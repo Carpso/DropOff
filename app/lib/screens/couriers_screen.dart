@@ -290,6 +290,27 @@ class CourierDetailScreen extends StatelessWidget {
             icon: const Icon(Icons.two_wheeler),
             label: Text('Book a rider to ${courier.name.split(' ').first}'),
           ),
+          if (courier.receiptAssets.isNotEmpty) ...[
+            const SizedBox(height: 22),
+            const SectionTitle('Receipt / waybill samples'),
+            const Text('Verified proof straight from the depot counter — tap any to zoom. Personal details belong to the original documents.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 260,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: courier.receiptAssets.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) => GestureDetector(
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ReceiptViewer(asset: courier.receiptAssets[index], title: '${courier.name} sample ${index + 1}'))),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(width: 210, color: const Color(0xFFE7E9E7), child: SampleStamp(child: Image.asset(courier.receiptAssets[index], fit: BoxFit.cover))),
+                  ),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 26),
           if (courier.branches.isNotEmpty) ...[
             SectionTitle('Branches near $sellerCity'),
@@ -373,27 +394,6 @@ class CourierDetailScreen extends StatelessWidget {
                 onPressed: () => launchUrl(Uri.parse(courier.sourceUrl), mode: LaunchMode.externalApplication),
               ),
             ),
-          if (courier.receiptAssets.isNotEmpty) ...[
-            const SizedBox(height: 26),
-            const SectionTitle('Receipt / waybill samples'),
-            const Text('Supplied reference images. Personal details belong to the original documents.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 260,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: courier.receiptAssets.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (context, index) => GestureDetector(
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ReceiptViewer(asset: courier.receiptAssets[index], title: '${courier.name} sample ${index + 1}'))),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(width: 210, color: const Color(0xFFE7E9E7), child: SampleStamp(child: Image.asset(courier.receiptAssets[index], fit: BoxFit.cover))),
-                  ),
-                ),
-              ),
-            ),
-          ],
           if (courier.id == 'platinum') ...[
             const SizedBox(height: 26),
             const SectionTitle('Depot reference'),

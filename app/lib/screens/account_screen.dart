@@ -675,7 +675,13 @@ class _TiersCardState extends State<_TiersCard> {
 
   String _windowLabel(Object? windows) {
     final list = (windows as List?)?.cast<Object>() ?? const [];
-    return list.map((w) => '$w'.replaceFirst('06:00', '6AM').replaceFirst('10:00', '10AM').replaceFirst('14:00', '2PM')).join(' / ');
+    // Arrival ranges (CAT) — matches the booking slot picker.
+    const ranges = {
+      '06:00': '6:00–7:30 AM',
+      '10:00': '10:00–11:30 AM',
+      '14:00': '2:00–3:30 PM',
+    };
+    return list.map((w) => ranges['$w'] ?? '$w').join(' / ');
   }
 
   Future<void> _chooseTier(String tier) async {
