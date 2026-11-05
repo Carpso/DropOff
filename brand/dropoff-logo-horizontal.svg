@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="480" viewBox="0 0 1500 480" role="img" aria-labelledby="title desc">
+  <title id="title">DropOff logo</title>
+  <desc id="desc">DropOff wordmark with a parcel inside a location pin and the promise We take it from here.</desc>
+  <defs>
+    <linearGradient id="bg" x1="30" y1="20" x2="410" y2="460" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#123F38"/>
+      <stop offset="1" stop-color="#071F1D"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#00110E" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect x="24" y="24" width="432" height="432" rx="96" fill="url(#bg)"/>
+  <g transform="translate(24 24) scale(.421875)" filter="url(#shadow)">
+    <path d="M512 164C356 164 230 290 230 446C230 654 512 856 512 856C512 856 794 654 794 446C794 290 668 164 512 164Z" fill="#FFFFFF"/>
+    <path d="M356 397L512 318L668 397L512 480Z" fill="#38D88F"/>
+    <path d="M356 397L512 480V642L356 559Z" fill="#159A63"/>
+    <path d="M512 480L668 397V559L512 642Z" fill="#0C704B"/>
+    <path d="M472 338L512 318L552 338L512 359Z" fill="#FF9B54"/>
+    <path d="M472 338L512 359V399L472 378Z" fill="#F27A35"/>
+    <path d="M552 338L512 359L552 379L592 358Z" fill="#FFB47D"/>
+    <path d="M566 492L626 460V508L566 540Z" fill="#EAFBF3"/>
+  </g>
+  <circle cx="350" cy="128" r="27" fill="#FF8A3D"/>
+  <circle cx="350" cy="128" r="10" fill="#FFF4E9"/>
+
+  <text x="520" y="247" fill="#0B2925" font-family="Inter, Montserrat, Arial, sans-serif" font-size="154" font-weight="750" letter-spacing="-7">Drop<tspan fill="#159A63">Off</tspan></text>
+  <text x="532" y="330" fill="#47625D" font-family="Inter, Montserrat, Arial, sans-serif" font-size="36" font-weight="600" letter-spacing="5">WE TAKE IT FROM HERE.</text>
+  <path d="M532 374H1370" stroke="#DCE9E4" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="1396" cy="374" r="10" fill="#FF8A3D"/>
+</svg>

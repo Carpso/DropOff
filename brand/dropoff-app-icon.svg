@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">DropOff app icon</title>
+  <desc id="desc">A white parcel with orange packing tape inside a gradient amber location pin on a deep green background, with a mint pickup-point accent.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15473B"/>
+      <stop offset="1" stop-color="#092A25"/>
+    </linearGradient>
+    <linearGradient id="pin" x1="0" y1="110" x2="0" y2="894" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFCE6B"/>
+      <stop offset="1" stop-color="#F29C1E"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="26" stdDeviation="24" flood-color="#021410" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="620" cy="120" r="540" fill="#2B7A5E" opacity="0.1"/>
+
+  <g filter="url(#shadow)">
+    <path d="M512 164C356 164 230 290 230 446C230 654 512 894 512 894C512 894 794 654 794 446C794 290 668 164 512 164Z" fill="url(#pin)"/>
+    <!-- parcel cube -->
+    <path d="M338 371L512 271L686 371L512 471Z" fill="#FFFFFF"/>
+    <path d="M338 371L512 471V682L338 582Z" fill="#F5F7EF"/>
+    <path d="M512 471L686 371V582L512 682Z" fill="#D9E2DC"/>
+    <!-- packing tape + highlight -->
+    <path d="M464 299L512 271L560 299V438L512 471L464 443Z" fill="#F09A22"/>
+    <path d="M464 299L512 271L516 273V470L512 471L464 443Z" fill="#FFB84D"/>
+    <!-- dark "drop" chevron -->
+    <path d="M464 443L512 471L560 438V494L512 528L464 494Z" fill="#123C32"/>
+  </g>
+
+  <!-- mint pickup-point accent -->
+  <circle cx="844" cy="206" r="32" fill="#4CE0A6"/>
+  <circle cx="844" cy="206" r="18" fill="#F2FFF8"/>
+</svg>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">DropOff app icon</title>
+  <desc id="desc">An orange location pin holding a white parcel, with a mint confirmation check, on a deep navy rounded square.</desc>
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#102A43"/>
+
+  <!-- Speed marks: the short trip from the sender's door. -->
+  <path d="M185 404h105M154 480h105M185 556h72" fill="none" stroke="#FF7A1A" stroke-width="30" stroke-linecap="round" opacity=".9"/>
+
+  <!-- Location pin. -->
+  <path d="M512 151c-180 0-326 139-326 310 0 229 326 421 326 421s326-192 326-421c0-171-146-310-326-310Z" fill="#FF7A1A"/>
+  <circle cx="512" cy="433" r="221" fill="#FFFFFF"/>
+
+  <!-- Parcel in isometric view. -->
+  <path d="m334 390 178-99 178 99-178 101Z" fill="#DCE8F2"/>
+  <path d="m334 390 178 101v178l-178-99Z" fill="#FFFFFF"/>
+  <path d="m512 491 178-101v180l-178 99Z" fill="#C4D6E4"/>
+  <path d="m451 326 61-35 178 99-61 35Z" fill="#FFB27D"/>
+  <path d="m512 491 61-35v178l-61 35Z" fill="#FF9650"/>
+  <path d="m334 390 178 101 178-101" fill="none" stroke="#102A43" stroke-width="12" stroke-linejoin="round" opacity=".16"/>
+
+  <!-- Handoff confirmation badge. -->
+  <circle cx="727" cy="710" r="119" fill="#102A43"/>
+  <circle cx="727" cy="710" r="98" fill="#20C997"/>
+  <path d="m680 711 31 32 67-72" fill="none" stroke="#FFFFFF" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

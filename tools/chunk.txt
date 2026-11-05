@@ -1,0 +1,15 @@
+s/platinum_price_2026.jpeg`
+- `app/assets/images/platinum_offices.jpeg`
+- `app/assets/images/mercury_waybill.jpeg`
+
+### DropOff rider fee guidance (Lusaka pilot)
+
+- Standard city pickup: **K35**.
+- Optional destination door delivery: **K30**.
+- Platform take-rate target: **20%** of the rider fee.
+- Courier fare is always separate and shown as “quote needed” until a verified rate exists.
+| Courier / comparator | Route | Published rate (ZMW) | Notes |
+|---|---|---|---|
+| **Icypeed** (SA→ZM, road) | JHB → Lusaka | **125** (first 0.5 kg) → 2,460 (100 kg) | Full public table in PDF; volumetric = `L×B×H / 2000`; free quotes via `quotes@icypeed.com`. Has Lusaka + Kitwe depots |
+| **Icypeed** road notes | — | — | Above ~50 kg = "cargo" class; doc fee R500/R600 (ZMW equiv.) |
+| **Mercury Express** | Domestic road | **

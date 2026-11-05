@@ -1,0 +1,60 @@
+﻿python : Traceback (most recent call last):
+At line:5 char:1
++ python -c "
++ ~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 7, in <module>
+    for v in vals: print(v)
+                   ~~~~~^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u251c' in position 4: character maps to <undefined>
+### small 17
+ROMA,
+AND
+'ANDI,
+YAMA
+IDA,
+KTO
+KTO
+KSO
+KIOO
+KIOO
+KIOO
+KIOO
+KIOO
+K130
+KIOO
+KIOO
+s arc charged at
+### medium 16
+KTO
+KIOO
+KIO
+KIOO
+KGO
+goo
+KVO
+KUO
+1<130
+KUO
+KUO
+KIOO
+"130
+K150
+"130
+I thc officc
+### large 32
+KIOO O
+Anovn
+K120 0
+AOOVC
+KOO a
+AOOVn
+KIOO a
+ADOVC
+K120 0
+ADOVE

@@ -1,0 +1,687 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// REST client for the DropOff Cloudflare Worker (workers/src/index.ts).
+///
+/// Configuration overrides (e.g. at build time):
+///   flutter run --dart-define=DROPOFF_API_URL=https://dropoff-api.<subdomain>.workers.dev \
+///     --dart-define=DROPOFF_API_KEY=... --dart-define=DROPOFF_ADMIN_KEY=... (superadmin console only)
+///
+/// Defaults point at the live Worker so sign-in/register work out of the box;
+/// every call still degrades gracefully if the network is down.
+class DropOffApi {
+  static const String baseUrl = String.fromEnvironment('DROPOFF_API_URL',
+      defaultValue: 'https://dropoff-api.godfreymoseskalambo.workers.dev');
+  // SECURITY: the ops/rider service key must NEVER ship inside a store build.
+  // It arrives only via --dart-define at build time on trusted rider/operator
+  // devices. Without it, customers sign in with the email/OTP JWT and every
+  // call degrades to that identity (server rejects bare ops-key requests).
+  static const String apiKey = String.fromEnvironment('DROPOFF_API_KEY');
+  static const String adminKey = String.fromEnvironment('DROPOFF_ADMIN_KEY');
+
+  /// Fee model mirror of workers/src/fees.ts — the server is authoritative;
+  /// these helpers only render the estimate before the job is created.
+  ///
+  /// MODEL: the customer pays the base + ONE "processing fee" (platform cut +
+  /// momo collection leg). The customer NEVER pays for the rider's payout —
+  /// the rider keeps 90% of the rider fee MINUS the payout transaction fees.
+  static const double platformFeePct = 1.0;
+  static const double platformFixedFee = 0.48;
+  static const double platformMinFee = 3.0;
+  static const double momoCollectionFee = 2.5;
+  static const double momoDisbursementFee = 1.5;
+  static const double riderTakePct = 10.0;
+
+  static double round2(double v) => (v * 100).roundToDouble() / 100;
+
+  /// Platform fee: 1% + K0.48 fixed, minimum K3.48 (also the payout cut).
+  static double platformFee(double amount) =>
+      platformMinFee + platformFixedFee > round2(amount * platformFeePct / 100) + platformFixedFee
+          ? platformMinFee + platformFixedFee
+          : round2(amount * platformFeePct / 100) + platformFixedFee;
+
+  /// What the RIDER receives at payout: 90% share minus transaction fees.
+  static double riderPayoutOf(double riderFee) {
+    final share = round2(riderFee * (1 - riderTakePct / 100));
+    return round2(share - momoDisbursementFee - platformFee(share));
+  }
+
+  /// Processing-only breakdown shown before the job is created — mirrors
+  /// collectionFees() in workers/src/fees.ts.
+  static Map<String, double> collectionFees(double base, {double? riderFee}) {
+    if (riderFee == null) return {'base': round2(base), 'prompt_total_zmw': round2(base)};
+    final platform = platformFee(base);
+    final processing = round2(platform + momoCollectionFee);
+    return {
+      'base': round2(base),
+      'rider_payout_zmw': riderPayoutOf(riderFee),
+      'processing_fee_zmw': processing,
+      'platform_fee_zmw': platform,
+      'lipila_fee_zmw': momoCollectionFee,
+      'prompt_total_zmw': round2(base + processing),
+    };
+  }
+
+  static bool get enabled => baseUrl.isNotEmpty; // API usable with JWT auth alone — the ops key is optional
+  static bool get adminEnabled => adminKey.isNotEmpty;
+  static bool get opsEnabled => apiKey.isNotEmpty; // rider/ops device flows only
+
+  /// JWT from phone-OTP login; set by the app store after /auth/verify.
+  static String? token;
+
+  /// Coalesces identical in-flight GETs so parallel screens share one request.
+  static final _inFlight = <String, Future<Map<String, dynamic>?>>{};
+  /// Network-first memory cache: a response is only reused for this tiny window
+  /// (double-taps / rebuilds), otherwise we always re-read the DB. Everything is
+  /// persisted separately and served only when the network is unreachable.
+  static final _memCache = <String, ({Map<String, dynamic> value, DateTime expiry})>{};
+  static const Duration _freshWindow = Duration(seconds: 5);
+  static const String _cachePrefix = 'dropoff_api_cache:';
+
+  // 15 s: mobile data is slow, and PBKDF2 login + cold D1 can take several
+  // seconds. 6 s produced false "something went wrong" on real phones.
+  static const Duration _timeout = Duration(seconds: 15);
+  /// Mobile-money collects are slow on Zambian networks — give them room.
+  static const Duration _paymentTimeout = Duration(seconds: 20);
+
+  /// Offline cache — successful GETs are persisted so the app stays useful
+  /// without a connection (screen falls back to the last good response).
+  /// Keyed by the signed-in JWT too, so user B can never read user A's cached
+  /// data after a logout / account switch on the same device.
+  static String _cacheKey(String path, [Map<String, String>? query]) =>
+      'dropoff_api_cache:${(token?.length ?? 0)}:${token?.hashCode ?? 0}:$path?${(query ?? const {}).entries.map((e) => '${e.key}=${e.value}').join('&')}';
+
+  static Future<void> _saveCache(String key, String body) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(key, body);
+    } catch (_) {
+      // caching is best-effort
+    }
+  }
+
+  /// Drop every cached response (memory + disk). Called on logout and after any
+  /// successful mutation so the next read always reflects the database.
+  static void clearCaches() {
+    _inFlight.clear();
+    _memCache.clear();
+    unawaited(_clearPersistedCaches());
+  }
+
+  static Future<void> _clearPersistedCaches([List<String>? roots]) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys().where((k) => k.startsWith(_cachePrefix)).toList();
+      for (final key in keys) {
+        if (roots == null || roots.any(key.contains)) await prefs.remove(key);
+      }
+    } catch (_) {
+      // caching is best-effort
+    }
+  }
+
+  /// Persisted cache keys that a mutation can invalidate. Unknown paths clear
+  /// everything so a stale value can never survive a write.
+  static List<String> _affectedRoots(String path) {
+    if (path.startsWith('/jobs') || path.startsWith('/rider')) {
+      return ['/jobs', '/wallet', '/route', '/batch', '/ratings', '/refer'];
+    }
+    if (path.startsWith('/ratings')) return ['/ratings', '/couriers'];
+    if (path.startsWith('/payments') || path.startsWith('/wallet')) return ['/wallet', '/jobs'];
+    if (path.startsWith('/recurring')) return ['/recurring'];
+    if (path.startsWith('/subscriptions')) return ['/subscriptions', '/wallet', '/plans'];
+    if (path.startsWith('/refer')) return ['/refer', '/jobs'];
+    if (path.startsWith('/couriers') || path.startsWith('/quotes') || path.startsWith('/admin')) {
+      return ['/couriers', '/quotes', '/plans'];
+    }
+    if (path.startsWith('/push')) return const [];
+    return const ['/jobs', '/wallet', '/route', '/batch', '/ratings', '/couriers', '/quotes', '/recurring', '/refer', '/subscriptions', '/plans'];
+  }
+
+  /// Invalidate after a successful write: memory is dropped synchronously so the
+  /// next read is live; disk is trimmed in the background.
+  static void _invalidateAfterMutation(String path) {
+    _inFlight.clear();
+    _memCache.clear();
+    unawaited(_clearPersistedCaches(_affectedRoots(path)));
+  }
+
+  static Future<Map<String, dynamic>?> _readCache(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(key);
+      if (raw == null) return null;
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Uri _uri(String path, [Map<String, String>? query]) =>
+      Uri.parse('$baseUrl$path').replace(queryParameters: query);
+
+  static Map<String, String> get _headers => {
+        'Content-Type': 'application/json',
+        if (apiKey.isNotEmpty) 'X-Api-Key': apiKey,
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
+
+  static Map<String, String> get _adminHeaders => {..._headers, 'X-Admin-Key': adminKey};
+
+  /// Ops API headers (server-side role='ops'): used for ops endpoints without a linked phone.
+  static Map<String, String> get _opsHeaders => {
+        'Content-Type': 'application/json',
+        'X-Api-Key': apiKey,
+      };
+
+  /// GET helper; returns null on failure — first tries the cache-less live call,
+  /// then falls back to the last cached copy (offline).
+  /// GET helper — network-first: always asks the Worker (coalescing identical
+  /// in-flight calls) so data matches the DB; the persisted copy is a fallback
+  /// only when the request fails (offline / poor signal).
+  static Future<Map<String, dynamic>?> get(String path, [Map<String, String>? query]) async {
+    if (!enabled) return null;
+    final cacheKey = _cacheKey(path, query);
+
+    // 1) in-flight coalescing: identical GETs hitting at the same time share one request
+    if (_inFlight.containsKey(cacheKey)) return _inFlight[cacheKey]!;
+
+    // 2) tiny freshness window only — avoids re-fetching on back-to-back rebuilds
+    final mem = _memCache[cacheKey];
+    if (mem != null && mem.expiry.isAfter(DateTime.now())) return mem.value;
+
+    final flight = _fetchGet(path, query, cacheKey);
+    _inFlight[cacheKey] = flight;
+    try { return await flight; } finally { _inFlight.remove(cacheKey); }
+  }
+
+  static Future<Map<String, dynamic>?> _fetchGet(
+    String path, Map<String, String>? query, String cacheKey,
+  ) async {
+    try {
+      final res = await http.get(_uri(path, query), headers: _headers).timeout(_timeout);
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        unawaited(_saveCache(cacheKey, res.body));
+        _memCache[cacheKey] = (value: decoded, expiry: DateTime.now().add(_freshWindow));
+        return decoded;
+      }
+      return _readCache(cacheKey);
+    } catch (_) {
+      final mem = _memCache[cacheKey];
+      if (mem != null) return mem.value;
+      return _readCache(cacheKey);
+    }
+  }
+
+  static Future<ApiResponse> delete(
+    String path, {
+    Map<String, dynamic>? body,
+    Duration? timeout,
+  }) async {
+    if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
+    try {
+      final res = await http
+          .delete(_uri(path), headers: _headers, body: jsonEncode(body ?? const {}))
+          .timeout(timeout ?? _timeout);
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
+      final ok = res.statusCode >= 200 && res.statusCode < 300;
+      if (ok) _invalidateAfterMutation(path);
+      return ApiResponse(
+        status: res.statusCode,
+        ok: ok,
+        body: decoded,
+        error: res.statusCode >= 400 ? '${decoded['error'] ?? 'http_${res.statusCode}'}' : null,
+      );
+    } catch (_) {
+      return const ApiResponse(error: 'network_error');
+    }
+  }
+
+  static Future<ApiResponse> post(
+    String path,
+    Map<String, dynamic> body, {
+    bool admin = false,
+    Duration? timeout,
+  }) async {
+    if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
+    try {
+      final res = await http
+          .post(_uri(path), headers: admin ? _adminHeaders : _headers, body: jsonEncode(body))
+          .timeout(timeout ?? _timeout);
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
+      final ok = res.statusCode >= 200 && res.statusCode < 300;
+      if (ok) _invalidateAfterMutation(path);
+      return ApiResponse(
+        status: res.statusCode,
+        ok: ok,
+        body: decoded,
+        error: res.statusCode >= 400 ? '${decoded['error'] ?? 'http_${res.statusCode}'}' : null,
+      );
+    } catch (_) {
+      return const ApiResponse(error: 'network_error');
+    }
+  }
+
+  /// GET helper; returns null on any failure (caller falls back to local data).
+  /// GET helper (admin)
+  static Future<Map<String, dynamic>?> getAdmin(String path, [Map<String, String>? query]) async {
+    if (!enabled || !adminEnabled) return null;
+    try {
+      final res = await http.get(_uri(path, query), headers: _adminHeaders).timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Best-effort promo lookup for the booking form (public today, advisory only).
+  static Future<Map<String, dynamic>?> checkPromo(String code) =>
+      get('/promo/check', {'code': code.trim().toUpperCase()});
+
+  /// Batch sweep: scattered pickup points grouped into snake-latbands routes.
+  static Future<Map<String, dynamic>?> batchPickup({String? date, int maxStops = 25}) async {
+    if (!enabled) return null;
+    try {
+      final query = <String, String>{'max_stops': '$maxStops', if (date != null) 'date': date};
+      final res = await http
+          .get(Uri.parse('$baseUrl/batch/pickup').replace(queryParameters: query), headers: _opsHeaders)
+          .timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Server-generated referral code + personal funnel stats.
+  static Future<Map<String, dynamic>?> referralCode() => get('/refer/code');
+
+  /// Claim a referrer's code at sign-up (silent no-op server-side if already tracked).
+  static Future<ApiResponse> claimReferral(String code) =>
+      post('/refer/claim', {'code': code.trim().toUpperCase()});
+
+  /// Today's pickup route in smart order (nearest-neighbor from the depot hub).
+  static Future<Map<String, dynamic>?> routePickup({String? phone}) async {
+    if (!enabled) return null;
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/route/pickup${phone != null ? '?phone=${Uri.encodeComponent(phone)}' : ''}'), headers: _opsHeaders)
+          .timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Share the rider's current GPS fix for dispatch + live tracking.
+  static Future<ApiResponse> riderPing({required String phone, required double lat, required double lng}) async {
+    if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
+    try {
+      final res = await http
+          .post(Uri.parse('$baseUrl/rider/ping'), headers: _opsHeaders, body: jsonEncode({'phone': phone, 'lat': lat, 'lng': lng}))
+          .timeout(_timeout);
+      return ApiResponse(status: res.statusCode, ok: res.statusCode < 300, body: const {});
+    } catch (e) {
+      return const ApiResponse(error: 'network_error');
+    }
+  }
+
+  /// Where is my rider? Used by senders/recipients to open the map live.
+  static Future<Map<String, dynamic>?> liveLocation(String jobRef) async {
+    if (!enabled) return null;
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/jobs/$jobRef/live'), headers: _headers).timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Standing orders — recurring parcel plans (weekly/biweekly/monthly).
+  static Future<List<Map<String, dynamic>>> recurring() async {
+    final data = await get('/recurring');
+    return (data?['recurring'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+  }
+
+  static Future<ApiResponse> createRecurring(Map<String, dynamic> plan) =>
+      post('/recurring', Map<String, dynamic>.from(plan));
+
+  static Future<ApiResponse> toggleRecurring(int id) => post('/recurring/$id/toggle', const {});
+
+  static Future<ApiResponse> deleteRecurring(int id) => post('/recurring/$id/delete', const {});
+
+  /// Active couriers + partner profiles — falls back to the built-in catalog.
+
+  static Future<List<Map<String, dynamic>>> couriers() async {
+    final data = await get('/couriers');
+    return (data?['couriers'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+  }
+
+  /// Public courier partner profile (verified rates from the chargebook).
+  static Future<Map<String, dynamic>?> courierProfile(int id) => get('/couriers/$id/profile');
+
+  /// Cities the chargebook/partner depots serve — falls back to an empty list
+  /// (the app then uses its built-in Zambian towns).
+  static Future<List<String>> cities() async {
+    final data = await get('/cities');
+    return (data?['cities'] as List?)?.cast<String>() ?? const [];
+  }
+
+  /// Server-side quotes: verified counter price + rider fee (+ leg-2) for a route.
+  static Future<List<Map<String, dynamic>>> quotes({
+    required String from,
+    required String to,
+    String service = 'standard',
+  }) async {
+    final data = await get('/quotes', {'from': from, 'to': to, 'service': service});
+    return (data?['quotes'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+  }
+
+  /// Phone-OTP login. `verify` returns/stores the JWT.
+  static Future<ApiResponse> requestOtp(String phone) => post('/auth/request', {'phone': phone});
+
+  static Future<ApiResponse> verifyOtp(String phone, String code) async {
+    final res = await post('/auth/verify', {'phone': phone, 'code': code});
+    if (res.ok) token = res.body['token'] as String?;
+    return res;
+  }
+
+  /// Email + password account. `password` >= 8 chars; `phone` is the momo
+  /// identity (260XXXXXXXXX). Both `register` and `login` return/store the JWT.
+  static Future<ApiResponse> registerEmail({
+    required String email,
+    required String password,
+    required String phone,
+    String? fullName,
+  }) async {
+    final res = await post('/auth/register', {
+      'email': email,
+      'password': password,
+      'phone': phone,
+      if (fullName != null && fullName.isNotEmpty) 'full_name': fullName,
+    });
+    if (res.ok) token = res.body['token'] as String?;
+    return res;
+  }
+
+  static Future<ApiResponse> loginEmail(String email, String password) async {
+    final res = await post('/auth/login', {'email': email, 'password': password});
+    if (res.ok) token = res.body['token'] as String?;
+    return res;
+  }
+
+  /// Password reset + email verification (links go out by email; when the app
+  /// was built without email configured the response contains a dev link).
+  static Future<ApiResponse> forgotPassword(String email) =>
+      post('/auth/forgot', {'email': email});
+
+  static Future<ApiResponse> resendVerification(String email) =>
+      post('/auth/resend-verification', {'email': email});
+
+  /// Create a job. Pricing is computed server-side; `pickupWindow` is one of
+  /// 'now', '06:00', '10:00', '14:00'; `payMethod` = mobile_money | cash.
+  static Future<ApiResponse> createJob(Map<String, dynamic> job) => post('/jobs', job);
+
+  /// Rider log: minutes waited (sender not ready / depot queue). Server bills
+  /// first 10 min free, K2/min after, K50 cap, and returns the updated totals.
+  static Future<ApiResponse> logWait({
+    required String jobRef,
+    required int minutes,
+    String? note,
+    double? lat,
+    double? lng,
+  }) =>
+      post('/jobs/$jobRef/events', {
+        'wait_minutes': minutes,
+        if (note != null) 'note': note,
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+      });
+
+  /// Rider log: status movement or COD collected at the door.
+  static Future<ApiResponse> jobEvent({
+    required String jobRef,
+    String? status,
+    String? note,
+    String? waybill,
+    String? photoUrl,
+    double? codCollectedZmw,
+    double? lat,
+    double? lng,
+  }) =>
+      post('/jobs/$jobRef/events', {
+        if (status != null) 'status': status,
+        if (note != null) 'note': note,
+        if (waybill != null) 'waybill': waybill,
+        if (photoUrl != null) 'photo_url': photoUrl,
+        if (codCollectedZmw != null) 'cod_collected_zmw': codCollectedZmw,
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+      });
+
+  /// Rate one side of a delivery — seller, driver (rider) or courier — with an
+  /// optional comment. Resubmitting updates the previous score.
+  static Future<ApiResponse> rateJob({
+    required String jobRef,
+    required String targetType,
+    required int stars,
+    String? comment,
+  }) async {
+    final res = await post('/jobs/$jobRef/rate', {
+      'target_type': targetType,
+      'stars': stars,
+      if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim(),
+    });
+    if (!res.ok && res.error == 'network_error' && !_flushingRatings) {
+      await _queueRating({
+        'job_ref': jobRef,
+        'target_type': targetType,
+        'stars': stars,
+        if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim(),
+      });
+    }
+    return res;
+  }
+
+  static const _ratingOutboxKey = 'dropoff_rating_outbox_v1';
+  static bool _flushingRatings = false;
+
+  static Future<void> _queueRating(Map<String, dynamic> item) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getString(_ratingOutboxKey) == null
+        ? <Map<String, dynamic>>[]
+        : (jsonDecode(prefs.getString(_ratingOutboxKey)!) as List)
+            .cast<Map<String, dynamic>>();
+    list.removeWhere((e) => e['job_ref'] == item['job_ref'] && e['target_type'] == item['target_type']);
+    list.add(item);
+    await prefs.setString(_ratingOutboxKey, jsonEncode(list));
+  }
+
+  /// Retry ratings left while offline. Called from the app store's outbox flush.
+  static Future<void> flushRatingOutbox() async {
+    if (!enabled || _flushingRatings) return;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_ratingOutboxKey);
+    if (raw == null) return;
+    final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    if (list.isEmpty) return;
+    _flushingRatings = true;
+    final remaining = <Map<String, dynamic>>[];
+    try {
+      for (final item in list) {
+        final res = await post('/jobs/${item['job_ref']}/rate', {
+          'target_type': item['target_type'],
+          'stars': item['stars'],
+          if (item['comment'] != null) 'comment': item['comment'],
+        });
+        if (!res.ok && res.error == 'network_error') remaining.add(item);
+      }
+    } finally {
+      _flushingRatings = false;
+    }
+    if (remaining.isEmpty) {
+      await prefs.remove(_ratingOutboxKey);
+    } else {
+      await prefs.setString(_ratingOutboxKey, jsonEncode(remaining));
+    }
+  }
+
+  /// Ratings already left on a job plus aggregate scores for each target.
+  static Future<Map<String, dynamic>?> jobRatings(String jobRef) =>
+      get('/jobs/$jobRef/ratings');
+
+  /// Get (or mint) the recipient-facing status/live-location link.
+  static Future<Map<String, dynamic>?> trackingLink(String jobRef) async {
+    final res = await post('/jobs/$jobRef/tracking-link', {});
+    return res.ok ? res.body : null;
+  }
+
+  /// Public recipient tracking — accepts the SMS link or the bare token.
+  /// Never requires an account; returns status, rider position and timeline.
+  static Future<Map<String, dynamic>?> trackByToken(String input) {
+    final raw = input.trim();
+    final match = RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw);
+    final token = match?.group(1) ?? raw;
+    return get('/track/$token');
+  }
+
+  // ---- chat (job thread / recipient-token thread / support thread) ----
+
+  static Future<Map<String, dynamic>?> jobChat(String jobRef) => get('/jobs/$jobRef/chat');
+
+  static Future<ApiResponse> sendJobChat(String jobRef, String body) =>
+      post('/jobs/$jobRef/chat', {'body': body});
+
+  static Future<Map<String, dynamic>?> trackChat(String tokenOrUrl) {
+    final raw = tokenOrUrl.trim();
+    final match = RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw);
+    final token = match?.group(1) ?? raw;
+    return get('/track/$token/chat');
+  }
+
+  static Future<ApiResponse> sendTrackChat(String tokenOrUrl, String body) {
+    final raw = tokenOrUrl.trim();
+    final match = RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw);
+    final token = match?.group(1) ?? raw;
+    return post('/track/$token/chat', {'body': body});
+  }
+
+  /// Open (or create) the support thread; a non-empty [body] is sent as the
+  /// first/reply message. Returns the thread with all messages.
+  static Future<Map<String, dynamic>?> supportChat({String? body}) =>
+      post('/chat/support', {if (body != null && body.trim().isNotEmpty) 'body': body.trim()})
+          .then((res) => res.ok ? res.body : null);
+
+  static Future<Map<String, dynamic>?> chatThreads() => get('/chat/threads');
+
+  /// The linked rider's day as slot-batched task queues (stops, ETAs, totals,
+  /// destination branch, target drop-off time).
+  static Future<Map<String, dynamic>?> riderQueue(String? phone) {
+    final q = phone == null || phone.isEmpty ? '' : '?phone=$phone';
+    return get('/rider/queue$q');
+  }
+
+  /// Start a Lipila mobile-money collect for a job against the server total.
+  static Future<ApiResponse> pay({
+    required String jobRef,
+    required String phone,
+    String channel = 'merchant',
+    String? idempotencyKey,
+  }) =>
+      post('/payments', {
+        'kind': 'job',
+        'job_ref': jobRef,
+        'phone': phone,
+        'channel': channel,
+        if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
+      }, timeout: _paymentTimeout);
+  /// Poll Lipila collect status (call every ~2s up to ~40s).
+  static Future<String?> paymentStatus(String paymentId) async =>
+      (await get('/payments/$paymentId/status'))?['status'] as String?;
+
+  /// Seller subscription packs (Silver K250 / Gold K500 / Platinum K750 per
+  /// 30-day cycle; every parcel counts as one).
+  static Future<Map<String, dynamic>?> plans() => get('/plans');
+
+  static Future<ApiResponse> subscribe({
+    required String tier,
+    String pickupWindow = '10:00',
+    String city = 'Lusaka',
+    String? senderName,
+  }) =>
+      post('/subscriptions', {
+        'tier': tier,
+        'pickup_window': pickupWindow,
+        'city': city,
+        if (senderName != null) 'sender_name': senderName,
+      });
+
+  static Future<Map<String, dynamic>?> subscription([String? phone]) =>
+      phone != null ? get('/subscriptions/$phone') : get('/subscriptions/');
+
+  /// Pay the signed-in seller's pack activation/renewal via Lipila. Poll with
+  /// [paymentStatus]; success flips the subscription to active server-side.
+  static Future<ApiResponse> paySubscription({String channel = 'merchant'}) =>
+      post('/payments', {
+        'kind': 'subscription',
+        'channel': channel,
+        'idempotency_key': 'sub-${DateTime.now().millisecondsSinceEpoch}',
+      });
+
+  // ---- superadmin console (pricebook / partners / growth dashboard) ----
+  static Future<ApiResponse> upsertCourier(Map<String, dynamic> courier) =>
+      post('/admin/couriers', courier, admin: true);
+
+  static Future<ApiResponse> upsertQuote({
+    required int courierId,
+    required String fromCity,
+    required String toCity,
+    required String weightClass,
+    required String service,
+    required double counterPriceZmw,
+  }) =>
+      post('/admin/quotes', {
+        'courier_id': courierId,
+        'from_city': fromCity,
+        'to_city': toCity,
+        'weight_class': weightClass,
+        'service': service,
+        'counter_price_zmw': counterPriceZmw,
+      }, admin: true);
+
+  static Future<ApiResponse> upsertRider({
+    required String phone,
+    required String fullName,
+    required String vehicle,
+  }) =>
+      post('/admin/riders', {'phone': phone, 'full_name': fullName, 'vehicle': vehicle}, admin: true);
+
+  static Future<ApiResponse> assignJob({required String jobRef, required String riderPhone}) =>
+      post('/admin/jobs/$jobRef/assign', {'phone': riderPhone}, admin: true);
+
+  static Future<ApiResponse> payout({
+    required String phone,
+    required double amountZmw,
+    String kind = 'rider_earning',
+  }) =>
+      post('/admin/payouts', {'phone': phone, 'amount_zmw': amountZmw, 'kind': kind}, admin: true);
+
+  static Future<Map<String, dynamic>?> adminStats() => getAdmin('/admin/stats');
+}
+
+class ApiResponse {
+  final int? status;
+  final bool ok;
+  final Map<String, dynamic> body;
+  final String? error;
+
+  const ApiResponse({this.status, this.ok = false, this.body = const {}, this.error});
+}
+

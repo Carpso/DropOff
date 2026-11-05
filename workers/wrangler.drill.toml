@@ -1,0 +1,11 @@
+# Isolated scratch config for D1 restore drills. Never deploy this file — it
+# only exists so wrangler can see the drill database by name.
+#   npx wrangler d1 migrations apply dropoff-restore-drill --remote --config wrangler.drill.toml
+name = "dropoff-restore-drill"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dropoff-restore-drill"
+database_id = "1efef086-7760-45b4-87c9-6d0b5f9e386b"

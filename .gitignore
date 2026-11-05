@@ -1,0 +1,33 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.flutter_export_environment.sh
+
+# Node / wrangler
+node_modules/
+.wrangler/
+*.log
+
+# Secrets & keys — NEVER commit
+key.properties
+*.jks
+*.keystore
+*.p8
+*.pem
+*service*account*.json
+*adminsdk*.json
+.dev.vars
+.env
+.env.*
+client_secret*.json
+
+# Local build outputs
+dist/
+
+# OS noise
+.DS_Store
+Thumbs.db

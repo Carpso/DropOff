@@ -1,0 +1,17 @@
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\bin\Release\net10.0-windows10.0.19041.0\ocr.exe
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\bin\Release\net10.0-windows10.0.19041.0\ocr.deps.json
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\bin\Release\net10.0-windows10.0.19041.0\ocr.runtimeconfig.json
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\bin\Release\net10.0-windows10.0.19041.0\ocr.dll
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\bin\Release\net10.0-windows10.0.19041.0\ocr.pdb
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\bin\Release\net10.0-windows10.0.19041.0\Microsoft.Windows.SDK.NET.dll
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\bin\Release\net10.0-windows10.0.19041.0\WinRT.Runtime.dll
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ocr.GeneratedMSBuildEditorConfig.editorconfig
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ocr.AssemblyInfoInputs.cache
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ocr.AssemblyInfo.cs
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ocr.csproj.CoreCompileInputs.cache
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ocr.csproj.Up2Date
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ocr.dll
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\refint\ocr.dll
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ocr.pdb
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ocr.genruntimeconfig.cache
+D:\Explorer\MAYUNDO\KEY PROJECTS\DropOff\tools\ocr\obj\Release\net10.0-windows10.0.19041.0\ref\ocr.dll

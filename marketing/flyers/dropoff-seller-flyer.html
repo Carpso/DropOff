@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DropOff — Seller Flyer</title>
+<style>
+@page { size: A5; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #f5f0e6; }
+.sheet {
+  width: 148mm; height: 210mm; margin: 20px auto; background: #10312A; color: #FFF8EC;
+  display: flex; flex-direction: column; padding: 14mm 12mm 10mm; position: relative; overflow: hidden;
+}
+.badge {
+  align-self: flex-start; background: #F6B73C; color: #10312A; font-weight: 900;
+  font-size: 13px; letter-spacing: 2px; padding: 6px 14px; border-radius: 30px;
+}
+h1 { font-size: 44px; line-height: 1.02; font-weight: 900; letter-spacing: -1.2px; margin: 18mm 0 4mm; }
+h1 em { font-style: normal; color: #F6B73C; }
+.sub { font-size: 15px; line-height: 1.35; color: #D8E4D8; max-width: 95mm; }
+.stamp {
+  position: absolute; top: 14mm; right: 10mm; width: 34mm; height: 34mm; border-radius: 50%;
+  border: 3px solid #F6B73C; color: #F6B73C; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; font-weight: 900; transform: rotate(-12deg); font-size: 11px; letter-spacing: 1px; text-align: center;
+}
+.stamp b { font-size: 15px; letter-spacing: 2px; }
+.rows { margin-top: 10mm; border-top: 1px solid rgba(255,248,236,.25); }
+.row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,248,236,.13); font-size: 13px; align-items: baseline; }
+.row b { color: #F6B73C; min-width: 12mm; font-size: 14px; }
+.footer { margin-top: auto; display: flex; align-items: center; gap: 12mm; border-top: 2px solid #F6B73C; padding-top: 8mm; }
+.qr { width: 26mm; height: 26mm; background: #fff; border-radius: 4mm; display: flex; align-items: center; justify-content: center; color: #10312A; font-size: 10px; font-weight: 800; text-align: center; padding: 2mm; }
+.foot-text { font-size: 12px; line-height: 1.5; }
+.foot-text strong { font-size: 16px; color: #FFF8EC; }
+.codes { display: flex; gap: 4mm; margin-top: 6mm; }
+.code { border: 1px dashed #F6B73C; border-radius: 3mm; padding: 4px 10px; font-size: 13px; font-weight: 800; color: #F6B73C; }
+.small { font-size: 9px; color: #9CB3A6; margin-top: 5mm; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="badge">DROPOFF · LUSAKA</div>
+  <div class="stamp">★ PROOF OF DROP<br><b>STAMPED</b></div>
+  <h1>Your orders are<br><em>not moving.</em><br>We are.</h1>
+  <p class="sub">DropOff picks up your parcel at your door and runs it to the courier of your choice — Platinum, Zampost, PostDotNet, Icypeed, Mercury, One World, Rovert. You never leave your shop.</p>
+
+  <div class="rows">
+    <div class="row"><b>01</b><span>Book on the app — pickup ASAP, 6am, 10am or 2pm.</span></div>
+    <div class="row"><b>02</b><span>Rider collects from your door &amp; counter.</span></div>
+    <div class="row"><b>03</b><span>Depot stamp + photo receipt lands in your app.</span></div>
+    <div class="row"><b>K45</b><span>Pickup fee (pay-as-you-go). Gold pack 3 parcels/day for K700/mo.</span></div>
+  </div>
+
+  <div class="codes">
+    <div class="code">FIRSTM10 · 10% off first drop</div>
+    <div class="code">SELLER20 · 20% off (500 max)</div>
+  </div>
+
+  <div class="footer">
+    <div class="qr">QR<br>to the<br>app</div>
+    <div class="foot-text">
+      <strong>DROPP OFF, LUSAKA</strong><br>
+      WhatsApp / Call: <b>+260 96 855 1110</b><br>
+      godfreymoseskalambo@gmail.com<br>
+      Book with code <b>SELLER20</b>
+    </div>
+  </div>
+  <div class="small">Partner collection via courier counter (pay direct — DropOff never holds partner money). COD with sign-off. Receipts digital, disputes in-app. Terms at depot.</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "697517974065",
+    "project_id": "dropoff-zambia",
+    "storage_bucket": "dropoff-zambia.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:697517974065:android:4eb19319bbc7fd02736b10",
+        "android_client_info": {
+          "package_name": "zm.dropoff.dropoff"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-mD1Qm4nhWjlh629RaotyfDs37pIOX2Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

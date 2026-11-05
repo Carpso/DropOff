@@ -1,0 +1,424 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../data/dropoff_api.dart';
+import '../data/push_service.dart';
+import '../models/booking.dart';
+
+class AppStore extends ChangeNotifier {
+  static const _bookingsKey = 'dropoff_bookings_v1';
+  static const _ridersKey = 'dropoff_riders_v1';
+  static const _tokenKey = 'dropoff_token_v1';
+  static const _phoneKey = 'dropoff_phone_v1';
+  static const _emailKey = 'dropoff_email_v1';
+  static const _outboxKey = 'dropoff_outbox_v1';
+
+  final List<Booking> _bookings = [];
+  final List<Rider> _riders = [];
+  final List<Map<String, dynamic>> _outbox = [];
+  bool _ready = false;
+  String? _token;
+  String? _linkedPhone;
+  String? _email;
+
+  List<Booking> get bookings => List.unmodifiable(_bookings);
+  List<Rider> get riders => List.unmodifiable(_riders);
+  bool get ready => _ready;
+  Rider get owner => _riders.firstWhere((rider) => rider.isOwner);
+  String? get linkedPhone => _linkedPhone;
+  String? get email => _email;
+  bool get linked => _token != null;
+
+  Future<void> initialize() async {
+    final preferences = await SharedPreferences.getInstance();
+    _token = preferences.getString(_tokenKey);
+    _linkedPhone = preferences.getString(_phoneKey);
+    _email = preferences.getString(_emailKey);
+    try {
+      final bookingJson = preferences.getString(_bookingsKey);
+      if (bookingJson != null) {
+        _bookings.addAll((jsonDecode(bookingJson) as List)
+            .map((item) => Booking.fromJson(item as Map<String, dynamic>)));
+      }
+      final riderJson = preferences.getString(_ridersKey);
+      if (riderJson != null) {
+        _riders.addAll((jsonDecode(riderJson) as List)
+            .map((item) => Rider.fromJson(item as Map<String, dynamic>)));
+      }
+      final outboxJson = preferences.getString(_outboxKey);
+      if (outboxJson != null) {
+        _outbox.addAll((jsonDecode(outboxJson) as List).cast<Map<String, dynamic>>());
+      }
+    } catch (_) {
+      await preferences.remove(_bookingsKey);
+      await preferences.remove(_ridersKey);
+      await preferences.remove(_outboxKey);
+      _bookings.clear();
+      _riders.clear();
+      _outbox.clear();
+    }
+    if (_riders.isEmpty) {
+      _riders.add(const Rider(
+        id: 'owner',
+        name: 'Owner',
+        phone: 'Add your phone in team settings',
+        vehicle: 'Motorcycle / vehicle',
+        isOwner: true,
+      ));
+    }
+    _ready = true;
+    notifyListeners();
+    unawaited(flushOutbox());
+  }
+
+  /// Offline outbox: bookings created without signal are retried here. The
+  /// Idempotency-Key is the local booking id, so a retry can never double-book.
+  Future<void> _persistOutbox() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_outboxKey, jsonEncode(_outbox));
+  }
+
+  Future<void> _enqueueJob(String localId, Map<String, dynamic> payload) async {
+    if (_outbox.any((item) => item['local_id'] == localId)) return;
+    _outbox.add({'type': 'job', 'local_id': localId, 'payload': payload, 'attempts': 0});
+    await _persistOutbox();
+  }
+
+  Future<void> flushOutbox() async {
+    if (!DropOffApi.enabled || !linked || _outbox.isEmpty) return;
+    for (final item in List<Map<String, dynamic>>.from(_outbox)) {
+      if (item['type'] != 'job') continue;
+      final payload = (item['payload'] as Map).cast<String, dynamic>();
+      final res = await DropOffApi.createJob(payload);
+      if (res.ok) {
+        final index = _bookings.indexWhere((b) => b.id == item['local_id']);
+        if (index >= 0) {
+          _bookings[index] = _bookings[index].copyWith(
+            serverRef: res.body['ref'] as String?,
+            promoCode: res.body['promo_code'] as String? ?? _bookings[index].promoCode,
+            promoDiscount: (res.body['promo_discount_zmw'] as num?)?.toDouble() ?? _bookings[index].promoDiscount,
+          );
+          await _saveBookings();
+        }
+        _outbox.remove(item);
+        await _persistOutbox();
+        notifyListeners();
+      } else if (res.error != 'network_error') {
+        // server rejected it (quote missing, expired promo, etc.) — drop it so
+        // the outbox can't wedge forever; the user can rebook with feedback.
+        _outbox.remove(item);
+        await _persistOutbox();
+      }
+    }
+    unawaited(DropOffApi.flushRatingOutbox());
+  }
+
+  /// Phone-OTP device link: request the SMS code, then confirm it.
+  Future<void> requestOtp(String phone) => DropOffApi.requestOtp(phone);
+
+  Future<bool> confirmOtp(String phone, String code) async {
+    final res = await DropOffApi.verifyOtp(phone, code);
+    if (res.ok) {
+      await _saveSession(token: DropOffApi.token, phone: res.body['phone'] as String? ?? phone, email: null);
+      unawaited(PushService.register());
+      return true;
+    }
+    return false;
+  }
+
+  /// Email + password account (customer login / first-time registration).
+  Future<bool> registerEmail({
+    required String email,
+    required String password,
+    required String phone,
+    String? fullName,
+  }) async {
+    final res = await DropOffApi.registerEmail(
+      email: email,
+      password: password,
+      phone: phone,
+      fullName: fullName,
+    );
+    _captureAuthError(res);
+    if (res.ok) {
+      await _saveSession(
+        token: DropOffApi.token,
+        phone: res.body['phone'] as String?,
+        email: res.body['email'] as String? ?? email,
+      );
+      unawaited(PushService.register());
+      return true;
+    }
+    return false;
+  }
+
+  Future<bool> loginEmail(String email, String password) async {
+    final res = await DropOffApi.loginEmail(email, password);
+    _captureAuthError(res);
+    if (res.ok) {
+      await _saveSession(
+        token: DropOffApi.token,
+        phone: res.body['phone'] as String?,
+        email: res.body['email'] as String? ?? email,
+      );
+      unawaited(PushService.register());
+      return true;
+    }
+    return false;
+  }
+
+  Future<ApiResponse> forgotPassword(String email) async {
+    final res = await DropOffApi.forgotPassword(email);
+    _captureAuthError(res);
+    return res;
+  }
+
+  Future<ApiResponse> resendVerification(String email) async {
+    final res = await DropOffApi.resendVerification(email);
+    _captureAuthError(res);
+    return res;
+  }
+
+  Future<void> _saveSession({required String? token, String? phone, String? email}) async {
+    _token = token;
+    _linkedPhone = phone ?? _linkedPhone;
+    _email = email;
+    final preferences = await SharedPreferences.getInstance();
+    if (token != null) await preferences.setString(_tokenKey, token);
+    if (_linkedPhone != null) await preferences.setString(_phoneKey, _linkedPhone!);
+    if (_email != null) await preferences.setString(_emailKey, _email!);
+    notifyListeners();
+    if (token != null) unawaited(flushOutbox());
+  }
+
+  /// Last auth error message from login/register for inline display.
+  String? lastAuthError;
+
+  void _captureAuthError(ApiResponse res) {
+    lastAuthError = res.ok ? null : authErrorText(res.body['error'] as String? ?? '');
+  }
+
+  /// Maps a failed login/register/forgot-password response to a human message.
+  static String authErrorText(String error) {
+    switch (error) {
+      case 'invalid_credentials':
+        return 'Wrong email or password.';
+      case 'email_already_registered':
+        return 'That email already has an account - sign in instead.';
+      case 'phone_already_used':
+        return 'That phone number is already linked to an account.';
+      case 'password_too_short_min_8':
+        return 'Use at least 8 characters for the password.';
+      case 'invalid_email':
+        return 'Enter a valid email address.';
+      case 'network_error':
+        return "Can't reach DropOff right now - check your internet connection and try again.";
+      case 'too_many_requests':
+      case 'too_many_attempts_wait_an_hour':
+      case 'too_many_codes_wait_an_hour':
+        return 'Too many tries - wait an hour, then retry.';
+      case 'session_revoked':
+        return 'Your session was revoked - sign in again.';
+      case 'internal_error':
+        return 'DropOff is having a moment - please try again in a minute.';
+      case 'unknown':
+      case '':
+        return 'Something went wrong. Check your details and retry.';
+      default:
+        return 'Something went wrong. Check your details and retry.';
+    }
+  }
+
+  Future<void> unlink() async {
+    await PushService.unregister();
+    DropOffApi.clearCaches();
+    _token = null;
+    _linkedPhone = null;
+    DropOffApi.token = null;
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_tokenKey);
+    await preferences.remove(_phoneKey);
+    notifyListeners();
+  }
+
+  /// Creates the booking locally (the app always works offline). If the
+  /// Worker is configured, it is dispatched server-side where *the Worker*
+  /// computes the verified pricing. Pricing from the client is never trusted.
+  Future<Booking> createBooking({
+    required String senderName,
+    required String senderPhone,
+    required String pickupAddress,
+    required String fromCity,
+    required String toCity,
+    required String courierId,
+    required ParcelSize parcelSize,
+    required String description,
+    required String recipientName,
+    required String recipientPhone,
+    required String paymentMethod,
+    required double riderFee,
+    required double? courierFare,
+    required double lastMileFee,
+    String pickupWindow = 'now',
+    String? service,
+    String? promoCode,
+    required bool roundTrip,
+    required String? returnCity,
+    required String? returnAddress,
+    required double returnLegFee,
+    required String? pickupAt,
+    int parcels = 1,
+    String vehicleClass = 'motorcycle',
+  }) async {
+    final now = DateTime.now();
+    final id = now.microsecondsSinceEpoch.toString();
+
+    // dispatch first (if linked) so the returned booking carries the server ref
+    ApiResponse response = const ApiResponse(error: 'offline_demo_mode');
+    final jobPayload = <String, dynamic>{
+      'idempotency_key': 'job-$id',
+      'sender_name': senderName,
+      'pickup_address': pickupAddress,
+      'from_city': fromCity,
+      'courier_id': courierId,
+      'recipient_name': recipientName,
+      'recipient_phone': recipientPhone,
+      'dest_city': toCity,
+      'dest_leg2': lastMileFee > 0,
+      'description': description,
+      'parcels': parcels,
+      'vehicle_class': vehicleClass,
+      'pay_method': switch (paymentMethod) {
+        'Cash at pickup' => 'cash',
+        _ => 'mobile_money',
+      },
+      'weight_class': switch (parcelSize) {
+        ParcelSize.small => '0-5kg',
+        ParcelSize.medium => '5-15kg',
+        ParcelSize.large => '15kg+',
+      },
+      'service': service ?? 'standard',
+      'pickup_window': pickupWindow,
+      'pickup_time': pickupWindow,
+      if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode.trim().toUpperCase(),
+    };
+    if (DropOffApi.enabled) {
+      response = await DropOffApi.createJob(jobPayload);
+      if (!response.ok && response.error == 'network_error') {
+        await _enqueueJob(id, jobPayload);
+      }
+    }
+    final serverRef = response.body['ref'] as String?;
+    final promoApplied = response.body['promo_code'] as String?;
+    final promoDiscount = (response.body['promo_discount_zmw'] as num?)?.toDouble();
+
+    final booking = Booking(
+      id: id,
+      reference: 'DO-${now.year}-${id.substring(id.length - 6)}',
+      createdAt: now,
+      senderName: senderName.trim(),
+      senderPhone: senderPhone.trim(),
+      pickupAddress: pickupAddress.trim(),
+      fromCity: fromCity,
+      toCity: toCity,
+      courierId: courierId,
+      parcelSize: parcelSize,
+      description: description.trim(),
+      recipientName: recipientName.trim(),
+      recipientPhone: recipientPhone.trim(),
+      paymentMethod: paymentMethod,
+      riderFee: riderFee,
+      courierFare: courierFare,
+      lastMileFee: lastMileFee,
+      pickupWindow: pickupWindow,
+      serverRef: serverRef,
+      promoCode: promoApplied ?? (promoCode?.trim().isEmpty ?? true ? null : promoCode?.trim().toUpperCase()),
+      promoDiscount: promoDiscount,
+      riderId: owner.id,
+      roundTrip: roundTrip,
+      returnCity: returnCity,
+      returnAddress: returnAddress,
+      returnLegFee: returnLegFee,
+      pickupAt: pickupAt,
+      parcels: parcels,
+      vehicleClass: vehicleClass,
+    );
+    _bookings.insert(0, booking);
+    await _saveBookings();
+    notifyListeners();
+    return booking;
+  }
+
+  Future<void> advanceBooking(String id) async {
+    final index = _bookings.indexWhere((booking) => booking.id == id);
+    if (index < 0 || _bookings[index].stage >= _bookings[index].timeline.length - 1) return;
+    _bookings[index] = _bookings[index].copyWith(stage: _bookings[index].stage + 1);
+    await _saveBookings();
+    notifyListeners();
+  }
+
+  Future<void> assignRider(String bookingId, String riderId) async {
+    final index = _bookings.indexWhere((booking) => booking.id == bookingId);
+    if (index < 0) return;
+    _bookings[index] = _bookings[index].copyWith(riderId: riderId);
+    await _saveBookings();
+    notifyListeners();
+  }
+
+  Future<void> addRider({required String name, required String phone, required String vehicle, String vehicleClass = 'motorcycle'}) async {
+    _riders.add(Rider(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      name: name.trim(),
+      phone: phone.trim(),
+      vehicle: vehicle,
+    ));
+    await _saveRiders();
+    notifyListeners();
+    // Server mirror (pricing class matters for truck/van runs). Plain post
+    // carries the ops key (rider device) or the owner JWT.
+    if (DropOffApi.enabled) {
+      await DropOffApi.post('/admin/riders', {
+        'phone': phone.trim(),
+        'full_name': name.trim(),
+        'vehicle': vehicle,
+        'vehicle_class': vehicleClass,
+      });
+    }
+  }
+
+  Future<void> toggleRider(String id, bool active) async {
+    final index = _riders.indexWhere((rider) => rider.id == id);
+    if (index < 0 || _riders[index].isOwner) return;
+    _riders[index] = _riders[index].copyWith(active: active);
+    await _saveRiders();
+    notifyListeners();
+  }
+
+  Future<void> removeRider(String id) async {
+    final rider = _riders.where((item) => item.id == id).firstOrNull;
+    if (rider == null || rider.isOwner) return;
+    _riders.removeWhere((item) => item.id == id);
+    for (var i = 0; i < _bookings.length; i++) {
+      if (_bookings[i].riderId == id) {
+        _bookings[i] = _bookings[i].copyWith(riderId: owner.id);
+      }
+    }
+    await Future.wait([_saveRiders(), _saveBookings()]);
+    notifyListeners();
+  }
+
+  Future<void> _saveBookings() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_bookingsKey, jsonEncode(_bookings.map((item) => item.toJson()).toList()));
+  }
+
+  Future<void> _saveRiders() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_ridersKey, jsonEncode(_riders.map((item) => item.toJson()).toList()));
+  }
+}
+
+

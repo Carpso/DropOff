@@ -1,0 +1,25 @@
+### DropOff rider fee guidance (Lusaka pilot)
+
+- Standard city pickup: **K35**.
+- Optional destination door delivery: **K30**.
+- Platform take-rate target: **20%** of the rider fee.
+- Courier fare is always separate and shown as “quote needed” until a verified rate exists.
+| Courier / comparator | Route | Published rate (ZMW) | Notes |
+|---|---|---|---|
+| **Icypeed** (SA→ZM, road) | JHB → Lusaka | **125** (first 0.5 kg) → 2,460 (100 kg) | Full public table in PDF; volumetric = `L×B×H / 2000`; free quotes via `quotes@icypeed.com`. Has Lusaka + Kitwe depots |
+| **Icypeed** road notes | — | — | Above ~50 kg = "cargo" class; doc fee R500/R600 (ZMW equiv.) |
+| **Mercury Express** | Domestic road | **K2.75 / kg** + one-off **K75** "collect & pay" add-on | VAT incl.; 1–2 day overnight between towns; domestic door-to-door; volumetric divisor **4,000** |
+| **One World (UPS ASC)** | Inter-city domestic | Quote-based (`oneworld.co.zm/rate-calculator`); 24–48 h line-of-rail, 72 h upcountry | Cash over counter / credit account for corporates |
+| **Platinum Courier Services** | Lusaka/Kitwe etc. | No published rates; reports ~**K20–50** for small city-to-city parcels | Depots in Chibolya (Lusaka) + Kitwe; better prices never posted — DropOff chats to the depot about a merchant rate |
+| **Zed Courier** (example competitor, also rider based) | Lusaka→Kitwe/Ndola | **80** (2–3 days) / **120** (overnight), <5 kg | published on farlijor.com/service.html; K8–13/kg for 30 kg+ freight |
+| **Market zoom-out (Zone 2)** | Copperbelt 2nd-tier cities | **90–200** for <5 kg | per seamedia.co.zm latest market survey |
+| **Market zoom-out (Zone 3)** | Remote / provincial | **3–7 days**, depot collection only | coverage per route — must be checked per town |
+
+**DropOff rider fee guidance (Lusaka pilot)**
+- Zone 1 (within Lusaka): **K25–45** flat per collect-and-drop (5 km radius).
+- Zone 1.5 (north / south Lusaka): K60–80.
+- Banded by distance (haversine from the depot), not by weight — the weight is already billed by the courier.
+- **Cash-handling surcharge** (if a rider advances courier fees at the counter): +5% capping.
+
+---
+

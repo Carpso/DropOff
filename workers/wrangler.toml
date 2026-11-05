@@ -1,0 +1,86 @@
+name = "dropoff-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+account_id = "ab82a97ce2c926279c483fef36c41945"
+
+# Transactional email (password reset / email verification) via Cloudflare
+# Email Service. MUST be a top-level binding (an array-of-tables) — putting it
+# under [triggers] silently does nothing and every auth email 500s.
+# Sender domain must be onboarded: npx wrangler email sending enable <domain>
+[[send_email]]
+name = "EMAIL"
+
+[triggers]
+# daily sweep: bill expiring Silver/Gold/Platinum packs 3 days before expiry,
+# export app-data backups to R2 at 02:00 CAT.
+# timed-pickup reminders: T-30 / T-10 pushes + missed flags (every minute).
+crons = ["0 2 * * *", "* * * * *"]
+
+[vars]
+# Lipila: PRODUCTION https://blz.lipila.io (live key required in LIPILA_API_KEY secret)
+# sandbox https://api.lipila.dev — only for test deploys
+LIPILA_BASE_URL = "https://blz.lipila.io"
+LIPILA_CALLBACK_URL = "https://dropoff-api.godfreymoseskalambo.workers.dev/webhooks/lipila"
+# Sender for transactional emails — MUST be on a domain onboarded for Email
+# Sending in THIS Cloudflare account (the account's only zone is
+# carpsosolutions.store; churchonapp.com is not in this account and was
+# rejected with "domain was not found").
+MAIL_FROM = "no-reply@carpsosolutions.store"
+APP_URL = "https://dropoff-api.godfreymoseskalambo.workers.dev"
+AUTH_DEV_MODE = "0"                            # "1" = return OTP codes / reset links in responses
+
+# SMS — Africa's Talking, the Carpso account (same pattern as Kingdom Sponsor /
+# chisomo). Secret: AT_API_KEY (npx wrangler secret put AT_API_KEY).
+# ENV=production is the gate: anything else only logs the code (no billing).
+ENV = "production"
+AT_USERNAME = "ChurchOnApp"                    # AT app username (not a secret)
+AT_FROM = "Carpso"                             # approved MNO sender ID — used for ALL SMS
+# Legacy SMS_* names still read as a fallback (sms.ts).
+
+# CORS: comma-separated origins allowed to call the API cross-origin (the
+# Flutter-web admin build). Empty = same-origin consoles only. e.g.
+# CORS_ORIGINS = "https://admin.yourdomain.com"
+CORS_ORIGINS = ""
+
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "dropoff-backups"
+
+# Realtime chat: one ChatRoom Durable Object per thread (hibernating WebSockets).
+[[durable_objects.bindings]]
+name = "CHAT"
+class_name = "ChatRoom"
+
+[[migrations]]
+tag = "v1_chat_do"
+new_sqlite_classes = ["ChatRoom"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dropoff-db"
+database_id = "1100c702-d4c2-4114-8926-7e113350ad17"
+migrations_dir = "migrations"
+
+# Secrets (set with: npx wrangler secret put <NAME>)
+#   LIPILA_API_KEY   - Lipila API key (sandbox key with sandbox base, live key with live base)
+#   API_AUTH_KEY     - ops/rider-app service key (`X-Api-Key`)
+#   ADMIN_AUTH_KEY   - superadmin pricebook/partner key (`X-Admin-Key`)
+#   JWT_SECRET       - signs phone-OTP JWTs AND hashes OTP codes; set a long random string
+#   SMS_USERNAME     - Africas Talking username (OTP delivery)
+#   SMS_API_KEY      - Africas Talking API key
+#   SMS_SENDER_ID    - approved sender name, e.g. "DropOff" (optional)
+#   OWNER_PHONE      - 260XXXXXXXXX — receives intrusion / new-device alerts (security.ts)
+#   OWNER_EMAIL      - email copy of owner alerts (falls back to SMS/push only)
+# EMAIL BINDING: no secrets needed — transactional mail goes through `send_email`.
+#
+# FIRST-TIME SETUP:
+#   1. npx wrangler d1 create dropoff-db   -> paste database_id here
+#   2. npx wrangler d1 migrations apply dropoff-db --remote
+#   3. npx wrangler deploy
+#   4. Seed chargebook with X-Admin-Key: POST /admin/couriers, POST /admin/quotes
+#   5. Go-live checklist:
+#      - LIPILA_BASE_URL -> https://blz.lipila.io + live secret key
+#      - whitelist the disbursement IP (Lipila dashboard) — Workers egress IPs
+#        are shared; prefer dashboard-initiated payouts until Lipila whitelists them
+#      - npx wrangler email sending enable <domain verified in this account>
+#      - AUTH_DEV_MODE stays "0" once SMS secrets are in
