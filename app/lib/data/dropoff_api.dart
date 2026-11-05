@@ -581,6 +581,31 @@ class DropOffApi {
 
   static Future<Map<String, dynamic>?> chatThreads() => get('/chat/threads');
 
+  /// Identity of the signed-in caller: {phone, role}. role 'admin' | 'ops'
+  /// unlocks the in-app admin console (owner phone is admin server-side).
+  static Future<Map<String, dynamic>?> me() => get('/me');
+
+  // ---- admin console (owner / admin key) ----
+
+  static Future<Map<String, dynamic>?> adminStats() => get('/admin/stats');
+
+  static Future<Map<String, dynamic>?> securityAlerts({bool unacknowledgedOnly = false}) =>
+      get('/security/alerts${unacknowledgedOnly ? '?unacknowledged=1' : ''}');
+
+  static Future<ApiResponse> ackAlert(int id) => post('/security/alerts/$id/ack', {});
+
+  static Future<Map<String, dynamic>?> fraudFlags({String status = 'open'}) =>
+      get('/admin/fraud?status=$status');
+
+  static Future<ApiResponse> reviewFraud(int id, {required String status}) =>
+      post('/admin/fraud/$id/review', {'status': status});
+
+  static Future<ApiResponse> adminSms({required String phone, required String message}) =>
+      post('/admin/sms', {'phone': phone, 'message': message});
+
+  static Future<ApiResponse> adminBroadcast({required String audience, required String message}) =>
+      post('/admin/sms/broadcast', {'audience': audience, 'message': message});
+
   /// The linked rider's day as slot-batched task queues (stops, ETAs, totals,
   /// destination branch, target drop-off time).
   static Future<Map<String, dynamic>?> riderQueue(String? phone) {
@@ -672,8 +697,6 @@ class DropOffApi {
     String kind = 'rider_earning',
   }) =>
       post('/admin/payouts', {'phone': phone, 'amount_zmw': amountZmw, 'kind': kind}, admin: true);
-
-  static Future<Map<String, dynamic>?> adminStats() => getAdmin('/admin/stats');
 }
 
 class ApiResponse {

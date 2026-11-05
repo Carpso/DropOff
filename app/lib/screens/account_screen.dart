@@ -9,6 +9,7 @@ import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../data/push_service.dart';
 import '../main.dart';
+import '../screens/admin_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/legal_screen.dart';
 import '../state/app_store.dart';
@@ -402,6 +403,7 @@ class _AccountScreenState extends State<AccountScreen> {
                 ),
               ),
             ),
+            const _AdminGate(),
           ],
           const _TiersCard(),
           if (!DropOffApi.enabled && !signedIn) ...[
@@ -797,10 +799,61 @@ class _TiersCardState extends State<_TiersCard> {
 }
 
 /// Live "X of Y parcels used this cycle" meter for the signed-in seller's pack.
-class _PlanUsageMeter extends StatelessWidget {
-  const _PlanUsageMeter({super.key});
+/// Shows the Admin console door only when the server says this identity is
+/// admin/ops (the owner's phone resolves to admin via OWNER_PHONE).
+class _AdminGate extends StatefulWidget {
+  const _AdminGate();
 
   @override
+  State<_AdminGate> createState() => _AdminGateState();
+}
+
+class _AdminGateState extends State<_AdminGate> {
+  bool _isAdmin = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    final me = await DropOffApi.me();
+    if (!mounted) return;
+    final role = '${me?['role'] ?? ''}';
+    setState(() => _isAdmin = role == 'admin' || role == 'ops');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isAdmin) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Card(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AdminScreen())),
+          child: const Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(children: [
+              Icon(Icons.admin_panel_settings_outlined, color: AppColors.forest),
+              SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Admin console', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                SizedBox(height: 2),
+                Text('Stats, security alerts, fraud queue and SMS broadcasts.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.3)),
+              ])),
+              Icon(Icons.chevron_right, color: AppColors.muted),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanUsageMeter extends StatelessWidget {
+  const _PlanUsageMeter({super.key});  @override
   Widget build(BuildContext context) {
     return FutureBuilder<Map<String, dynamic>?>(
       future: DropOffApi.subscription(),

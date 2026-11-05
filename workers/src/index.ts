@@ -326,6 +326,10 @@ app.use('GET /plans', cacheFor(30));
 /* --------------------------------- health --------------------------------- */
 app.get('/health', (c) => c.json({ ok: true, ts: Date.now() }));
 
+// Identity for the signed-in caller — the app uses this to reveal admin/ops
+// surfaces (the owner's phone is admin via OWNER_PHONE middleware grant).
+app.get('/me', (c) => c.json({ phone: c.get('phone') ?? null, role: c.get('role') ?? null }));
+
 /* ------------------------------ phone OTP auth ---------------------------- */
 // POST /auth/request {phone}   -> { sent: true, dev_code? }
 // POST /auth/verify {phone, code} -> { token }  (JWT, 30 days)
@@ -851,11 +855,8 @@ app.post('/jobs', async (c) => {
             AND created_at >= ?2 AND created_at < ?3`,
         ).bind(senderPhone, activeSub.period_start, activeSub.period_end).first<any>();
         planUsed = used?.n ?? 0;
-        // Rollover: unused Gold/Platinum parcels (capped at 25%) carry into the
-        // cycle they were granted to, on top of the tier cap.
-        const carry = activeSub.rollover_period === activeSub.period_start
-          ? Number(activeSub.rollover_parcels ?? 0) : 0;
-        planCap = plan.parcels_per_month + carry;
+        // No rollover: unused parcels expire with the cycle.
+        planCap = plan.parcels_per_month;
         if (planUsed + parcels <= planCap) {
           riderFee = plan.rider_fee_zmw;
           packInclusion = 'pack';
@@ -972,10 +973,12 @@ app.post('/jobs', async (c) => {
       'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
     ).bind(meta.last_row_id, 'created', 'Job created').run();
     if (windowRolledFrom) {
+      const fromLabel = windowRolledFrom === 'now' ? 'instant' : (SWEEP_SLOTS[windowRolledFrom]?.range ?? windowRolledFrom);
+      const toLabel = pickupWindow === 'now' ? 'instant' : (SWEEP_SLOTS[pickupWindow]?.range ?? pickupWindow);
       await c.env.DB.prepare(
         'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
       ).bind(meta.last_row_id, 'window_rolled',
-        `${windowRolledFrom} window had closed — moved to the ${pickupWindow === 'now' ? 'instant' : pickupWindow} slot automatically`).run();
+        `The ${fromLabel} window had closed — moved to the ${toLabel} slot automatically`).run();
     }
 
     c.executionCtx.waitUntil(
@@ -2047,41 +2050,28 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     if (pay.job_id) stmts.push(db.prepare('UPDATE jobs SET paid = 1 WHERE id = ?1').bind(pay.job_id));
     await env.DB.batch(stmts);
   } else if (pay.kind === 'subscription' && pay.subscription_id) {
-    // Activate/renew the pack for another 30-day cycle. Gold/Platinum carry
-    // up to 25% of unused parcels into the new cycle (rollover).
-    const sub = await env.DB.prepare('SELECT phone, tier, period_start, period_end, rollover_parcels, rollover_period FROM subscriptions WHERE id = ?1')
+    // Activate/renew the pack for another 30-day cycle. Unused parcels do NOT
+    // roll over — they expire with the cycle.
+    const sub = await env.DB.prepare('SELECT phone, tier, period_start, period_end FROM subscriptions WHERE id = ?1')
       .bind(pay.subscription_id).first<any>();
-    const plan = sub ? (await plans(env.DB))[sub.tier as PlanTier] : null;
     const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    let carry = 0;
     let newStart = nowStr;
-    if (sub && plan && sub.period_start && sub.period_end) {
-      const used = (await env.DB.prepare(
-        `SELECT COALESCE(SUM(j.parcels), 0) AS n FROM jobs j
-          WHERE j.sender_phone = ?1 AND j.created_at >= ?2 AND j.created_at < ?3`,
-      ).bind(sub.phone, sub.period_start, sub.period_end).first<any>())?.n ?? 0;
-      const prevCarry = sub.rollover_period === sub.period_start ? Number(sub.rollover_parcels ?? 0) : 0;
-      const cap = plan.parcels_per_month + prevCarry;
-      const unused = Math.max(0, cap - Number(used));
-      const carryCap = Math.floor(plan.parcels_per_month * 0.25); // gold + platinum; silver carries nothing
-      carry = sub.tier === 'silver' ? 0 : Math.min(unused, carryCap);
+    if (sub && sub.period_start && sub.period_end) {
       newStart = sub.period_end > nowStr ? sub.period_start : nowStr;
     }
     await env.DB.prepare(
       `UPDATE subscriptions SET status = 'active',
          period_start = ?2,
          period_end = datetime(?2, '+30 days'),
-         rollover_parcels = ?3,
-         rollover_period = ?2,
+         rollover_parcels = 0,
+         rollover_period = NULL,
          expires_at = datetime(?2, '+30 days'),
          started_at = datetime('now')
        WHERE id = ?1`,
-    ).bind(pay.subscription_id, newStart, carry).run();
+    ).bind(pay.subscription_id, newStart).run();
     await sendToPhone(env, pay.phone, {
       title: sub?.tier ? `${sub.tier} pack renewed` : 'Pack renewed',
-      body: carry > 0
-        ? `Renewed for 30 days — ${carry} unused parcel${carry === 1 ? '' : 's'} carried over. Book away!`
-        : 'Renewed for another 30 days. Book away!',
+      body: 'Renewed for another 30 days. Unused parcels do not carry over — book away!',
       data: { kind: 'subscription_active' },
     });
   } else if (pay.kind === 'upgrade' && pay.subscription_id) {
@@ -2810,10 +2800,10 @@ app.get('/rider/route', async (c) => {
 /* --------------------- rider task queue (slot batches) -------------------- */
 // The rider's day, grouped into sweep windows like a task queue: stop order,
 // ETA chain, parcel totals, majority destination branch, target drop-off time.
-const SWEEP_SLOTS: Record<string, { label: string; cutoff: string; start: string; target: string }> = {
-  '06:00': { label: '06:00 AM slot', cutoff: '05:30', start: '06:00', target: '08:30' },
-  '10:00': { label: '10:00 AM slot', cutoff: '09:30', start: '10:00', target: '12:30' },
-  '14:00': { label: '2:00 PM slot', cutoff: '13:30', start: '14:00', target: '16:30' },
+const SWEEP_SLOTS: Record<string, { label: string; cutoff: string; start: string; target: string; range: string }> = {
+  '06:00': { label: '06:00–07:30 slot', cutoff: '05:30', start: '06:00', target: '08:30', range: '6:00–7:30 AM' },
+  '10:00': { label: '10:00–11:30 slot', cutoff: '09:30', start: '10:00', target: '12:30', range: '10:00–11:30 AM' },
+  '14:00': { label: '14:00–15:30 slot', cutoff: '13:30', start: '14:00', target: '16:30', range: '2:00–3:30 PM' },
 };
 
 function catHM(offsetMinutes = 0): string {
@@ -3302,8 +3292,8 @@ app.get('/subscriptions/:phone?', async (c) => {
       `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs WHERE sender_phone = ?1
         AND created_at >= ?2 AND created_at < ?3`,
     ).bind(phone, sub.period_start, sub.period_end).first<any>())?.n ?? 0;
-    rollover = sub.rollover_period === sub.period_start ? Number(sub.rollover_parcels ?? 0) : 0;
-    effectiveCap = (plan?.parcels_per_month ?? 0) + rollover;
+    rollover = 0; // no rollover — unused parcels expire with the cycle
+    effectiveCap = (plan?.parcels_per_month ?? 0);
   }
   return c.json({
     subscription: sub,
@@ -3654,7 +3644,6 @@ async function notifyCapNudges(env: Env): Promise<void> {
     const packs = await plans(env.DB);
     const { results } = await env.DB.prepare(
       `SELECT s.id, s.phone, s.tier, s.period_start, s.period_end, s.cap_nudge_period,
-              s.rollover_parcels, s.rollover_period,
               (SELECT COALESCE(SUM(j.parcels), 0) FROM jobs j
                 WHERE j.sender_phone = s.phone AND j.created_at >= s.period_start
                   AND j.created_at < s.period_end) AS used
@@ -3664,8 +3653,7 @@ async function notifyCapNudges(env: Env): Promise<void> {
     for (const row of results as any[]) {
       const plan = packs[row.tier as PlanTier];
       if (!plan || !row.period_start) continue;
-      const carry = row.rollover_period === row.period_start ? Number(row.rollover_parcels ?? 0) : 0;
-      const cap = plan.parcels_per_month + carry;
+      const cap = plan.parcels_per_month;
       const used = Number(row.used ?? 0);
       if (cap <= 0 || used < cap * 0.8) continue;
       if (row.cap_nudge_period === row.period_start) continue; // once per cycle

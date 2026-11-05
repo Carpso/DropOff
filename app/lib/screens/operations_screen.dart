@@ -92,7 +92,7 @@ class OperationsScreen extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const Text('Add a rider or driver', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
-          const Text('Start solo. Add your team only when you are ready.', style: TextStyle(color: AppColors.muted)),
+          const Text('Add riders and drivers only when you are ready.', style: TextStyle(color: AppColors.muted)),
           const SizedBox(height: 20),
           TextField(controller: name, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Full name', prefixIcon: Icon(Icons.person_outline))),
           const SizedBox(height: 12),
@@ -214,42 +214,15 @@ class OperationsScreen extends StatelessWidget {
         const _BatchPickupCard(),
         const SizedBox(height: 12),
         Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-                const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: Icon(Icons.my_location, color: AppColors.forest, size: 22),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'Rider live position',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, height: 1.1),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                FilledButton.tonal(
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    minimumSize: const Size(0, 36),
-                  ),
-                  onPressed: () => _pingMyLocation(context),
-                  child: const Text('Share'),
-                ),
-              ]),
-              const SizedBox(height: 8),
-              // aligned with the title text (icon 22 px + 12 px gap)
-              const Padding(
-                padding: EdgeInsets.only(left: 34),
-                child: Text('Broadcast your GPS once so senders of your jobs can open a live map.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
-              ),
-            ]),
+          child: ListTile(
+            leading: const Icon(Icons.my_location, color: AppColors.forest),
+            title: const Text('Rider live position', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            subtitle: const Text('Broadcast your GPS once so senders of your jobs can open a live map.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+            trailing: FilledButton.tonal(
+              style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), minimumSize: const Size(0, 36)),
+              onPressed: () => _pingMyLocation(context),
+              child: const Text('Share'),
+            ),
           ),
         ),
         const SizedBox(height: 26),

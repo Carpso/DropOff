@@ -30,13 +30,13 @@ class _BookingScreenState extends State<BookingScreen> {
     '14:00': 'Daily sweep 2:00 pm',
   };
 
-  /// Seller-facing slot copy: the benefit of each sweep window + its booking
-  /// cutoff (CAT). Closed slots stay visible (list-only) and auto-roll forward.
+  /// Seller-facing slot copy: arrival RANGE + benefit + booking cutoff (CAT).
+  /// Closed slots stay visible (list-only) and auto-roll forward.
   static const Map<String, ({String title, String benefit, String cutoff})> slotCopy = {
     'now': (title: 'Instant pick-up', benefit: 'Rider dispatched ASAP', cutoff: ''),
-    '06:00': (title: '06:00 AM window', benefit: 'Catches early outbound buses', cutoff: '05:30'),
-    '10:00': (title: '10:00 AM window', benefit: 'Catches midday courier express', cutoff: '09:30'),
-    '14:00': (title: '2:00 PM window', benefit: 'Catches final evening transit', cutoff: '13:30'),
+    '06:00': (title: '6:00 – 7:30 AM window', benefit: 'Catches early outbound buses', cutoff: '05:30'),
+    '10:00': (title: '10:00 – 11:30 AM window', benefit: 'Catches midday courier express', cutoff: '09:30'),
+    '14:00': (title: '2:00 – 3:30 PM window', benefit: 'Catches final evening transit', cutoff: '13:30'),
   };
 
   bool _slotClosed(String key) {
