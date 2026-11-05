@@ -15,6 +15,7 @@ class AppStore extends ChangeNotifier {
   static const _phoneKey = 'dropoff_phone_v1';
   static const _emailKey = 'dropoff_email_v1';
   static const _outboxKey = 'dropoff_outbox_v1';
+  static const _rememberKey = 'dropoff_remember_v1';
 
   final List<Booking> _bookings = [];
   final List<Rider> _riders = [];
@@ -23,6 +24,7 @@ class AppStore extends ChangeNotifier {
   String? _token;
   String? _linkedPhone;
   String? _email;
+  String? _role;
 
   List<Booking> get bookings => List.unmodifiable(_bookings);
   List<Rider> get riders => List.unmodifiable(_riders);
@@ -32,8 +34,20 @@ class AppStore extends ChangeNotifier {
   String? get email => _email;
   bool get linked => _token != null;
 
+  /// Server role for the signed-in identity: customer | partner | admin | ops.
+  /// Admin/ops unlock the Team tab and the admin console.
+  String? get role => _role;
+  bool get isStaff => _role == 'admin' || _role == 'ops';
+
   Future<void> initialize() async {
     final preferences = await SharedPreferences.getInstance();
+    final remember = preferences.getBool(_rememberKey) ?? true;
+    if (!remember) {
+      // Session-only login: drop any persisted credential on cold start.
+      await preferences.remove(_tokenKey);
+      await preferences.remove(_phoneKey);
+      await preferences.remove(_emailKey);
+    }
     _token = preferences.getString(_tokenKey);
     _linkedPhone = preferences.getString(_phoneKey);
     _email = preferences.getString(_emailKey);
@@ -72,6 +86,20 @@ class AppStore extends ChangeNotifier {
     _ready = true;
     notifyListeners();
     unawaited(flushOutbox());
+    if (_token != null) unawaited(refreshRole());
+  }
+
+  /// Pulls the signed-in identity's role from GET /me so the shell can hide
+  /// Team/admin surfaces from ordinary sellers and recipients.
+  Future<void> refreshRole() async {
+    if (_token == null || !DropOffApi.enabled) return;
+    final me = await DropOffApi.me();
+    final next = '${me?['role'] ?? ''}';
+    final role = next.isEmpty ? null : next;
+    if (role != _role) {
+      _role = role;
+      notifyListeners();
+    }
   }
 
   /// Offline outbox: bookings created without signal are retried here. The
@@ -135,6 +163,7 @@ class AppStore extends ChangeNotifier {
     required String password,
     required String phone,
     String? fullName,
+    bool remember = true,
   }) async {
     final res = await DropOffApi.registerEmail(
       email: email,
@@ -148,6 +177,7 @@ class AppStore extends ChangeNotifier {
         token: DropOffApi.token,
         phone: res.body['phone'] as String?,
         email: res.body['email'] as String? ?? email,
+        remember: remember,
       );
       unawaited(PushService.register());
       return true;
@@ -155,7 +185,7 @@ class AppStore extends ChangeNotifier {
     return false;
   }
 
-  Future<bool> loginEmail(String email, String password) async {
+  Future<bool> loginEmail(String email, String password, {bool remember = true}) async {
     final res = await DropOffApi.loginEmail(email, password);
     _captureAuthError(res);
     if (res.ok) {
@@ -163,6 +193,7 @@ class AppStore extends ChangeNotifier {
         token: DropOffApi.token,
         phone: res.body['phone'] as String?,
         email: res.body['email'] as String? ?? email,
+        remember: remember,
       );
       unawaited(PushService.register());
       return true;
@@ -182,20 +213,39 @@ class AppStore extends ChangeNotifier {
     return res;
   }
 
-  Future<void> _saveSession({required String? token, String? phone, String? email}) async {
+  Future<void> _saveSession({required String? token, String? phone, String? email, bool remember = true}) async {
     _token = token;
     _linkedPhone = phone ?? _linkedPhone;
     _email = email;
     final preferences = await SharedPreferences.getInstance();
-    if (token != null) await preferences.setString(_tokenKey, token);
-    if (_linkedPhone != null) await preferences.setString(_phoneKey, _linkedPhone!);
-    if (_email != null) await preferences.setString(_emailKey, _email!);
+    await preferences.setBool(_rememberKey, remember);
+    if (token != null && remember) {
+      await preferences.setString(_tokenKey, token);
+      if (_linkedPhone != null) await preferences.setString(_phoneKey, _linkedPhone!);
+      if (_email != null) await preferences.setString(_emailKey, _email!);
+    } else if (token != null && !remember) {
+      // Keep the session in memory only — never write credentials to disk.
+      await preferences.remove(_tokenKey);
+      await preferences.remove(_phoneKey);
+      await preferences.remove(_emailKey);
+    }
     notifyListeners();
-    if (token != null) unawaited(flushOutbox());
+    if (token != null) {
+      unawaited(flushOutbox());
+      unawaited(refreshRole());
+    }
   }
 
   /// Last auth error message from login/register for inline display.
   String? lastAuthError;
+
+  /// Server's plan decision for the most recent booking ('pack' | 'payg' | null).
+  String? lastBookingPlanInclusion;
+  String? lastBookingWindowRolled;
+  double? lastBookingDueZmw;
+  int? lastBookingPlanUsed;
+  int? lastBookingPlanCap;
+  int? lastBookingParcels;
 
   void _captureAuthError(ApiResponse res) {
     lastAuthError = res.ok ? null : authErrorText(res.body['error'] as String? ?? '');
@@ -237,10 +287,12 @@ class AppStore extends ChangeNotifier {
     DropOffApi.clearCaches();
     _token = null;
     _linkedPhone = null;
+    _role = null;
     DropOffApi.token = null;
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_tokenKey);
     await preferences.remove(_phoneKey);
+    await preferences.remove(_emailKey);
     notifyListeners();
   }
 
@@ -272,6 +324,7 @@ class AppStore extends ChangeNotifier {
     required String? pickupAt,
     int parcels = 1,
     String vehicleClass = 'motorcycle',
+    String? branch,
   }) async {
     final now = DateTime.now();
     final id = now.microsecondsSinceEpoch.toString();
@@ -291,6 +344,7 @@ class AppStore extends ChangeNotifier {
       'description': description,
       'parcels': parcels,
       'vehicle_class': vehicleClass,
+      if (branch != null && branch.trim().isNotEmpty) 'branch': branch.trim(),
       'pay_method': switch (paymentMethod) {
         'Cash at pickup' => 'cash',
         _ => 'mobile_money',
@@ -314,6 +368,14 @@ class AppStore extends ChangeNotifier {
     final serverRef = response.body['ref'] as String?;
     final promoApplied = response.body['promo_code'] as String?;
     final promoDiscount = (response.body['promo_discount_zmw'] as num?)?.toDouble();
+    // Expose the server's plan decision so the booking screen knows whether to
+    // prompt for payment ('pack' = rider fee already inside the subscription).
+    lastBookingPlanInclusion = response.body['plan_inclusion'] as String?;
+    lastBookingWindowRolled = response.body['window_rolled_from'] as String?;
+    lastBookingDueZmw = (response.body['prompt_total_zmw'] as num?)?.toDouble();
+    lastBookingPlanUsed = (response.body['plan_used'] as num?)?.toInt();
+    lastBookingPlanCap = (response.body['plan_cap'] as num?)?.toInt();
+    lastBookingParcels = (response.body['parcels'] as num?)?.toInt() ?? parcels;
 
     final booking = Booking(
       id: id,
@@ -345,6 +407,7 @@ class AppStore extends ChangeNotifier {
       pickupAt: pickupAt,
       parcels: parcels,
       vehicleClass: vehicleClass,
+      branch: branch,
     );
     _bookings.insert(0, booking);
     await _saveBookings();

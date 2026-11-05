@@ -106,9 +106,24 @@ class BookingCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${booking.fromCity} → ${booking.toCity}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                // First mile ends at the nominated depot branch — that is the
+                // DropOff leg we track and get paid for. Final city is optional
+                // last mile and stays secondary.
+                Text(
+                  (booking.branch?.isNotEmpty == true)
+                      ? '${booking.fromCity} → ${booking.branch}'
+                      : '${booking.fromCity} → ${booking.toCity}',
+                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                ),
                 const SizedBox(height: 3),
-                Text(courier.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                Text(
+                  (booking.branch?.isNotEmpty == true)
+                      ? '${courier.name} · onward to ${booking.toCity}'
+                      : courier.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
               ])),
               const Icon(Icons.chevron_right, color: AppColors.muted),
             ]),
@@ -150,9 +165,19 @@ class BookingDetailScreen extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(booking.timeline[booking.stage].toUpperCase(), style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 1)),
             const SizedBox(height: 12),
-            Text('${booking.fromCity} → ${booking.toCity}', style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.w900)),
+            Text(
+              (booking.branch?.isNotEmpty == true)
+                  ? '${booking.fromCity} → ${booking.branch}'
+                  : '${booking.fromCity} → ${booking.toCity}',
+              style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 8),
-            Text(courier.name, style: const TextStyle(color: Colors.white70)),
+            Text(
+              (booking.branch?.isNotEmpty == true)
+                  ? '${courier.name} · onward to ${booking.toCity}'
+                  : courier.name,
+              style: const TextStyle(color: Colors.white70),
+            ),
             const SizedBox(height: 20),
             ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: (booking.stage + 1) / booking.timeline.length, minHeight: 5, backgroundColor: Colors.white24, color: AppColors.amber)),
           ]),
@@ -169,12 +194,14 @@ class BookingDetailScreen extends StatelessWidget {
         const SizedBox(height: 8),
         Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(children: [
           _detailRow('Pickup', booking.pickupAddress),
+          if (booking.branch?.isNotEmpty == true)
+            _detailRow('Drop-off branch', '${booking.branch} (${courier.name})'),
           _detailRow('Parcel', '${booking.parcelSize.label} • ${booking.description}'),
           _detailRow('Sender', '${booking.senderName}\n${booking.senderPhone}'),
           _detailRow('Recipient', '${booking.recipientName}\n${booking.recipientPhone}'),
           _detailRow('Payment', booking.paymentMethod),
           _detailRow('Rider', rider?.name ?? 'DropOff Owner'),
-          _detailRow('Rider fee', kwacha(booking.riderFee)),
+          _detailRow('DropOff rider fee', kwacha(booking.riderFee)),
           _detailRow('Courier fare', kwacha(booking.courierFare)),
           if (booking.lastMileFee > 0) _detailRow('Last-mile fee', kwacha(booking.lastMileFee)),
           _detailRow('Counter fare', '${booking.courierFare != null ? kwacha(booking.courierFare) : 'Confirmed at depot'} — pay directly to the depot'),
@@ -183,7 +210,9 @@ class BookingDetailScreen extends StatelessWidget {
             _detailRow('Promo', '${booking.promoCode}${booking.promoDiscount != null ? ' — saved ${kwacha(booking.promoDiscount)} on the DropOff leg' : ''}'),
         ]))),
         const SizedBox(height: 20),
-        if (store.riders.where((item) => item.active).length > 1) ...[
+        // Operator controls (assign rider / advance status) are staff-only —
+        // sellers and recipients never see the fleet console on a job card.
+        if (store.isStaff && store.riders.where((item) => item.active).length > 1) ...[
           DropdownButtonFormField<String>(
             initialValue: booking.riderId,
             decoration: const InputDecoration(labelText: 'Assign rider / driver', prefixIcon: Icon(Icons.two_wheeler)),
@@ -192,14 +221,16 @@ class BookingDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 14),
         ],
-        if (booking.stage < booking.timeline.length - 1)
+        if (store.isStaff && booking.stage < booking.timeline.length - 1)
           FilledButton.icon(
             onPressed: () => store.advanceBooking(booking.id),
             icon: const Icon(Icons.update),
             label: Text('Operator: mark “${booking.timeline[booking.stage + 1]}”'),
           )
-        else
-          const InfoPill(icon: Icons.check_circle, label: 'Journey complete'),
+        else if (!store.isStaff && booking.stage >= booking.timeline.length - 1)
+          const InfoPill(icon: Icons.check_circle, label: 'Journey complete')
+        else if (!store.isStaff)
+          const SizedBox.shrink(),
         if (booking.dispatched && DropOffApi.enabled && store.linked) ...[
           const SizedBox(height: 20),
           Row(children: [

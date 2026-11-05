@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/dropoff_api.dart';
+import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
+import 'account_screen.dart';
 import 'chat_screen.dart';
 
 /// Recipient parcel tracking — the same public view the SMS link opens,
@@ -56,6 +58,32 @@ class _TrackScreenState extends State<TrackScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppScope.of(context);
+    if (!store.linked) {
+      // In-app tracking is behind an account (SMS recipients keep using the
+      // public link). Sign up first, then paste the code.
+      return Scaffold(
+        appBar: AppBar(title: const Text('Track a parcel', style: TextStyle(fontWeight: FontWeight.w900))),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.lock_outline, size: 44, color: AppColors.muted),
+              const SizedBox(height: 16),
+              const Text('Sign up to track', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              const Text('Create your free account to follow your parcel — status, rider location and the depot branch it lands at.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Sign up / Sign in'),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Track a parcel', style: TextStyle(fontWeight: FontWeight.w900))),
       body: ListView(
@@ -116,24 +144,34 @@ class _TrackScreenState extends State<TrackScreen> {
     );
   }
 
-  Widget _statusHeader(Map<String, dynamic> d) => Container(
+  Widget _statusHeader(Map<String, dynamic> d) {
+    final dropoff = d['dropoff'] as Map<String, dynamic>?;
+    final branch = '${dropoff?['branch'] ?? ''}'.trim();
+    final dropoffPoint = branch.isNotEmpty ? '$branch (${dropoff?['courier'] ?? ''})' : '${d['dest_city'] ?? 'depot'}';
+    final dropoffIsBranch = branch.isNotEmpty;
+    return Container(
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(24)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('${d['status'] ?? ''}'.replaceAll('_', ' ').toUpperCase(),
               style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 1)),
           const SizedBox(height: 12),
-          Text('${d['pickup_city'] ?? 'Pickup'} → ${d['dest_city'] ?? ''}',
-              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900)),
+          Text('${d['pickup_city'] ?? 'Pickup'} → $dropoffPoint',
+              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
           const SizedBox(height: 8),
-          Text('For ${d['recipient_name'] ?? 'recipient'} • via ${d['courier'] ?? 'courier'}',
-              style: const TextStyle(color: Colors.white70)),
+          Text(
+            dropoffIsBranch
+                ? 'First mile: to your nominated ${d['courier'] ?? ''} depot branch${d['dest_city'] != null ? ' · onward to ${d['dest_city']}' : ''}'
+                : 'For ${d['recipient_name'] ?? 'recipient'} • via ${d['courier'] ?? 'courier'}',
+            style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.35),
+          ),
           if (d['eta_minutes'] != null) ...[
             const SizedBox(height: 6),
             Text('ETA ~${d['eta_minutes']} min', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
           ],
         ]),
       );
+  }
 
   Widget _riderStrip(Map<String, dynamic> d) {
     final rider = d['rider'] as Map<String, dynamic>?;

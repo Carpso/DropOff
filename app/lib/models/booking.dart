@@ -203,6 +203,9 @@ class Booking {
   /// Vehicle class for this trip: motorcycle | car | van | truck.
   final String vehicleClass;
 
+  /// The depot branch the rider delivers to (e.g. 'Longacres branch').
+  final String? branch;
+
   const Booking({
     required this.id,
     required this.reference,
@@ -234,6 +237,7 @@ class Booking {
     this.pickupAt,
     this.parcels = 1,
     this.vehicleClass = 'motorcycle',
+    this.branch,
   });
 
   bool get dispatched => serverRef != null && serverRef!.isNotEmpty;
@@ -304,6 +308,7 @@ class Booking {
         'pickupAt': pickupAt,
         'parcels': parcels,
         'vehicleClass': vehicleClass,
+        'branch': branch,
       };
 
   factory Booking.fromJson(Map<String, dynamic> json) => Booking(
@@ -337,5 +342,6 @@ class Booking {
         pickupAt: json['pickupAt'] as String?,
         parcels: (json['parcels'] as num?)?.toInt() ?? 1,
         vehicleClass: json['vehicleClass'] as String? ?? 'motorcycle',
+        branch: json['branch'] as String?,
       );
 }

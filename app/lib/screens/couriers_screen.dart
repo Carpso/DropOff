@@ -3,10 +3,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
+import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/sample_stamp.dart';
+import 'account_screen.dart';
 import 'booking_screen.dart';
 
 class CouriersScreen extends StatefulWidget {
@@ -21,6 +23,30 @@ class _CouriersScreenState extends State<CouriersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppScope.of(context);
+    if (!store.linked) {
+      // The courier directory is seller tooling — sign up first.
+      return SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.lock_outline, size: 44, color: AppColors.muted),
+              const SizedBox(height: 16),
+              const Text('Sign up to see couriers', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              const Text('Create your free account to browse partner depots, published rates and book your first drop.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Sign up / Sign in'),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
     final filtered = couriers.where((item) => item.name.toLowerCase().contains(_query.toLowerCase())).toList();
     return SafeArea(
       child: ListView(
@@ -161,7 +187,23 @@ class _LiveDepotsSection extends StatelessWidget {
             style: const TextStyle(color: AppColors.muted, fontSize: 12),
           );
         }
-        final filtered = list.where((c) {
+        // Deduplicate against the FEATURED catalog above: a courier already
+        // listed there (Platinum, Mercury, DHL, One World, Icypeed, Rovert)
+        // must not appear twice on the same tab. Also collapse live rows that
+        // share the same normalized name (duplicate seeds / renames).
+        const featuredTokens = ['platinum', 'mercury', 'dhl', 'one world', 'icypeed', 'rovert'];
+        String norm(String raw) => raw.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+        final seenNames = <String>{};
+        final deduped = <Map<String, dynamic>>[];
+        for (final c in list) {
+          final name = '${c['name'] ?? ''}';
+          final n = norm(name);
+          if (n.isEmpty) continue;
+          if (featuredTokens.any((t) => n.contains(t))) continue;
+          if (!seenNames.add(n)) continue;
+          deduped.add(c);
+        }
+        final filtered = deduped.where((c) {
           final name = '${c['name'] ?? ''}'.toLowerCase();
           final city = '${c['city'] ?? ''}'.toLowerCase();
           final q = query.toLowerCase();

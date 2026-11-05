@@ -6,6 +6,7 @@ import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
+import 'account_screen.dart';
 import 'bookings_screen.dart';
 import 'couriers_screen.dart';
 
@@ -77,6 +78,7 @@ class _BookingScreenState extends State<BookingScreen> {
   /// cars/vans cover most everyday parcels.
   String _vehicleClass = 'motorcycle';
   int _parcels = 1;
+  String? _branch;
   static const Map<String, int> _maxParcelsByVehicle = {'motorcycle': 3, 'car': 6, 'van': 10, 'truck': 15};
   static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
@@ -206,12 +208,65 @@ class _BookingScreenState extends State<BookingScreen> {
       pickupAt: _customPickup?.toIso8601String(),
       parcels: _parcels,
       vehicleClass: _vehicleClass,
+      branch: _branch,
     );
+    if (store.lastBookingWindowRolled != null) {
+      _message('The ${store.lastBookingWindowRolled} window had closed — your booking moved to the next open slot automatically.');
+    }
 
     // Live Lipila collect for mobile-money jobs; the Worker responds with the
     // payment id and the client polls GET /payments/:id/status every 2s.
-    if (booking.dispatched && DropOffApi.enabled && _payment == 'Mobile money' && store.linked) {
-      _message('Sending a Lipila prompt to ${_senderPhone.text}…\nYou pay DropOff only — the courier counter fare stays with the depot.');
+    // Pack-covered trips skip payment entirely — the subscription already paid
+    // for the rider leg, and the parcels were deducted server-side.
+    final inclusion = store.lastBookingPlanInclusion;
+    final due = store.lastBookingDueZmw;
+    final used = store.lastBookingPlanUsed;
+    final cap = store.lastBookingPlanCap;
+    final justParcels = store.lastBookingParcels ?? _parcels;
+    if (booking.dispatched && inclusion == 'pack') {
+      if (mounted) {
+        final remaining = (used != null && cap != null) ? cap - used : null;
+        _message(
+          remaining != null && remaining >= 0
+              ? 'Covered by your pack — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted ($remaining left on your plan). No payment due.'
+              : 'Covered by your pack — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted. No payment due.',
+        );
+      }
+    } else if (booking.dispatched && inclusion == 'payg' && used != null && cap != null && used >= cap) {
+      // Pack cap reached: tier overage applied server-side — still collect.
+      if (_payment == 'Mobile money' && DropOffApi.enabled && store.linked && due != null && due > 0) {
+        if (mounted) {
+          _message('Your pack cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.');
+        }
+        final res = await DropOffApi.pay(
+          jobRef: booking.serverRef!,
+          phone: _senderPhone.text,
+          idempotencyKey: 'pay-${booking.serverRef}',
+        );
+        if (res.ok) {
+          final paymentId = '${res.body['payment_id']}';
+          String status = 'pending';
+          for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
+            await Future<void>.delayed(const Duration(seconds: 2));
+            status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
+          }
+          if (!mounted) return;
+          final msg = switch (status) {
+            'success' => 'Lipila payment received. Your rider is being dispatched.',
+            'failed' => 'The mobile-money request was rejected — try Cash at pickup.',
+            _ => 'Payment still pending — the rider sweep confirms when your money lands.',
+          };
+          _message(msg);
+        } else if (mounted) {
+          _message('Payment could not start now (${res.error}); the booking is saved — settle at pickup or try again.');
+        }
+      } else if (mounted) {
+        _message(due != null && due > 0
+            ? 'Pack cap reached — tier discount applied. K${due.toStringAsFixed(2)} due on this DropOff leg.'
+            : 'Pack cap reached — tier discount applied to this DropOff leg.');
+      }
+    } else if (booking.dispatched && DropOffApi.enabled && _payment == 'Mobile money' && store.linked) {
+      _message('Sending a Lipila prompt${due != null ? ' for K${due.toStringAsFixed(2)}' : ''} to ${_senderPhone.text}…\nYou pay DropOff only — the courier counter fare stays with the depot.');
       final res = await DropOffApi.pay(
         jobRef: booking.serverRef!,
         phone: _senderPhone.text,
@@ -234,6 +289,9 @@ class _BookingScreenState extends State<BookingScreen> {
       } else if (mounted) {
         _message('Payment could not start now (${res.error}); the booking is saved — settle at pickup or try again.');
       }
+    } else if (booking.dispatched && due != null && due > 0 && mounted) {
+      // Cash at pickup (or offline): still surface the exact amount due.
+      _message('DropOff leg due: K${due.toStringAsFixed(2)} — settle by mobile money or at pickup. Courier counter fare is separate.');
     }
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => BookingSuccessScreen(bookingId: booking.id)));
@@ -241,6 +299,32 @@ class _BookingScreenState extends State<BookingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final store = AppScope.of(context);
+    if (!store.linked) {
+      // Booking requires an identity (pricing, pack deduction and payment all
+      // hang off the account) — show the sign-up door instead of the form.
+      return Scaffold(
+        appBar: AppBar(title: const Text('Book a pickup', style: TextStyle(fontWeight: FontWeight.w900))),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.lock_outline, size: 44, color: AppColors.muted),
+              const SizedBox(height: 16),
+              const Text('Sign up to book a pickup', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              const Text('Create your free account (phone code or email) to book, pay and track your parcels.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Sign up / Sign in'),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
     final courier = courierById(_courierId);
     return Scaffold(
       appBar: AppBar(
@@ -424,6 +508,8 @@ class _BookingScreenState extends State<BookingScreen> {
             ),
         ],
         const SizedBox(height: 18),
+        _BranchSelector(selected: selected, onBranch: (b) => setState(() => _branch = b)),
+        const SizedBox(height: 18),
         Container(
           padding: const EdgeInsets.all(13),
           decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
@@ -604,6 +690,8 @@ class _BookingScreenState extends State<BookingScreen> {
           onSelectionChanged: (selection) => setState(() => _payment = selection.first),
         ),
         const SizedBox(height: 24),
+        _PlanBanner(parcels: _parcels),
+        const SizedBox(height: 14),
         Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('$_from → $_to', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
           const SizedBox(height: 4),
@@ -630,7 +718,7 @@ class _BookingScreenState extends State<BookingScreen> {
               _priceLine('Charged on your DropOff order', kwacha(_dropOffDue), bold: true),
               const SizedBox(height: 4),
               const Text(
-                'You never pay the rider\u2019s payout fees — the rider keeps 90% of the rider fee minus their payout transaction fees.',
+                'You never pay the rider\u2019s payout fees or see driver earnings — that is between DropOff and the driver.',
                 style: TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.4),
               ),
           ]);
@@ -689,3 +777,126 @@ class BookingSuccessScreen extends StatelessWidget {
 }
 
 
+
+/// Shows the signed-in seller which pack is active and how this trip deducts
+/// from it — no more guessing between plan parcels and pay-as-you-go.
+class _PlanBanner extends StatelessWidget {
+  final int parcels;
+  const _PlanBanner({required this.parcels});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: DropOffApi.subscription(),
+      builder: (context, snap) {
+        final sub = snap.data?['subscription'] as Map<String, dynamic>?;
+        final plan = snap.data?['plan'] as Map<String, dynamic>?;
+        if (snap.connectionState != ConnectionState.done) return const SizedBox.shrink();
+        if (sub == null || plan == null || sub['status'] != 'active') {
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
+            child: const Text(
+              'Pay-as-you-go — rider fee per trip. Packs from K250/mo cover the rider fee inside your monthly parcels.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
+            ),
+          );
+        }
+        final tier = '${sub['tier']}'.toUpperCase();
+        final cap = (plan['parcels_per_month'] as num?)?.toInt() ?? 0;
+        final used = (snap.data?['usage_this_period'] as num?)?.toInt() ?? 0;
+        final remaining = (snap.data?['remaining_this_period'] as num?)?.toInt() ?? 0;
+        final pct = (plan['overage_discount_pct'] as num?)?.toInt() ?? 0;
+        final renews = '${sub['period_end'] ?? ''}'.split(' ').first;
+        final covered = remaining >= parcels;
+        return Container(
+          padding: const EdgeInsets.all(13),
+          decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(13), border: Border.all(color: AppColors.forest.withValues(alpha: 0.35))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.card_membership, size: 17, color: AppColors.forest),
+              const SizedBox(width: 8),
+              Expanded(child: Text('$tier pack active — $used of $cap parcels used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest))),
+            ]),
+            const SizedBox(height: 5),
+            Text(
+              covered
+                  ? 'This trip deducts $parcels parcel${parcels == 1 ? '' : 's'} — $remaining left. Renews $renews.'
+                  : 'Only $remaining left on your $tier pack — this trip pays your tier discount ($pct% off pay-as-you-go). Renews $renews.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
+            ),
+          ]),
+        );
+      },
+    );
+  }
+}
+
+/// Depot-branch picker for the selected courier: server branches (admin-
+/// managed) with the catalog fallback. The seller says exactly which branch
+/// the rider hands the parcel to.
+class _BranchSelector extends StatefulWidget {
+  final CourierInfo selected;
+  final ValueChanged<String> onBranch;
+  const _BranchSelector({required this.selected, required this.onBranch});
+
+  @override
+  State<_BranchSelector> createState() => _BranchSelectorState();
+}
+
+class _BranchSelectorState extends State<_BranchSelector> {
+  /// Whether the parent has been given a branch yet (default = first loaded).
+  bool _reported = false;
+
+  Future<List<String>> _load() async {
+    final live = <String>[];
+    if (DropOffApi.enabled) {
+      final profile = await DropOffApi.courierProfile(_serverIdOf(widget.selected.id));
+      for (final b in ((profile?['branches'] as List?) ?? const [])) {
+        final name = '${(b as Map)['name'] ?? ''}'.trim();
+        if (name.isNotEmpty && !live.contains(name)) live.add(name);
+      }
+    }
+    if (live.isEmpty) {
+      for (final b in widget.selected.branchesNear('Lusaka')) {
+        if (!live.contains(b.name)) live.add(b.name);
+      }
+    }
+    return live;
+  }
+
+  /// Catalog ids ('platinum', 'mercury'...) map onto the live chargebook ids.
+  static const Map<String, int> _serverIds = {
+    'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4,
+  };
+  int _serverIdOf(String catalogId) => _serverIds[catalogId] ?? 1;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<String>>(
+      future: _load(),
+      builder: (context, snap) {
+        final branches = snap.data ?? const <String>[];
+        if (branches.isEmpty) return const SizedBox.shrink();
+        // The dropdown displays branches.first — mirror it into the form state
+        // so the booking actually submits a branch without a manual tap.
+        if (!_reported) {
+          _reported = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) widget.onBranch(branches.first);
+          });
+        }
+        return DropdownButtonFormField<String>(
+          initialValue: branches.first,
+          decoration: const InputDecoration(
+            labelText: 'Drop-off branch (depot)',
+            hintText: 'Where should the rider take it?',
+            prefixIcon: Icon(Icons.local_shipping_outlined),
+          ),
+          items: [for (final b in branches) DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis))],
+          onChanged: (v) { if (v != null) widget.onBranch(v); },
+        );
+      },
+    );
+  }
+}

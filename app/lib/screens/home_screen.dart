@@ -17,6 +17,14 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key, required this.onOpenCouriers, required this.onOpenBookings});
 
   Future<void> _book(BuildContext context, [String? courierId]) async {
+    final store = AppScope.of(context);
+    if (!store.linked) {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => const AccountScreen(),
+      ));
+      if (!context.mounted || !AppScope.of(context).linked) return;
+    }
+    if (!context.mounted) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => BookingScreen(initialCourierId: courierId),
     ));
@@ -129,7 +137,14 @@ class HomeScreen extends StatelessWidget {
               itemBuilder: (context, index) {
                 final courier = couriers[index];
                 return GestureDetector(
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CourierDetailScreen(courier: courier))),
+                  onTap: () {
+                    final store = AppScope.of(context);
+                    if (!store.linked) {
+                      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
+                      return;
+                    }
+                    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CourierDetailScreen(courier: courier)));
+                  },
                   child: Container(
                     width: 156,
                     padding: const EdgeInsets.all(16),

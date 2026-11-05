@@ -35,6 +35,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _creating = false;
   bool _busy = false;
   bool _agreed = false;
+  bool _remember = true;
   bool _obscure = true;
   bool _otpBusy = false;
   bool _otpSent = false;
@@ -104,8 +105,9 @@ class _AccountScreenState extends State<AccountScreen> {
             password: _password.text,
             phone: _phone.text,
             fullName: _fullName.text.trim().isEmpty ? null : _fullName.text.trim(),
+            remember: _remember,
           )
-        : await store.loginEmail(_email.text.trim(), _password.text);
+        : await store.loginEmail(_email.text.trim(), _password.text, remember: _remember);
     if (!mounted) return;
     setState(() => _busy = false);
     if (ok) {
@@ -302,7 +304,19 @@ class _AccountScreenState extends State<AccountScreen> {
               const SizedBox(height: 14),
               Text(_error!, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 13)),
             ],
-            const SizedBox(height: 20),
+            const SizedBox(height: 10),
+            Row(children: [
+              Checkbox(
+                value: _remember,
+                onChanged: (v) => setState(() => _remember = v ?? true),
+                visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(width: 4),
+              const Expanded(
+                child: Text('Remember me on this device', style: TextStyle(fontSize: 13, color: AppColors.muted)),
+              ),
+            ]),
+            const SizedBox(height: 8),
             FilledButton.icon(
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
               onPressed: (!_busy && _inputsValid) ? _submit : null,
@@ -756,42 +770,56 @@ class _TiersCardState extends State<_TiersCard> {
                   return Column(children: [
                     for (final entry in display.entries)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Row(children: [
-                          Expanded(
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Row(children: [
-                                Text(entry.value.label, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                                if (models[entry.key]?['tag'] != null) ...[
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(20)),
-                                    child: Text('${models[entry.key]['tag']}', style: const TextStyle(color: Color(0xFF7B5710), fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
-                                  ),
-                                ],
-                              ]),
-                              Text(
-                                '${entry.value.blurb}\n${_windowLabel(models[entry.key]?['windows'])}',
-                                style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
-                              ),
-                            ]),
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.line.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.line),
                           ),
-                          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                            Text('K${models[entry.key]?['fee_zmw'] ?? '—'}/mo', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forest)),
-                            const SizedBox(height: 7),
-                            FilledButton(
-                              style: FilledButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Expanded(
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Row(children: [
+                                    Text(entry.value.label, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.4)),
+                                    if (models[entry.key]?['tag'] != null) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(20)),
+                                        child: Text('${models[entry.key]['tag']}', style: const TextStyle(color: Color(0xFF7B5710), fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
+                                      ),
+                                    ],
+                                  ]),
+                                  const SizedBox(height: 4),
+                                  Text(entry.value.blurb, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+                                  const SizedBox(height: 2),
+                                  Text(_windowLabel(models[entry.key]?['windows']), style: const TextStyle(color: AppColors.forest, fontSize: 11, height: 1.35, fontWeight: FontWeight.w600)),
+                                ]),
                               ),
-                              onPressed: _busyTier != null ? null : () => _chooseTier(entry.key),
-                              child: _busyTier == entry.key
-                                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : const Text('Choose', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-                            ),
+                              const SizedBox(width: 10),
+                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                Text('K${models[entry.key]?['fee_zmw'] ?? '—'}/mo', maxLines: 1, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.forest)),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: 92,
+                                  child: FilledButton(
+                                    style: FilledButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                    ),
+                                    onPressed: _busyTier != null ? null : () => _chooseTier(entry.key),
+                                    child: _busyTier == entry.key
+                                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                        : const Text('Choose', maxLines: 1, textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                                  ),
+                                ),
+                              ]),
+                            ]),
                           ]),
-                        ]),
+                        ),
                       ),
                   ]);
                 },

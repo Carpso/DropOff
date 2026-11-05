@@ -262,12 +262,14 @@ const idemKeyOf = (c: any, body: any): string | null => {
   return key ? key.slice(0, 160) : null;
 };
 
-async function replayIdempotent(c: any, key: string | null, scope: string) {
+async function replayIdempotent(c: any, key: string | null, scope: string, phone?: string | null) {
   if (!key) return null;
   const row: any = await c.env.DB.prepare(
-    'SELECT scope, status, response FROM idempotency_keys WHERE key = ?1',
+    'SELECT scope, status, response, phone FROM idempotency_keys WHERE key = ?1',
   ).bind(key).first();
   if (!row || row.scope !== scope) return null;
+  // Ownership: only the phone that created the key may replay it.
+  if (phone != null && row.phone != null && row.phone !== phone) return null;
   try { return c.json(JSON.parse(row.response), row.status); } catch { return null; }
 }
 
@@ -697,9 +699,14 @@ app.get('/couriers/:id/profile', async (c) => {
       WHERE target_type = 'courier' AND target_key = ?1 AND hidden = 0 AND comment IS NOT NULL AND comment <> ''
       ORDER BY id DESC LIMIT 10`,
   ).bind(`courier:${id}`).all();
+  const { results: branches } = await c.env.DB.prepare(
+    `SELECT name, city, address, lat, lng, phone FROM courier_branches
+      WHERE courier_id = ?1 AND active = 1 ORDER BY name`,
+  ).bind(id).all();
   return c.json({
     courier, rates,
     rating: { count: rating?.count ?? 0, average: rating?.average ?? null, reviews },
+    branches,
   });
 });
 
@@ -735,7 +742,7 @@ app.get('/quotes', async (c) => {
       weight_class: r.weight_class,
       counter_price_zmw: r.counter_price_zmw,
       rider_fee_zmw: riderFee,
-      rider_payout_zmw: fees.rider_payout_zmw,
+      // rider payout stays between DropOff and the driver — never quoted to sellers
       leg2_fee_zmw: leg2Fee,
       leg2_processing_fee_zmw: leg2Processing,
       // DropOff NEVER holds partner money â€” split the fare explicitly.
@@ -774,7 +781,7 @@ app.post('/jobs', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ error: 'invalid JSON body' }, 400);
   const idemKey = idemKeyOf(c, b);
-  const replay = await replayIdempotent(c, idemKey, 'job');
+  const replay = await replayIdempotent(c, idemKey, 'job', c.get('phone') ?? null);
   if (replay) return replay;
   // promo bookkeeping lives outside the try so the refund in catch can see it
   let promoConsumed = false;
@@ -952,8 +959,8 @@ app.post('/jobs', async (c) => {
          promo_code, promo_discount_zmw,
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile,
-         parcels, vehicle_class)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)`,
+         parcels, vehicle_class, branch)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)`,
     ).bind(
       ref, senderPhone, b.sender_name, b.pickup_address, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -963,6 +970,7 @@ app.post('/jobs', async (c) => {
       isRoundTrip ? 1 : 0, b.return_city ?? null, b.return_address ?? null, returnLegFee,
       pickupAt, lastMile,
       parcels, vehicleClass,
+      b.branch ? String(b.branch).trim().slice(0, 80) : null,
     ).run();
 
     if (promoCode) {
@@ -1069,7 +1077,12 @@ app.post('/jobs', async (c) => {
       ok: true, ref, job_id: meta.last_row_id, total_zmw: total,
       dropoff_leg_zmw: dropOffLeg,
       promo_code: promoCode, promo_discount_zmw: promoDiscount,
-      fees: feeBase, prompt_total_zmw: feeBase.prompt_total_zmw,
+      // Strip rider payout — driver earnings are never shown to sellers.
+      fees: (() => {
+        const { rider_payout_zmw: _omit, ...customerFees } = feeBase as any;
+        return customerFees;
+      })(),
+      prompt_total_zmw: feeBase.prompt_total_zmw,
       pack_inclusion: packInclusion, pay_method: payMethod,
       auto_assigned: autoAssigned,
       tracking_token: trackingToken, tracking_url: trackUrl,
@@ -1079,6 +1092,7 @@ app.post('/jobs', async (c) => {
       plan_inclusion: packInclusion,
       pickup_window: pickupWindow,
       window_rolled_from: windowRolledFrom,
+      branch: b.branch ? String(b.branch).trim().slice(0, 80) : null,
     };
     await saveIdempotent(c.env, idemKey, 'job', senderPhone, 201, payload);
     return c.json(payload, 201);
@@ -1107,8 +1121,11 @@ app.get('/promo/check', async (c) => {
 app.get('/jobs', async (c) => {
   const role = c.get('role');
   let phone: string | null = null;
-  if (role === 'customer') phone = c.get('phone') ?? '';
-  else { // ops: must specify whose jobs; admin? paygo regular listing
+  if (role === 'customer' || role === 'partner') {
+    // Partners list only their own jobs — never another seller's.
+    phone = c.get('phone') ?? '';
+  } else {
+    // ops/admin: must specify whose jobs
     try { phone = normalizeZmPhone(c.req.query('phone') ?? ''); } catch { phone = ''; }
   }
   if (!phone) return c.json({ error: 'missing phone' }, 400);
@@ -1128,13 +1145,18 @@ app.get('/jobs/:ref', async (c) => {
   ).bind(c.req.param('ref')).first() as any;
   if (!job) return c.json({ error: 'not found' }, 404);
   const phone = c.get('phone');
-  const isCustomer = c.get('role') === 'customer';
-  if (isCustomer && phone !== job.sender_phone && phone !== job.recipient_phone) {
+  const role = c.get('role');
+  // Customers AND partners are participants-or-strangers: only the job's own
+  // sender/recipient (or staff) may read it. Partners must not read other
+  // sellers' money fields or internal event notes.
+  const isStaff = role === 'ops' || isAdmin(c);
+  const isParticipant = phone === job.sender_phone || phone === job.recipient_phone;
+  if (!isStaff && !isParticipant) {
     return c.json({ error: 'not found' }, 404); // no existence leak
   }
 
   let payload: any = { ...job };
-  if (isCustomer) {
+  if (!isStaff) {
     // internal fields no seller or recipient should ever read
     for (const k of ['fraud_score', 'review_required']) delete payload[k];
     if (phone === job.recipient_phone && phone !== job.sender_phone) {
@@ -1145,6 +1167,8 @@ app.get('/jobs/:ref', async (c) => {
         delete payload[k];
       }
     }
+    // Never leak driver payout language to sellers either.
+    for (const k of ['rider_payout_zmw']) delete payload[k];
   }
 
   // Timeline: public statuses only; notes stay internal for non-participants.
@@ -1154,7 +1178,7 @@ app.get('/jobs/:ref', async (c) => {
   const safeEvents = (events as any[])
     .filter((e) => ['created', 'rider_assigned', 'picked_up', 'at_depot', 'departed',
       'arrived', 'delivered', 'ready_for_collection', 'partner_confirmed'].includes(e.status))
-    .map((e) => (isCustomer ? { status: e.status, created_at: e.created_at } : e));
+    .map((e) => (!isStaff ? { status: e.status, created_at: e.created_at } : e));
   return c.json({ job: payload, events: safeEvents });
 });
 
@@ -1165,16 +1189,18 @@ app.get('/jobs/:ref/live', async (c) => {
        FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id WHERE j.ref = ?1`,
   ).bind(c.req.param('ref')).first() as any;
   if (!job) return c.json({ error: 'not found' }, 404);
-  if (c.get('role') === 'customer' && c.get('phone') !== job.sender_phone && c.get('phone') !== job.recipient_phone) {
+  const liveRole = c.get('role');
+  const liveStaff = liveRole === 'ops' || isAdmin(c);
+  const livePhone = c.get('phone');
+  if (!liveStaff && livePhone !== job.sender_phone && livePhone !== job.recipient_phone) {
     return c.json({ error: 'not found' }, 404);
   }
   if (!job.rider_phone) return c.json({ has_rider: false });
   if (job.last_lat == null) {
-    return c.json({ has_rider: true, rider_phone: job.rider_phone, location: null, note: 'rider has not shared location yet' });
+    return c.json({ has_rider: true, location: null, note: 'rider has not shared location yet' });
   }
   return c.json({
     has_rider: true,
-    rider_phone: job.rider_phone,
     lat: job.last_lat,
     lng: job.last_lng,
     seen_at: job.last_seen_at,
@@ -1198,7 +1224,7 @@ app.post('/jobs/:ref/events', async (c) => {
   const job = await c.env.DB.prepare(
     `SELECT j.id, j.ref, j.sender_phone, j.counter_price_zmw, j.rider_fee_zmw, j.leg2_fee_zmw,
             j.leg2_processing_fee_zmw, j.promo_discount_zmw,
-            j.total_zmw, j.wait_minutes, j.pay_method, j.paid,
+            j.total_zmw, j.wait_minutes, j.wait_fee_zmw, j.pay_method, j.paid,
             r.phone AS rider_phone
        FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
       WHERE j.ref = ?1`,
@@ -1233,7 +1259,18 @@ app.post('/jobs/:ref/events', async (c) => {
     ).bind(job.id, minutes, waitFee, totals.total_zmw));
     dbStatements.push(c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note, lat, lng) VALUES (?1,'waiting',?2,?3,?4)`,
-    ).bind(job.id, b.note ?? `Waited ${minutes} min (first ${WAIT_FREE_MINUTES} free = K${waitFee})`, b.lat ?? null, b.lng ?? null));
+    ).bind(job.id, b.note ?? `Waited ${minutes} min (first ${WAIT_FREE_MINUTES} free = K${waitFee} — paid to the driver)`, b.lat ?? null, b.lng ?? null));
+    // The waiting bill belongs to the DRIVER, not the platform: credit the
+    // increase over what was already recorded as driver earnings.
+    const delta = round2(Math.max(0, waitFee - Number(job.wait_fee_zmw ?? 0)));
+    if (delta > 0 && job.rider_phone) {
+      dbStatements.push(c.env.DB.prepare(
+        `INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)`,
+      ).bind(job.rider_phone));
+      dbStatements.push(c.env.DB.prepare(
+        `INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'wait_fee', ?3)`,
+      ).bind(job.rider_phone, delta, job.id));
+    }
   }
 
   // COD collection at the door (leg-2 / partner COD): the cash FLOATS with the
@@ -1510,9 +1547,9 @@ app.post('/admin/fraud/:id/review', async (c) => {
 app.get('/track/:token', async (c) => {
   const row = await c.env.DB.prepare(
     `SELECT t.job_id, t.job_ref,
-            j.ref, j.status, j.created_at, j.pickup_address, j.dest_city,
+            j.ref, j.status, j.created_at, j.pickup_address, j.dest_city, j.branch,
             j.recipient_name, j.eta_minutes,
-            co.name AS courier_name,
+            co.name AS courier_name, co.depot_name AS courier_depot,
             r.full_name AS rider_name, r.vehicle AS rider_vehicle,
             r.last_lat, r.last_lng, r.last_seen_at
        FROM tracking_tokens t
@@ -1535,6 +1572,12 @@ app.get('/track/:token', async (c) => {
     created_at: row.created_at,
     pickup_city: (row.pickup_address ?? '').split(',').slice(-1)[0].trim() || null,
     dest_city: row.dest_city,
+    // First mile ends at the depot branch the seller nominated — that is what
+    // DropOff is paid for; the final city is only the optional last mile.
+    dropoff: {
+      branch: row.branch ?? row.courier_depot ?? null,
+      courier: row.courier_name ?? null,
+    },
     recipient_name: row.recipient_name,
     courier: row.courier_name,
     eta_minutes: row.eta_minutes ?? null,
@@ -1853,6 +1896,44 @@ app.get('/admin/sms/log', async (c) => {
   return c.json({ broadcasts: results });
 });
 
+/* ------------------------- courier branches (admin) ------------------------ */
+app.get('/admin/branches', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
+  const courierId = Number(c.req.query('courier_id') ?? 0);
+  const { results } = await c.env.DB.prepare(
+    `SELECT b.*, co.name AS courier_name FROM courier_branches b
+       JOIN couriers co ON co.id = b.courier_id
+      WHERE b.active = 1 ${courierId ? 'AND b.courier_id = ?1' : ''}
+      ORDER BY co.name, b.name`,
+  ).bind(...(courierId ? [courierId] : [])).all();
+  return c.json({ branches: results });
+});
+
+app.post('/admin/branches', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const courierId = Number(b?.courier_id ?? 0);
+  const name = String(b?.name ?? '').trim();
+  if (!courierId || !name) return c.json({ error: 'courier_id and name required' }, 400);
+  const lat = b?.lat == null || b?.lat === '' ? null : Number(b.lat);
+  const lng = b?.lng == null || b?.lng === '' ? null : Number(b.lng);
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO courier_branches (courier_id, name, city, address, lat, lng, phone)
+      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+  ).bind(courierId, name.slice(0, 80), String(b?.city ?? 'Lusaka').trim() || 'Lusaka',
+    b?.address ? String(b.address).trim().slice(0, 200) : null,
+    Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null,
+    b?.phone ? String(b.phone).trim().slice(0, 20) : null).run();
+  return c.json({ ok: true, id: meta.last_row_id });
+});
+
+app.delete('/admin/branches/:id', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  const res = await c.env.DB.prepare('UPDATE courier_branches SET active = 0 WHERE id = ?1')
+    .bind(Number(c.req.param('id'))).run();
+  return c.json({ ok: true, removed: res.meta.changes ?? 0 });
+});
+
 /* ------------------------------ FCM push reg ------------------------------ */
 // POST /push/register {token, platform} â€” upserts this device under the JWT's
 // phone so the Worker can reach it on job/payment events. DELETE removes it.
@@ -1917,7 +1998,7 @@ app.post('/payments', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ error: 'invalid JSON body' }, 400);
   const idemKey = idemKeyOf(c, b);
-  const replay = await replayIdempotent(c, idemKey, 'payment');
+  const replay = await replayIdempotent(c, idemKey, 'payment', c.get('phone') ?? null);
   if (replay) return replay;
   const kind: string = ['job', 'topup', 'subscription'].includes(b.kind) ? b.kind : 'job';
 
@@ -2249,7 +2330,15 @@ app.post('/webhooks/lipila', async (c) => {
 });
 
 /* ------------------------- seller subscription packs ----------------------- */
-app.get('/plans', async (c) => c.json({ plans: await plans(c.env.DB), driver_monthly_pay_zmw: DRIVER_MONTHLY_PAY_ZMW, driver_daily_target: DRIVER_DAILY_TARGET, platform_take: PLATFORM_TAKE }));
+app.get('/plans', async (c) => {
+  // Driver economics are for drivers and admins only — sellers/customers get
+  // the tier catalogue alone.
+  const privileged = c.get('role') === 'ops' || isAdmin(c);
+  return c.json({
+    plans: await plans(c.env.DB),
+    ...(privileged ? { driver_monthly_pay_zmw: DRIVER_MONTHLY_PAY_ZMW, driver_daily_target: DRIVER_DAILY_TARGET, platform_take: PLATFORM_TAKE } : {}),
+  });
+});
 
 /* ---------------------------- partner shop portal -------------------------- */
 // Partner accounts are normal auth_users with role='partner' + courier_id, set
@@ -3278,8 +3367,15 @@ app.post('/subscriptions', async (c) => {
 
 app.get('/subscriptions/:phone?', async (c) => {
   let phone = c.req.param('phone') ?? '';
-  if (c.get('role') === 'customer' || !phone) phone = c.get('phone') ?? normalizeZmPhone(phone);
-  else phone = normalizeZmPhone(phone);
+  const role = c.get('role');
+  const staff = role === 'ops' || isAdmin(c);
+  if (role === 'customer' || role === 'partner' || !phone || !staff) {
+    // Anyone non-staff reads only their own subscription — no IDOR.
+    phone = c.get('phone') ?? (staff ? normalizeZmPhone(phone) : '');
+  } else {
+    phone = normalizeZmPhone(phone);
+  }
+  if (!phone) return c.json({ subscription: null });
   const sub = await c.env.DB.prepare(
     `SELECT id, tier, city, pickup_window, status, started_at, period_start, period_end
        FROM subscriptions WHERE phone = ?1`,

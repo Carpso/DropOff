@@ -91,8 +91,6 @@ class OperationsScreen extends StatelessWidget {
         padding: EdgeInsets.fromLTRB(22, 22, 22, MediaQuery.of(context).viewInsets.bottom + 24),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const Text('Add a rider or driver', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
-          const SizedBox(height: 6),
-          const Text('Add riders and drivers only when you are ready.', style: TextStyle(color: AppColors.muted)),
           const SizedBox(height: 20),
           TextField(controller: name, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Full name', prefixIcon: Icon(Icons.person_outline))),
           const SizedBox(height: 12),
@@ -251,14 +249,19 @@ class OperationsScreen extends StatelessWidget {
             ]))),
           ),
         const SizedBox(height: 22),
-        const SectionTitle('How DropOff earns'),
-        const SizedBox(height: 8),
-        const Card(child: Padding(padding: EdgeInsets.all(18), child: Column(children: [
-          _RevenueRow(number: '01', title: 'Pay-as-you-go pickup', text: 'K45 per pickup. Platform takes 10% (K4.50 to DropOff, K40.50 to the rider) — thin on purpose so riders stay loyal.'),
-          _RevenueRow(number: '02', title: 'Seller packs: Silver / Gold / Platinum', text: 'K250 / K500 / K750 per month for 10 / 25 / 50 parcels (30-day cycle). Every parcel counts as one — even in the same trip. Sweep drivers earn K3,000/month each with a 30-parcels/day target; after the cap you keep a tier discount off pay-as-you-go.'),
-          _RevenueRow(number: '03', title: 'Waiting & COD float', text: 'Waiting over 10 min bills K2/min (K50 cap). COD cash floats with the rider/driver — sender paid via momo disbursement minus our 2%.'),
-          _RevenueRow(number: '04', title: 'Door delivery & packs', text: 'Last-mile door delivery priced like first-mile pay-as-you-go (recipient-city distance + vehicle). Pack parcels bundle the rider inside the monthly fee.'),
-        ]))),
+        // Driver economics are staff-only (admin/ops). This screen is already
+        // behind the Team tab which only staff see — keep the card for them
+        // but never surface rider payout splits to sellers/recipients.
+        if (AppScope.of(context).isStaff) ...[
+          const SectionTitle('How DropOff earns'),
+          const SizedBox(height: 8),
+          const Card(child: Padding(padding: EdgeInsets.all(18), child: Column(children: [
+            _RevenueRow(number: '01', title: 'Pay-as-you-go pickup', text: 'K45 per pickup. Platform takes 10% (K4.50 to DropOff, K40.50 to the rider) — thin on purpose so riders stay loyal.'),
+            _RevenueRow(number: '02', title: 'Seller packs: Silver / Gold / Platinum', text: 'K250 / K500 / K750 per month for 10 / 25 / 50 parcels (30-day cycle). Every parcel counts as one — even in the same trip. Sweep drivers earn K3,000/month each with a 30-parcels/day target; after the cap you keep a tier discount off pay-as-you-go.'),
+            _RevenueRow(number: '03', title: 'Waiting & COD float', text: 'Waiting over 10 min bills K2/min (K50 cap) — paid to the driver in full. COD cash floats with the rider/driver — sender paid via momo disbursement minus our 2%.'),
+            _RevenueRow(number: '04', title: 'Door delivery & packs', text: 'Last-mile door delivery priced like first-mile pay-as-you-go (recipient-city distance + vehicle). Pack parcels bundle the rider inside the monthly fee.'),
+          ]))),
+        ],
       ]),
     );
   }

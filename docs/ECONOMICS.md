@@ -10,7 +10,7 @@ All figures in Zambian Kwacha (ZMW ≈ K). Rider = person doing the pickup run. 
 | Platform processing fee on the DropOff leg (customer) | max(1% × leg, K3.00) + K0.48 → **min K3.48** | DropOff (on leg ≈ K45 → K3.48 wins) |
 | Lipila mobile-money leg (customer) | K2.50 | Lipila (zero margin pass-through) |
 | COD processing (cash at door) — platform cut | 2% of collected amount | DropOff |
-| Waiting bill, K2/min after 10 min free, K50 cap | K0–K50 | DropOff (full) |
+| Waiting bill, K2/min after 10 min free, K50 cap | K0–K50 | Driver (full) |
 | Depot door delivery (placement city) | Pay-as-you-go by recipient-city distance bands × vehicle multiplier (from K45) + processing | DropOff (rider works door for the same job; no second split) |
 | Wallet top-up (riders only) | 1% + K0.48, min K3.48 + K2.50 | DropOff collects on float |
 
