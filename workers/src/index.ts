@@ -65,7 +65,10 @@ async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
   return merged;
 }
 const PLATFORM_TAKE = 0.10;           // of the rider fee, on pay-as-you-go
-const PACK_RIDER_PAY_ZMW = 5;         // rider wage per swept pack parcel (density wage)
+// Sweep drivers are salaried, not per-parcel: flat monthly wage with a daily
+// sweep expectation used for ops monitoring.
+const DRIVER_MONTHLY_PAY_ZMW = 3000;  // flat pay per driver / month
+const DRIVER_DAILY_TARGET = 30;       // parcels/day each driver is expected to sweep
 const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00'];
 // Business day = Central Africa Time (UTC+2). D1's 'localtime' is UTC, so every
 // daily-cap / sweep query must use this explicit offset or the day rolls over
@@ -2246,7 +2249,7 @@ app.post('/webhooks/lipila', async (c) => {
 });
 
 /* ------------------------- seller subscription packs ----------------------- */
-app.get('/plans', async (c) => c.json({ plans: await plans(c.env.DB), rider_pack_pay_zmw: PACK_RIDER_PAY_ZMW, platform_take: PLATFORM_TAKE }));
+app.get('/plans', async (c) => c.json({ plans: await plans(c.env.DB), driver_monthly_pay_zmw: DRIVER_MONTHLY_PAY_ZMW, driver_daily_target: DRIVER_DAILY_TARGET, platform_take: PLATFORM_TAKE }));
 
 /* ---------------------------- partner shop portal -------------------------- */
 // Partner accounts are normal auth_users with role='partner' + courier_id, set

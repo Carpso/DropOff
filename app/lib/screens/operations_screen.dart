@@ -255,7 +255,7 @@ class OperationsScreen extends StatelessWidget {
         const SizedBox(height: 8),
         const Card(child: Padding(padding: EdgeInsets.all(18), child: Column(children: [
           _RevenueRow(number: '01', title: 'Pay-as-you-go pickup', text: 'K45 per pickup. Platform takes 10% (K4.50 to DropOff, K40.50 to the rider) — thin on purpose so riders stay loyal.'),
-          _RevenueRow(number: '02', title: 'Seller packs: Silver / Gold / Platinum', text: 'K250 / K500 / K750 per month for 10 / 25 / 50 parcels (30-day cycle). Every parcel counts as one — even in the same trip. Swept pack parcels pay the rider K5 each; after the cap you keep a tier discount off pay-as-you-go.'),
+          _RevenueRow(number: '02', title: 'Seller packs: Silver / Gold / Platinum', text: 'K250 / K500 / K750 per month for 10 / 25 / 50 parcels (30-day cycle). Every parcel counts as one — even in the same trip. Sweep drivers earn K3,000/month each with a 30-parcels/day target; after the cap you keep a tier discount off pay-as-you-go.'),
           _RevenueRow(number: '03', title: 'Waiting & COD float', text: 'Waiting over 10 min bills K2/min (K50 cap). COD cash floats with the rider/driver — sender paid via momo disbursement minus our 2%.'),
           _RevenueRow(number: '04', title: 'Door delivery & packs', text: 'Last-mile door delivery priced like first-mile pay-as-you-go (recipient-city distance + vehicle). Pack parcels bundle the rider inside the monthly fee.'),
         ]))),

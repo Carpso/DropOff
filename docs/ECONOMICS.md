@@ -11,29 +11,27 @@ All figures in Zambian Kwacha (ZMW ≈ K). Rider = person doing the pickup run. 
 | Lipila mobile-money leg (customer) | K2.50 | Lipila (zero margin pass-through) |
 | COD processing (cash at door) — platform cut | 2% of collected amount | DropOff |
 | Waiting bill, K2/min after 10 min free, K50 cap | K0–K50 | DropOff (full) |
-| Depot door delivery (placement city) | K30 + K3.48 min processing | DropOff (rider works door for the same job; no second split) |
+| Depot door delivery (placement city) | Pay-as-you-go by recipient-city distance bands × vehicle multiplier (from K45) + processing | DropOff (rider works door for the same job; no second split) |
 | Wallet top-up (riders only) | 1% + K0.48, min K3.48 + K2.50 | DropOff collects on float |
 
 **Not shared today:** no per-parcel commission to DropOff from the courier fare — the counter fare is the partner's (seller pays at depot), and DropOff doesn't touch partner money.
 
-## 2. Packs (win-back/retention engine — the subscriber float pays for everything)
+## 2. Packs (the subscriber float pays for everything)
 
-| Pack | Price / mo | Parcels/day | Sweep window | Rider earns* | DropOff floor/mo |
-|------|-----------|------------|--------------|--------------|------------------|
-| Silver | K350 | 1 | 6am / 10am / 2pm | K5 per swept parcel | ~K235 if 30 sweeps (~66% margin) |
-| Gold | K700 | 3 | 6am / 10am / 2pm | K5 per swept parcel | ~K550 if 90 sweeps |
-| Platinum | K1,500 | 10 | 6am / 10am / 2pm | K5 per swept parcel | ~K1,150 if 300 sweeps |
+| Pack | Price / 30-day cycle | Parcels included | Sweep windows (arrival range) | Rollover | After-cap overage |
+|------|---------------------|------------------|-------------------------------|----------|-------------------|
+| Silver | K250 | 10 | 6:00–7:30 / 10:00–11:30 / 2:00–3:30 PM | None — unused parcels expire | 15% off PAYG |
+| Gold | K500 | 25 | same windows | None | 25% off PAYG |
+| Platinum | K750 | 50 | same windows | None | 35% off PAYG |
 
-*Rider wage = K5 per pack parcel (direct operator cost). Pack members pay NO rider fee and NO per-parcel processing.
+Every trip consumes one slot per **parcel** (3 parcels in one trip = 3 slots). Cutoffs: book by 05:30 / 09:30 / 13:30 CAT; late bookings auto-roll to the next open window. Pack members pay NO rider fee and NO per-parcel processing inside the cap.
 
-## 3. One engine, three margins (the sweep math)
+## 3. Sweep driver economics (salaried, not per-parcel)
 
-A Lusaka sweep of 30 parcels across Silver + Gold + Platinum:
-
-- Pack revenue: e.g. 10 Silver + 10 Gold + 10 Platinum → K3,500 + K7,000 + K15,000 = **K25,500/mo**
-- Rider wages: 300 parcels × K5 = K1,500
-- Route cost: fuel/time for 1 sweep ≈ K120–K180
-- **Gross per month from packs alone ≈ K23,800**
+- **Driver pay: K3,000/month flat, per driver.** Daily expectation: **30 parcels/day** per driver (ops monitoring target, not a wage unit).
+- Break-even per driver: 30 parcels/day × 30 days = ~900 parcels/month served.
+  - At an average pack yield of K20/parcel (blended Silver K25 / Gold K20 / Platinum K15): ~K18,000 pack revenue vs K3,000 wage + ~K1,500 route cost (fuel/time per sweep) → **~K13,500 gross margin per driver/month**.
+- Paygo parcels on the same runs still pay riders their normal 90% share of the rider fee — the salary covers the committed sweep workload only.
 
 ## 4. Batch pickup — scattered points, one run
 
