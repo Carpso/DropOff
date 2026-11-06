@@ -31,6 +31,25 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   String _vehicleClass = 'motorcycle';
   int _parcels = 1;
   bool _saving = false;
+  bool _aiBusy = false;
+
+  /// AI tidy-up of a free-text address (best-effort; never blocks).
+  Future<void> _aiTidy(TextEditingController ctl) async {
+    final text = ctl.text.trim();
+    if (text.length < 5) return _message('Type the address first, then tap AI.');
+    setState(() => _aiBusy = true);
+    final res = await DropOffApi.aiAddress(text);
+    if (!mounted) return;
+    setState(() => _aiBusy = false);
+    final parsed = res.body['parsed'];
+    if (!res.ok || parsed is! Map) return _message('AI is unavailable right now - your address is unchanged.');
+    final parts = [parsed['street'], parsed['area'], parsed['landmark']]
+        .map((e) => '${e ?? ''}'.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (parts.isNotEmpty) ctl.text = parts.join(', ');
+    _message('AI tidied the address - check it before booking.');
+  }
 
   static const Map<String, String> _windows = {
     '06:00': '6:00 – 7:30 AM',
@@ -184,6 +203,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             hintText: points.isEmpty ? 'e.g. Longacres counter' : points.first,
             prefixIcon: const Icon(Icons.location_on_outlined),
             helperText: points.isEmpty ? 'Ask the courier which counter holds it.' : 'Popular: ${points.take(2).join(' · ')}',
+            suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_point), child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')),
           ),
         ),
         const SizedBox(height: 20),
@@ -193,7 +213,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         const SizedBox(height: 10),
         TextField(controller: _recipientPhone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Recipient mobile number', hintText: '0961234567', prefixIcon: Icon(Icons.phone_outlined))),
         const SizedBox(height: 10),
-        TextField(controller: _address, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Door address', hintText: 'e.g. 12 Kabwata Site, near the shops', prefixIcon: Icon(Icons.house_outlined), alignLabelWithHint: true)),
+        TextField(controller: _address, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Door address', hintText: 'e.g. 12 Kabwata Site, near the shops', prefixIcon: Icon(Icons.house_outlined), alignLabelWithHint: true, suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_address), child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')))),
         const SizedBox(height: 10),
         TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents (optional)', hintText: 'e.g. One carton of shoes', prefixIcon: Icon(Icons.inventory_2_outlined))),
         const SizedBox(height: 10),

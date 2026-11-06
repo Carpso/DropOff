@@ -83,3 +83,9 @@ ThemeData buildAppTheme() {
     ),
   );
 }
+
+/// Respect the system text-size setting on the biggest headings so they never
+/// crush into a vertical ribbon on large-font phones. Clamp so they can't grow
+/// past ~1.3x.
+double scaleText(BuildContext context, double baseSize) =>
+    baseSize * MediaQuery.textScaleFactorOf(context).clamp(1.0, 1.3);

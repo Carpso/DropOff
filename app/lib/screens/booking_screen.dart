@@ -80,6 +80,7 @@ class _BookingScreenState extends State<BookingScreen> {
   /// cars/vans cover most everyday parcels.
   String _vehicleClass = 'motorcycle';
   int _parcels = 1;
+  final _courierSearchCtl = TextEditingController();
   static const Map<String, int> _maxParcelsByVehicle = {'motorcycle': 3, 'car': 6, 'van': 10, 'truck': 15};
   static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
@@ -125,6 +126,7 @@ class _BookingScreenState extends State<BookingScreen> {
         if (_parcels > _maxParcelsByVehicle[vehicle]!) _parcels = _maxParcelsByVehicle[vehicle]!;
       }
     }
+    _courierSearchCtl.addListener(() => setState(() {}));
     // Prefer the live chargebook's coverage when the API is on.
     if (DropOffApi.enabled) {
       DropOffApi.cities().then((list) {
@@ -138,7 +140,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
   @override
   void dispose() {
-    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress]) {
+    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress, _courierSearchCtl]) {
       controller.dispose();
     }
     super.dispose();
@@ -185,6 +187,8 @@ class _BookingScreenState extends State<BookingScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_promoNote)));
     }
   }
+
+  List<CourierInfo> get _filteredCouriers => couriers.where((c) => c.name.toLowerCase().contains(_courierSearchCtl.text.toLowerCase())).toList();
 
   double? get _courierFare => courierFareFor(courierId: _courierId, fromCity: _from, toCity: _to, size: _size);
 
@@ -415,6 +419,7 @@ class _BookingScreenState extends State<BookingScreen> {
             ),
           ),
         ),
+        _grandTotalBar(),
         Container(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
           decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppColors.line))),
@@ -439,7 +444,7 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   List<Widget> _routeStep() => [
-        const Text('Where should we go?', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+        Text('Where should we go?', style: TextStyle(fontSize: scaleText(context, 26), fontWeight: FontWeight.w900, letterSpacing: -0.5)),
         const SizedBox(height: 6),
         const Text('We handle the trip from the sender to the courier depot.', style: TextStyle(color: AppColors.muted)),
         const SizedBox(height: 24),
@@ -447,7 +452,9 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 10),
         const Center(child: Icon(Icons.arrow_downward_rounded, color: AppColors.amber)),
         const SizedBox(height: 10),
-        _cityDropdown('Parcel destination', _to, (value) => setState(() => _to = value)),
+        _cityDropdown('Depot destination (receipt)', _to, (value) => setState(() => _to = value)),
+        const SizedBox(height: 8),
+        const InfoPill(icon: Icons.receipt_long, label: 'Your parcel is dropped at the courier depot. The destination above is for your receipt only — it is not the actual door drop-off.', color: AppColors.amber),
         const SizedBox(height: 18),
               TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: TextButton(onPressed: _aiBusy ? null : _aiTidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')))),
         const SizedBox(height: 16),
@@ -473,7 +480,7 @@ class _BookingScreenState extends State<BookingScreen> {
       ];
 
   List<Widget> _parcelStep(CourierInfo selected) => [
-        const Text('What are we carrying?', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+        Text('What are we carrying?', style: TextStyle(fontSize: scaleText(context, 26), fontWeight: FontWeight.w900, letterSpacing: -0.5)),
         const SizedBox(height: 22),
         SegmentedButton<ParcelSize>(
           segments: [for (final size in ParcelSize.values) ButtonSegment(value: size, label: Text(size.label))],
@@ -503,9 +510,13 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 6),
         const Text('Each parcel counts as one plan parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
         const SizedBox(height: 26),
-        const Text('Choose the courier', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        Text('Choose the courier', style: TextStyle(fontSize: scaleText(context, 18), fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
         const Text('Your rider takes the parcel to this company’s depot.', style: TextStyle(color: AppColors.muted, fontSize: 13)),
+        const SizedBox(height: 12),
+        const Text('Search couriers', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.muted)),
+        const SizedBox(height: 6),
+        TextField(controller: _courierSearchCtl, decoration: const InputDecoration(labelText: 'Filter by name', hintText: 'e.g. DHL, Platinum', prefixIcon: Icon(Icons.search), isDense: true)),
         const SizedBox(height: 12),
         if (_from != 'Lusaka') ...[
           const SizedBox(height: 12),
@@ -528,7 +539,7 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
           const SizedBox(height: 26),
         ] else ...[
-          for (final courier in couriers)
+          for (final courier in _filteredCouriers)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: InkWell(
@@ -576,7 +587,7 @@ class _BookingScreenState extends State<BookingScreen> {
       ];
 
   List<Widget> _detailsStep(CourierInfo courier) => [
-        const Text('Nearly ready to roll.', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+        Text('Nearly ready to roll.', style: TextStyle(fontSize: scaleText(context, 26), fontWeight: FontWeight.w900, letterSpacing: -0.5)),
         const SizedBox(height: 20),
         TextField(controller: _senderName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Sender name', prefixIcon: Icon(Icons.person_outline))),
         const SizedBox(height: 12),
@@ -740,6 +751,22 @@ class _BookingScreenState extends State<BookingScreen> {
         child: Row(children: [
           Expanded(child: Text(label, style: TextStyle(color: bold ? AppColors.ink : AppColors.muted, fontWeight: bold ? FontWeight.w800 : FontWeight.normal))),
           Text(value, style: TextStyle(fontWeight: bold ? FontWeight.w900 : FontWeight.w700, fontSize: bold ? 18 : 14)),
+        ]),
+      );
+
+  /// Full-width grand-total bar promoted above the Place booking button so the
+  /// seller never misses what they actually pay.
+  Widget _grandTotalBar() => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.forest.withValues(alpha: 0.22))),
+        child: Row(children: [
+          const Icon(Icons.receipt_long, size: 18, color: AppColors.forest),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Estimated total you pay', style: TextStyle(fontSize: 12, color: AppColors.muted))),
+          Text(kwacha(_courierFare != null ? _dropOffDue + _courierFare! : _dropOffLeg), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
+          if (_courierFare == null) const Text(' + depot counter fare', style: TextStyle(fontSize: 12, color: AppColors.muted)),
         ]),
       );
 

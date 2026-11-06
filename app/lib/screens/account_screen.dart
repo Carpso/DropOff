@@ -42,6 +42,16 @@ class _AccountScreenState extends State<AccountScreen> {
   String? _otpMsg;
   String? _error;
 
+  // Self-contained create-account modal (kept separate from the sign-in flow so
+  // the default Account screen is always sign-in first).
+  final _cEmail = TextEditingController();
+  final _cPassword = TextEditingController();
+  final _cPhone = TextEditingController();
+  final _cFullName = TextEditingController();
+  final _cReferral = TextEditingController();
+  bool _cAgreed = false;
+  bool _cBusy = false;
+
   @override
   void dispose() {
     _email.dispose();
@@ -51,6 +61,11 @@ class _AccountScreenState extends State<AccountScreen> {
     _referral.dispose();
     _otpPhone.dispose();
     _otpCode.dispose();
+    _cEmail.dispose();
+    _cPassword.dispose();
+    _cPhone.dispose();
+    _cFullName.dispose();
+    _cReferral.dispose();
     super.dispose();
   }
 
@@ -122,6 +137,90 @@ class _AccountScreenState extends State<AccountScreen> {
     } else {
       setState(() => _error = store.lastAuthError ?? AppStore.authErrorText('unknown'));
     }
+  }
+
+  /// Create account from the modal bottom sheet — self-contained, never
+  // entangled with the sign-in form above.
+  Future<void> _createSubmit() async {
+    final store = AppScope.of(context);
+    if (!_cAgreed) {
+      if (!mounted) return;
+      setState(() => _cBusy = false);
+      return;
+    }
+    final digits = _cPhone.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length < 9) {
+      if (!mounted) return;
+      setState(() { _cBusy = false; });
+      return;
+    }
+    setState(() { _cBusy = true; });
+    final ok = await AppScope.of(context).registerEmail(
+      email: _cEmail.text.trim(),
+      password: _cPassword.text,
+      phone: _cPhone.text,
+      fullName: _cFullName.text.trim().isEmpty ? null : _cFullName.text.trim(),
+      remember: false,
+    );
+    if (!mounted) return;
+    setState(() => _cBusy = false);
+    if (ok) {
+      if (_cReferral.text.trim().isNotEmpty) {
+        unawaited(DropOffApi.claimReferral(_cReferral.text.trim()));
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Account created — you are signed in.')));
+    } else {
+      setState(() => _error = store.lastAuthError ?? AppStore.authErrorText('unknown'));
+    }
+  }
+
+  void _showCreateAccountSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Create account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
+            const SizedBox(height: 4),
+            const Text('Your phone is the mobile-money identity for refunds; email is the sign-in key.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+            const SizedBox(height: 14),
+            TextField(controller: _cEmail, keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email], decoration: const InputDecoration(labelText: 'Email')),
+            const SizedBox(height: 12),
+            TextField(controller: _cPassword, obscureText: true, autofillHints: const [AutofillHints.password], decoration: const InputDecoration(labelText: 'Password (8+ chars)', helperText: 'At least 8 characters')),
+            const SizedBox(height: 12),
+            TextField(controller: _cPhone, keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber], decoration: const InputDecoration(labelText: 'Mobile money phone', helperText: '09…, 097… or +260…')),
+            const SizedBox(height: 12),
+            TextField(controller: _cFullName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Full name (optional)')),
+            const SizedBox(height: 12),
+            TextField(controller: _cReferral, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Referral code (optional)', hintText: 'DRP-XXXXX', prefixIcon: Icon(Icons.redeem_rounded))),
+            const SizedBox(height: 14),
+            Row(children: [
+              Checkbox(value: _cAgreed, onChanged: (v) => setSheetState(() => _cAgreed = v ?? false), visualDensity: VisualDensity.compact),
+              const SizedBox(width: 8),
+              Expanded(child: RichText(text: TextSpan(style: const TextStyle(color: AppColors.muted, fontSize: 12), children: [
+                const TextSpan(text: 'I agree to the '),
+                TextSpan(text: 'Terms of use', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest), recognizer: TapGestureRecognizer()..onTap = () => Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const LegalScreen(title: 'Terms of use', asset: 'assets/legal/terms.md')))),
+                const TextSpan(text: ' and '),
+                TextSpan(text: 'Privacy policy', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest), recognizer: TapGestureRecognizer()..onTap = () => Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const LegalScreen(title: 'Privacy policy', asset: 'assets/legal/privacy.md')))),
+              ]))),
+            ]),
+            if (_error != null) ...[const SizedBox(height: 10), Text(_error!, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 13))],
+            const SizedBox(height: 12),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+              onPressed: _cBusy ? null : _createSubmit,
+              icon: _cBusy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.person_add_alt_1),
+              label: const Text('Create account'),
+            )),
+          ]),
+        ),
+      ),
+    );
   }
 
   Future<void> _unlink() async {
@@ -204,15 +303,10 @@ class _AccountScreenState extends State<AccountScreen> {
               ),
             ]))),
           ] else ...[
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, icon: Icon(Icons.login), label: Text('Sign in')),
-                ButtonSegment(value: true, icon: Icon(Icons.person_add_alt_1), label: Text('Create account')),
-              ],
-              selected: {_creating},
-              onSelectionChanged: (v) => setState(() { _creating = v.first; _error = null; }),
-            ),
-            const SizedBox(height: 18),
+            const Text('Sign in to your account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+            const SizedBox(height: 6),
+            const Text('Phone code or email — your parcels, packs and bookings live behind your account.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+            const SizedBox(height: 14),
             TextField(
               controller: _email,
               keyboardType: TextInputType.emailAddress,
@@ -236,70 +330,11 @@ class _AccountScreenState extends State<AccountScreen> {
                 ),
               ),
             ),
-            if (_creating) ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _phone,
-                keyboardType: TextInputType.phone,
-                autofillHints: const [AutofillHints.telephoneNumber],
-                decoration: const InputDecoration(
-                  labelText: 'Mobile money phone',
-                  helperText: 'Payments & payouts — 09…, 097… or +260…',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _fullName,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(labelText: 'Full name (optional)'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _referral,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(
-                  labelText: 'Referral code (optional)',
-                  hintText: 'DRP-XXXXX',
-                  prefixIcon: Icon(Icons.redeem_rounded),
-                ),
-              ),
-            ],
-            if (_creating) ...[
-              const SizedBox(height: 14),
-              Row(children: [
-                Checkbox(
-                  value: _agreed,
-                  onChanged: (v) => setState(() => _agreed = v ?? false),
-                  visualDensity: VisualDensity.compact,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: RichText(
-                    text: TextSpan(
-                      style: const TextStyle(color: AppColors.muted, fontSize: 12),
-                      children: [
-                        const TextSpan(text: 'I agree to the '),
-                        TextSpan(
-                          text: 'Terms of use',
-                          style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest),
-                          recognizer: TapGestureRecognizer()
-                            ..onTap = () => Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => const LegalScreen(title: 'Terms of use', asset: 'assets/legal/terms.md'))),
-                        ),
-                        const TextSpan(text: ' and '),
-                        TextSpan(
-                          text: 'Privacy policy',
-                          style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest),
-                          recognizer: TapGestureRecognizer()
-                            ..onTap = () => Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => const LegalScreen(title: 'Privacy policy', asset: 'assets/legal/privacy.md'))),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ]),
-            ],
+            const SizedBox(height: 10),
+            Row(children: [
+              const Expanded(child: Text("Don't have an account?", style: TextStyle(color: AppColors.muted, fontSize: 13))),
+              TextButton(onPressed: _showCreateAccountSheet, child: const Text('Create account', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest))),
+            ]),
             if (_error != null) ...[
               const SizedBox(height: 14),
               Text(_error!, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 13)),

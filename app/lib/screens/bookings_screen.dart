@@ -13,8 +13,22 @@ import 'chat_screen.dart';
 import 'inbox_screen.dart';
 import 'rider_map_screen.dart';
 
-class BookingsScreen extends StatelessWidget {
+class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
+  @override
+  State<BookingsScreen> createState() => _BookingsScreenState();
+}
+
+class _BookingsScreenState extends State<BookingsScreen> {
+  Future<void> _refresh() async {
+    if (!mounted) return;
+    // Bookings live in the local store; pull-to-refresh re-reads the latest
+    // state (outbox retries and server-synced jobs land here automatically).
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
@@ -56,26 +70,30 @@ class BookingsScreen extends StatelessWidget {
           ]),
         ),
         Expanded(
-          child: bookings.isEmpty
-              ? EmptyState(
-                  icon: Icons.inventory_2_outlined,
-                  title: 'No parcels yet',
-                  message: 'Book your first home-to-depot pickup. Your tracking timeline will appear here.',
-                  action: FilledButton.icon(
-                    onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen())),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Book a pickup'),
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            color: AppColors.forest,
+            child: bookings.isEmpty
+                ? EmptyState(
+                    icon: Icons.inventory_2_outlined,
+                    title: 'No parcels yet',
+                    message: 'Book your first home-to-depot pickup. Your tracking timeline will appear here.',
+                    action: FilledButton.icon(
+                      onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen())),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Book a pickup'),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 26),
+                    itemCount: bookings.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final booking = bookings[index];
+                      return BookingCard(booking: booking, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: booking.id))));
+                    },
                   ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 26),
-                  itemCount: bookings.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final booking = bookings[index];
-                    return BookingCard(booking: booking, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: booking.id))));
-                  },
-                ),
+          ),
         ),
       ]),
     );

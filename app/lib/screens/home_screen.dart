@@ -58,12 +58,12 @@ class HomeScreen extends StatelessWidget {
           Row(children: [
             const DropOffLogo(size: 46),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('DropOff', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
+                Text('DropOff', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: scaleText(context, 25), fontWeight: FontWeight.w900, letterSpacing: -0.7)),
                 Text('WE CARRY IT TO THE COURIER',
                     maxLines: 2,
-                    softWrap: true, // never clipped — wraps under it instead
+                    softWrap: true,
                     style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.25, height: 1.3, color: AppColors.muted)),
               ]),
             ),
@@ -95,7 +95,7 @@ class HomeScreen extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   const InfoPill(icon: Icons.bolt_rounded, label: 'HOME / SHOP → COURIER DEPOT', color: AppColors.amber),
                   const SizedBox(height: 18),
-                  const Text('Send it anywhere.\nWithout going anywhere.', style: TextStyle(color: Colors.white, fontSize: 29, height: 1.12, fontWeight: FontWeight.w900, letterSpacing: -0.8)),
+                  Text('Send it anywhere.\nWithout going anywhere.', style: TextStyle(color: Colors.white, fontSize: scaleText(context, 29), height: 1.12, fontWeight: FontWeight.w900, letterSpacing: -0.8)),
                   const SizedBox(height: 12),
                   const Text('A rider collects your parcel and drops it at the courier you choose.', style: TextStyle(color: Color(0xFFC9D9D2), height: 1.45, fontSize: 14)),
                   const SizedBox(height: 22),

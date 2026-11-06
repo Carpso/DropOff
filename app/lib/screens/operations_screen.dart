@@ -213,6 +213,10 @@ class OperationsScreen extends StatelessWidget {
             Expanded(child: _Metric(value: '$activeRiders', label: 'Team size', icon: Icons.groups_outlined)),
           ]),
           const SizedBox(height: 16),
+          // Verification first: a new rider can't be assigned jobs until their
+          // ID, plate and photos are approved, so it goes before the queue.
+          const _RiderVerificationCard(),
+          const SizedBox(height: 12),
           _TaskQueueCard(),
           const SizedBox(height: 12),
           const _RiderCashCard(),
@@ -222,8 +226,6 @@ class OperationsScreen extends StatelessWidget {
           const _RiderPayCard(),
           const SizedBox(height: 12),
           const _RiderTargetsCard(),
-          const SizedBox(height: 12),
-          const _RiderVerificationCard(),
           const SizedBox(height: 12),
           Card(
             child: ListTile(
@@ -314,28 +316,40 @@ class OperationsScreen extends StatelessWidget {
         const SizedBox(height: 26),
         SectionTitle('Riders & drivers', actionLabel: '+ Add', onAction: () => _addRider(context)),
         const SizedBox(height: 8),
-        for (final rider in store.riders)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Card(child: Padding(padding: const EdgeInsets.all(14), child: Row(children: [
-              CircleAvatar(
-                backgroundColor: rider.isOwner ? AppColors.amber : const Color(0xFFE4ECE6),
-                child: Icon(_vehicleIcon(rider.vehicle), color: AppColors.forest),
-              ),
-              const SizedBox(width: 12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(rider.isOwner ? '${rider.name} (You)' : rider.name, style: const TextStyle(fontWeight: FontWeight.w800)),
-                const SizedBox(height: 3),
-                Text('${rider.vehicle} • ${rider.phone}', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
-              ])),
-              if (rider.isOwner)
-                const InfoPill(icon: Icons.verified, label: 'OWNER')
-              else ...[
-                Switch(value: rider.active, onChanged: (value) => store.toggleRider(rider.id, value)),
-                IconButton(icon: const Icon(Icons.delete_outline, color: AppColors.muted), onPressed: () => store.removeRider(rider.id)),
-              ],
-            ]))),
+        if (store.riders.isEmpty) ...[
+          EmptyState(            icon: Icons.directions_bike,
+            title: 'No riders yet',
+            message: 'Tap + Add to register your first rider or driver. They’ll appear here once verified.',
+            action: FilledButton.icon(
+              onPressed: () => _addRider(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Add rider'),
+            ),
           ),
+        ] else ...[
+          for (final rider in store.riders)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Card(child: Padding(padding: const EdgeInsets.all(14), child: Row(children: [
+                CircleAvatar(
+                  backgroundColor: rider.isOwner ? AppColors.amber : const Color(0xFFE4ECE6),
+                  child: Icon(_vehicleIcon(rider.vehicle), color: AppColors.forest),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(rider.isOwner ? '${rider.name} (You)' : rider.name, style: const TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 3),
+                  Text('${rider.vehicle} • ${rider.phone}', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
+                ])),
+                if (rider.isOwner)
+                  const InfoPill(icon: Icons.verified, label: 'OWNER')
+                else ...[
+                  Switch(value: rider.active, onChanged: (value) => store.toggleRider(rider.id, value)),
+                  IconButton(icon: const Icon(Icons.delete_outline, color: AppColors.muted), onPressed: () => store.removeRider(rider.id)),
+                ],
+              ]))),
+            ),
+        ],
         const SizedBox(height: 22),
         // Driver economics are staff-only (admin/ops). This screen is already
         // behind the Team tab which only staff see — keep the card for them
