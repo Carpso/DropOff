@@ -52,7 +52,7 @@ export function haversineKm(aLat: number, aLng: number, bLat: number, bLng: numb
 
 export function baseRiderFee(city: string, lat: number, lng: number,
                              vehicleClass: VehicleClass = 'motorcycle'): number {
-  // Pay-as-you-go walk-up rate at Yango-competitive pricing (no plan).
+  // Pay-as-you-go walk-up rate (no plan).
   let base = 70; // non-Lusaka default
   if (city === 'Lusaka' && lat && lng) {
     const km = haversineKm(lat, lng, depotLat, depotLng);
