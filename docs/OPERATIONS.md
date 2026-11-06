@@ -144,7 +144,72 @@ clean drill. Insert order is parent-first; delete order is reverse.
 
 ## 8. Known gaps
 
-- No customer accounts for recipients by design: tracking is token/SMS only.
 - Firebase push requires the service-account secret above.
 - Cloudflare WAF rules in section 3 must be created in the dashboard; the API
   does not have zone access.
+
+## 9. Who can do what (roles)
+
+- **Owner = superadmin.** The phone in `OWNER_PHONE` is granted role `admin`
+  server-side, and additionally holds immutable superadmin rights. Superadmin
+  manages accounts with `GET /admin/users` and
+  `POST /admin/users/role {email, role: customer|admin|partner}` — that is how
+  an assistant (e.g. a spouse account) is promoted to admin. The owner row can
+  never be demoted (server refuses), so there is no self-lockout.
+- **Admins** (`role='admin'` or `X-Admin-Key`) run everything operational:
+  fraud queue, tiers, branches, broadcasts, support inbox. Admins cannot mint
+  more admins — role writes are superadmin-only.
+- **Ops** (`role='ops'` devices, or `X-Api-Key` devices) read operational
+  endpoints and reply to support tickets but cannot change roles.
+- **Riders** log in with their own phone: ops registers the number via
+  `POST /admin/riders`, the rider then does the normal phone-OTP sign-in in the
+  app. The middleware resolves any JWT phone that matches an active
+  `riders.phone` row to `role='rider'`, so the same app shows a personal rider
+  view: their task queue (`/rider/queue`, `/rider/route` — both keyed to the
+  caller's own phone), GPS broadcasting (`/rider/ping`) and their jobs only.
+  Fleet-wide routes/batch endpoints stay ops/admin-only and 403 for riders;
+  `GET /me` returns `{phone, role, superadmin, rider:{id,name}}`.
+- **Seller/owner Business tab**: every signed-in seller (customer + admin +
+  owner identities, not riders) gets a Business dashboard tab built entirely
+  from existing endpoints — active plan usage (`/subscriptions`), parcels in
+  flight / delivered from `/jobs` (own phone), and the referral funnel
+  (`/refer/code`). Tapping an in-flight parcel mints the tracking link
+  (`/jobs/:ref/tracking-link`) and opens the verified Track screen.
+- `GET /me` returns `{phone, role, superadmin}`; the app drives its Staff tab,
+  admin console and Users-and-roles card off this — no role is trusted
+  client-side.
+
+## 10. Tracking verification (link ≠ access)
+
+A tracking link now proves nothing by itself. Every `/track/:token` route
+(GET status, GET/POST chat) requires one of:
+
+1. a signed-in JWT whose phone equals the job's sender or recipient phone,
+2. an `X-Track-Grant` header minted by `POST /track/:token/verify` with the
+   participant phone (grant = SHA-256 of `${JWT_SECRET}:track:${token}:${phone}`),
+   stored in-memory per app session, or
+3. staff keys (`X-Admin-Key` / `X-Api-Key`).
+
+Unknown token → `404`. Stranger with the link →
+`{requires_verification: true, hint_phone: "••••1234"}` only — no parcel data,
+no prices, no rider location. The in-app TrackScreen shows a phone-verify card
+in exactly that case; the verify call is rate-limited (15/min) to stop
+brute-forcing. Chat reuses the same gate.
+
+## 11. Support inbox (visible tickets)
+
+Support chats live in `chat_threads.kind='support'` and are no longer hidden:
+
+- `GET /admin/support/threads` — list with last message, last activity and a
+  per-ticket unread count (messages since the last `ops` reply),
+- `GET /admin/support/threads/:id` — full message history,
+- replies reuse `POST /chat/support/:id/reply` (admin / ops / admin key).
+
+The in-app admin console renders both as the **Support inbox** card.
+
+## 12. Delivery IQ
+
+`GET /iq/eta?courier_id=&window=` computes the typical and slow-day
+pickup→depot minutes from real `job_events` (picked_up → at_depot) over the
+last 90 days (max 300 jobs). Signed-in callers only. The booking screen shows
+it beside the pickup-window picker so sellers see real speed before booking.

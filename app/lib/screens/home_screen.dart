@@ -49,8 +49,11 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(width: 12),
             const Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('DropOff', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
-                Text('WE CARRY IT TO THE COURIER', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.25, color: AppColors.muted)),
+                Text('DropOff', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
+                Text('WE CARRY IT TO THE COURIER',
+                    maxLines: 2,
+                    softWrap: true, // never clipped — wraps under it instead
+                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.25, height: 1.3, color: AppColors.muted)),
               ]),
             ),
             IconButton(

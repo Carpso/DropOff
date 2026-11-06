@@ -16,15 +16,19 @@ All figures in Zambian Kwacha (ZMW ≈ K). Rider = person doing the pickup run. 
 
 **Not shared today:** no per-parcel commission to DropOff from the courier fare — the counter fare is the partner's (seller pays at depot), and DropOff doesn't touch partner money.
 
-## 2. Packs (the subscriber float pays for everything)
+## 2. Plans (the subscriber float pays for everything)
 
-| Pack | Price / 30-day cycle | Parcels included | Sweep windows (arrival range) | Rollover | After-cap overage |
-|------|---------------------|------------------|-------------------------------|----------|-------------------|
-| Silver | K250 | 10 | 6:00–7:30 / 10:00–11:30 / 2:00–3:30 PM | None — unused parcels expire | 15% off PAYG |
-| Gold | K500 | 25 | same windows | None | 25% off PAYG |
-| Platinum | K750 | 50 | same windows | None | 35% off PAYG |
+| Plan | Cycle | Parcels included | Sweep windows (arrival range) | Rollover | After-cap overage |
+|------|-------|------------------|-------------------------------|----------|-------------------|
+| Daily Dash | 1 day — TODAY only | 6 | 6:00–7:30 / 10:00–11:30 / 2:00–3:30 PM | None — expires tonight | 5% off PAYG |
+| Weekly Sprint | 7 days | 20 | same windows | None | 10% off PAYG |
+| Silver | 30 days | 10 | same windows | None — unused parcels expire | 15% off PAYG |
+| Gold | 30 days | 25 | same windows | None | 25% off PAYG |
+| Platinum | 30 days | 50 | same windows | None | 35% off PAYG |
 
-Every trip consumes one slot per **parcel** (3 parcels in one trip = 3 slots). Cutoffs: book by 05:30 / 09:30 / 13:30 CAT; late bookings auto-roll to the next open window. Pack members pay NO rider fee and NO per-parcel processing inside the cap.
+Seed prices: Daily K69, Weekly K399, Silver K250, Gold K500, Platinum K750 — **the live chargebook in the `tiers` D1 table is the source of truth** (editable via `/admin/tiers` without a deploy; current prod rows: Silver K350, Gold K700, Platinum K1500 from the original chargebook).
+
+Cycle length is the plan's `cycle_days` (1 / 7 / 30) — `period_end` is always `period_start + cycle_days`, never a hardcoded +30. Every trip consumes one slot per **parcel** (3 parcels in one trip = 3 slots); one booking with two parcels burns two days-worth at Daily pace. Cutoffs: book by 05:30 / 09:30 / 13:30 CAT; late bookings auto-roll to the next open window. Plan members pay NO rider fee and NO per-parcel processing inside the cap.
 
 ## 3. Sweep driver economics (salaried, not per-parcel)
 

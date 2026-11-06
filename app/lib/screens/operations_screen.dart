@@ -188,6 +188,79 @@ class OperationsScreen extends StatelessWidget {
         ),
       );
     }
+    if (!store.isStaff && store.isRider) {
+      // Rider personal view: their own task queue (server keys it to the
+      // signed-in rider phone) + GPS broadcast. No add-rider, no fleet routes,
+      // no economics — those stay staff-only (routes/batch 403 for riders).
+      final activeRiders = store.riders.where((item) => item.active).length;
+      return SafeArea(
+        child: ListView(padding: const EdgeInsets.fromLTRB(20, 22, 20, 28), children: [
+          Row(children: [
+            const Icon(Icons.two_wheeler, color: AppColors.forest),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Your riding day', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+              const SizedBox(height: 3),
+              Text('Signed in as ${store.linkedPhone} — jobs assigned to you land here automatically.', style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+            ])),
+          ]),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: _Metric(value: '${store.bookings.length}', label: 'Bookings on device', icon: Icons.inventory_2_outlined)),
+            const SizedBox(width: 12),
+            Expanded(child: _Metric(value: '$activeRiders', label: 'Team size', icon: Icons.groups_outlined)),
+          ]),
+          const SizedBox(height: 16),
+          _TaskQueueCard(),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.my_location, color: AppColors.forest),
+              title: const Text('Share live position', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              subtitle: const Text('Broadcast your GPS so senders of your jobs can follow you live.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+              trailing: FilledButton.tonal(
+                style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), minimumSize: const Size(0, 36)),
+                onPressed: () => _pingMyLocation(context),
+                child: const Text('Share'),
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+          Card(
+            child: ListTile(
+              leading: Icon(store.linked ? Icons.verified_user : Icons.link_outlined, color: AppColors.forest),
+              title: Text(store.linked ? 'Linked as ${store.linkedPhone}' : 'Device not linked', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              subtitle: const Text('This number is your rider identity — jobs and COD are keyed to it.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+              trailing: TextButton(onPressed: () => _linkDevice(context), child: const Text('Manage')),
+            ),
+          ),
+        ]),
+      );
+    }
+    if (!store.isStaff) {
+      // Defense in depth: the Team tab is already hidden for non-staff, but a
+      // deep link or stale shell must still land on this door — riders and
+      // drivers are created ONLY by admin/ops (the server enforces it too).
+      return SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.admin_panel_settings_outlined, size: 44, color: AppColors.muted),
+              const SizedBox(height: 16),
+              const Text('Staff access only', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              const Text('Riders, drivers, fleet routes and GPS tools are managed by DropOff staff. Your bookings live under Bookings.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const SizedBox(height: 20),
+              FilledButton.tonal(
+                onPressed: () => Navigator.of(context).maybePop(),
+                child: const Text('Go back'),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
     final activeRiders = store.riders.where((item) => item.active).length;
     return SafeArea(
       child: ListView(padding: const EdgeInsets.fromLTRB(20, 22, 20, 28), children: [

@@ -400,7 +400,7 @@ class _BookingScreenState extends State<BookingScreen> {
           tileColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15), side: const BorderSide(color: AppColors.line)),
           title: const Text('Round trip', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-          subtitle: const Text('Rider brings the parcel back to the origin depot after delivery'),
+          subtitle: const Text('If it can\'t travel on, the rider returns the parcel from the depot back to your door — no re-booking'),
           value: _roundTrip,
           onChanged: (value) => setState(() => _roundTrip = value),
         ),
@@ -408,9 +408,9 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 10),
           _cityDropdown('Return city', _returnCity, (value) => setState(() => _returnCity = value)),
           const SizedBox(height: 10),
-          TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Where the parcel comes back to', prefixIcon: Icon(Icons.route_outlined))),
+          TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Your door — where the parcel comes back', prefixIcon: Icon(Icons.house_outlined))),
           const SizedBox(height: 6),
-          Text('Return leg charged at the depot counter fare for $_returnCity → $_from, confirmed at the counter.', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+          const Text('The return ride (depot → your door) is estimated at the depot counter fare for the reverse leg and confirmed at the counter.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
         ],
         const SizedBox(height: 16),
         const InfoPill(icon: Icons.two_wheeler, label: 'Pickup rider fee: from K45, always under the courier counter fare'),
@@ -648,6 +648,8 @@ class _BookingScreenState extends State<BookingScreen> {
             style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
           ),
         ),
+        const SizedBox(height: 4),
+        _DeliveryIqCard(courierCatalogId: courier.id, window: _pickupWindow),
         const SizedBox(height: 10),
         Row(children: [
           const Expanded(child: Text('Custom pickup time', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
@@ -843,6 +845,82 @@ class _PlanBannerState extends State<_PlanBanner> {
 /// Depot-branch picker for the selected courier: server branches (admin-
 /// managed) with the catalog fallback. The seller says exactly which branch
 /// the rider hands the parcel to.
+/// Catalog ids ('platinum', 'mercury'…) map onto the live chargebook ids.
+const Map<String, int> kCourierServerIds = {
+  'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4,
+};
+int courierServerIdOf(String catalogId) => kCourierServerIds[catalogId] ?? 1;
+
+/// Delivery IQ — how fast this courier's depot actually receives parcels:
+/// the typical (and slow-day) pickup→depot minutes from the last 90 days of
+/// real job events, shown right where the pickup window is picked.
+class _DeliveryIqCard extends StatefulWidget {
+  const _DeliveryIqCard({required this.courierCatalogId, required this.window});
+
+  final String courierCatalogId;
+  final String window;
+
+  @override
+  State<_DeliveryIqCard> createState() => _DeliveryIqCardState();
+}
+
+class _DeliveryIqCardState extends State<_DeliveryIqCard> {
+  Future<Map<String, dynamic>?>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DeliveryIqCard old) {
+    super.didUpdateWidget(old);
+    if (old.courierCatalogId != widget.courierCatalogId || old.window != widget.window) _load();
+  }
+
+  void _load() {
+    if (!DropOffApi.enabled) return;
+    // 'now' is a UI-only slot — the IQ window filter wants a real slot or none.
+    final w = widget.window == 'now' ? '' : widget.window;
+    _future = DropOffApi.iqEta(courierServerIdOf(widget.courierCatalogId), w);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!DropOffApi.enabled) return const SizedBox.shrink();
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _future,
+      builder: (context, snap) {
+        final data = snap.data;
+        final p50 = (data?['minutes_p50'] as num?)?.toInt();
+        if (p50 == null) return const SizedBox.shrink(); // no data yet — stay quiet
+        final p90 = ((data?['minutes_p90'] as num?)?.toInt() ?? p50).toString();
+        final n = (data?['sample_count'] as num?)?.toInt() ?? 0;
+        return Container(
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.forest.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.forest.withValues(alpha: 0.18)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.speed_rounded, size: 18, color: AppColors.forest),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Delivery IQ: this courier usually reaches the depot in ~$p50 min; busy days up to $p90 min (from $n recent pickups).',
+                style: const TextStyle(color: AppColors.forest, fontSize: 11.5, height: 1.35),
+              ),
+            ),
+          ]),
+        );
+      },
+    );
+  }
+}
+
 class _BranchSelector extends StatefulWidget {
   final CourierInfo selected;
   final ValueChanged<String> onBranch;
@@ -893,10 +971,7 @@ class _BranchSelectorState extends State<_BranchSelector> {
   }
 
   /// Catalog ids ('platinum', 'mercury'...) map onto the live chargebook ids.
-  static const Map<String, int> _serverIds = {
-    'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4,
-  };
-  int _serverIdOf(String catalogId) => _serverIds[catalogId] ?? 1;
+  int _serverIdOf(String catalogId) => courierServerIdOf(catalogId);
 
   @override
   Widget build(BuildContext context) {

@@ -188,7 +188,8 @@ class Booking {
   final int stage;
   final String riderId;
 
-  /// Round trip: the parcel returns to the origin city/depot after delivery.
+  /// Round trip: if the parcel can't travel on, the rider returns it from the
+  /// depot back to the seller/sender's door (no re-booking).
   final bool roundTrip;
   final String? returnCity;
   final String? returnAddress;

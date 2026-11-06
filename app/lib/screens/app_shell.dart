@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import 'bookings_screen.dart';
+import 'business_screen.dart';
 import 'couriers_screen.dart';
 import 'home_screen.dart';
 import 'operations_screen.dart';
@@ -21,20 +22,24 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
-    // Team = riders/drivers/ops console. Only staff (admin/ops) see it —
-    // ordinary sellers and recipients never get the fleet tools or the
-    // driver-economics card.
+    // Tabs: everyone gets Home/Couriers/Bookings. Signed-in sellers also get
+    // the Business dashboard. Staff (admin/ops) add Team; riders get Team as
+    // their personal rider view instead of Business.
+    final showBusiness = store.linked && !store.isRider;
     final screens = <Widget>[
       HomeScreen(onOpenCouriers: () => goTo(1), onOpenBookings: () => goTo(2)),
       const CouriersScreen(),
       const BookingsScreen(),
-      if (store.isStaff) const OperationsScreen(),
+      if (showBusiness) const BusinessScreen(),
+      if (store.isTeam) const OperationsScreen(),
     ];
     final destinations = <NavigationDestination>[
       const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
       const NavigationDestination(icon: Icon(Icons.local_shipping_outlined), selectedIcon: Icon(Icons.local_shipping), label: 'Couriers'),
       const NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Bookings'),
-      if (store.isStaff)
+      if (showBusiness)
+        const NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Business'),
+      if (store.isTeam)
         const NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups), label: 'Team'),
     ];
     final safeIndex = _index < screens.length ? _index : 0;
