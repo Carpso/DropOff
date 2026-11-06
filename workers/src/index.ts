@@ -19,19 +19,22 @@ import { ChatRoom } from './chat_do';
 
 export { ChatRoom };
 
-const app = new Hono<{ Bindings: Env; Variables: { phone?: string; role?: 'customer' | 'partner' | 'ops'; courierId?: number; reqId?: string } }>();
+const app = new Hono<{ Bindings: Env; Variables: { phone?: string; role?: 'customer' | 'partner' | 'ops' | 'admin' | 'rider'; riderId?: number; courierId?: number; reqId?: string } }>();
 
 /* ------------------------- seller subscription packs ----------------------- */
 // Silver (K350/mo, 1 parcel/day) / Gold (K700/mo, 3) / Platinum (K1500/mo, 10),
 // each with one guaranteed daily sweep window (6am / 10am / 2pm). Inside the
 // pack the SENDER pays no rider fee (bundled); Sweep riders are paid a flat
 // per-parcel wage; pay-as-you-go riders keep 90% of the fee (platform take 10%).
-type PlanTier = 'silver' | 'gold' | 'platinum';
+type PlanTier = 'daily' | 'weekly' | 'silver' | 'gold' | 'platinum';
 interface PlanDef { fee_zmw: number; windows: string[]; parcels_per_day: number; parcels_per_month: number; rider_fee_zmw: number; overage_discount_pct: number; cycle_days: number; tag?: string | null }
 // Editable live in D1 via /admin/tiers. These are the fallback/seed values.
 // One trip (booking) consumes ONE plan slot no matter how many parcels are in it.
-// Cycle is 30 days from activation; overage keeps the tier discount off PAYG.
+// Cycle = cycle_days from activation (daily pass = 1 day, weekly = 7, monthly
+// packs = 30); overage keeps the tier discount off PAYG.
 const PLANS: Record<PlanTier, PlanDef> = {
+  daily:   { fee_zmw: 69, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 6, parcels_per_month: 6, rider_fee_zmw: 0, overage_discount_pct: 5, cycle_days: 1, tag: 'Daily Dash' },
+  weekly:  { fee_zmw: 399, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 20, rider_fee_zmw: 0, overage_discount_pct: 10, cycle_days: 7, tag: 'Weekly Sprint' },
   silver: { fee_zmw: 250, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 10, rider_fee_zmw: 0, overage_discount_pct: 15, cycle_days: 30 },
   gold:   { fee_zmw: 500, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 25, rider_fee_zmw: 0, overage_discount_pct: 25, cycle_days: 30 },
   platinum: { fee_zmw: 750, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 50, rider_fee_zmw: 0, overage_discount_pct: 35, cycle_days: 30 },
@@ -40,6 +43,8 @@ const PLANS: Record<PlanTier, PlanDef> = {
 /** DB-backed catalogue (price, per-day cap, tag) â€” constants only as fallback. */
 async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
   const merged: Record<PlanTier, PlanDef> = {
+    daily: { ...PLANS.daily, tag: null },
+    weekly: { ...PLANS.weekly, tag: null },
     silver: { ...PLANS.silver, tag: null },
     gold: { ...PLANS.gold, tag: null },
     platinum: { ...PLANS.platinum, tag: null },
@@ -51,12 +56,13 @@ async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
     if (merged[key]) {
       merged[key] = {
         ...merged[key],
-        fee_zmw: Number(row.fee_zmw),
-        parcels_per_day: Number(row.parcels_per_day),
-        parcels_per_month: Number(row.parcels_per_month),
-        rider_fee_zmw: Number(row.rider_fee_zmw),
-        overage_discount_pct: Number(row.overage_discount_pct),
-        cycle_days: Number(row.cycle_days),
+        // || fallback guards NULL/legacy columns (fresh DBs pre-0035).
+        fee_zmw: Number(row.fee_zmw) || merged[key].fee_zmw,
+        parcels_per_day: Number(row.parcels_per_day) || merged[key].parcels_per_day,
+        parcels_per_month: Number(row.parcels_per_month) || merged[key].parcels_per_month,
+        rider_fee_zmw: Number(row.rider_fee_zmw) || merged[key].rider_fee_zmw,
+        overage_discount_pct: Number(row.overage_discount_pct) || merged[key].overage_discount_pct,
+        cycle_days: Number(row.cycle_days) || merged[key].cycle_days,
         tag: row.tag ?? null,
       };
     }
@@ -147,8 +153,21 @@ app.use('*', async (c, next) => {
       c.set('phone', claims.phone);
       // The app owner's phone is always admin (OWNER_PHONE secret) — covers
       // OTP-only sign-ins that have no auth_users row.
-      c.set('role', user?.role === 'partner' || user?.role === 'admin' ? user.role
-        : claims.phone === ownerPhone(c.env) ? 'admin' : 'customer');
+      let role = user?.role === 'partner' || user?.role === 'admin' ? user.role
+        : claims.phone === ownerPhone(c.env) ? 'admin' : null;
+      if (!role) {
+        // Rider sign-in: a phone that ops registered on a rider resolves to
+        // role='rider' — the same app then shows the Team/Rider tab with ONLY
+        // that rider's jobs, route and COD (all keyed off callers' phone).
+        const rider = await c.env.DB.prepare(
+          'SELECT id FROM riders WHERE phone = ?1 AND active = 1',
+        ).bind(claims.phone).first<{ id: number }>();
+        if (rider) {
+          role = 'rider';
+          c.set('riderId', rider.id);
+        }
+      }
+      c.set('role', role ?? 'customer');
       if (user?.courier_id) c.set('courierId', user.courier_id);
       return next();
     }
@@ -173,6 +192,14 @@ const isAdmin = (c: { env: Env; req: { header: (k: string) => string | undefined
 
 const isOwner = (c: { env: Env; get?: (k: string) => unknown }) =>
   Boolean(typeof c.get === 'function' && c.get('phone') && c.get('phone') === ownerPhone(c.env));
+
+// Superadmin = the app owner (OWNER_PHONE) or the admin key. Only a
+// superadmin can mint or demote admins (e.g. the owner promoting a spouse
+// to admin for day-to-day assistant work). Owner keeps admin role too, so
+// every admin/ops surface works for them.
+const isSuperAdmin = (c: { env: Env; req: { header: (k: string) => string | undefined }; get?: (k: string) => unknown }) =>
+  c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY
+  || (typeof c.get === 'function' && c.get('phone') === ownerPhone(c.env));
 
 /** Naive per-IP throttle in D1 (e.g. 20 auth requests / hour / ip). */
 async function rateLimited(
@@ -253,6 +280,67 @@ async function issueTrackingToken(env: Env, jobId: number, jobRef: string, phone
 const trackingUrl = (env: Env, token: string) =>
   `${(env.APP_URL ?? '').replace(/\/$/, '')}/track/${token}`;
 
+/* ------------------------ tracking access control ------------------------- */
+// The link ALONE is no longer enough: every /track/:token route requires one of
+//   (a) a JWT whose phone is the sender or recipient of that job (the app's
+//       signed-in participant — recipients verify by signing up),
+//   (b) a valid X-Track-Grant minted by POST /track/:token/verify for a
+//       participant phone (phone number = proof the link belongs to you), or
+//   (c) staff keys (X-Admin-Key / X-Api-Key).
+// Anyone else with the link only learns the last 4 digits of the phone to
+// verify with — never parcel data, rider location or events.
+async function trackGrantFor(env: Env, token: string, phone: string): Promise<string> {
+  const data = new TextEncoder().encode(`${env.JWT_SECRET}:track:${token}:${phone}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+type TrackAccess = {
+  granted: boolean;
+  jobId: number | null;          // null => token unknown/expired (404)
+  senderPhone: string | null;
+  recipientPhone: string | null;
+  recipientName: string | null;
+};
+
+async function trackAccess(c: any, token: string): Promise<TrackAccess> {
+  const db: D1Database = (c as { env: { DB: D1Database } }).env.DB;
+  const job = await db.prepare(
+    `SELECT t.job_id, j.sender_phone, j.recipient_phone, j.recipient_name
+       FROM tracking_tokens t JOIN jobs j ON j.id = t.job_id
+      WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+  ).bind(token).first<any>();
+  const base = {
+    jobId: job ? (job.job_id as number) : null,
+    senderPhone: job?.sender_phone ?? null,
+    recipientPhone: job?.recipient_phone ?? null,
+    recipientName: job?.recipient_name ?? null,
+  };
+  if (!job) return { granted: false, ...base };
+  // Staff keys (ops console / admin console / rider devices).
+  if (c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY || c.req.header('X-Api-Key') === c.env.API_AUTH_KEY) {
+    return { granted: true, ...base };
+  }
+  // Signed-in participant: the app always attaches its JWT when present.
+  const bearer = (c.req.header('Authorization') ?? '').replace(/^Bearer\s+/, '');
+  if (bearer) {
+    const claims = await verifyJwtClaims(bearer, c.env.JWT_SECRET);
+    if (claims && (claims.phone === job.sender_phone || claims.phone === job.recipient_phone)) {
+      return { granted: true, ...base };
+    }
+  }
+  // Phone-verified grant minted by POST /track/:token/verify.
+  const grant = c.req.header('X-Track-Grant') ?? '';
+  if (grant && grant.length === 64) {
+    for (const p of [job.sender_phone, job.recipient_phone]) {
+      if (p && grant === (await trackGrantFor(c.env, token, p))) return { granted: true, ...base };
+    }
+  }
+  return { granted: false, ...base }; // token valid, viewer unproven
+}
+
+const maskPhone = (p: string | null) => (p && p.length >= 4 ? `••••${p.slice(-4)}` : null);
+
 /* ------------------------------ idempotency ------------------------------- */
 // Clients retry on flaky networks; the same Idempotency-Key must replay the
 // first response instead of creating a second job / mobile-money collect.
@@ -332,8 +420,23 @@ app.use('GET /plans', cacheFor(30));
 app.get('/health', (c) => c.json({ ok: true, ts: Date.now() }));
 
 // Identity for the signed-in caller — the app uses this to reveal admin/ops
-// surfaces (the owner's phone is admin via OWNER_PHONE middleware grant).
-app.get('/me', (c) => c.json({ phone: c.get('phone') ?? null, role: c.get('role') ?? null }));
+// surfaces (the owner's phone is admin via OWNER_PHONE middleware grant) and
+// the superadmin flag to unlock role management (promote admins).
+app.get('/me', async (c) => {
+  const phone = c.get('phone');
+  let rider: { id: number; name: string } | null = null;
+  if (phone) {
+    const r = await c.env.DB.prepare('SELECT id, full_name FROM riders WHERE phone = ?1 AND active = 1')
+      .bind(phone).first<{ id: number; full_name: string }>();
+    if (r) rider = { id: r.id, name: r.full_name };
+  }
+  return c.json({
+    phone: phone ?? null,
+    role: c.get('role') ?? null,
+    superadmin: isSuperAdmin(c),
+    rider,
+  });
+});
 
 /* ------------------------------ phone OTP auth ---------------------------- */
 // POST /auth/request {phone}   -> { sent: true, dev_code? }
@@ -922,7 +1025,8 @@ app.post('/jobs', async (c) => {
       promoDiscountZmw: promoDiscount,
     });
 
-    // Round trip: a second, priced leg back to the origin depot/city.
+    // Round trip: if the parcel can't travel on, the rider returns it from the
+    // depot back to the seller/sender's door (second priced leg, no re-booking).
     const isRoundTrip = b.round_trip === 1 || b.round_trip === true;
     let returnLegFee = 0;
     if (isRoundTrip) {
@@ -1560,9 +1664,22 @@ app.post('/admin/fraud/:id/review', async (c) => {
 });
 
 /* --------------------------- public tracking page ------------------------- */
-// GET /track/:token — public (no auth). Shows status + live rider location to
-// the recipient; never exposes prices, sender phone or payment data.
+// GET /track/:token — the token alone no longer opens the parcel: an
+// unverified viewer gets a phone-verification gate (last-4 hint only). See
+// trackAccess() for the three grant paths (JWT participant, X-Track-Grant,
+// staff keys). Verified viewers get status + live rider location; never
+// prices, sender phone or payment data.
 app.get('/track/:token', async (c) => {
+  const token = c.req.param('token');
+  const access = await trackAccess(c, token);
+  if (!access.jobId) return c.json({ error: 'not found' }, 404);
+  if (!access.granted) {
+    return c.json({
+      requires_verification: true,
+      hint_phone: maskPhone(access.recipientPhone),
+      hint: 'This parcel can only be tracked from the phone it was addressed to (or the sender\'s phone). Sign up / sign in with that number to follow it.',
+    });
+  }
   const row = await c.env.DB.prepare(
     `SELECT t.job_id, t.job_ref,
             j.ref, j.status, j.created_at, j.pickup_address, j.dest_city, j.branch,
@@ -1604,6 +1721,37 @@ app.get('/track/:token', async (c) => {
       ? { lat: row.last_lat, lng: row.last_lng, seen_at: row.last_seen_at }
       : null,
     events,
+    // "belongs to" proof shown by the app after a successful grant.
+    verified: true,
+    verified_for: access.recipientName ?? null,
+  });
+});
+
+// POST /track/:token/verify {phone} — proves the caller owns a participant
+// phone (the recipient's or the sender's) and mints an X-Track-Grant.
+// Rate-limited so the gate cannot be brute-forced.
+app.post('/track/:token/verify', async (c) => {
+  if (await rateLimited(c, 'track_verify', 15)) return c.json({ error: 'too_many_requests' }, 429);
+  const b: any = await c.req.json().catch(() => null);
+  let phone = '';
+  try { phone = normalizeZmPhone(String(b?.phone ?? '')); } catch { return c.json({ error: 'invalid_phone' }, 400); }
+  const token = c.req.param('token');
+  const job = await c.env.DB.prepare(
+    `SELECT j.sender_phone, j.recipient_phone, j.recipient_name, j.ref
+       FROM tracking_tokens t JOIN jobs j ON j.id = t.job_id
+      WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+  ).bind(token).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (phone !== job.sender_phone && phone !== job.recipient_phone) {
+    return c.json({ error: 'phone_does_not_match' }, 403);
+  }
+  const grant = await trackGrantFor(c.env, token, phone);
+  return c.json({
+    ok: true, grant,
+    ref: job.ref,
+    recipient_name: job.recipient_name,
+    verified_phone: phone,
+    is_sender: phone === job.sender_phone,
   });
 });
 
@@ -1621,6 +1769,51 @@ app.post('/jobs/:ref/tracking-link', async (c) => {
   ).bind(job.id).first<{ token: string }>();
   const token = existing?.token ?? await issueTrackingToken(c.env, job.id, job.ref, job.recipient_phone);
   return c.json({ token, url: trackingUrl(c.env, token) });
+});
+
+/* ------------------------------- Delivery IQ ------------------------------ */
+// GET /iq/eta?courier_id=&window= — how fast does this courier actually reach
+// the depot? Computed from real job_events (picked_up → at_depot) over the
+// last 90 days (max 300 jobs), optionally filtered to one pickup window.
+// Signed-in callers only (booking screen shows it next to the window picker).
+app.get('/iq/eta', async (c) => {
+  if (!c.get('phone')) return c.json({ error: 'identity_required' }, 401);
+  const courierId = Number(c.req.query('courier_id') ?? '');
+  const window = c.req.query('window') ?? '';
+  if (!courierId) return c.json({ error: 'courier_id required' }, 400);
+  const rows = await c.env.DB.prepare(
+    `SELECT j.pickup_window,
+            MIN(CASE WHEN e.status = 'picked_up' THEN e.created_at END) AS picked_at,
+            MIN(CASE WHEN e.status = 'at_depot' THEN e.created_at END) AS depot_at
+       FROM jobs j JOIN job_events e ON e.job_id = j.id
+      WHERE j.courier_id = ?1 AND j.created_at >= datetime('now', '-90 days')
+      GROUP BY j.id LIMIT 300`,
+  ).bind(courierId).all<any>();
+  const mins: number[] = [];
+  for (const r of rows.results ?? []) {
+    if (window && r.pickup_window !== window) continue;
+    if (!r.picked_at || !r.depot_at) continue;
+    const t1 = Date.parse(String(r.picked_at).replace(' ', 'T') + 'Z');
+    const t2 = Date.parse(String(r.depot_at).replace(' ', 'T') + 'Z');
+    if (Number.isNaN(t1) || Number.isNaN(t2)) continue;
+    const m = Math.round((t2 - t1) / 60000);
+    if (m >= 0 && m < 24 * 60) mins.push(m); // drop bogus/negative gaps
+  }
+  if (mins.length === 0) {
+    return c.json({ courier_id: courierId, window: window || null, sample_count: 0 });
+  }
+  mins.sort((a, b) => a - b);
+  const p = (q: number) => mins[Math.min(mins.length - 1, Math.floor(q * mins.length))];
+  const avg = Math.round(mins.reduce((s, m) => s + m, 0) / mins.length);
+  return c.json({
+    courier_id: courierId,
+    window: window || null,
+    sample_count: mins.length,
+    minutes_p50: p(0.5),
+    minutes_p90: p(0.9),
+    minutes_avg: avg,
+    basis: 'actual pickup→depot times, last 90 days',
+  });
 });
 
 /* ---------------------------------- chat ---------------------------------- */
@@ -1728,17 +1921,15 @@ app.post('/jobs/:ref/chat', async (c) => {
   return c.json({ ok: true, id: meta.last_row_id });
 });
 
-// Recipient chat via the tracking token (no account — token is the credential)
+// Recipient chat via the tracking token — same grant gate as GET /track/:token.
 app.get('/track/:token/chat', async (c) => {
-  const row = await c.env.DB.prepare(
-    `SELECT t.job_id FROM tracking_tokens t WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
-  ).bind(c.req.param('token')).first<{ job_id: number }>();
-  if (!row) return c.json({ error: 'not found' }, 404);
-  const threadId = await getOrCreateJobThread(c.env, row.job_id);
+  const access = await trackAccess(c, c.req.param('token'));
+  if (!access.jobId) return c.json({ error: 'not found' }, 404);
+  if (!access.granted) return c.json({ error: 'verification_required' }, 401);
+  const threadId = await getOrCreateJobThread(c.env, access.jobId);
   const messages = await chatMessages(c.env, threadId);
   // recipient read state keyed by their phone on the job
-  const job = await c.env.DB.prepare('SELECT recipient_phone FROM jobs WHERE id = ?1').bind(row.job_id).first<{ recipient_phone: string }>();
-  if (job?.recipient_phone) await markThreadRead(c.env, threadId, job.recipient_phone);
+  if (access.recipientPhone) await markThreadRead(c.env, threadId, access.recipientPhone);
   return c.json({ thread_id: threadId, role: 'recipient', messages });
 });
 
@@ -1748,13 +1939,12 @@ app.post('/track/:token/chat', async (c) => {
   const body = String(b?.body ?? '').trim().slice(0, 500);
   if (!body) return c.json({ error: 'body required' }, 400);
   if (containsProfanity(body)) return c.json({ error: 'message_blocked', message: 'Keep messages respectful.' }, 400);
-  const row = await c.env.DB.prepare(
-    `SELECT t.job_id FROM tracking_tokens t WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
-  ).bind(c.req.param('token')).first<{ job_id: number }>();
-  if (!row) return c.json({ error: 'not found' }, 404);
+  const access = await trackAccess(c, c.req.param('token'));
+  if (!access.jobId) return c.json({ error: 'not found' }, 404);
+  if (!access.granted) return c.json({ error: 'verification_required' }, 401);
   const job = await c.env.DB.prepare(
     'SELECT id, ref, sender_phone, recipient_phone, courier_id, rider_id FROM jobs WHERE id = ?1',
-  ).bind(row.job_id).first<any>();
+  ).bind(access.jobId).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
   const threadId = await getOrCreateJobThread(c.env, job.id);
   const { meta } = await c.env.DB.prepare(
@@ -1832,6 +2022,74 @@ app.get('/chat/threads', async (c) => {
                      OR (?2 IS NOT NULL AND jj.rider_id = ?2))))`,
   ).bind(phone, rider?.id ?? null).all();
   return c.json({ threads: results });
+});
+
+/* --------------------------- support inbox (admin) ------------------------- */
+// Staff view of every support ticket (kind='support' threads). Reply with the
+// existing POST /chat/support/:id/reply. "Unread" = messages from the seller
+// that arrived after the last ops reply.
+app.get('/admin/support/threads', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.id, t.phone, t.created_at,
+            (SELECT m.body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_message,
+            (SELECT m.created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_at,
+            (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id) AS message_count,
+            (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id AND m.sender_role <> 'ops'
+               AND m.id > COALESCE((SELECT MAX(m2.id) FROM chat_messages m2 WHERE m2.thread_id = t.id AND m2.sender_role = 'ops'), 0)) AS unread
+       FROM chat_threads t
+      WHERE t.kind = 'support'
+      ORDER BY COALESCE((SELECT m.created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1), t.created_at) DESC
+      LIMIT 100`,
+  ).all();
+  return c.json({ threads: results });
+});
+
+app.get('/admin/support/threads/:id', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const id = Number(c.req.param('id'));
+  const thread = await c.env.DB.prepare(
+    `SELECT id, kind, phone, created_at FROM chat_threads WHERE id = ?1 AND kind = 'support'`,
+  ).bind(id).first();
+  if (!thread) return c.json({ error: 'not found' }, 404);
+  const { results: messages } = await c.env.DB.prepare(
+    'SELECT id, sender_phone, sender_role, body, created_at FROM chat_messages WHERE thread_id = ?1 ORDER BY id',
+  ).bind(id).all();
+  return c.json({ thread, messages });
+});
+
+/* ------------------------------ users & roles ----------------------------- */
+// GET: any staff can review accounts. Role writes: SUPERADMIN only (owner or
+// admin key) — the owner can promote an assistant to admin; admins cannot
+// mint more admins, and the owner row can never be demoted (no self-lockout).
+app.get('/admin/users', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT email, phone, full_name, role, email_verified, created_at
+       FROM auth_users ORDER BY created_at DESC LIMIT 200`,
+  ).all();
+  return c.json({ users: results });
+});
+
+app.post('/admin/users/role', async (c) => {
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const email = String(b?.email ?? '').trim().toLowerCase();
+  const role = String(b?.role ?? '');
+  if (!email || !['customer', 'admin', 'partner'].includes(role)) {
+    return c.json({ error: 'email and role (customer|admin|partner) required' }, 400);
+  }
+  const user = await c.env.DB.prepare(
+    'SELECT email, phone, role FROM auth_users WHERE email = ?1',
+  ).bind(email).first<any>();
+  if (!user) return c.json({ error: 'not found' }, 404);
+  // The owner account can never be demoted — you cannot lock yourself out.
+  if (role !== 'admin' && user.phone && user.phone === ownerPhone(c.env)) {
+    return c.json({ error: 'owner_cannot_be_demoted' }, 400);
+  }
+  const res = await c.env.DB.prepare('UPDATE auth_users SET role = ?2 WHERE email = ?1')
+    .bind(email, role).run();
+  return c.json({ ok: true, email, role, updated: res.meta.changes ?? 0 });
 });
 
 /* -------- admin/superadmin SMS communication + marketing ------------------- */
@@ -2161,10 +2419,13 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     if (pay.job_id) stmts.push(db.prepare('UPDATE jobs SET paid = 1 WHERE id = ?1').bind(pay.job_id));
     await env.DB.batch(stmts);
   } else if (pay.kind === 'subscription' && pay.subscription_id) {
-    // Activate/renew the pack for another 30-day cycle. Unused parcels do NOT
-    // roll over — they expire with the cycle.
+    // Activate/renew the pack for its own cycle (daily = 1 day, weekly = 7,
+    // monthly packs = 30). Unused parcels do NOT roll over — they expire.
     const sub = await env.DB.prepare('SELECT phone, tier, period_start, period_end FROM subscriptions WHERE id = ?1')
       .bind(pay.subscription_id).first<any>();
+    const packs = await plans(env.DB);
+    const cycleDays = Math.max(1, packs[(sub?.tier ?? 'silver') as PlanTier]?.cycle_days || 30);
+    const cycleMod = `+${cycleDays} days`;
     const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
     let newStart = nowStr;
     if (sub && sub.period_start && sub.period_end) {
@@ -2173,16 +2434,18 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     await env.DB.prepare(
       `UPDATE subscriptions SET status = 'active',
          period_start = ?2,
-         period_end = datetime(?2, '+30 days'),
+         period_end = datetime(?2, ?3),
          rollover_parcels = 0,
          rollover_period = NULL,
-         expires_at = datetime(?2, '+30 days'),
+         expires_at = datetime(?2, ?3),
          started_at = datetime('now')
        WHERE id = ?1`,
-    ).bind(pay.subscription_id, newStart).run();
+    ).bind(pay.subscription_id, newStart, cycleMod).run();
     await sendToPhone(env, pay.phone, {
       title: sub?.tier ? `${sub.tier} pack renewed` : 'Pack renewed',
-      body: 'Renewed for another 30 days. Unused parcels do not carry over — book away!',
+      body: cycleDays === 1
+        ? 'Your daily pass is live for today. Book away — unused parcels expire tonight.'
+        : `Renewed for another ${cycleDays} days. Unused parcels do not carry over — book away!`,
       data: { kind: 'subscription_active' },
     });
   } else if (pay.kind === 'upgrade' && pay.subscription_id) {
@@ -3222,7 +3485,7 @@ app.get('/console', (c) => {
 <h2>Tiers (pack prices â€” editable live)</h2>
 <table id="tiersTbl"><thead><tr><th>tier</th><th>fee K/mo</th><th>parcels/day</th><th>rider fee K</th><th>tag</th><th></th></tr></thead><tbody></tbody></table>
 <div>
-<select id="tTier"><option>silver</option><option>gold</option><option>platinum</option></select>
+<select id="tTier"><option>daily</option><option>weekly</option><option>silver</option><option>gold</option><option>platinum</option></select>
 <input id="tFee" type="number" placeholder="fee ZMW" step="1">
 <input id="tPpd" type="number" placeholder="parcels/day" step="1">
 <input id="tRider" type="number" placeholder="rider fee (0 = bundled)" step="1">
@@ -3374,7 +3637,7 @@ app.post('/subscriptions', async (c) => {
   const tier: PlanTier = b.tier;
   const packs = await plans(c.env.DB);
   const plan = packs[tier];
-  if (!plan || plan.fee_zmw <= 0) return c.json({ error: 'tier must be "silver", "gold" or "platinum"' }, 400);
+  if (!plan || plan.fee_zmw <= 0) return c.json({ error: `tier must be one of ${Object.keys(packs).join(', ')}` }, 400);
   // identity: customers subscribe their own phone; ops/admin may set any
   const phone = c.get('role') === 'customer' ? c.get('phone')! : normalizeZmPhone(b.phone ?? '');
   if (!phone) return c.json({ error: 'missing phone' }, 401);
@@ -3382,12 +3645,14 @@ app.post('/subscriptions', async (c) => {
   if (!plan.windows.includes(window)) {
     return c.json({ error: `pickup_window must be one of ${plan.windows.join(', ')}` }, 400);
   }
+  // Cycle length comes from the plan: daily pass = 1 day, weekly = 7, packs = 30.
+  const cycleMod = `+${Math.max(1, plan.cycle_days || 30)} days`;
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO subscriptions (phone, sender_name, tier, city, pickup_window, status, period_start, period_end)
      VALUES (?1,?2,?3,?4,?5,
        CASE WHEN EXISTS (SELECT 1 FROM subscriptions s2 WHERE s2.phone = ?1 AND s2.status = 'active' AND s2.period_end > datetime('now'))
             THEN 'active' ELSE 'pending_payment' END,
-       datetime('now'), datetime('now', '+30 days'))
+       datetime('now'), datetime('now', ?6))
      ON CONFLICT(phone) DO UPDATE SET
        tier = excluded.tier, sender_name = excluded.sender_name, city = excluded.city,
        pickup_window = excluded.pickup_window,
@@ -3396,8 +3661,8 @@ app.post('/subscriptions', async (c) => {
        period_start = CASE WHEN subscriptions.status = 'active' AND subscriptions.period_end > datetime('now')
                   THEN subscriptions.period_start ELSE datetime('now') END,
        period_end = CASE WHEN subscriptions.status = 'active' AND subscriptions.period_end > datetime('now')
-                  THEN subscriptions.period_end ELSE datetime('now', '+30 days') END`,
-  ).bind(phone, b.sender_name ?? null, tier, b.city ?? 'Lusaka', window).run();
+                  THEN subscriptions.period_end ELSE datetime('now', ?6) END`,
+  ).bind(phone, b.sender_name ?? null, tier, b.city ?? 'Lusaka', window, cycleMod).run();
   const sub = await c.env.DB.prepare('SELECT id, tier, period_start, period_end FROM subscriptions WHERE phone = ?1')
     .bind(phone).first<any>();
   return c.json({
@@ -3452,7 +3717,7 @@ app.get('/subscriptions/:phone?', async (c) => {
 // Pay the difference for the remaining days; the new tier's cap applies the
 // moment the upgrade is requested. Failed/abandoned payments are reverted by
 // the reconciliation sweep using the prevTier stored on the payment row.
-const TIER_RANK: Record<string, number> = { silver: 0, gold: 1, platinum: 2 };
+const TIER_RANK: Record<string, number> = { daily: 0, weekly: 1, silver: 2, gold: 3, platinum: 4 };
 
 app.post('/subscriptions/upgrade', async (c) => {
   if (await rateLimited(c, 'payment_create', 30)) return c.json({ error: 'too_many_requests' }, 429);
@@ -3462,7 +3727,7 @@ app.post('/subscriptions/upgrade', async (c) => {
   if (!phone) return c.json({ error: 'identity_required' }, 401);
   const packs = await plans(c.env.DB);
   const newPlan = packs[tier];
-  if (!newPlan || newPlan.fee_zmw <= 0) return c.json({ error: 'tier must be "silver", "gold" or "platinum"' }, 400);
+  if (!newPlan || newPlan.fee_zmw <= 0) return c.json({ error: `tier must be one of ${Object.keys(packs).join(', ')}` }, 400);
   const sub = await c.env.DB.prepare(
     `SELECT id, phone, tier, period_start, period_end FROM subscriptions WHERE phone = ?1 ORDER BY id DESC LIMIT 1`,
   ).bind(phone).first<any>();
