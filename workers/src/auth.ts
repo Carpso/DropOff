@@ -50,7 +50,7 @@ export function generateEmailToken(): string {
 interface JwtPayload { phone: string; exp: number; ver?: number } // ver = token_version (session revocation)
 
 export async function signJwt(
-  phone: string, secret: string, ttlSeconds = 60 * 60 * 24 * 30, ver = 0,
+  phone: string, secret: string, ttlSeconds = 60 * 60 * 24 * 7, ver = 0,
 ): Promise<string> {
   const header = b64urlJson({ alg: 'HS256', typ: 'JWT' });
   const payload = b64urlJson({ phone, exp: Math.floor(Date.now() / 1000) + ttlSeconds, ver } satisfies JwtPayload);
@@ -83,10 +83,10 @@ export async function verifyJwtClaims(token: string, secret: string): Promise<Jw
 }
 
 /* ------------------------------ password auth ----------------------------- */
-// PBKDF2-SHA256, 100k iterations, 32-byte hash, random 16-byte salt.
+// PBKDF2-SHA256, 210k iterations, 32-byte hash, random 16-byte salt.
 // Stored as: pbkdf2$100000$<saltHex>$<hashHex>
 
-const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_ITERATIONS = 210_000;
 
 function toHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');

@@ -82,6 +82,6 @@ describe('auth', () => {
     const hash = await hashPassword('S3curePass!');
     expect(await verifyPassword('S3curePass!', hash)).toBe(true);
     expect(await verifyPassword('wrong', hash)).toBe(false);
-    expect(hash.startsWith('pbkdf2$100000$')).toBe(true);
+    expect(hash.startsWith('pbkdf2$210000$')).toBe(true);
   });
 });

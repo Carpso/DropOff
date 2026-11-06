@@ -1,3 +1,6 @@
+// Circuit breaker for external payment providers.
+import { withCircuit } from './circuit';
+
 // Environment types (declared here so both modules share them)
 export interface Env {
   DB: D1Database;
@@ -79,19 +82,27 @@ export async function lipilaCollect(
   note: string,
   email?: string,
 ): Promise<{ ok: boolean; lipilaReference?: string; raw?: string; status: number }> {
-  const res = await fetch(`${env.LIPILA_BASE_URL}/api/v1/collections/mobile-money`, {
-    method: 'POST',
-    headers: lipilaHeaders(env.LIPILA_API_KEY, env),
-    body: JSON.stringify({
-      referenceId: reference,
-      amount: amountZmw,
-      narration: note,
-      accountNumber: phoneZm,
-      currency: 'ZMW',
-      ...(email ? { email } : {}),
-      referenceData: note,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await withCircuit('lipila-collect', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/collections/mobile-money`, {
+      method: 'POST',
+      headers: lipilaHeaders(env.LIPILA_API_KEY, env),
+      body: JSON.stringify({
+        referenceId: reference,
+        amount: amountZmw,
+        narration: note,
+        accountNumber: phoneZm,
+        currency: 'ZMW',
+        ...(email ? { email } : {}),
+        referenceData: note,
+      }),
+    }));
+  } catch (e: any) {
+    if (e?.status === 503) {
+      return { ok: false, status: 503, lipilaReference: undefined, raw: 'circuit_open' };
+    }
+    return { ok: false, status: 502, lipilaReference: undefined, raw: String(e?.message ?? e) };
+  }
   const text = await res.text();
   let data: any = null;
   try { data = JSON.parse(text); } catch { /* keep raw */ }
@@ -106,18 +117,26 @@ export async function lipilaDisburse(
   reference: string,
   note: string,
 ): Promise<{ ok: boolean; lipilaReference?: string; raw?: string; status: number }> {
-  const res = await fetch(`${env.LIPILA_BASE_URL}/api/v1/disbursements/mobile-money`, {
-    method: 'POST',
-    headers: lipilaHeaders(env.LIPILA_API_KEY, env),
-    body: JSON.stringify({
-      referenceId: reference,
-      amount: amountZmw,
-      accountNumber: phoneZm,
-      currency: 'ZMW',
-      narration: note,
-      referenceData: note,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await withCircuit('lipila-disbursements', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/disbursements/mobile-money`, {
+      method: 'POST',
+      headers: lipilaHeaders(env.LIPILA_API_KEY, env),
+      body: JSON.stringify({
+        referenceId: reference,
+        amount: amountZmw,
+        accountNumber: phoneZm,
+        currency: 'ZMW',
+        narration: note,
+        referenceData: note,
+      }),
+    }));
+  } catch (e: any) {
+    if (e?.status === 503) {
+      return { ok: false, status: 503, lipilaReference: undefined, raw: 'circuit_open' };
+    }
+    return { ok: false, status: 502, lipilaReference: undefined, raw: String(e?.message ?? e) };
+  }
   const text = await res.text();
   let data: any = null;
   try { data = JSON.parse(text); } catch { /* keep raw */ }
@@ -126,9 +145,14 @@ export async function lipilaDisburse(
 
 /** Poll a collection. The app polls every ~2s for up to 40s. */
 export async function lipilaStatus(env: Env, reference: string): Promise<'pending' | 'success' | 'failed'> {
-  const res = await fetch(`${env.LIPILA_BASE_URL}/api/v1/collections/check-status?referenceId=${encodeURIComponent(reference)}`, {
-    headers: { accept: 'application/json', 'x-api-key': env.LIPILA_API_KEY },
-  });
+  let res: Response;
+  try {
+    res = await withCircuit('lipila-status', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/collections/check-status?referenceId=${encodeURIComponent(reference)}`, {
+      headers: { accept: 'application/json', 'x-api-key': env.LIPILA_API_KEY },
+    }));
+  } catch {
+    return 'pending'; // circuit open: treat as pending, never block a payment on a status poll
+  }
   if (!res.ok) return 'pending';
   const data: any = await res.json().catch(() => null);
   return mapLipilaStatus(data?.status);

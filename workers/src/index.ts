@@ -93,6 +93,19 @@ const WAIT_FREE_MINUTES = 10;
 const WAIT_RATE_PER_MIN = 2;
 const WAIT_CAP_ZMW = 50;
 
+/* ------------------------------- pagination ------------------------------- */
+// Keyset (cursor) pagination so list endpoints stay O(1) at 1M+ rows.
+// Clients pass `?after=<last_id_seen>`; the server returns `next_after` + `has_more`.
+const PAGE_DEFAULT = 50;
+const PAGE_MAX = 200;
+function pageLimit(raw: string | null | undefined): number {
+  const n = Number(raw ?? '');
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), PAGE_MAX) : PAGE_DEFAULT;
+}
+function cacheSeconds(seconds: number): Record<string, string> {
+  return { 'Cache-Control': `public, max-age=${seconds}, stale-while-revalidate=${Math.floor(seconds / 2)}` };
+}
+
 function waitFeeFor(minutes: number): number {
   if (!Number.isFinite(minutes) || minutes <= 0) return 0;
   return Math.min(WAIT_CAP_ZMW, Math.round(Math.max(0, minutes - WAIT_FREE_MINUTES) * WAIT_RATE_PER_MIN));
@@ -172,6 +185,33 @@ function r2KeyFromUrl(url: string): string | null {
   const clean = String(url ?? '').replace(/^https?:\/\/[^/]+/, '');
   const m = clean.match(/^\/media\/(.+)$/);
   return m ? m[1] : null;
+}
+
+/** Validate that the file bytes really look like an image (magic bytes).
+ *  Prevents a client from uploading an HTML/JS payload with a .jpg extension
+ *  and having it served back with attacker-chosen Content-Type (XSS). */
+const IMAGE_MAGIC: [string, Uint8Array][] = [
+  ['jpg', new Uint8Array([0xFF, 0xD8, 0xFF])],
+  ['png', new Uint8Array([0x89, 0x50, 0x4E, 0x47])],
+  ['gif', new Uint8Array([0x47, 0x49, 0x46, 0x38])],
+  ['webp', new Uint8Array([0x52, 0x49, 0x46, 0x46])], // RIFF; WEBP check below
+];
+function looksLikeImage(bytes: Uint8Array, ext: string): boolean {
+  if (ext === 'heic' || ext === 'heif') return true; // iOS HEIC — complex ftyp box, allow by ext
+  if (ext === 'webp') {
+    if (bytes.length < 12) return false;
+    const riff = new TextDecoder().decode(bytes.slice(0, 4)) === 'RIFF';
+    const webp = new TextDecoder().decode(bytes.slice(8, 12)) === 'WEBP';
+    return riff && webp;
+  }
+  for (const [e, sig] of IMAGE_MAGIC) {
+    if (ext === e && bytes.length >= sig.length) {
+      let match = true;
+      for (let i = 0; i < sig.length; i++) if (bytes[i] !== sig[i]) { match = false; break; }
+      if (match) return true;
+    }
+  }
+  return false;
 }
 
 const RIDER_DOC_FIELDS = [
@@ -612,10 +652,7 @@ app.post('/auth/register', async (c) => {
     `SELECT email, phone FROM auth_users WHERE email = ?1 OR phone = ?2 LIMIT 1`,
   ).bind(email, phone).first<any>();
   if (clash) {
-    return c.json(
-      { error: clash.email === email ? 'email_already_registered' : 'phone_already_used' },
-      409,
-    );
+    return c.json({ error: 'account_already_exists' }, 409);
   }
 
   const passwordHash = await hashPassword(password);
@@ -818,7 +855,7 @@ app.post('/auth/login', async (c) => {
       { ip, device: devId, userAgent: ua, email });
   }
 
-  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(user.token_version ?? 0));
+  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 7, Number(user.token_version ?? 0));
   return c.json({ ok: true, token, email, phone, full_name: user.full_name });
 });
 
@@ -864,11 +901,11 @@ app.get('/couriers', async (c) => {
               WHERE r.target_type = 'courier' AND r.target_key = 'courier:' || co.id AND r.hidden = 0) AS rating_average,
             (SELECT COUNT(*) FROM ratings r
               WHERE r.target_type = 'courier' AND r.target_key = 'courier:' || co.id AND r.hidden = 0) AS rating_count
-       FROM couriers co
-       LEFT JOIN partner_pos pp ON pp.courier_id = co.id AND pp.active = 1
-      WHERE co.active = 1 ORDER BY co.name`,
+           FROM couriers co
+           LEFT JOIN partner_pos pp ON pp.courier_id = co.id AND pp.active = 1
+          WHERE co.active = 1 ORDER BY co.id`,
   ).all();
-  return c.json({ couriers: results });
+  return c.json({ couriers: results }, 200, cacheSeconds(300));
 });
 
 // Public partner profile: verified rates come straight from the quotes chargebook
@@ -1391,13 +1428,23 @@ app.get('/jobs', async (c) => {
     try { phone = normalizeZmPhone(c.req.query('phone') ?? ''); } catch { phone = ''; }
   }
   if (!phone) return c.json({ error: 'missing phone' }, 400);
+  const limit = pageLimit(c.req.query('limit'));
+  const after = c.req.query('after') ? Number(c.req.query('after')) : null;
+  const afterBind = after != null && Number.isFinite(after) ? after : 9007199254740991;
   const { results } = await c.env.DB.prepare(
     `SELECT j.*, co.name AS courier_name, co.depot_name,
             (SELECT status FROM job_events ev WHERE ev.job_id = j.id ORDER BY ev.id DESC LIMIT 1) AS last_event
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
-      WHERE j.sender_phone = ?1 ORDER BY j.id DESC LIMIT 50`,
-  ).bind(phone).all();
-  return c.json({ jobs: results });
+      WHERE j.sender_phone = ?1 AND j.id < ?2
+      ORDER BY j.id DESC LIMIT ?3`,
+  ).bind(phone, afterBind, limit + 1).all();
+  const hasMore = results.length > limit;
+  const page = hasMore ? results.slice(0, -1) : results;
+  return c.json({
+    jobs: page,
+    next_after: hasMore ? Number(page[page.length - 1]?.id ?? 0) : undefined,
+    has_more: hasMore,
+  }, 200, cacheSeconds(30));
 });
 
 app.get('/jobs/:ref', async (c) => {
@@ -1493,12 +1540,15 @@ app.post('/jobs/:ref/events', async (c) => {
   ).bind(c.req.param('ref')).first() as any;
   if (!job) return c.json({ error: 'not found' }, 404);
 
-  // authorization: ops/admin keys (handled above) or the assigned rider's JWT
-  if (c.get('role') === 'customer') {
-    const phone = c.get('phone');
+  // authorization: ops/admin keys, or the assigned rider's own JWT.
+  // Applies to every authenticated role — not just 'customer' — so a rider,
+  // partner or ops-key device cannot tamper with another rider's job.
+  const phone = c.get('phone') ?? null;
+  const isAdminKey = isAdmin(c);
+  const isOpsKey = c.get('role') === 'ops';
+  if (!isAdminKey && !isOpsKey) {
     const isAssigned = job.rider_phone && phone === job.rider_phone;
-    const isAdminKey = isAdmin(c);
-    if (!isAssigned && !isAdminKey) return c.json({ error: 'only the assigned rider can act on this job' }, 403);
+    if (!isAssigned) return c.json({ error: 'only the assigned rider can act on this job' }, 403);
   }
 
   const dbStatements: D1PreparedStatement[] = [];
@@ -1610,6 +1660,23 @@ app.post('/jobs/:ref/events', async (c) => {
     const push = stagePush[status];
     if (push) {
       await sendToPhone(c.env, job.sender_phone, { ...push, data: { job_ref: String(updated.ref), kind: 'status' } });
+    }
+    // SMS milestones to both parties — proactive updates are the #1 trust signal
+    // in first-mile delivery. Best-effort: never fails the job if SMS is off.
+    const smsMilestones = new Set(['picked_up', 'at_depot', 'delivered', 'ready_for_collection']);
+    if (status && smsMilestones.has(status) && job.sender_phone && job.recipient_phone) {
+      const ref = String(updated.ref);
+      const body = status === 'delivered'
+        ? `DropOff: your parcel ${ref} is delivered at the depot. Track it in the DropOff app.`
+        : status === 'ready_for_collection'
+          ? `DropOff: your parcel ${ref} is ready for collection at the depot.`
+          : status === 'at_depot'
+            ? `DropOff: your parcel ${ref} reached the depot.`
+            : `DropOff: your parcel ${ref} was picked up and is heading to the depot.`;
+      await Promise.allSettled([
+        sendSms(c.env, job.sender_phone, body),
+        sendSms(c.env, job.recipient_phone, body),
+      ]);
     }
   }
   return c.json({ ok: true, job: updated });
@@ -4223,7 +4290,13 @@ app.post('/uploads', async (c) => {
   }
   if (!ext) return c.json({ error: 'unsupported_image_type', allowed: Object.keys(UPLOAD_TYPES) }, 400);
   const key = `uploads/${crypto.randomUUID()}.${ext}`;
-  await c.env.BACKUPS.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: type } });
+  const bytes = await file.arrayBuffer();
+  if (!looksLikeImage(new Uint8Array(bytes), ext)) {
+    return c.json({ error: 'file_not_an_image' }, 400);
+  }
+  // Force a safe image content-type regardless of what the client sent.
+  const safeType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+  await c.env.BACKUPS.put(key, bytes, { httpMetadata: { contentType: safeType } });
   return c.json({ ok: true, key, url: `/media/${key}` });
 });
 
@@ -4313,19 +4386,25 @@ app.get('/rider/targets', async (c) => {
 /* ------------------ admin/owner: verify riders + fleet targets ------------ */
 app.get('/admin/riders', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const limit = pageLimit(c.req.query('limit'));
   const { results } = await c.env.DB.prepare(
     `SELECT ${riderDocSelect()}, last_lat, last_lng, last_seen_at
        FROM riders ORDER BY
        CASE verification_status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END,
-       full_name COLLATE NOCASE`,
-  ).all<any>();
+       full_name COLLATE NOCASE
+       LIMIT ?1`,
+  ).bind(limit + 1).all<any>();
+  const hasMore = results.length > limit;
+  const page = hasMore ? results.slice(0, -1) : results;
   const targets = await riderTargetStats(c.env.DB);
-  const riders = ((results ?? []) as any[]).map((r) => ({
+  const riders = ((page ?? []) as any[]).map((r) => ({
     ...r,
     targets: targets.get(Number(r.id)) ?? shapeTargets(0, 0),
   }));
   return c.json({
     riders,
+    next_after: hasMore ? Number(page[page.length - 1]?.id ?? 0) : undefined,
+    has_more: hasMore,
     pending: riders.filter((r) => r.verification_status === 'pending').length,
     verified: riders.filter((r) => r.verification_status === 'verified').length,
     daily_target: DRIVER_DAILY_TARGET,
@@ -4387,6 +4466,185 @@ app.post('/admin/riders/:id/ai-check', async (c) => {
   await c.env.DB.prepare('UPDATE riders SET ai_check_json = ?2 WHERE id = ?1')
     .bind(id, JSON.stringify(result)).run().catch(() => {});
   return c.json({ ok: true, ...result, submitted_plate: rider.plate_number, submitted_nrc: rider.nrc_number });
+});
+
+/* ------------------------------ web dashboard ----------------------------- */
+// Server-rendered admin dashboard (no separate build / hosting needed).
+// Superadmin (owner) sees everything; admins see riders/jobs/fraud/alerts but
+// cannot mint/demote admins. Sellers & partners use the mobile app (app-first)
+// — they get read-only job/tracking surfaces via the existing API.
+function h(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function layout(title: string, user: string, body: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${h(title)} — DropOff</title><style>
+* { box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f4f7f5; color: #17221e; }
+.top { background: #123c32; color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 50; }
+.top h1 { margin: 0; font-size: 17px; letter-spacing: -0.5px; }
+.top a { color: #f6b73c; text-decoration: none; font-weight: 700; font-size: 13px; }
+.top a:hover { text-decoration: underline; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+nav { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+nav a { padding: 8px 14px; border-radius: 8px; background: #fff; border: 1px solid #e2e6e1; color: #17221e; text-decoration: none; font-weight: 700; font-size: 13px; }
+nav a.active { background: #123c32; color: #fff; border-color: #123c32; }
+nav a:hover { border-color: #123c32; }
+.card { background: #fff; border: 1px solid #e2e6e1; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.card h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.6px; color: #65736d; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.metric { background: #fff; border: 1px solid #e2e6e1; border-radius: 10px; padding: 14px; text-align: center; }
+.metric .v { font-size: 26px; font-weight: 800; color: #123c32; }
+.metric .l { font-size: 12px; color: #65736d; margin-top: 4px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e2e6e1; color: #65736d; font-weight: 800; font-size: 11px; text-transform: uppercase; }
+td { padding: 10px 8px; border-bottom: 1px solid #eef1ee; vertical-align: top; }
+tr:hover td { background: #f4f7f5; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 800; }
+.badge-verified { background: #e3efe6; color: #123c32; }
+.badge-pending { background: #fdf3e3; color: #8a5a00; }
+.badge-rejected { background: #fdeceb; color: #b3261e; }
+.badge-open { background: #fdeceb; color: #b3261e; }
+.badge-cleared { background: #e3efe6; color: #123c32; }
+.btn { background: #123c32; color: #fff; border: none; padding: 6px 12px; border-radius: 8px; font-weight: 800; font-size: 12px; cursor: pointer; }
+.btn:hover { background: #175445; }
+.btn-sm { padding: 4px 8px; font-size: 11px; }
+.btn-outline { background: transparent; border: 1px solid #123c32; color: #123c32; }
+.btn-outline:hover { background: #123c32; color: #fff; }
+.btn-danger { background: #b3261e; color: #fff; }
+.btn-danger:hover { background: #9a1f19; }
+input, select { padding: 6px 10px; border: 1px solid #e2e6e1; border-radius: 8px; font-size: 13px; }
+.empty { color: #65736d; font-size: 13px; text-align: center; padding: 30px; }
+.foot { margin-top: 24px; color: #65736d; font-size: 11px; border-top: 1px solid #e2e6e1; padding-top: 12px; }
+@media (max-width: 700px) { .wrap { padding: 10px; } .metrics { grid-template-columns: 1fr; } table { font-size: 11px; } th, td { padding: 6px 4px; } }
+</style></head><body>
+<div class="top"><strong style="font-size:18px;letter-spacing:-0.6px;">DropOff</strong> <span style="opacity:.8">first-mile · Zambia</span> <a href="/dashboard">Dashboard</a> <span style="opacity:.6">·</span> <a href="/admin/riders">Riders</a> <span style="opacity:.6">·</span> <a href="/admin/fraud">Fraud</a> <span style="opacity:.6">·</span> <a href="/security/alerts">Alerts</a> <span style="opacity:.6">·</span> <strong>${h(user)}</strong> <a href="/auth/logout" style="margin-left:10px;">Sign out</a></div>
+<div class="wrap">${body}</div>
+<div class="foot">DropOff — home or shop pickup to your courier depot. Internal admin surface. Not for sellers or recipients.</div>
+</body></html>`;
+}
+function statusBadge(s: string): string {
+  const cls = s === 'verified' ? 'badge-verified' : s === 'rejected' ? 'badge-rejected' : 'badge-pending';
+  return `<span class="badge ${cls}">${h(s)}</span>`;
+}
+
+/* Dashboard home: key metrics + quick links */
+app.get('/dashboard', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const phone = c.get('phone') ?? 'admin';
+  const stats = await c.env.DB.prepare(
+    `SELECT (SELECT COUNT(*) FROM riders) AS riders,
+            (SELECT COUNT(*) FROM riders WHERE verification_status = 'pending') AS pending,
+            (SELECT COUNT(*) FROM riders WHERE verification_status = 'verified') AS verified,
+            (SELECT COUNT(*) FROM jobs) AS jobs,
+            (SELECT COUNT(*) FROM jobs WHERE status IN ('rider_assigned','picked_up','at_depot','departed','arrived')) AS in_flight,
+            (SELECT COUNT(*) FROM fraud_flags WHERE status = 'open') AS open_fraud,
+            (SELECT COUNT(*) FROM security_alerts WHERE acknowledged = 0) AS unacked_alerts
+       FROM riders LIMIT 1`,
+  ).first<any>();
+  const b = `
+  <div class="metrics">
+    <div class="metric"><div class="v">${h(stats?.jobs ?? 0)}</div><div class="l">Jobs total</div></div>
+    <div class="metric"><div class="v">${h(stats?.in_flight ?? 0)}</div><div class="l">In flight</div></div>
+    <div class="metric"><div class="v">${h(stats?.riders ?? 0)}</div><div class="l">Riders</div></div>
+    <div class="metric"><div class="v">${h(stats?.pending ?? 0)}</div><div class="l">Pending verification</div></div>
+    <div class="metric"><div class="v">${h(stats?.open_fraud ?? 0)}</div><div class="l">Open fraud flags</div></div>
+    <div class="metric"><div class="v">${h(stats?.unacked_alerts ?? 0)}</div><div class="l">Unacked alerts</div></div>
+  </div>
+  <div class="card">
+    <h2>Quick actions</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a class="btn" href="/admin/riders">Manage riders</a>
+      <a class="btn btn-outline" href="/dashboard/riders">Rider list + targets</a>
+      <a class="btn btn-outline" href="/dashboard/jobs">Job list</a>
+      <a class="btn btn-outline" href="/admin/fraud">Review fraud</a>
+      <a class="btn btn-outline" href="/security/alerts?unacknowledged=1">Security alerts</a>
+    </div>
+  </div>
+  `;
+  return new Response(layout('Dashboard', phone, b), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+});
+
+/* Rider list + targets (dashboard view of /admin/riders) */
+app.get('/dashboard/riders', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const limit = pageLimit(c.req.query('limit'));
+  const { results } = await c.env.DB.prepare(
+    `SELECT ${riderDocSelect()}, last_lat, last_lng, last_seen_at
+       FROM riders ORDER BY id DESC LIMIT ?1`,
+  ).bind(limit + 1).all<any>();
+  const hasMore = results.length > limit;
+  const page = hasMore ? results.slice(0, -1) : results;
+  const targets = await riderTargetStats(c.env.DB);
+  const rows = ((page ?? []) as any[]).map((r) => {
+    const t = targets.get(Number(r.id)) ?? shapeTargets(0, 0);
+    return `<tr>
+      <td>${h(r.full_name)}</td>
+      <td>${h(r.phone)}</td>
+      <td>${h(r.vehicle)} ${h(r.vehicle_class ?? '')}</td>
+      <td>${statusBadge(r.verification_status ?? 'pending')}</td>
+      <td>${t.today}/${t.daily_target}</td>
+      <td>${t.month}/${t.month_target}</td>
+      <td>${t.on_track ? 'on track' : 'behind'}</td>
+      <td>
+        <form method="post" action="/admin/riders/${h(r.id)}/verify" style="display:inline" onsubmit="return confirm('Verify this rider?')">
+          <input type="hidden" name="status" value="verified">
+          <button class="btn btn-sm" ${r.verification_status === 'verified' ? 'disabled' : ''}>Verify</button>
+        </form>
+        <form method="post" action="/admin/riders/${h(r.id)}/verify" style="display:inline" onsubmit="return confirm('Reject this rider?')">
+          <input type="hidden" name="status" value="rejected">
+          <input type="hidden" name="note" value="Rejected from dashboard">
+          <button class="btn btn-sm btn-danger" ${r.verification_status === 'rejected' ? 'disabled' : ''}>Reject</button>
+        </form>
+      </td>
+    </tr>`;
+  }).join('');
+  const b = `
+  <div class="card">
+    <h2>Riders &amp; drivers</h2>
+    <p style="margin:0 0 10px;color:#65736d;font-size:12px">${hasMore ? `Showing ${page.length} of more than ${limit}` : `Showing ${page.length} riders`}</p>
+    <table>
+      <thead><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th>Verification</th><th>Today</th><th>Month</th><th>Pace</th><th>Action</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="8" class="empty">No riders.</td></tr>'}</tbody>
+    </table>
+  </div>
+  `;
+  return new Response(layout('Riders', c.get('phone') ?? 'admin', b), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+});
+
+/* Job list (dashboard view) */
+app.get('/dashboard/jobs', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const limit = pageLimit(c.req.query('limit'));
+  const { results } = await c.env.DB.prepare(
+    `SELECT j.ref, j.sender_phone, j.sender_name, j.recipient_name, j.pickup_address, j.dest_city, j.status, j.rider_fee_zmw, j.total_zmw, j.created_at,
+            co.name AS courier_name
+       FROM jobs j JOIN couriers co ON co.id = j.courier_id
+      ORDER BY j.id DESC LIMIT ?1`,
+  ).bind(limit + 1).all<any>();
+  const hasMore = results.length > limit;
+  const page = hasMore ? results.slice(0, -1) : results;
+  const rows = ((page ?? []) as any[]).map((j) => `<tr>
+    <td>${h(j.ref)}</td>
+    <td>${h(j.sender_name)}</td>
+    <td>${h(j.sender_phone)}</td>
+    <td>${h(j.recipient_name)}</td>
+    <td>${h(j.pickup_address)}</td>
+    <td>${h(j.dest_city)}</td>
+    <td>${h(j.courier_name)}</td>
+    <td><span class="badge ${j.status === 'delivered' ? 'badge-cleared' : 'badge-open'}">${h(j.status)}</span></td>
+    <td>K${Number(j.total_zmw ?? 0).toFixed(2)}</td>
+    <td>${h(j.created_at)}</td>
+  </tr>`).join('');
+  const b = `
+  <div class="card">
+    <h2>Jobs</h2>
+    <table>
+      <thead><tr><th>Ref</th><th>Sender</th><th>Phone</th><th>Recipient</th><th>Pickup</th><th>Dest</th><th>Courier</th><th>Status</th><th>Total</th><th>Created</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="10" class="empty">No jobs.</td></tr>'}</tbody>
+    </table>
+  </div>
+  `;
+  return new Response(layout('Jobs', c.get('phone') ?? 'admin', b), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 });
 
 /* ------------------------------ AI helpers -------------------------------- */
