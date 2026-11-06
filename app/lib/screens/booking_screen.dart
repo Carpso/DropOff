@@ -8,11 +8,15 @@ import '../ui/app_theme.dart';
 import '../widgets/common.dart';
 import 'account_screen.dart';
 import 'bookings_screen.dart';
-import 'couriers_screen.dart';
 
 class BookingScreen extends StatefulWidget {
   final String? initialCourierId;
   const BookingScreen({super.key, this.initialCourierId});
+
+  /// Repeat-last-booking hook: BusinessScreen stores a snapshot of the job to
+  /// clone (from / to / branch / courier / recipients…) here before pushing;
+  /// initState consumes it once and clears it.
+  static Map<String, dynamic>? prefill;
 
   @override
   State<BookingScreen> createState() => _BookingScreenState();
@@ -25,7 +29,6 @@ class _BookingScreenState extends State<BookingScreen> {
   /// before the server quote; the authoritative charge comes from the Worker.
   static const double lastMilePrice = 45;
   static const Map<String, String> pickupWindows = {
-    'now': 'As soon as possible',
     '06:00': 'Daily sweep 6:00 am',
     '10:00': 'Daily sweep 10:00 am',
     '14:00': 'Daily sweep 2:00 pm',
@@ -34,14 +37,12 @@ class _BookingScreenState extends State<BookingScreen> {
   /// Seller-facing slot copy: arrival RANGE + benefit + booking cutoff (CAT).
   /// Closed slots stay visible (list-only) and auto-roll forward.
   static const Map<String, ({String title, String benefit, String cutoff})> slotCopy = {
-    'now': (title: 'Instant pick-up', benefit: 'Rider dispatched ASAP', cutoff: ''),
     '06:00': (title: '6:00 – 7:30 AM window', benefit: 'Catches early outbound buses', cutoff: '05:30'),
     '10:00': (title: '10:00 – 11:30 AM window', benefit: 'Catches midday courier express', cutoff: '09:30'),
     '14:00': (title: '2:00 – 3:30 PM window', benefit: 'Catches final evening transit', cutoff: '13:30'),
   };
 
   bool _slotClosed(String key) {
-    if (key == 'now') return false;
     final parts = slotCopy[key]!.cutoff.split(':');
     final now = TimeOfDay.now();
     final cutMin = int.parse(parts[0]) * 60 + int.parse(parts[1]);
@@ -55,20 +56,20 @@ class _BookingScreenState extends State<BookingScreen> {
   final _recipientName = TextEditingController();
   final _recipientPhone = TextEditingController();
   final _promo = TextEditingController();
+  final _pack = TextEditingController();
   final _returnAddress = TextEditingController();
 
   int _step = 0;
   String _from = 'Lusaka';
   String _to = 'Ndola';
-  String _pickupWindow = 'now';
+  String _pickupWindow = '10:00';
   late String _courierId = widget.initialCourierId ?? 'platinum';
   ParcelSize _size = ParcelSize.small;
   bool _lastMile = false;
   bool _roundTrip = false;
   String _returnCity = 'Lusaka';
-  DateTime? _customPickup;
-  bool _useCustomPickup = false;
   String _payment = 'Mobile money';
+  bool _packActive = false;
   bool _saving = false;
   List<String> _cities = cities;
   double? _promoPct;
@@ -78,13 +79,51 @@ class _BookingScreenState extends State<BookingScreen> {
   /// cars/vans cover most everyday parcels.
   String _vehicleClass = 'motorcycle';
   int _parcels = 1;
-  String? _branch;
   static const Map<String, int> _maxParcelsByVehicle = {'motorcycle': 3, 'car': 6, 'van': 10, 'truck': 15};
   static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
   @override
   void initState() {
     super.initState();
+    // Repeat last booking: adopt the snapshot's fields, then clear it so we
+    // never prefill twice for a fresh booking.
+    final pre = BookingScreen.prefill;
+    if (pre != null) {
+      BookingScreen.prefill = null;
+      final from = '${pre['from'] ?? ''}'.trim();
+      final to = '${pre['to'] ?? ''}'.trim();
+      if (from.isNotEmpty && from != to) { _from = from; _to = to; }
+      final pickup = '${pre['pickup'] ?? ''}'.trim();
+      if (pickup.isNotEmpty) _pickup.text = pickup;
+      final desc = '${pre['description'] ?? ''}'.trim();
+      if (desc.isNotEmpty) _description.text = desc;
+      final sender = '${pre['sender_name'] ?? ''}'.trim();
+      if (sender.isNotEmpty) _senderName.text = sender;
+      final senderPhone = '${pre['sender_phone'] ?? ''}'.trim();
+      if (senderPhone.isNotEmpty) _senderPhone.text = senderPhone;
+      final recipient = '${pre['recipient_name'] ?? ''}'.trim();
+      if (recipient.isNotEmpty) _recipientName.text = recipient;
+      final recipientPhone = '${pre['recipient_phone'] ?? ''}'.trim();
+      if (recipientPhone.isNotEmpty) _recipientPhone.text = recipientPhone;
+      final size = '${pre['size'] ?? ''}'.toLowerCase();
+      for (final s in ParcelSize.values) {
+        if (s.name == size) { _size = s; break; }
+      }
+      // Older snapshots/job rows carry the chargebook weight class instead.
+      switch ('${pre['weight_class'] ?? ''}') {
+        case '0-5kg': _size = ParcelSize.small; break;
+        case '5-15kg': _size = ParcelSize.medium; break;
+        case '15kg+': _size = ParcelSize.large; break;
+      }
+      _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
+      final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
+      if (parcels > 0 && parcels <= _maxParcelsByVehicle[_vehicleClass]!) _parcels = parcels;
+      final vehicle = '${pre['vehicle_class'] ?? ''}';
+      if (_maxParcelsByVehicle.containsKey(vehicle)) {
+        _vehicleClass = vehicle;
+        if (_parcels > _maxParcelsByVehicle[vehicle]!) _parcels = _maxParcelsByVehicle[vehicle]!;
+      }
+    }
     // Prefer the live chargebook's coverage when the API is on.
     if (DropOffApi.enabled) {
       DropOffApi.cities().then((list) {
@@ -98,10 +137,30 @@ class _BookingScreenState extends State<BookingScreen> {
 
   @override
   void dispose() {
-    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _returnAddress]) {
+    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress]) {
       controller.dispose();
     }
     super.dispose();
+  }
+
+  /// Redeem a bulk-paid pack code (sold offline) onto the signed-in number.
+  Future<void> _applyPack() async {
+    final code = _pack.text.trim().toUpperCase();
+    if (code.isEmpty) return;
+    final res = await DropOffApi.redeemPackCode(code);
+    if (!mounted) return;
+    if (res.ok) {
+      setState(() => _packActive = true);
+      final tier = '${res.body['tier'] ?? 'pack'}';
+      final end = '${res.body['period_end'] ?? ''}'.split(' ').first;
+      _message('$tier pack activated${end.isEmpty ? '' : ' until $end'} — rider fee covered on this booking.');
+    } else {
+      _message(res.error == 'code_not_found'
+          ? 'That pack code was not recognised.'
+          : res.error == 'code_used'
+              ? 'That pack code has already been used.'
+              : 'Could not redeem the pack code (${res.error}).');
+    }
   }
 
   Future<void> _checkPromo() async {
@@ -139,26 +198,6 @@ class _BookingScreenState extends State<BookingScreen> {
 
   bool _validPhone(String value) => RegExp(r'^(?:\+?260|0)?[79][567]\d{7}$').hasMatch(value.replaceAll(RegExp(r'[\s-]'), ''));
 
-  Future<void> _pickDateTime() async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: _customPickup ?? DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 7)),
-    );
-    if (date == null) return;
-    if (!mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_customPickup ?? DateTime.now()),
-    );
-    if (time == null) return;
-    setState(() {
-      _customPickup = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-      _useCustomPickup = true;
-    });
-  }
-
   void _next() {
     if (_step == 0) {
       if (_from == _to) return _message('Choose different pickup and destination cities.');
@@ -178,9 +217,6 @@ class _BookingScreenState extends State<BookingScreen> {
     }
     if (_roundTrip && _returnAddress.text.trim().isEmpty) {
       return _message('Enter the return address for the round trip.');
-    }
-    if (_customPickup != null && _customPickup!.isBefore(DateTime.now())) {
-      return _message('Pick a pickup time in the future.');
     }
     setState(() => _saving = true);
     final store = AppScope.of(context);
@@ -205,10 +241,9 @@ class _BookingScreenState extends State<BookingScreen> {
       returnCity: _roundTrip ? _returnCity : null,
       returnAddress: _roundTrip ? _returnAddress.text.trim().isEmpty ? null : _returnAddress.text.trim() : null,
       returnLegFee: _roundTrip ? (_courierFare ?? 0) : 0,
-      pickupAt: _customPickup?.toIso8601String(),
+      pickupAt: null,
       parcels: _parcels,
       vehicleClass: _vehicleClass,
-      branch: _branch,
     );
     if (store.lastBookingWindowRolled != null) {
       _message('The ${store.lastBookingWindowRolled} window had closed — your booking moved to the next open slot automatically.');
@@ -413,13 +448,7 @@ class _BookingScreenState extends State<BookingScreen> {
           const Text('The return ride (depot → your door) is estimated at the depot counter fare for the reverse leg and confirmed at the counter.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
         ],
         const SizedBox(height: 16),
-        const InfoPill(icon: Icons.two_wheeler, label: 'Pickup rider fee: from K45, always under the courier counter fare'),
-        const SizedBox(height: 18),
-        const Card(child: Padding(padding: EdgeInsets.all(16), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(Icons.info_outline, size: 20, color: AppColors.forest),
-          SizedBox(width: 10),
-          Expanded(child: Text('The intercity courier ticket is separate from the local rider fee. Both are shown clearly before booking when a verified fare is available.', style: TextStyle(fontSize: 12, color: AppColors.muted, height: 1.45))),
-        ]))),
+        const InfoPill(icon: Icons.two_wheeler, label: 'Pickup rider fee: from K45'),
       ];
 
   List<Widget> _parcelStep(CourierInfo selected) => [
@@ -432,27 +461,26 @@ class _BookingScreenState extends State<BookingScreen> {
         ),
         const SizedBox(height: 16),
         TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents', hintText: 'e.g. Two boxed phones', prefixIcon: Icon(Icons.inventory_2_outlined))),
-        const SizedBox(height: 14),
-        Row(children: [
-          Expanded(flex: 2, child: DropdownButtonFormField<String>(
+        const SizedBox(height: 16),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: DropdownButtonFormField<String>(
             initialValue: _vehicleClass,
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'Vehicle', hintText: 'Motorcycle', prefixIcon: Icon(Icons.directions)),
-            items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+            items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
             onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _maxParcelsByVehicle[v]!) _parcels = _maxParcelsByVehicle[v]!; setState(() {}); } },
           )),
           const SizedBox(width: 12),
-          Expanded(flex: 3, child: DropdownButtonFormField<int>(
+          Expanded(child: DropdownButtonFormField<int>(
             initialValue: _parcels.clamp(1, _maxParcelsByVehicle[_vehicleClass]!),
-            decoration: const InputDecoration(
-              labelText: 'Parcels in this trip',
-              hintText: '1',
-              helperText: 'Each parcel counts as one plan parcel',
-              prefixIcon: Icon(Icons.inventory),
-            ),
-            items: List.generate(_maxParcelsByVehicle[_vehicleClass]!, (i) => i + 1).map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}'))).toList(),
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Parcels', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+            items: List.generate(_maxParcelsByVehicle[_vehicleClass]!, (i) => i + 1).map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}', maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
             onChanged: (v) { if (v != null) setState(() => _parcels = v); },
           )),
         ]),
+        const SizedBox(height: 6),
+        const Text('Each parcel counts as one plan parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
         const SizedBox(height: 26),
         const Text('Choose the courier', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
@@ -508,8 +536,6 @@ class _BookingScreenState extends State<BookingScreen> {
             ),
         ],
         const SizedBox(height: 18),
-        _BranchSelector(selected: selected, onBranch: (b) => setState(() => _branch = b)),
-        const SizedBox(height: 18),
         Container(
           padding: const EdgeInsets.all(13),
           decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
@@ -518,48 +544,12 @@ class _BookingScreenState extends State<BookingScreen> {
             SizedBox(width: 10),
             Expanded(
               child: Text(
-                'DropOff covers the first mile (your pickup → depot) and last mile (depot → recipient). What happens with your nominated courier between depots is their own operation — we never control their route, timing or depot handling.',
+                'Your rider takes the parcel to the nearest depot of the courier you choose — no branch to pick.',
                 style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
               ),
             ),
           ]),
         ),
-        if (selected.branches.isNotEmpty) ...[
-          const SizedBox(height: 22),
-          Text('Branches near $_from', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text('Closest to your pickup first — your rider hands the parcel to the nearest ${selected.name.split(' ').first} branch.', style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
-          const SizedBox(height: 10),
-          for (final branch in selected.branchesNear(_from).take(3))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: DecoratedBox(
-                decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-                  child: Row(children: [
-                    const Icon(Icons.location_on_outlined, size: 18, color: AppColors.forest),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text(branch.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
-                    Text(
-                      branchDistanceLabel(branch, _from) ?? branch.city,
-                      style: const TextStyle(color: AppColors.muted, fontSize: 11, fontWeight: FontWeight.w600),
-                    ),
-                  ]),
-                ),
-              ),
-            ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              icon: const Icon(Icons.list_alt, size: 16),
-              label: Text('View all ${selected.branches.length} branches'),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => CourierDetailScreen(courier: selected, sellerCity: _from),
-              )),
-            ),
-          ),
-        ],
         if (selected.hasVerifiedRates && _from != 'Lusaka')
           const Text('Platinum’s captured tariff starts from Lusaka. This reverse/other route needs a counter quote.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
       ];
@@ -584,6 +574,21 @@ class _BookingScreenState extends State<BookingScreen> {
             prefixIcon: const Icon(Icons.local_offer_outlined),
             suffixIcon: TextButton(onPressed: _checkPromo, child: const Text('Apply')),
             helperText: _promoPct != null ? '-${_promoPct!.toStringAsFixed(0)}% — $_promoNote' : null,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _pack,
+          enabled: !_packActive,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(
+            labelText: 'Pack code (paid in bulk)',
+            hintText: 'e.g. DROPW-8F2K',
+            prefixIcon: const Icon(Icons.card_membership_outlined),
+            suffixIcon: TextButton(onPressed: _packActive ? null : _applyPack, child: const Text('Apply')),
+            helperText: _packActive
+                ? 'Pack active — this booking needs no rider-payment prompt.'
+                : 'Bought a pack offline? Enter its code to activate it on your number.',
           ),
         ),
         const SizedBox(height: 14),
@@ -612,9 +617,7 @@ class _BookingScreenState extends State<BookingScreen> {
                 ),
                 child: Row(children: [
                   Icon(
-                    _slotClosed(entry.key)
-                        ? Icons.lock_outline
-                        : entry.key == 'now' ? Icons.bolt_rounded : Icons.schedule_rounded,
+                    _slotClosed(entry.key) ? Icons.lock_outline : Icons.schedule_rounded,
                     size: 20,
                     color: _slotClosed(entry.key) ? AppColors.muted : (_pickupWindow == entry.key ? AppColors.forest : AppColors.muted),
                   ),
@@ -644,32 +647,12 @@ class _BookingScreenState extends State<BookingScreen> {
         const Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            'Riders sweep Lusaka in these windows. Miss the cutoff and your booking auto-rolls to the next open slot — you are never blocked.',
+            'Riders sweep Lusaka in these windows; each slot locks 30 minutes before it starts. Closed slots reopen for tomorrow.',
             style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
           ),
         ),
         const SizedBox(height: 4),
         _DeliveryIqCard(courierCatalogId: courier.id, window: _pickupWindow),
-        const SizedBox(height: 10),
-        Row(children: [
-          const Expanded(child: Text('Custom pickup time', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
-          Switch(value: _useCustomPickup, onChanged: (v) => setState(() => _useCustomPickup = v)),
-        ]),
-        if (_useCustomPickup) ...[
-          const SizedBox(height: 10),
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-            leading: const Icon(Icons.schedule_rounded),
-            title: Text(_customPickup == null ? 'Pick a date and time' : 'Pickup ${_customPickup!.day}/${_customPickup!.month} ${_customPickup!.hour}:${_customPickup!.minute.toString().padLeft(2, '0')}'),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: _pickDateTime,
-          ),
-          const SizedBox(height: 4),
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Riders get a push 30 and 10 minutes before the slot — and you can track them live in Bookings.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
-          ),
-        ],
         const SizedBox(height: 16),
         SwitchListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 14),
@@ -807,7 +790,7 @@ class _PlanBannerState extends State<_PlanBanner> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
             child: const Text(
-              'Pay-as-you-go — rider fee per trip. Packs from K250/mo cover the rider fee inside your monthly parcels.',
+              'Pay-as-you-go — rider fee per trip. Packs from K69 cover the rider fee inside your plan parcels.',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
             ),
           );
@@ -850,6 +833,13 @@ const Map<String, int> kCourierServerIds = {
   'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4,
 };
 int courierServerIdOf(String catalogId) => kCourierServerIds[catalogId] ?? 1;
+
+/// Inverse of courierServerIdOf: turn a live chargebook id back into the
+/// catalog name the booking UI tracks ('dhl', 'mercury'…).
+String courierCatalogForServerId(int serverId) =>
+    (kCourierServerIds.entries.firstWhere((e) => e.value == serverId,
+            orElse: () => const MapEntry('platinum', 1)))
+        .key;
 
 /// Delivery IQ — how fast this courier's depot actually receives parcels:
 /// the typical (and slow-day) pickup→depot minutes from the last 90 days of
@@ -897,6 +887,7 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
         if (p50 == null) return const SizedBox.shrink(); // no data yet — stay quiet
         final p90 = ((data?['minutes_p90'] as num?)?.toInt() ?? p50).toString();
         final n = (data?['sample_count'] as num?)?.toInt() ?? 0;
+        final fallback = data?['fallback'] == true;
         return Container(
           margin: const EdgeInsets.only(top: 8),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -910,7 +901,9 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Delivery IQ: this courier usually reaches the depot in ~$p50 min; busy days up to $p90 min (from $n recent pickups).',
+                fallback
+                    ? 'Delivery IQ (advertised): this courier usually reaches the depot in ~$p50 min; busy days up to $p90 min. Measured averages appear from the first pickups.'
+                    : 'Delivery IQ: this courier usually reaches the depot in ~$p50 min; busy days up to $p90 min (from $n recent pickups).',
                 style: const TextStyle(color: AppColors.forest, fontSize: 11.5, height: 1.35),
               ),
             ),
@@ -921,84 +914,3 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
   }
 }
 
-class _BranchSelector extends StatefulWidget {
-  final CourierInfo selected;
-  final ValueChanged<String> onBranch;
-  const _BranchSelector({required this.selected, required this.onBranch});
-
-  @override
-  State<_BranchSelector> createState() => _BranchSelectorState();
-}
-
-class _BranchSelectorState extends State<_BranchSelector> {
-  /// Whether the parent has been given a branch yet (default = first loaded).
-  bool _reported = false;
-
-  // Cached future: one network round-trip per selected courier, not one per
-  // parent rebuild (the booking form rebuilds on every keystroke).
-  late Future<List<String>> _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _load();
-  }
-
-  @override
-  void didUpdateWidget(covariant _BranchSelector old) {
-    super.didUpdateWidget(old);
-    if (old.selected.id != widget.selected.id) {
-      _reported = false;
-      _future = _load();
-    }
-  }
-
-  Future<List<String>> _load() async {
-    final live = <String>[];
-    if (DropOffApi.enabled) {
-      final profile = await DropOffApi.courierProfile(_serverIdOf(widget.selected.id));
-      for (final b in ((profile?['branches'] as List?) ?? const [])) {
-        final name = '${(b as Map)['name'] ?? ''}'.trim();
-        if (name.isNotEmpty && !live.contains(name)) live.add(name);
-      }
-    }
-    if (live.isEmpty) {
-      for (final b in widget.selected.branchesNear('Lusaka')) {
-        if (!live.contains(b.name)) live.add(b.name);
-      }
-    }
-    return live;
-  }
-
-  /// Catalog ids ('platinum', 'mercury'...) map onto the live chargebook ids.
-  int _serverIdOf(String catalogId) => courierServerIdOf(catalogId);
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<String>>(
-      future: _future,
-      builder: (context, snap) {
-        final branches = snap.data ?? const <String>[];
-        if (branches.isEmpty) return const SizedBox.shrink();
-        // The dropdown displays branches.first — mirror it into the form state
-        // so the booking actually submits a branch without a manual tap.
-        if (!_reported) {
-          _reported = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) widget.onBranch(branches.first);
-          });
-        }
-        return DropdownButtonFormField<String>(
-          initialValue: branches.first,
-          decoration: const InputDecoration(
-            labelText: 'Drop-off branch (depot)',
-            hintText: 'Where should the rider take it?',
-            prefixIcon: Icon(Icons.local_shipping_outlined),
-          ),
-          items: [for (final b in branches) DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis))],
-          onChanged: (v) { if (v != null) widget.onBranch(v); },
-        );
-      },
-    );
-  }
-}

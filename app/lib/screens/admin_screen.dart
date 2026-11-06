@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/dropoff_api.dart';
 import '../ui/app_theme.dart';
@@ -150,6 +151,8 @@ class _AdminScreenState extends State<AdminScreen> {
             if (_superadmin) ...[
               const SizedBox(height: 18),
               const _UsersCard(),
+              const SizedBox(height: 18),
+              const _PackCodesCard(),
             ],
             const SizedBox(height: 18),
             const _BranchManagerCard(),
@@ -764,6 +767,126 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
             onPressed: _saving ? null : _add,
             child: Text(_saving ? 'Adding…' : 'Add branch'),
           ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Mint bulk pack codes for offline/agent sale. Codes activate a pack with no
+/// payment prompt when a seller redeems one on their own number.
+class _PackCodesCard extends StatefulWidget {
+  const _PackCodesCard();
+
+  @override
+  State<_PackCodesCard> createState() => _PackCodesCardState();
+}
+
+class _PackCodesCardState extends State<_PackCodesCard> {
+  String _tier = 'daily';
+  int _count = 5;
+  final _note = TextEditingController();
+  List<String> _codes = const [];
+  bool _busy = false;
+
+  static const Map<String, String> _labels = {
+    'daily': 'Daily Dash',
+    'weekly': 'Weekly Sprint',
+    'silver': 'Silver',
+    'gold': 'Gold',
+    'platinum': 'Platinum',
+  };
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _generate() async {
+    setState(() => _busy = true);
+    final res = await DropOffApi.generatePackCodes(tier: _tier, count: _count, note: _note.text.trim());
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (!res.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not generate codes (${res.error}).')));
+      return;
+    }
+    final codes = ((res.body['codes'] as List?) ?? const []).map((c) => '$c').toList();
+    setState(() => _codes = codes);
+    if (codes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No codes generated � try again.')));
+    }
+  }
+
+  void _copyAll() {
+    if (_codes.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: _codes.join('\n')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${_codes.length} code${_codes.length == 1 ? '' : 's'} copied.')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!DropOffApi.enabled) return const SizedBox.shrink();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.card_membership_outlined, color: AppColors.forest),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Pack codes (offline sales)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            if (_codes.isNotEmpty)
+              TextButton(onPressed: _copyAll, child: const Text('Copy all')),
+          ]),
+          const SizedBox(height: 4),
+          const Text('Sell packs at the counter or to agents. The seller redeems the code in the app � no payment prompt, the pack goes live instantly.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: _tier,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Tier'),
+                items: _labels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
+                onChanged: (v) { if (v != null) setState(() => _tier = v); },
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 96,
+              child: DropdownButtonFormField<int>(
+                initialValue: _count,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'How many'),
+                items: [1, 2, 5, 10, 20, 50].map((n) => DropdownMenuItem(value: n, child: Text('$n'))).toList(),
+                onChanged: (v) { if (v != null) setState(() => _count = v); },
+              ),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          TextField(controller: _note, decoration: const InputDecoration(labelText: 'Note (optional)', hintText: 'e.g. Market day batch, agent Chanda')),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _busy ? null : _generate,
+            icon: const Icon(Icons.qr_code_2, size: 18),
+            label: Text(_busy ? 'Generating�' : 'Generate $_count ${_labels[_tier]} code${_count == 1 ? '' : 's'}'),
+          ),
+          if (_codes.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (final code in _codes)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, letterSpacing: 1.1, fontSize: 13)),
+                  ),
+              ]),
+            ),
+          ],
         ]),
       ),
     );

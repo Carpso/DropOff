@@ -21,9 +21,13 @@ class BusinessScreen extends StatefulWidget {
 
 class _BusinessScreenState extends State<BusinessScreen> {
   Map<String, dynamic>? _sub;
+  Map<String, dynamic>? _packs;
   List<Map<String, dynamic>> _jobs = const [];
   Map<String, dynamic>? _refer;
   bool _loading = true;
+
+  /// Plan ladder for upgrade suggestions (matches the worker's TIER_RANK).
+  static const List<String> _tierLadder = ['daily', 'weekly', 'silver', 'gold', 'platinum'];
 
   @override
   void initState() {
@@ -42,6 +46,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       DropOffApi.subscription(),
       DropOffApi.get('/jobs', store.linkedPhone != null ? {'phone': store.linkedPhone!} : null),
       DropOffApi.referralCode(),
+      DropOffApi.plans(),
     ]);
     if (!mounted) return;
     setState(() {
@@ -49,6 +54,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       _jobs = (((results[1] as Map<String, dynamic>?)?['jobs'] as List?) ?? const [])
           .cast<Map<String, dynamic>>();
       _refer = results[2] as Map<String, dynamic>?;
+      _packs = results[3] as Map<String, dynamic>?;
       _loading = false;
     });
   }
@@ -80,6 +86,148 @@ class _BusinessScreenState extends State<BusinessScreen> {
     await launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}'), mode: LaunchMode.externalApplication);
   }
 
+  // ---- retention math -------------------------------------------------------
+
+  /// Worker timestamps are UTC; naive ones ('YYYY-MM-DD HH:MM:SS') get a Z.
+  DateTime? _ts(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    final t = s.replaceFirst(' ', 'T');
+    final naive = !t.endsWith('Z') && !t.contains('+00:00') && !RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(t);
+    return DateTime.tryParse(naive ? '${t}Z' : t);
+  }
+
+  bool _within30d(Map<String, dynamic> job) {
+    final created = _ts('${job['created_at'] ?? ''}');
+    if (created == null) return false;
+    return DateTime.now().difference(created) <= const Duration(days: 30);
+  }
+
+  /// DropOff leg spend across the last 30 days: rider fee + door legs +
+  /// processing (what the seller pays DropOff per parcel). Partner money is not
+  /// counted — sellers don't see courier fares here anyway.
+  ({double k, int parcels}) get _spend {
+    var k = 0.0;
+    var n = 0;
+    for (final job in _jobs.where(_within30d)) {
+      final fee = ((job['rider_fee_zmw'] ?? 0) as num).toDouble() +
+          ((job['leg2_fee_zmw'] ?? 0) as num).toDouble() +
+          ((job['leg2_processing_fee_zmw'] ?? 0) as num).toDouble();
+      k += fee;
+      n += (job['parcels'] as num?)?.toInt() ?? 1;
+    }
+    return (k: (k * 100).roundToDouble() / 100, parcels: n);
+  }
+
+  Map<String, dynamic>? _planOf(String tier) =>
+      (_packs?['plans'] as Map<String, dynamic>?)?[tier] as Map<String, dynamic>?;
+
+  Map<String, dynamic>? get _sub2 => _sub?['subscription'] as Map<String, dynamic>?;
+  Map<String, dynamic>? get _plan => _sub?['plan'] as Map<String, dynamic>?;
+
+  /// One-tap renewal: re-subscribes the current tier — the worker sends the
+  /// momo prompt; payment status flips at the webhook exactly like first purchase.
+  Future<void> _renew() async {
+    final sub = _sub2;
+    if (sub == null) return;
+    final tier = '${sub['tier'] ?? ''}';
+    if (tier.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Momo prompt on its way — approve it to renew.')));
+    final res = await DropOffApi.subscribe(
+      tier: tier,
+      pickupWindow: '${sub['pickup_window'] ?? '10:00'}',
+      city: '${sub['city'] ?? 'Lusaka'}',
+    );
+    if (!mounted) return;
+    final err = res.error ?? (res.ok ? null : 'Something went wrong.');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err == null || err.isEmpty ? 'Prompt sent — approve on your phone to renew $tier.' : err)));
+    if (err == null || err.isEmpty) _load();
+  }
+
+  /// Retention card: the maths that keeps sellers subscribed — pay-for-itself
+  /// (no pack but regular shipping), overage savings (cap exhausted), and
+  /// renewal-in-window with one tap.
+  Widget? _retentionCard() {
+    final sub = _sub2;
+    final plan = _plan;
+    if (sub == null) {
+      final s = _spend;
+      if (s.parcels < 3) return null; // not a regular yet — don't be pushy
+      return _banner(
+        icon: Icons.trending_up_rounded,
+        title: '3+ parcels a month pays off with a pack',
+        body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying per trip. A Daily Dash (K69, 6 parcels/day) or Weekly Sprint (K399, 20 parcels/cycle) removes the per-parcel rider cost — most regulars save K${(s.k).toStringAsFixed(0)}+.',
+        cta: 'Browse packs',
+        onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+      );
+    }
+    if ((sub['status'] ?? '') != 'active') return null;
+    final cap = (plan?['parcels_per_month'] as num?)?.toInt() ?? 0;
+    final used = (_sub?['usage_this_period'] as num?)?.toInt() ?? 0;
+    final tier = '${sub['tier'] ?? ''}';
+    final fee = (plan?['fee_zmw'] as num?)?.toDouble() ?? 0;
+    final end = _ts('${sub['period_end'] ?? ''}');
+    final renewsSoon = end != null && DateTime.now().add(const Duration(days: 3)).isAfter(end);
+    if (renewsSoon) {
+      final expired = DateTime.now().isAfter(end);
+      final label = expired ? 'Renew now' : 'Renew early';
+      return _banner(
+        icon: Icons.schedule_rounded,
+        title: expired ? 'Your $tier pack has run out' : '$tier pack ends ${'${sub['period_end'] ?? ''}'.split(' ').first}',
+        body: expired
+            ? (fee > 0 ? 'Renew for K${fee.toStringAsFixed(0)} to keep your pack rate — trips right now bill ad hoc.' : 'Renew to keep your pack rate — trips right now bill ad hoc.')
+            : 'Renew now and the cycle starts over — your free-rider parcels stay topped up. We auto-bill 3 days before with a momo prompt.',
+        cta: label,
+        onCta: _renew,
+      );
+    }
+    if (cap > 0 && used >= cap) {
+      final pct = (plan?['overage_discount_pct'] as num?)?.toInt() ?? 0;
+      final idx = _tierLadder.indexOf(tier);
+      final nextTier = idx >= 0 && idx + 1 < _tierLadder.length ? _tierLadder[idx + 1] : null;
+      final next = nextTier == null ? null : _planOf(nextTier);
+      return _banner(
+        icon: Icons.savings_outlined,
+        title: 'You outgrew the $tier pack this cycle',
+        body: next == null
+            ? 'Extra parcels keep your ${pct > 0 ? '$pct% overage discount' : 'tier discount'} — you never pay full PAYG price.'
+            : '${next['tag'] ?? nextTier!.toUpperCase()} adds ${(next['parcels_per_month'] as num?)?.toInt() ?? 0} parcels for K${(next['fee_zmw'] as num?)?.toStringAsFixed(0) ?? ''} —${pct > 0 ? ' and overages stay $pct% off' : ' pro-rated to the day'}. One tap in Manage.',
+        cta: next == null ? 'Manage' : 'See $nextTier',
+        onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+      );
+    }
+    return null;
+  }
+
+  Widget _banner({required IconData icon, required String title, required String body, required String cta, required VoidCallback onCta}) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.amber.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.amber.withValues(alpha: 0.35)),
+      ),
+      child: Row(children: [
+        Icon(icon, size: 20, color: AppColors.amber),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, height: 1.2)),
+            const SizedBox(height: 3),
+            Text(body, style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        FilledButton(
+          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+          onPressed: onCta,
+          child: Text(cta, maxLines: 1),
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
@@ -88,6 +236,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
         child: Center(child: Text('Sign in to see your business.', style: TextStyle(color: AppColors.muted))),
       );
     }
+    final retention = _retentionCard();
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: _load,
@@ -106,6 +255,10 @@ class _BusinessScreenState extends State<BusinessScreen> {
             else ...[
               _planCard(),
               const SizedBox(height: 14),
+              if (retention != null) ...[
+                retention,
+                const SizedBox(height: 14),
+              ],
               _statsRow(),
               const SizedBox(height: 14),
               _inFlightCard(),
@@ -193,14 +346,17 @@ class _BusinessScreenState extends State<BusinessScreen> {
   Widget _statsRow() {
     final inFlight = _jobs.where(_inFlight).length;
     final delivered = _jobs.length - inFlight;
-    final rewarded = ((_refer?['stats']?['rewarded'] as num?)?.toInt()) ?? 0;
-    final pending = ((_refer?['stats']?['pending'] as num?)?.toInt()) ?? 0;
+    final spend = _spend;
     return Row(children: [
       Expanded(child: _Stat(value: '$inFlight', label: 'In flight', icon: Icons.local_shipping_outlined, accent: true)),
       const SizedBox(width: 10),
       Expanded(child: _Stat(value: '$delivered', label: 'Delivered · recent', icon: Icons.check_circle_outline)),
       const SizedBox(width: 10),
-      Expanded(child: _Stat(value: '$rewarded', label: 'Referrals earned${pending > 0 ? ' (+$pending pending)' : ''}', icon: Icons.handshake_outlined)),
+      Expanded(child: _Stat(
+        value: spend.k > 0 ? 'K${spend.k % 1 == 0 ? spend.k.toStringAsFixed(0) : spend.k.toStringAsFixed(2)}' : 'K0',
+        label: spend.k > 0 ? 'DropOff spend · 30d (${spend.parcels} parcels)' : 'DropOff spend · 30d',
+        icon: Icons.account_balance_wallet_outlined,
+      )),
     ]);
   }
 
@@ -214,7 +370,34 @@ class _BusinessScreenState extends State<BusinessScreen> {
             const Icon(Icons.route_rounded, color: AppColors.forest),
             const SizedBox(width: 8),
             const Expanded(child: Text('Parcels in flight', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            if (_jobs.isNotEmpty)
+              TextButton(
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: Size.zero),
+                onPressed: () {
+                  // Repeat-last-booking: clone the most recent job's details into
+                  // the booking form (cities, branch, courier, recipients…).
+                  final src = _jobs.first;
+                  BookingScreen.prefill = {
+                    'from': src['from_city'] ?? 'Lusaka',
+                    'to': src['dest_city'] ?? '',
+                    'branch': src['branch'] ?? '',
+                    'pickup': src['pickup_address'] ?? '',
+                    'description': src['description'] ?? '',
+                    'sender_name': src['sender_name'] ?? '',
+                    'sender_phone': src['sender_phone'] ?? '',
+                    'recipient_name': src['recipient_name'] ?? '',
+                    'recipient_phone': src['recipient_phone'] ?? '',
+                    'weight_class': src['weight_class'] ?? '',
+                    'courier_id': src['courier_id'],
+                    'parcels': src['parcels'],
+                    'vehicle_class': src['vehicle_class'] ?? '',
+                  };
+                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
+                },
+                child: const Text('Repeat last'),
+              ),
             TextButton(
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: Size.zero),
               onPressed: flying.isEmpty ? null : () => _track(flying.first),
               child: const Text('Track'),
             ),

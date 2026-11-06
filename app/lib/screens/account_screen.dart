@@ -425,6 +425,7 @@ class _AccountScreenState extends State<AccountScreen> {
             const _AdminGate(),
           ],
           const _TiersCard(),
+          const _PackCodeCard(),
           if (!DropOffApi.enabled && !signedIn) ...[
             const SizedBox(height: 26),
             const Padding(
@@ -691,6 +692,21 @@ class _TiersCardState extends State<_TiersCard> {
   Future<Map<String, dynamic>?> _loadPlans() => DropOffApi.plans();
   String? _busyTier;
   int _usageCycle = 0;
+  Map<String, dynamic>? _current;
+  static const Map<String, int> _tierRank = {'daily': 0, 'weekly': 1, 'silver': 2, 'gold': 3, 'platinum': 4};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrent();
+  }
+
+  Future<void> _loadCurrent() async {
+    if (!DropOffApi.enabled) return;
+    final snap = await DropOffApi.subscription();
+    if (!mounted) return;
+    setState(() => _current = snap?['subscription'] as Map<String, dynamic>?);
+  }
 
   String _cycleUnit(Map<String, dynamic>? model) {
     final days = (model?['cycle_days'] as num?)?.toInt() ?? 30;
@@ -719,6 +735,35 @@ class _TiersCardState extends State<_TiersCard> {
       messenger.showSnackBar(const SnackBar(content: Text('Sign in first — your pack is tied to your phone.')));
       return;
     }
+    final currentTier = '${_current?['tier'] ?? ''}';
+    final active = '${_current?['status'] ?? ''}' == 'active';
+    if (active && currentTier.isNotEmpty && currentTier != tier) {
+      final curRank = _tierRank[currentTier] ?? -1;
+      final newRank = _tierRank[tier] ?? -1;
+      if (newRank < curRank) {
+        messenger.showSnackBar(const SnackBar(content: Text('Downgrades apply automatically at your next renewal — nothing to pay now.')));
+        return;
+      }
+      if (newRank > curRank) {
+        setState(() => _busyTier = tier);
+        final up = await DropOffApi.upgradeSubscription(tier);
+        if (!mounted) return;
+        setState(() => _busyTier = null);
+        if (!up.ok) {
+          messenger.showSnackBar(SnackBar(content: Text(up.error == 'payment_already_pending'
+              ? 'A payment prompt is already waiting on your phone — approve it first.'
+              : 'Could not upgrade (${up.error}). Try again.')));
+          return;
+        }
+        final extra = ((up.body['amount_zmw'] as num?) ?? 0).toDouble();
+        messenger.showSnackBar(SnackBar(content: Text(extra > 0
+            ? '${tier.toUpperCase()} is live now — approve the K${extra.toStringAsFixed(2)} prorated prompt.'
+            : '${tier.toUpperCase()} is live — nothing extra to pay this cycle.')));
+        setState(() => _usageCycle++);
+        _loadCurrent();
+        return;
+      }
+    }
     setState(() => _busyTier = tier);
     final res = await DropOffApi.subscribe(tier: tier);
     if (!res.ok) {
@@ -743,6 +788,7 @@ class _TiersCardState extends State<_TiersCard> {
     }
     if (!mounted) return;
     setState(() { _busyTier = null; _usageCycle++; });
+    _loadCurrent();
     messenger.showSnackBar(SnackBar(content: Text(switch (status) {
       'success' when tier == 'daily' => 'Daily Dash is LIVE — today\u2019s parcels are ready.',
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
@@ -785,16 +831,26 @@ class _TiersCardState extends State<_TiersCard> {
                     'gold': (label: 'GOLD', blurb: '25 parcels / month — weekly shippers'),
                     'platinum': (label: 'PLATINUM', blurb: '50 parcels / month — daily bulk senders'),
                   };
+                  final currentTier = '${_current?['tier'] ?? ''}';
+                  final currentActive = '${_current?['status'] ?? ''}' == 'active';
                   return Column(children: [
                     for (final entry in display.entries)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: Container(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(14),
+                          onTap: _busyTier != null ? null : () => _chooseTier(entry.key),
+                          child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: AppColors.line.withValues(alpha: 0.12),
+                            color: currentActive && currentTier == entry.key
+                                ? AppColors.forest.withValues(alpha: 0.08)
+                                : AppColors.line.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppColors.line),
+                            border: Border.all(
+                              color: currentActive && currentTier == entry.key ? AppColors.forest : AppColors.line,
+                              width: currentActive && currentTier == entry.key ? 1.4 : 1,
+                            ),
                           ),
                           // Fixed-width price/button rail on the right keeps the
                           // left text block wide enough to read HORIZONTALLY —
@@ -810,6 +866,14 @@ class _TiersCardState extends State<_TiersCard> {
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.4)),
                                   ),
+                                  if (currentActive && currentTier == entry.key) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(20)),
+                                      child: const Text('CURRENT', style: TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
+                                    ),
+                                  ],
                                   if (models[entry.key]?['tag'] != null) ...[
                                     const SizedBox(width: 6),
                                     Flexible(
@@ -856,11 +920,21 @@ class _TiersCardState extends State<_TiersCard> {
                                   onPressed: _busyTier != null ? null : () => _chooseTier(entry.key),
                                   child: _busyTier == entry.key
                                       ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                                      : const Text('Choose', maxLines: 1, textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                                      : Text(
+                                          currentActive && currentTier == entry.key
+                                              ? 'Renew'
+                                              : currentActive && (_tierRank[entry.key] ?? 0) > (_tierRank[currentTier] ?? 0)
+                                                  ? 'Upgrade'
+                                                  : 'Choose',
+                                          maxLines: 1,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                                        ),
                                 ),
                               ]),
                             ),
                           ]),
+                        ),
                         ),
                       ),
                   ]);
@@ -868,6 +942,86 @@ class _TiersCardState extends State<_TiersCard> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Bulk/offline pack codes: sold by agents or at market days; redeeming one
+/// activates the pack on this number with no payment prompt.
+class _PackCodeCard extends StatefulWidget {
+  const _PackCodeCard();
+
+  @override
+  State<_PackCodeCard> createState() => _PackCodeCardState();
+}
+
+class _PackCodeCardState extends State<_PackCodeCard> {
+  final _code = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _redeem() async {
+    final code = _code.text.trim().toUpperCase();
+    if (code.isEmpty) return;
+    final store = AppScope.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    if (!store.linked) {
+      messenger.showSnackBar(const SnackBar(content: Text('Sign in first — the pack attaches to your number.')));
+      return;
+    }
+    setState(() => _busy = true);
+    final res = await DropOffApi.redeemPackCode(code);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (res.ok) {
+      _code.clear();
+      final tier = '${res.body['tier'] ?? 'pack'}';
+      final end = '${res.body['period_end'] ?? ''}'.split(' ').first;
+      messenger.showSnackBar(SnackBar(content: Text('$tier pack activated${end.isEmpty ? '' : ' — runs to $end'}. No payment needed.')));
+    } else {
+      messenger.showSnackBar(SnackBar(content: Text(res.error == 'code_not_found'
+          ? 'That pack code was not recognised.'
+          : res.error == 'code_used'
+              ? 'That pack code has already been used.'
+              : 'Could not redeem (${res.error}).')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!DropOffApi.enabled) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Row(children: [
+              Icon(Icons.card_membership_outlined, color: AppColors.forest),
+              SizedBox(width: 10),
+              Expanded(child: Text('Have a pack code?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            ]),
+            const SizedBox(height: 4),
+            const Text('Bought a pack from an agent or at a market day? Redeem the code — it activates instantly on your number.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _code,
+              textCapitalization: TextCapitalization.characters,
+              decoration: InputDecoration(
+                labelText: 'Pack code',
+                hintText: 'DROP-8F2K-19QA',
+                prefixIcon: const Icon(Icons.qr_code_2),
+                suffixIcon: TextButton(onPressed: _busy ? null : _redeem, child: _busy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Redeem')),
+              ),
+            ),
+          ]),
         ),
       ),
     );

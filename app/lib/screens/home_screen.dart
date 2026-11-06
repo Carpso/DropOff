@@ -7,6 +7,7 @@ import '../widgets/common.dart';
 import 'account_screen.dart';
 import 'booking_screen.dart';
 import 'bookings_screen.dart';
+import 'collections_screen.dart';
 import 'couriers_screen.dart';
 import 'track_screen.dart';
 
@@ -34,6 +35,16 @@ class HomeScreen extends StatelessWidget {
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => const AccountScreen(),
     ));
+  }
+
+  Future<void> _collect(BuildContext context) async {
+    final store = AppScope.of(context);
+    if (!store.linked) {
+      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
+      if (!context.mounted || !AppScope.of(context).linked) return;
+    }
+    if (!context.mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const CollectionsScreen()));
   }
 
   @override
@@ -88,12 +99,29 @@ class HomeScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   const Text('A rider collects your parcel and drops it at the courier you choose.', style: TextStyle(color: Color(0xFFC9D9D2), height: 1.45, fontSize: 14)),
                   const SizedBox(height: 22),
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: AppColors.amber, foregroundColor: AppColors.ink, minimumSize: const Size(190, 52)),
-                    onPressed: () => _book(context),
-                    icon: const Icon(Icons.add_box_outlined),
-                    label: const Text('Book a pickup'),
-                  ),
+                  Row(children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(backgroundColor: AppColors.amber, foregroundColor: AppColors.ink, minimumSize: const Size(0, 52)),
+                        onPressed: () => _book(context),
+                        icon: const Icon(Icons.add_box_outlined, size: 19),
+                        label: const Text('Book a pickup', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: AppColors.forest,
+                          minimumSize: const Size(0, 52),
+                        ),
+                        onPressed: () => _collect(context),
+                        icon: const Icon(Icons.inventory_2_outlined, size: 19),
+                        label: const Text('Book a collection', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                    ),
+                  ]),
                 ]),
               ),
             ]),

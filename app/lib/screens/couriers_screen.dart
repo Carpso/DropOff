@@ -118,26 +118,6 @@ class _CouriersScreenState extends State<CouriersScreen> {
   }
 }
 
-class CourierAvatar extends StatelessWidget {
-  final CourierInfo courier;
-  final double size;
-  const CourierAvatar({super.key, required this.courier, this.size = 50});
-
-  String get initials {
-    final words = courier.name.split(' ');
-    return words.length == 1 ? words.first.substring(0, 1) : '${words.first[0]}${words[1][0]}';
-  }
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: size,
-        height: size,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(color: Color(courier.colorValue).withValues(alpha: 0.11), borderRadius: BorderRadius.circular(size * 0.3)),
-        child: Text(initials, style: TextStyle(color: Color(courier.colorValue), fontWeight: FontWeight.w900, fontSize: size * 0.32)),
-      );
-}
-
 /// Live directory straight from the Worker's chargebook (ZICTA-licensed
 /// operators), rendered with each operator's hosted logo when available.
 class _LiveDepotsSection extends StatelessWidget {

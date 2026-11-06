@@ -161,7 +161,10 @@ class DropOffApi {
         if (token != null) 'Authorization': 'Bearer $token',
       };
 
-  static Map<String, String> get _adminHeaders => {..._headers, 'X-Admin-Key': adminKey};
+  static Map<String, String> get _adminHeaders => {
+        ..._headers,
+        if (adminKey.isNotEmpty) 'X-Admin-Key': adminKey,
+      };
 
   /// Ops API headers (server-side role='ops'): used for ops endpoints without a linked phone.
   static Map<String, String> get _opsHeaders => {
@@ -619,22 +622,23 @@ class DropOffApi {
   // ---- staff console: support inbox + user roles ----
 
   /// Admin/ops view of every support ticket ({threads: [{id, phone, last_message, unread, ...}]}).
-  static Future<Map<String, dynamic>?> adminSupportThreads() => get('/admin/support/threads');
+  /// Sent with admin headers too: an admin-key-only console device works without a JWT.
+  static Future<Map<String, dynamic>?> adminSupportThreads() => getAdmin('/admin/support/threads');
 
   /// One support ticket with all messages.
   static Future<Map<String, dynamic>?> adminSupportThread(int threadId) =>
-      get('/admin/support/threads/$threadId');
+      getAdmin('/admin/support/threads/$threadId');
 
   /// Admin/ops reply into a support ticket (same endpoint sellers use).
   static Future<ApiResponse> supportReply(int threadId, String body) =>
-      post('/chat/support/$threadId/reply', {'body': body});
+      post('/chat/support/$threadId/reply', {'body': body}, admin: true);
 
   /// {users: [{email, phone, full_name, role, ...}]} — staff can read, superadmin can write.
-  static Future<Map<String, dynamic>?> adminUsers() => get('/admin/users');
+  static Future<Map<String, dynamic>?> adminUsers() => getAdmin('/admin/users');
 
   /// Promote/demote an account (customer|admin|partner) — superadmin only.
   static Future<ApiResponse> adminSetUserRole(String email, String role) =>
-      post('/admin/users/role', {'email': email, 'role': role});
+      post('/admin/users/role', {'email': email, 'role': role}, admin: true);
 
   /// Delivery IQ: how fast this courier really reaches the depot (p50/p90/avg
   /// minutes from actual pickup→depot times over the last 90 days).
@@ -647,24 +651,24 @@ class DropOffApi {
 
   // ---- admin console (owner / admin key) ----
 
-  static Future<Map<String, dynamic>?> adminStats() => get('/admin/stats');
+  static Future<Map<String, dynamic>?> adminStats() => getAdmin('/admin/stats');
 
   static Future<Map<String, dynamic>?> securityAlerts({bool unacknowledgedOnly = false}) =>
-      get('/security/alerts${unacknowledgedOnly ? '?unacknowledged=1' : ''}');
+      getAdmin('/security/alerts${unacknowledgedOnly ? '?unacknowledged=1' : ''}');
 
-  static Future<ApiResponse> ackAlert(int id) => post('/security/alerts/$id/ack', {});
+  static Future<ApiResponse> ackAlert(int id) => post('/security/alerts/$id/ack', {}, admin: true);
 
   static Future<Map<String, dynamic>?> fraudFlags({String status = 'open'}) =>
-      get('/admin/fraud?status=$status');
+      getAdmin('/admin/fraud?status=$status');
 
   static Future<ApiResponse> reviewFraud(int id, {required String status}) =>
-      post('/admin/fraud/$id/review', {'status': status});
+      post('/admin/fraud/$id/review', {'status': status}, admin: true);
 
   static Future<ApiResponse> adminSms({required String phone, required String message}) =>
-      post('/admin/sms', {'phone': phone, 'message': message});
+      post('/admin/sms', {'phone': phone, 'message': message}, admin: true);
 
   static Future<ApiResponse> adminBroadcast({required String audience, required String message}) =>
-      post('/admin/sms/broadcast', {'audience': audience, 'message': message});
+      post('/admin/sms/broadcast', {'audience': audience, 'message': message}, admin: true);
 
   /// The linked rider's day as slot-batched task queues (stops, ETAs, totals,
   /// destination branch, target drop-off time).
@@ -672,6 +676,18 @@ class DropOffApi {
     final q = phone == null || phone.isEmpty ? '' : '?phone=$phone';
     return get('/rider/queue$q');
   }
+
+  /// Rider self-remit: settle the COD float on a job assigned to the signed-in
+  /// rider. Pushes the cash (minus the platform cut) to the sender's momo.
+  static Future<ApiResponse> riderCodRemit(String jobRef) =>
+      post('/rider/cod/remit', {'job_ref': jobRef});
+
+  /// {rider, n, average, reviews: [...]} — the signed-in rider's rating summary.
+  static Future<Map<String, dynamic>?> riderReviews() => get('/rider/reviews');
+
+  /// {jobs, total_unremitted_zmw, platform_cut_pct} — COD cash still floated by
+  /// the signed-in rider (collected at the door, not yet pushed to sellers).
+  static Future<Map<String, dynamic>?> riderCod() => get('/rider/cod');
 
   /// Start a Lipila mobile-money collect for a job against the server total.
   static Future<ApiResponse> pay({
@@ -691,8 +707,10 @@ class DropOffApi {
   static Future<String?> paymentStatus(String paymentId) async =>
       (await get('/payments/$paymentId/status'))?['status'] as String?;
 
-  /// Seller subscription packs (Silver K250 / Gold K500 / Platinum K750 per
-  /// 30-day cycle; every parcel counts as one).
+  /// Seller subscription packs (live prices come from /plans; seeded at Silver
+  /// K250 / Gold K500 / Platinum K750, plus Daily K69 and Weekly K399).
+  /// Cycle length comes from the plan (1 / 7 / 30 days); every parcel counts
+  /// as one — even several in the same trip.
   static Future<Map<String, dynamic>?> plans() => get('/plans');
 
   static Future<ApiResponse> subscribe({
@@ -709,7 +727,52 @@ class DropOffApi {
       });
 
   static Future<Map<String, dynamic>?> subscription([String? phone]) =>
-      phone != null ? get('/subscriptions/$phone') : get('/subscriptions/');
+      phone != null ? get('/subscriptions/$phone') : get('/subscriptions');
+
+  /// Redeem a bulk/offline pack code onto the signed-in seller's number.
+  /// No payment prompt — the pack was already paid for in bulk.
+  static Future<ApiResponse> redeemPackCode(String code) =>
+      post('/subscriptions/redeem', {'code': code});
+
+  /// Mid-cycle upgrade: the bigger cap goes live now, the prorated difference
+  /// is collected with a Lipila prompt.
+  static Future<ApiResponse> upgradeSubscription(String tier) =>
+      post('/subscriptions/upgrade', {'tier': tier});
+
+  /// Admin: mint pack codes for offline/agent sale.
+  static Future<ApiResponse> generatePackCodes({required String tier, int count = 1, String? note}) =>
+      post('/admin/pack-codes', {'tier': tier, 'count': count, if (note != null && note.isNotEmpty) 'note': note}, admin: true);
+  static Future<Map<String, dynamic>?> packCodes() => getAdmin('/admin/pack-codes');
+
+  /// Collection from a courier point to the recipient's door (Lusaka). The
+  /// parcel already arrived at the depot; a rider picks it up and runs the
+  /// last mile. No counter fare, no branch choice.
+  static Future<ApiResponse> createCollection({
+    required int courierId,
+    required String point,
+    required String recipientName,
+    required String recipientPhone,
+    required String destAddress,
+    required String pickupWindow,
+    String? senderName,
+    String? description,
+    int parcels = 1,
+    String vehicleClass = 'motorcycle',
+    String payMethod = 'mobile_money',
+  }) =>
+      post('/collections', {
+        'courier_id': courierId,
+        'point': point,
+        'recipient_name': recipientName,
+        'recipient_phone': recipientPhone,
+        'dest_address': destAddress,
+        'pickup_window': pickupWindow,
+        if (senderName != null && senderName.isNotEmpty) 'sender_name': senderName,
+        if (description != null && description.isNotEmpty) 'description': description,
+        'parcels': parcels,
+        'vehicle_class': vehicleClass,
+        'pay_method': payMethod,
+      });
 
   /// Pay the signed-in seller's pack activation/renewal via Lipila. Poll with
   /// [paymentStatus]; success flips the subscription to active server-side.

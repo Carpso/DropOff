@@ -213,6 +213,12 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 16),
           _TaskQueueCard(),
           const SizedBox(height: 12),
+          const _RiderCashCard(),
+          const SizedBox(height: 12),
+          const _RiderReviewsCard(),
+          const SizedBox(height: 12),
+          const _RiderPayCard(),
+          const SizedBox(height: 12),
           Card(
             child: ListTile(
               leading: const Icon(Icons.my_location, color: AppColors.forest),
@@ -333,7 +339,7 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 8),
           const Card(child: Padding(padding: EdgeInsets.all(18), child: Column(children: [
             _RevenueRow(number: '01', title: 'Pay-as-you-go pickup', text: 'K45 per pickup. Platform takes 10% (K4.50 to DropOff, K40.50 to the rider) — thin on purpose so riders stay loyal.'),
-            _RevenueRow(number: '02', title: 'Seller packs: Silver / Gold / Platinum', text: 'K250 / K500 / K750 per month for 10 / 25 / 50 parcels (30-day cycle). Every parcel counts as one — even in the same trip. Sweep drivers earn K3,000/month each with a 30-parcels/day target; after the cap you keep a tier discount off pay-as-you-go.'),
+            _RevenueRow(number: '02', title: 'Seller packs: Silver / Gold / Platinum', text: 'K250 / K500 / K750 per 30-day cycle for 10 / 25 / 50 parcels (plus Daily K69 and Weekly K399). Every parcel counts as one — even in the same trip.'),
             _RevenueRow(number: '03', title: 'Waiting & COD float', text: 'Waiting over 10 min bills K2/min (K50 cap) — paid to the driver in full. COD cash floats with the rider/driver — sender paid via momo disbursement minus our 2%.'),
             _RevenueRow(number: '04', title: 'Door delivery & packs', text: 'Last-mile door delivery priced like first-mile pay-as-you-go (recipient-city distance + vehicle). Pack parcels bundle the rider inside the monthly fee.'),
           ]))),
@@ -405,6 +411,193 @@ class _Metric extends StatelessWidget {
     Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
     Text(label, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
   ])));
+}
+
+/// COD cash the signed-in rider is still floating: collected at the door for
+/// sellers, not yet remitted. One tap pushes it to the seller's momo (minus the
+/// platform cut) — the same settlement admin/payouts performs.
+class _RiderCashCard extends StatefulWidget {
+  const _RiderCashCard();
+
+  @override
+  State<_RiderCashCard> createState() => _RiderCashCardState();
+}
+
+class _RiderCashCardState extends State<_RiderCashCard> {
+  Map<String, dynamic>? _data;
+  bool _loading = true;
+  String? _busyRef;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (!DropOffApi.enabled) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    final data = await DropOffApi.riderCod();
+    if (!mounted) return;
+    setState(() {
+      _data = data;
+      _loading = false;
+    });
+  }
+
+  Future<void> _remit(Map<String, dynamic> job) async {
+    final ref = '${job['ref'] ?? ''}';
+    final cod = (job['cod_collected_zmw'] as num?)?.toDouble() ?? 0;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remit this COD?'),
+        content: Text('K${cod.toStringAsFixed(2)} collected on $ref will be pushed to the seller\'s mobile money (platform keeps its cut). This moves money — cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remit')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _busyRef = ref);
+    final res = await DropOffApi.riderCodRemit(ref);
+    if (!mounted) return;
+    setState(() => _busyRef = null);
+    final error = res.error ?? (res.ok ? null : 'Remittance failed.');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(error ?? 'Remitted — seller notified, K${((res.body['credited_zmw'] as num?) ?? 0).toStringAsFixed(2)} sent.'),
+    ));
+    if (error == null) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!DropOffApi.enabled || _loading) {
+      return const Card(child: Padding(padding: EdgeInsets.all(16), child: Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))));
+    }
+    final jobs = ((_data?['jobs'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final open = jobs.where((j) => ((j['remitted'] as num?)?.toInt() ?? 0) == 0).toList();
+    final total = ((_data?['total_unremitted_zmw'] as num?)?.toDouble()) ?? 0;
+    final cut = ((_data?['platform_cut_pct'] as num?)?.toInt()) ?? 0;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.account_balance_wallet_outlined, color: AppColors.forest),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Cash in your float', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            Text('K${total.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.forest)),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            open.isEmpty
+                ? 'All settled — nothing waiting. COD you collect at the door shows here until you remit it.'
+                : 'Collected at the door for sellers. Remitting pushes it straight to their mobile money${cut > 0 ? ' (platform keeps $cut%)' : ''}.',
+            style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
+          ),
+          ...open.take(4).map((job) => Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Row(children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${job['ref'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                      Text('K${((job['cod_collected_zmw'] as num?) ?? 0).toStringAsFixed(2)} · ${job['recipient_name'] ?? 'recipient'}',
+                          style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                    ]),
+                  ),
+                  FilledButton.tonal(
+                    style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, minimumSize: const Size(0, 34)),
+                    onPressed: _busyRef == null ? () => _remit(job) : null,
+                    child: Text(_busyRef == '${job['ref']}' ? 'Sending…' : 'Remit'),
+                  ),
+                ]),
+              )),
+        ]),
+      ),
+    );
+  }
+}
+
+/// The rider's own reputation: average stars + latest written reviews.
+class _RiderReviewsCard extends StatefulWidget {
+  const _RiderReviewsCard();
+
+  @override
+  State<_RiderReviewsCard> createState() => _RiderReviewsCardState();
+}
+
+class _RiderReviewsCardState extends State<_RiderReviewsCard> {
+  Map<String, dynamic>? _data;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (!DropOffApi.enabled) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    final data = await DropOffApi.riderReviews();
+    if (!mounted) return;
+    setState(() {
+      _data = data;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!DropOffApi.enabled || _loading) return const SizedBox.shrink();
+    final n = ((_data?['n'] as num?)?.toInt()) ?? 0;
+    final avg = ((_data?['average'] as num?)?.toDouble()) ?? 0;
+    final reviews = ((_data?['reviews'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.star_outline_rounded, color: AppColors.amber),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Your ratings', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            if (n > 0) ...[
+              ...List.generate(5, (i) => Icon(i < avg.round() ? Icons.star_rounded : Icons.star_border_rounded, size: 16, color: AppColors.amber)),
+              const SizedBox(width: 6),
+              Text('${avg.toStringAsFixed(1)} · $n', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+            ],
+          ]),
+          if (n == 0)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text('No ratings yet — sellers and recipients rate you after each delivery; they show up here.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+            )
+          else
+            ...reviews.take(2).map((r) => Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      ...List.generate(5, (i) => Icon(i < ((r['stars'] as num?)?.toInt() ?? 0) ? Icons.star_rounded : Icons.star_border_rounded, size: 12, color: AppColors.amber)),
+                      const SizedBox(width: 6),
+                      Text('${r['created_at'] ?? ''}'.split(' ').first, style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                    ]),
+                    if ('${r['comment'] ?? ''}'.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Text('“${r['comment']}”', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, height: 1.35)),
+                      ),
+                  ]),
+                )),
+        ]),
+      ),
+    );
+  }
 }
 
 class _BatchPickupCard extends StatefulWidget {
@@ -571,3 +764,27 @@ class _RevenueRow extends StatelessWidget {
 }
 
 
+
+
+/// Flat driver pay + daily expectation. Shown ONLY on the rider view (never in
+/// seller-facing copy); staff see the full economics in the revenue card.
+class _RiderPayCard extends StatelessWidget {
+  const _RiderPayCard();
+
+  @override
+  Widget build(BuildContext context) => const Card(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.payments_outlined, color: AppColors.forest),
+              SizedBox(width: 10),
+              Expanded(child: Text('Your pay', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            ]),
+            SizedBox(height: 6),
+            Text('K3,000/month flat with a 30-parcels/day target. After the cap you keep your tier discount off pay-as-you-go.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+          ]),
+        ),
+      );
+}

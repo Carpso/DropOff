@@ -357,7 +357,6 @@ class AppStore extends ChangeNotifier {
       'description': description,
       'parcels': parcels,
       'vehicle_class': vehicleClass,
-      if (branch != null && branch.trim().isNotEmpty) 'branch': branch.trim(),
       'pay_method': switch (paymentMethod) {
         'Cash at pickup' => 'cash',
         _ => 'mobile_money',
