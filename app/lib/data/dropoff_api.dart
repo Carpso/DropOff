@@ -238,11 +238,14 @@ class DropOffApi {
     Map<String, dynamic> body, {
     bool admin = false,
     Duration? timeout,
+    Map<String, String>? extraHeaders,
   }) async {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
       final res = await http
-          .post(_uri(path), headers: admin ? _adminHeaders : _headers, body: jsonEncode(body))
+          .post(_uri(path),
+              headers: {...(admin ? _adminHeaders : _headers), ...?extraHeaders},
+              body: jsonEncode(body))
           .timeout(timeout ?? _timeout);
       final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
       final ok = res.statusCode >= 200 && res.statusCode < 300;
@@ -535,13 +538,57 @@ class DropOffApi {
     return res.ok ? res.body : null;
   }
 
-  /// Public recipient tracking — accepts the SMS link or the bare token.
-  /// Never requires an account; returns status, rider position and timeline.
-  static Future<Map<String, dynamic>?> trackByToken(String input) {
+  // ---- recipient tracking (verification-gated) ----
+  // The shared link alone never opens the parcel: the Worker answers with
+  // requires_verification + a last-4 phone hint until the viewer proves a
+  // participant phone. Signed-in users (sender/recipient) pass via their JWT
+  // automatically (in _headers); phone-verified viewers pass via the
+  // X-Track-Grant minted by verifyTrack() below.
+
+  /// Grants per token (in-memory only — a fresh app run simply re-verifies).
+  static final Map<String, String> _trackGrants = {};
+
+  static String _trackTokenOf(String input) {
     final raw = input.trim();
-    final match = RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw);
-    final token = match?.group(1) ?? raw;
-    return get('/track/$token');
+    return RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw)?.group(1) ?? raw;
+  }
+
+  static Map<String, String> _trackHeaders(String token) => {
+        if (_trackGrants[token] != null) 'X-Track-Grant': _trackGrants[token]!,
+      };
+
+  /// Live (never cached) tracking fetch — gate vs granted responses must not
+  /// be served from a stale snapshot.
+  static Future<Map<String, dynamic>?> _trackGet(String path, String token) async {
+    if (!enabled) return null;
+    try {
+      final res = await http
+          .get(_uri(path), headers: {..._headers, ..._trackHeaders(token)})
+          .timeout(_timeout);
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Recipient tracking — accepts the SMS link or the bare token. Callers
+  /// must treat `requires_verification: true` as "show the phone gate".
+  static Future<Map<String, dynamic>?> trackByToken(String input) {
+    final token = _trackTokenOf(input);
+    return _trackGet('/track/$token', token);
+  }
+
+  /// Phone-verification gate: succeeds only for the sender's or recipient's
+  /// phone; stores the returned grant for every subsequent /track/* call.
+  static Future<Map<String, dynamic>?> verifyTrack(String tokenOrUrl, String phone) async {
+    final token = _trackTokenOf(tokenOrUrl);
+    final res = await post('/track/$token/verify', {'phone': phone});
+    final grant = res.ok ? res.body['grant'] as String? : null;
+    if (grant != null) _trackGrants[token] = grant;
+    return res.ok ? res.body : null;
   }
 
   // ---- chat (job thread / recipient-token thread / support thread) ----
@@ -552,17 +599,13 @@ class DropOffApi {
       post('/jobs/$jobRef/chat', {'body': body});
 
   static Future<Map<String, dynamic>?> trackChat(String tokenOrUrl) {
-    final raw = tokenOrUrl.trim();
-    final match = RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw);
-    final token = match?.group(1) ?? raw;
-    return get('/track/$token/chat');
+    final token = _trackTokenOf(tokenOrUrl);
+    return _trackGet('/track/$token/chat', token);
   }
 
   static Future<ApiResponse> sendTrackChat(String tokenOrUrl, String body) {
-    final raw = tokenOrUrl.trim();
-    final match = RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw);
-    final token = match?.group(1) ?? raw;
-    return post('/track/$token/chat', {'body': body});
+    final token = _trackTokenOf(tokenOrUrl);
+    return post('/track/$token/chat', {'body': body}, extraHeaders: _trackHeaders(token));
   }
 
   /// Open (or create) the support thread; a non-empty [body] is sent as the
@@ -572,6 +615,31 @@ class DropOffApi {
           .then((res) => res.ok ? res.body : null);
 
   static Future<Map<String, dynamic>?> chatThreads() => get('/chat/threads');
+
+  // ---- staff console: support inbox + user roles ----
+
+  /// Admin/ops view of every support ticket ({threads: [{id, phone, last_message, unread, ...}]}).
+  static Future<Map<String, dynamic>?> adminSupportThreads() => get('/admin/support/threads');
+
+  /// One support ticket with all messages.
+  static Future<Map<String, dynamic>?> adminSupportThread(int threadId) =>
+      get('/admin/support/threads/$threadId');
+
+  /// Admin/ops reply into a support ticket (same endpoint sellers use).
+  static Future<ApiResponse> supportReply(int threadId, String body) =>
+      post('/chat/support/$threadId/reply', {'body': body});
+
+  /// {users: [{email, phone, full_name, role, ...}]} — staff can read, superadmin can write.
+  static Future<Map<String, dynamic>?> adminUsers() => get('/admin/users');
+
+  /// Promote/demote an account (customer|admin|partner) — superadmin only.
+  static Future<ApiResponse> adminSetUserRole(String email, String role) =>
+      post('/admin/users/role', {'email': email, 'role': role});
+
+  /// Delivery IQ: how fast this courier really reaches the depot (p50/p90/avg
+  /// minutes from actual pickup→depot times over the last 90 days).
+  static Future<Map<String, dynamic>?> iqEta(int courierId, String window) =>
+      get('/iq/eta', {'courier_id': '$courierId', 'window': window});
 
   /// Identity of the signed-in caller: {phone, role}. role 'admin' | 'ops'
   /// unlocks the in-app admin console (owner phone is admin server-side).

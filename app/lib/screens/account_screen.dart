@@ -327,7 +327,9 @@ class _AccountScreenState extends State<AccountScreen> {
             ),
             if (!_creating) ...[
               const SizedBox(height: 8),
-              Row(children: [
+              // Wrap (not Row): two long button labels can never overflow or
+              // crush each other on narrow phones / large font scales.
+              Wrap(alignment: WrapAlignment.center, children: [
                 TextButton(
                   onPressed: () => _forgotPassword(),
                   child: const Text('Forgot password?'),
@@ -347,11 +349,14 @@ class _AccountScreenState extends State<AccountScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              alignment: WrapAlignment.center,
               children: [
                 _legalLink('Terms of use', 'assets/legal/terms.md'),
-                const Text('\u2022', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6),
+                  child: Text('\u2022', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                ),
                 _legalLink('Privacy policy', 'assets/legal/privacy.md'),
               ],
             ),
@@ -687,8 +692,16 @@ class _TiersCardState extends State<_TiersCard> {
   String? _busyTier;
   int _usageCycle = 0;
 
-  String _windowLabel(Object? windows) {
-    final list = (windows as List?)?.cast<Object>() ?? const [];
+  String _cycleUnit(Map<String, dynamic>? model) {
+    final days = (model?['cycle_days'] as num?)?.toInt() ?? 30;
+    return switch (days) {
+      1 => '/day',
+      7 => '/wk',
+      _ => '/mo',
+    };
+  }
+
+  String _windowLabel(Object? windows) {    final list = (windows as List?)?.cast<Object>() ?? const [];
     // Arrival ranges (CAT) — matches the booking slot picker. Cap at 3 so the
     // label can never balloon into a tall vertical stack.
     const ranges = {
@@ -731,6 +744,8 @@ class _TiersCardState extends State<_TiersCard> {
     if (!mounted) return;
     setState(() { _busyTier = null; _usageCycle++; });
     messenger.showSnackBar(SnackBar(content: Text(switch (status) {
+      'success' when tier == 'daily' => 'Daily Dash is LIVE — today\u2019s parcels are ready.',
+      'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
       'success' => '$tier pack is LIVE — your monthly parcels are ready.',
       'failed' => 'The mobile-money prompt was rejected — pay again from this screen.',
       _ => 'Payment still pending — the pack activates the moment it lands.',
@@ -751,7 +766,7 @@ class _TiersCardState extends State<_TiersCard> {
               const Text('Send more, pay less', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
               const SizedBox(height: 4),
               const Text(
-                'Subscription packs bundle the rider into one monthly prompt. Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.',
+                'Plans bundle the rider into ONE mobile-money prompt — a Daily Dash pass, a 7-day Weekly Sprint, or a monthly pack. Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.',
                 style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.45),
               ),
               const SizedBox(height: 12),
@@ -764,6 +779,8 @@ class _TiersCardState extends State<_TiersCard> {
                     return const Text('Tier prices load when the server is reachable.', style: TextStyle(color: AppColors.muted, fontSize: 12));
                   }
                   const display = <String, ({String label, String blurb})>{
+                    'daily': (label: 'DAILY DASH', blurb: '6 parcels, today only — vendors & daily traders'),
+                    'weekly': (label: 'WEEKLY SPRINT', blurb: '20 parcels / 7 days — no monthly lock-in'),
                     'silver': (label: 'SILVER', blurb: '10 parcels / month — low-volume senders'),
                     'gold': (label: 'GOLD', blurb: '25 parcels / month — weekly shippers'),
                     'platinum': (label: 'PLATINUM', blurb: '50 parcels / month — daily bulk senders'),
@@ -826,7 +843,7 @@ class _TiersCardState extends State<_TiersCard> {
                                 FittedBox(
                                   fit: BoxFit.scaleDown,
                                   alignment: Alignment.centerRight,
-                                  child: Text('K${models[entry.key]?['fee_zmw'] ?? '—'}/mo',
+                                  child: Text('K${models[entry.key]?['fee_zmw'] ?? '—'}${_cycleUnit(models[entry.key])}',
                                       maxLines: 1,
                                       style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.forest)),
                                 ),
@@ -860,8 +877,7 @@ class _TiersCardState extends State<_TiersCard> {
 /// Live "X of Y parcels used this cycle" meter for the signed-in seller's pack.
 /// Shows the Admin console door only when the server says this identity is
 /// admin/ops (the owner's phone resolves to admin via OWNER_PHONE).
-class _AdminGate extends StatefulWidget {
-  const _AdminGate();
+class _AdminGate extends StatefulWidget {  const _AdminGate();
 
   @override
   State<_AdminGate> createState() => _AdminGateState();
@@ -911,11 +927,21 @@ class _AdminGateState extends State<_AdminGate> {
   }
 }
 
-class _PlanUsageMeter extends StatelessWidget {
-  const _PlanUsageMeter({super.key});  @override
+class _PlanUsageMeter extends StatefulWidget {
+  const _PlanUsageMeter({super.key});
+
+  @override
+  State<_PlanUsageMeter> createState() => _PlanUsageMeterState();
+}
+
+class _PlanUsageMeterState extends State<_PlanUsageMeter> {
+  // Cached: one fetch per mount, not one per parent rebuild.
+  late final Future<Map<String, dynamic>?> _future = DropOffApi.subscription();
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<Map<String, dynamic>?>(
-      future: DropOffApi.subscription(),
+      future: _future,
       builder: (context, snap) {
         final sub = snap.data?['subscription'] as Map<String, dynamic>?;
         final plan = snap.data?['plan'] as Map<String, dynamic>?;
@@ -934,8 +960,21 @@ class _PlanUsageMeter extends StatelessWidget {
             Row(children: [
               const Icon(Icons.inventory_2_outlined, size: 16, color: AppColors.forest),
               const SizedBox(width: 8),
-              Expanded(child: Text('$tier pack — $used of $cap parcels used', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
-              Text('$remaining left', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest)),
+              // Expanded label + FLEXIBLE counter: the trailing count can never
+              // squeeze the label into a vertical ribbon.
+              Expanded(
+                child: Text('$tier pack — $used of $cap parcels used',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text('$remaining left',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest)),
+              ),
             ]),
             const SizedBox(height: 9),
             ClipRRect(

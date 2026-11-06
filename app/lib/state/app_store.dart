@@ -25,6 +25,7 @@ class AppStore extends ChangeNotifier {
   String? _linkedPhone;
   String? _email;
   String? _role;
+  bool _superadmin = false;
 
   List<Booking> get bookings => List.unmodifiable(_bookings);
   List<Rider> get riders => List.unmodifiable(_riders);
@@ -34,10 +35,17 @@ class AppStore extends ChangeNotifier {
   String? get email => _email;
   bool get linked => _token != null;
 
-  /// Server role for the signed-in identity: customer | partner | admin | ops.
-  /// Admin/ops unlock the Team tab and the admin console.
+  /// Server role for the signed-in identity: customer | partner | admin | ops |
+  /// rider. Admin/ops unlock the Team tab and the admin console; rider unlocks
+  /// a personal rider view (their queue + GPS) via phone-OTP login.
   String? get role => _role;
   bool get isStaff => _role == 'admin' || _role == 'ops';
+  bool get isRider => _role == 'rider';
+  bool get isTeam => isStaff || isRider;
+
+  /// True when the signed-in phone is the app owner's (or the admin key is
+  /// configured): unlocks user/role management in the admin console.
+  bool get isSuperAdmin => _superadmin;
 
   Future<void> initialize() async {
     final preferences = await SharedPreferences.getInstance();
@@ -86,18 +94,22 @@ class AppStore extends ChangeNotifier {
     _ready = true;
     notifyListeners();
     unawaited(flushOutbox());
-    if (_token != null) unawaited(refreshRole());
+    if (DropOffApi.enabled) unawaited(refreshRole());
   }
 
   /// Pulls the signed-in identity's role from GET /me so the shell can hide
-  /// Team/admin surfaces from ordinary sellers and recipients.
+  /// Team/admin surfaces from ordinary sellers and recipients. Runs even
+  /// without a JWT: an ops-key device (rider build) resolves role='ops' via
+  /// X-Api-Key; a bare session gets role=null (fail closed — staff hidden).
   Future<void> refreshRole() async {
-    if (_token == null || !DropOffApi.enabled) return;
+    if (!DropOffApi.enabled) return;
     final me = await DropOffApi.me();
     final next = '${me?['role'] ?? ''}';
     final role = next.isEmpty ? null : next;
-    if (role != _role) {
+    final sa = me?['superadmin'] == true;
+    if (role != _role || sa != _superadmin) {
       _role = role;
+      _superadmin = sa;
       notifyListeners();
     }
   }
@@ -288,6 +300,7 @@ class AppStore extends ChangeNotifier {
     _token = null;
     _linkedPhone = null;
     _role = null;
+    _superadmin = false;
     DropOffApi.token = null;
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_tokenKey);

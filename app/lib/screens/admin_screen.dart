@@ -19,6 +19,7 @@ class _AdminScreenState extends State<AdminScreen> {
   List<Map<String, dynamic>> _flags = const [];
   bool _loading = true;
   bool _authorized = false;
+  bool _superadmin = false;
 
   final _smsPhone = TextEditingController();
   final _smsBody = TextEditingController();
@@ -51,6 +52,7 @@ class _AdminScreenState extends State<AdminScreen> {
     if (!mounted) return;
     setState(() {
       _authorized = true;
+      _superadmin = me?['superadmin'] == true;
       _stats = stats;
       _alerts = ((alerts?['alerts'] as List?) ?? const []).cast<Map<String, dynamic>>();
       _flags = ((flags?['flags'] as List?) ?? const []).cast<Map<String, dynamic>>();
@@ -143,6 +145,12 @@ class _AdminScreenState extends State<AdminScreen> {
             _alertsCard(),
             const SizedBox(height: 18),
             _fraudCard(),
+            const SizedBox(height: 18),
+            const _SupportInboxCard(),
+            if (_superadmin) ...[
+              const SizedBox(height: 18),
+              const _UsersCard(),
+            ],
             const SizedBox(height: 18),
             const _BranchManagerCard(),
             const SizedBox(height: 18),
@@ -313,6 +321,335 @@ class _AdminScreenState extends State<AdminScreen> {
           ]),
         ),
       );
+}
+
+/// Support inbox: every support ticket (kind='support' chat thread) with the
+/// seller's last message and unread count. Tap a ticket to read the thread and
+/// reply (POST /chat/support/:id/reply — the same endpoint sellers reply with).
+class _SupportInboxCard extends StatefulWidget {
+  const _SupportInboxCard();
+
+  @override
+  State<_SupportInboxCard> createState() => _SupportInboxCardState();
+}
+
+class _SupportInboxCardState extends State<_SupportInboxCard> {
+  List<Map<String, dynamic>> _threads = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final data = await DropOffApi.adminSupportThreads();
+    if (!mounted) return;
+    setState(() {
+      _threads = ((data?['threads'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _loading = false;
+    });
+  }
+
+  Future<void> _open(Map<String, dynamic> thread) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (_) => _SupportTicketSheet(threadId: (thread['id'] as num).toInt(), phone: '${thread['phone'] ?? ''}'),
+    );
+    if (mounted) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.support_agent, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Support inbox', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 6),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+          else if (_threads.isEmpty)
+            const Text('No tickets. Everyone is happy.', style: TextStyle(color: AppColors.muted, fontSize: 12.5))
+          else
+            ..._threads.take(12).map((t) {
+              final unread = (t['unread'] as num?)?.toInt() ?? 0;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => _open(t),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    child: Row(children: [
+                      const Icon(Icons.chat_bubble_outline, size: 16, color: AppColors.forest),
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('Ticket #${t['id']} · ${t['phone'] ?? ''}',
+                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                        if ('${t['last_message'] ?? ''}'.isNotEmpty)
+                          Text('${t['last_message']}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                      ])),
+                      if (unread > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(10)),
+                          child: Text('$unread', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11)),
+                        ),
+                    ]),
+                  ),
+                ),
+              );
+            }),
+        ]),
+      ),
+    );
+  }
+}
+
+/// One open support ticket: full message history + a reply box.
+class _SupportTicketSheet extends StatefulWidget {
+  const _SupportTicketSheet({required this.threadId, required this.phone});
+
+  final int threadId;
+  final String phone;
+
+  @override
+  State<_SupportTicketSheet> createState() => _SupportTicketSheetState();
+}
+
+class _SupportTicketSheetState extends State<_SupportTicketSheet> {
+  List<Map<String, dynamic>> _messages = const [];
+  bool _loading = true;
+  bool _sending = false;
+  final _reply = TextEditingController();
+  final _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _reply.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final data = await DropOffApi.adminSupportThread(widget.threadId);
+    if (!mounted) return;
+    setState(() {
+      _messages = ((data?['messages'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _loading = false;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+  }
+
+  Future<void> _send() async {
+    final body = _reply.text.trim();
+    if (body.isEmpty || _sending) return;
+    setState(() => _sending = true);
+    _reply.clear();
+    final res = await DropOffApi.supportReply(widget.threadId, body);
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (!res.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Reply failed: ${res.error}')));
+      return;
+    }
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.8,
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            child: Row(children: [
+              const Icon(Icons.support_agent, color: AppColors.forest),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Ticket #${widget.threadId} · ${widget.phone}',
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+              ),
+              IconButton(tooltip: 'Reload', onPressed: _load, icon: const Icon(Icons.refresh, size: 18)),
+            ]),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, i) {
+                      final m = _messages[i];
+                      final fromOps = '${m['sender_role'] ?? ''}' == 'ops';
+                      final time = '${m['created_at'] ?? ''}'.split(' ').last;
+                      return Align(
+                        alignment: fromOps ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+                          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                          decoration: BoxDecoration(
+                            color: fromOps ? AppColors.forest : AppColors.line.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text('${m['sender_role'] ?? 'user'} · $time',
+                                style: TextStyle(color: fromOps ? Colors.white70 : AppColors.muted, fontSize: 10.5, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 3),
+                            Text('${m['body'] ?? ''}',
+                                style: TextStyle(color: fromOps ? Colors.white : Colors.black87, fontSize: 13, height: 1.3)),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _reply,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    maxLength: 500,
+                    decoration: const InputDecoration(hintText: 'Reply as DropOff…', counterText: ''),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                IconButton.filled(
+                  onPressed: _sending ? null : _send,
+                  icon: _sending
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.send_rounded),
+                ),
+              ]),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Accounts & roles (superadmin only): review every account and mentor who is
+/// admin. The owner's own row can never be demoted (server refuses).
+class _UsersCard extends StatefulWidget {
+  const _UsersCard();
+
+  @override
+  State<_UsersCard> createState() => _UsersCardState();
+}
+
+class _UsersCardState extends State<_UsersCard> {
+  List<Map<String, dynamic>> _users = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final data = await DropOffApi.adminUsers();
+    if (!mounted) return;
+    setState(() {
+      _users = ((data?['users'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _loading = false;
+    });
+  }
+
+  Future<void> _setRole(Map<String, dynamic> user, String role) async {
+    final email = '${user['email'] ?? ''}';
+    if (email.isEmpty || role == '${user['role'] ?? ''}') return;
+    final res = await DropOffApi.adminSetUserRole(email, role);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
+        ? '$email is now $role.'
+        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'the owner account cannot be demoted' : res.error}')));
+    if (res.ok) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.manage_accounts_outlined, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Accounts & roles', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 4),
+          const Text('As the owner you decide who is admin (e.g. your spouse to run support). Admins cannot invite more admins.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+          const SizedBox(height: 8),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+          else if (_users.isEmpty)
+            const Text('No accounts found.', style: TextStyle(color: AppColors.muted, fontSize: 12.5))
+          else
+            ..._users.take(60).map((u) {
+              final role = '${u['role'] ?? 'customer'}';
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  const Icon(Icons.person_outline, size: 16, color: AppColors.forest),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${u['full_name'] ?? u['email'] ?? u['phone'] ?? 'Account'}',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                    Text('${u['email'] ?? ''} · ${u['phone'] ?? ''}',
+                        style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                  ])),
+                  PopupMenuButton<String>(
+                    tooltip: 'Change role',
+                    initialValue: role,
+                    onSelected: (r) => _setRole(u, r),
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'customer', child: Text('customer')),
+                      PopupMenuItem(value: 'admin', child: Text('admin')),
+                      PopupMenuItem(value: 'partner', child: Text('partner')),
+                    ],
+                    child: Chip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text(role, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ]),
+              );
+            }),
+        ]),
+      ),
+    );
+  }
 }
 
 /// Depot-branch manager: pick a courier, add a Lusaka branch (name, area,

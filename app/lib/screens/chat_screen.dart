@@ -7,6 +7,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../data/dropoff_api.dart';
 import '../ui/app_theme.dart';
+import 'track_screen.dart';
 
 /// One chat, three doors:
 ///  - job thread   (seller, rider, depot partner, ops — via job ref)
@@ -42,6 +43,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _myRole;
   int? _threadId;
   bool _loading = true;
+  bool _needsVerify = false;
   bool _sending = false;
   Timer? _poll;
   WebSocketChannel? _ws;
@@ -149,7 +151,15 @@ class _ChatScreenState extends State<ChatScreen> {
       } else {
         data = await DropOffApi.trackChat(widget.token!);
       }
-      if (!mounted || data == null) return;
+      if (!mounted) return;
+      if (data == null && !_isRecipient) return;
+      if (data == null) {
+        // Token chat without a phone-verification grant (fresh app run): the
+        // TrackScreen verify flow mints the X-Track-Grant — route the user there.
+        setState(() { _loading = false; _needsVerify = true; });
+        _poll?.cancel();
+        return;
+      }
       final incoming = ((data['messages'] as List?) ?? const []).cast<Map<String, dynamic>>();
       setState(() {
         _messages = incoming;
@@ -215,7 +225,29 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900))),
       body: Column(children: [
         Expanded(
-          child: _loading
+          child: _needsVerify
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      const Icon(Icons.phonelink_lock, size: 44, color: AppColors.muted),
+                      const SizedBox(height: 16),
+                      const Text('Verify your number first', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+                      const SizedBox(height: 8),
+                      const Text('Only the parcel\u2019s sender or recipient can open this chat. Verify the phone it was addressed to, then come back.',
+                          textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.5)),
+                      const SizedBox(height: 20),
+                      FilledButton.icon(
+                        onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
+                          builder: (_) => TrackScreen(initialToken: widget.token),
+                        )),
+                        icon: const Icon(Icons.verified_user),
+                        label: const Text('Verify & track'),
+                      ),
+                    ]),
+                  ),
+                )
+              : _loading
               ? const Center(child: CircularProgressIndicator())
               : _messages.isEmpty
                   ? const Center(
