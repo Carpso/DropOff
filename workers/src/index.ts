@@ -4444,6 +4444,57 @@ app.post('/admin/support/threads/:id/ai-draft', async (c) => {
     });
     return c.json({ draft: String(out?.response ?? '').trim().slice(0, 1200) });
   } catch (e: any) {
+
+
+// Depot drop-off receipt / POD: the driver attaches a photo to the job
+// (dropoff_photo_url), then AI reads the depot, parcel count, condition and
+// flags damage or shortage. Owner/admins review it on the job; the result is
+// kept as a job event so it can't be edited after the fact.
+app.post('/ai/receipt/:ref', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (!c.env.AI) return c.json({ error: 'ai_unavailable' }, 503);
+  if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
+  const ref = c.req.param('ref');
+  const job = await c.env.DB.prepare(
+    `SELECT id, ref, rider_id, sender_phone, dropoff_photo_url, status FROM jobs WHERE ref = ?1`,
+  ).bind(ref).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  const role = c.get('role');
+  const isAssignedRider = role === 'rider' && c.get('riderId') !== undefined && Number(c.get('riderId')) === Number(job.rider_id);
+  if (!isAssignedRider && !isAdmin(c) && role !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const key = r2KeyFromUrl(job.dropoff_photo_url);
+  if (!key) return c.json({ error: 'no_receipt_photo', hint: 'Attach a depot drop-off photo to this job first.' }, 400);
+  const object = await c.env.BACKUPS.get(key);
+  if (!object) return c.json({ error: 'photo_missing' }, 404);
+  const bytes = [...new Uint8Array(await object.arrayBuffer())];
+  let text = '';
+  try {
+    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+      image: bytes,
+      prompt: 'This is a delivery drop-off / proof-of-delivery photo at a courier depot. Transcribe everything visible: depot name or location, number of parcels or packages, condition of parcels, any damage, shortage or discrepancy notes, dates, times and signatures. Output only the transcribed text, no extra labels.',
+      max_tokens: 400,
+    });
+    text = String(out?.response ?? out?.description ?? '').trim().slice(0, 1200);
+  } catch (e: any) {
+    return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
+  }
+  const norm = text.toLowerCase();
+  const parcelMatch = text.match(/(\d+)\s*(parcel|package|box|item|piece)/i);
+  const result = {
+    text,
+    depot_hint: '',
+    parcel_count: parcelMatch ? Number(parcelMatch[1]) : null,
+    damage_flag: /damage|broken|torn|leak|crushed|dented/i.test(norm),
+    shortage_flag: /shortage|missing|less than|short|not all/i.test(norm),
+    discrepancy_flag: /discrepancy|mismatch|wrong|incorrect/i.test(norm),
+    checked_at: new Date().toISOString(),
+  };
+  await c.env.DB.prepare(
+    `INSERT INTO job_events (job_id, status, note) VALUES (?1,'receipt_ai_check',?2)`,
+  ).bind(job.id, JSON.stringify(result)).run().catch(() => {});
+  return c.json({ ok: true, ref, ...result });
+});
     return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
   }
 });
