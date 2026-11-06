@@ -1063,8 +1063,8 @@ app.post('/jobs', async (c) => {
          promo_code, promo_discount_zmw,
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile,
-         parcels, vehicle_class, branch)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)`,
+         parcels, vehicle_class, branch, from_city)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)`,
     ).bind(
       ref, senderPhone, b.sender_name, b.pickup_address, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -1075,6 +1075,7 @@ app.post('/jobs', async (c) => {
       pickupAt, lastMile,
       parcels, vehicleClass,
       b.branch ? String(b.branch).trim().slice(0, 80) : null,
+      fromCity,
     ).run();
 
     if (promoCode) {
@@ -1209,6 +1210,73 @@ app.post('/jobs', async (c) => {
     }
     return c.json({ error: e.message ?? 'bad request' }, 400);
   }
+});
+
+// Collection from a courier point → recipient's door (Lusaka only).
+// The parcel already arrived at the courier depot; a rider picks it up there
+// and runs the last mile. No counter fare and no branch choice — the rider
+// collects from the nominated point. Pricing = last-mile zone fare + its
+// processing fee (same model as the door-delivery add-on).
+app.post('/collections', async (c) => {
+  const phone = c.get('phone');
+  const role = c.get('role');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (role === 'rider') return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  if (!b) return c.json({ error: 'invalid JSON body' }, 400);
+  const courierId = Number(b.courier_id);
+  if (!courierId) return c.json({ error: 'courier_id required' }, 400);
+  const courier = await c.env.DB.prepare('SELECT id, name FROM couriers WHERE id = ?1').bind(courierId).first<any>();
+  if (!courier) return c.json({ error: 'courier_not_found' }, 404);
+  const point = String(b.point ?? '').trim();
+  if (point.length < 2) return c.json({ error: 'collection_point_required' }, 400);
+  const recipientName = String(b.recipient_name ?? '').trim();
+  const recipientPhone = normalizeZmPhone(String(b.recipient_phone ?? ''));
+  if (recipientName.length < 2) return c.json({ error: 'recipient_name_required' }, 400);
+  if (!recipientPhone) return c.json({ error: 'invalid_recipient_phone' }, 400);
+  const destAddress = String(b.dest_address ?? '').trim();
+  if (destAddress.length < 4) return c.json({ error: 'dest_address_required' }, 400);
+  const window = String(b.pickup_window ?? '10:00');
+  if (!['06:00', '10:00', '14:00'].includes(window)) return c.json({ error: 'pickup_window must be 06:00, 10:00 or 14:00' }, 400);
+  const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class) ? b.vehicle_class : 'motorcycle';
+  const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, VEHICLE_MAX_PARCELS[vehicleClass]));
+  const payMethod = b.pay_method === 'cash' ? 'cash' : 'mobile_money';
+
+  const riderFee = baseRiderFee('Lusaka', 0, 0, vehicleClass);
+  const processing = round2(platformFee(riderFee));
+  const total = round2(riderFee + processing);
+  const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
+
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
+       recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
+       counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
+       pickup_time, pickup_window, pay_method, last_mile, parcels, vehicle_class, from_city)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,1,?16,?17,'Lusaka')`,
+  ).bind(
+    ref, phone, String(b.sender_name ?? '').trim() || null, point, courierId,
+    recipientName, recipientPhone, destAddress,
+    String(b.description ?? 'Collection').trim().slice(0, 200), String(b.weight_class ?? '0-5kg'),
+    riderFee, processing, total, window, payMethod, parcels, vehicleClass,
+  ).run();
+
+  await c.env.DB.prepare(
+    `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'created', ?2)`,
+  ).bind(meta.last_row_id, `Collection booked from ${courier.name} (${point}) — rider delivers to ${recipientName}'s door`).run();
+
+  return c.json({
+    ok: true,
+    ref,
+    courier_id: courierId,
+    courier_name: courier.name,
+    pickup_window: window,
+    rider_fee_zmw: riderFee,
+    processing_fee_zmw: processing,
+    total_zmw: total,
+    parcels,
+    vehicle_class: vehicleClass,
+    pay_method: payMethod,
+  }, 201);
 });
 
 // Sellers can test a promo code before booking (public, read-only)
@@ -1800,7 +1868,20 @@ app.get('/iq/eta', async (c) => {
     if (m >= 0 && m < 24 * 60) mins.push(m); // drop bogus/negative gaps
   }
   if (mins.length === 0) {
-    return c.json({ courier_id: courierId, window: window || null, sample_count: 0 });
+    // Cold start: no 90-day history yet. Fall back to the advertised window
+    // bands so the estimate is still useful (labelled, never passed off as IQ).
+    const bands: Record<string, number> = { '06:00': 50, '10:00': 45, '14:00': 45 };
+    const p50 = bands[window] ?? 50;
+    return c.json({
+      courier_id: courierId,
+      window: window || null,
+      sample_count: 0,
+      fallback: true,
+      minutes_p50: p50,
+      minutes_p90: p50 + 25,
+      minutes_avg: p50 + 5,
+      basis: 'advertised window bands (no measured history yet)',
+    });
   }
   mins.sort((a, b) => a - b);
   const p = (q: number) => mins[Math.min(mins.length - 1, Math.floor(q * mins.length))];
@@ -3713,6 +3794,81 @@ app.get('/subscriptions/:phone?', async (c) => {
   });
 });
 
+/* --------------------- pack codes (bulk / offline sale) -------------------- */
+// Codes are generated by staff (agents, market days) and redeemed by a seller
+// onto their own number: the pack activates with no payment prompt because it
+// was already paid for in bulk.
+app.post('/admin/pack-codes', async (c) => {
+  const b: any = await c.req.json().catch(() => null);
+  const tier = String(b?.tier ?? '').toLowerCase() as PlanTier;
+  const packs = await plans(c.env.DB);
+  const plan = packs[tier];
+  if (!plan) return c.json({ error: `tier must be one of ${Object.keys(packs).join(', ')}` }, 400);
+  const count = Math.max(1, Math.min(Number(b?.count ?? 1) || 1, 50));
+  const note = b?.note != null ? String(b.note).slice(0, 120) : null;
+  const days = Math.max(1, plan.cycle_days || 30);
+  const codes: string[] = [];
+  for (let i = 0; i < count; i++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = `DROP-${randomCode(4)}-${randomCode(4)}`;
+      const ins = await c.env.DB.prepare(
+        `INSERT OR IGNORE INTO pack_codes (code, tier, cycle_days, note) VALUES (?1, ?2, ?3, ?4)`,
+      ).bind(code, tier, days, note).run();
+      if ((ins.meta.changes ?? 0) > 0) { codes.push(code); break; }
+    }
+  }
+  return c.json({ ok: true, tier, cycle_days: days, codes });
+});
+
+app.get('/admin/pack-codes', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT code, tier, cycle_days, note, created_at, used_by, used_at
+       FROM pack_codes ORDER BY id DESC LIMIT 100`,
+  ).all();
+  return c.json({ codes: results ?? [] });
+});
+
+app.post('/subscriptions/redeem', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const code = String(b?.code ?? '').trim().toUpperCase();
+  if (!code) return c.json({ error: 'code_required' }, 400);
+  const row = await c.env.DB.prepare(
+    'SELECT code, tier, cycle_days, used_by FROM pack_codes WHERE code = ?1',
+  ).bind(code).first<any>();
+  if (!row) return c.json({ error: 'code_not_found' }, 404);
+  if (row.used_by) return c.json({ error: 'code_used' }, 409);
+  const packs = await plans(c.env.DB);
+  const plan = packs[row.tier as PlanTier];
+  if (!plan) return c.json({ error: 'pack_tier_unavailable' }, 409);
+  const days = Math.max(1, Number(row.cycle_days) || plan.cycle_days || 30);
+  // Consume atomically — two devices racing the same code: exactly one wins.
+  const upd = await c.env.DB.prepare(
+    `UPDATE pack_codes SET used_by = ?1, used_at = datetime('now') WHERE code = ?2 AND used_by IS NULL`,
+  ).bind(phone, code).run();
+  if ((upd.meta.changes ?? 0) === 0) return c.json({ error: 'code_used' }, 409);
+  const cycleMod = `+${days} days`;
+  await c.env.DB.prepare(
+    `INSERT INTO subscriptions (phone, tier, city, pickup_window, status, period_start, period_end)
+     VALUES (?1, ?2, 'Lusaka', '10:00', 'active', datetime('now'), datetime('now', ?3))
+     ON CONFLICT(phone) DO UPDATE SET
+       tier = excluded.tier, status = 'active',
+       period_start = excluded.period_start, period_end = excluded.period_end`,
+  ).bind(phone, row.tier, cycleMod).run();
+  const sub = await c.env.DB.prepare(
+    'SELECT tier, period_start, period_end FROM subscriptions WHERE phone = ?1',
+  ).bind(phone).first<any>();
+  return c.json({
+    ok: true,
+    tier: sub?.tier ?? row.tier,
+    period_start: sub?.period_start,
+    period_end: sub?.period_end,
+    cycle_days: days,
+    parcels: plan.parcels_per_month,
+  });
+});
+
 /* ----------------------- mid-cycle upgrade (prorated) ---------------------- */
 // Pay the difference for the remaining days; the new tier's cap applies the
 // moment the upgrade is requested. Failed/abandoned payments are reverted by
@@ -3883,35 +4039,117 @@ app.post('/admin/partners', async (c) => {
 // Rider earnings/cash-out + COD remittance (float settlement is admin-controlled).
 // kind='cod_remit' settles cash the rider/driver floated from a job's door collection:
 // the sender's wallet gets the COD amount net of the platform's COD cut.
+
+// Shared by /admin/payouts and /rider/cod/remit: push the COD float to the
+// sender's momo (Lipila disbursement), log the payment + job event.
+async function remitJobCod(c: any, job_ref: string): Promise<Response> {
+  const job = await c.env.DB.prepare(
+    'SELECT id, ref, sender_phone, cod_collected_zmw FROM jobs WHERE ref = ?1').bind(job_ref).first() as any;
+  if (!job) return c.json({ error: 'job not found' }, 404);
+  if (!job.cod_collected_zmw) return c.json({ error: 'no cash collected on this job' }, 409);
+  const cod = Number(job.cod_collected_zmw);
+  const net = Math.round(cod * (1 - COD_FEE) * 100) / 100;
+  // Customers/sellers have NO wallet — settle COD straight to their momo.
+  const ref = `cod-${job.ref}-${Date.now().toString(36)}`;
+  const disb = await lipilaDisburse(c.env, job.sender_phone, net, ref, `DropOff COD remit ${job.ref}`);
+  if (!disb.ok) return c.json({ error: 'lipila disbursement failed', detail: disb.raw ?? null }, 502);
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status, channel, kind)
+       VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, 'pending', 'merchant', 'cod_remit')`,
+    ).bind(job.id, job.sender_phone, providerFromPhone(job.sender_phone), net, disb.lipilaReference ?? ref),
+    c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_remit_initiated', ?2)`)
+      .bind(job.id, `COD K${cod} remitted via momo — sender gets K${net} (platform keeps K${(cod - net).toFixed(2)}). Ref ${disb.lipilaReference ?? ref}`),
+  ]);
+  return c.json({ ok: true, job_ref: job.ref, credited_zmw: net, platform_kept_zmw: round2(cod - net), lipila_reference: disb.lipilaReference ?? ref, settlement: 'momo_disbursement' });
+}
+
 app.post('/admin/payouts', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const kind: string = ['rider_earning', 'rider_payout', 'cod_remit'].includes(b?.kind) ? b.kind : 'rider_earning';
   if (kind === 'cod_remit') {
-    const job = await c.env.DB.prepare(
-      'SELECT id, ref, sender_phone, cod_collected_zmw FROM jobs WHERE ref = ?1').bind(b?.job_ref ?? '').first() as any;
-    if (!job) return c.json({ error: 'job not found' }, 404);
-    if (!job.cod_collected_zmw) return c.json({ error: 'no cash collected on this job' }, 409);
-    const cod = Number(job.cod_collected_zmw);
-    const net = Math.round(cod * (1 - COD_FEE) * 100) / 100;
-    // Customers/sellers have NO wallet â€” settle COD straight to their momo.
-    const ref = `cod-${job.ref}-${Date.now().toString(36)}`;
-    const disb = await lipilaDisburse(c.env, job.sender_phone, net, ref, `DropOff COD remit ${job.ref}`);
-    if (!disb.ok) return c.json({ error: 'lipila disbursement failed', detail: disb.raw ?? null }, 502);
-    await c.env.DB.batch([
-      c.env.DB.prepare(
-        `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status, channel, kind)
-         VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, 'pending', 'merchant', 'cod_remit')`,
-      ).bind(job.id, job.sender_phone, providerFromPhone(job.sender_phone), net, disb.lipilaReference ?? ref),
-      c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_remit_initiated', ?2)`)
-        .bind(job.id, `COD K${cod} remitted via momo â€” sender gets K${net} (platform keeps K${(cod - net).toFixed(2)}). Ref ${disb.lipilaReference ?? ref}`),
-    ]);
-    return c.json({ ok: true, job_ref: job.ref, credited_zmw: net, platform_kept_zmw: round2(cod - net), lipila_reference: disb.lipilaReference ?? ref, settlement: 'momo_disbursement' });
+    return remitJobCod(c, b?.job_ref ?? '');
   }
   const phone = normalizeZmPhone(b?.phone ?? '');
   const amount = Math.round(Math.abs(Number(b?.amount_zmw) || 0) * 100) / 100;
   if (!phone || amount <= 0) return c.json({ error: 'phone and positive amount required' }, 400);
   await c.env.DB.batch(await walletCreditStatements(c, phone, b.kind === 'rider_payout' ? -amount : amount, kind));
   return c.json({ ok: true });
+});
+
+// Rider self-remittance: a signed-in rider settles the COD float on a job THE
+// PLATFORM ASSIGNED TO THEM. One prompt per job (idempotent-ish: re-run with
+// no cash double-pays? no — the payment row is per attempt; keep admin key +
+// job match as the guard). Ops/admin use /admin/payouts instead.
+app.post('/rider/cod/remit', async (c) => {
+  const role = c.get('role');
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (role === 'rider') {
+    const b: any = await c.req.json().catch(() => null) ?? {};
+    const ref = String(b?.job_ref ?? '');
+    if (!ref) return c.json({ error: 'job_ref required' }, 400);
+    const rider = await c.env.DB.prepare(
+      'SELECT id FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>() as any;
+    if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+    const job = await c.env.DB.prepare('SELECT rider_id FROM jobs WHERE ref = ?1').bind(ref).first<any>() as any;
+    if (!job) return c.json({ error: 'job not found' }, 404);
+    if (Number(job.rider_id) !== Number(rider.id)) return c.json({ error: 'not_assigned_to_you' }, 403);
+    return remitJobCod(c, ref);
+  }
+  return c.json({ error: 'forbidden' }, 403);
+});
+
+// Rider cash float: COD still sitting with the rider (collected, not yet remitted).
+app.get('/rider/cod', async (c) => {
+  const phone = c.get('phone');
+  const role = c.get('role');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (role !== 'rider' && !isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT id FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>() as any;
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  const { results } = await c.env.DB.prepare(
+    `SELECT j.ref, j.recipient_name, j.cod_collected_zmw, j.created_at,
+            (SELECT COUNT(*) FROM payments p WHERE p.job_id = j.id AND p.kind = 'cod_remit') AS remitted
+       FROM jobs j
+      WHERE j.rider_id = ?1 AND j.cod_collected_zmw > 0
+      ORDER BY j.id DESC LIMIT 50`,
+  ).bind(rider.id).all<any>();
+  const jobs = (results ?? []) as any[];
+  const open = jobs.filter((j) => Number(j.remitted ?? 0) === 0);
+  const total = open.reduce((s, j) => s + Number(j.cod_collected_zmw ?? 0), 0);
+  return c.json({
+    jobs,
+    total_unremitted_zmw: Math.round(total * 100) / 100,
+    platform_cut_pct: Math.round(COD_FEE * 100),
+  });
+});
+
+// Rider reputation: the rider's own rating summary + latest reviews.
+app.get('/rider/reviews', async (c) => {
+  const role = c.get('role');
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (role !== 'rider' && !isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT id, name FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>() as any;
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  const sum = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n, COALESCE(ROUND(AVG(stars), 1), 0) AS avg FROM ratings
+      WHERE target_type = 'rider' AND target_key = CAST(?1 AS TEXT) AND hidden = 0 AND verified = 1`,
+  ).bind(rider.id).first<any>() as any;
+  const recent = await c.env.DB.prepare(
+    `SELECT stars, comment, created_at FROM ratings
+      WHERE target_type = 'rider' AND target_key = CAST(?1 AS TEXT) AND hidden = 0 AND verified = 1
+      ORDER BY created_at DESC, id DESC LIMIT 5`,
+  ).bind(rider.id).all<any>();
+  return c.json({
+    rider: { id: rider.id, name: rider.name },
+    n: Number(sum?.n ?? 0),
+    average: Number(sum?.avg ?? 0),
+    reviews: (recent.results ?? []),
+  });
 });
 
 // Refund a settled payment to the payer's momo. Admin-key only: this moves money.
@@ -4042,6 +4280,40 @@ async function billExpiringSubscriptions(env: Env): Promise<{ billed: number; fa
         AND NOT EXISTS (SELECT 1 FROM payments WHERE subscription_id = subscriptions.id AND status = 'pending')`,
   ).run();
   return { billed, failed, expired: lapse.meta.changes ?? 0 };
+}
+
+/* --------- cron: expiry/grace nudge (renewal prompt safety net) ------------ */
+// Auto-renewal fires a Lipila prompt 3 days before expiry. If that prompt never
+// surfaced (collect init failed / dismissed), the seller still finds out here:
+// one SMS per cycle pre-expiry, and a lapsed-into-grace warning after.
+async function notifyExpiryNudges(env: Env): Promise<void> {
+  try {
+    const now = `datetime('now')`;
+    const { results } = await env.DB.prepare(
+      `SELECT s.id, s.phone, s.tier, s.period_start, s.period_end, s.expiry_nudge_period,
+              (SELECT COUNT(*) FROM payments p WHERE p.subscription_id = s.id AND p.status = 'pending') AS pending
+         FROM subscriptions s
+        WHERE s.status = 'active' AND s.period_end IS NOT NULL AND s.period_end <= datetime('now', '+3 days')`,
+    ).all();
+    for (const row of results as any[]) {
+      const mark = String(row.expiry_nudge_period ?? '');
+      const end = String(row.period_end);
+      const key = mark.includes('|') ? mark : `${mark}|`; // legacy cap-nudge value never collides
+      const lapsed = end < now.replace(/'/g, '');
+      const want = `${String(row.period_start)}|${lapsed ? 'grace' : 'exp'}`;
+      if (key.includes(want) || mark === want) continue;
+      if (lapsed) {
+        await sendSms(env, row.phone,
+          `DropOff: your ${row.tier} pack lapsed on ${end.slice(0, 10)}; trips now bill ad hoc. Renew in the app to get your pack rate back.`);
+      } else {
+        if (Number(row.pending ?? 0) > 0) continue; // renewal prompt already on the phone
+        await sendSms(env, row.phone,
+          `DropOff: your ${row.tier} pack ends ${end.slice(0, 10)}. Renew or upgrade in the app to keep your free rider rate (we auto-bill 3 days before, approve the momo prompt).`);
+      }
+      await env.DB.prepare('UPDATE subscriptions SET expiry_nudge_period = ?2 WHERE id = ?1')
+        .bind(row.id, want).run().catch(() => {});
+    }
+  } catch { /* nudges are best-effort — never break the cron */ }
 }
 
 /* --------------------- cron: 80%-cap renewal nudge ------------------------- */
@@ -4320,6 +4592,7 @@ export default {
         if (event.cron === '* * * * *') {
           await checkTimedPickups(env);
           await notifyCapNudges(env);
+          await notifyExpiryNudges(env);
           return;
         }
         await purgeStaleRows(env);

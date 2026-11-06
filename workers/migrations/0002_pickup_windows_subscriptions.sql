@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   phone TEXT NOT NULL UNIQUE,        -- sender phone, 260XXXXXXXXX
   sender_name TEXT,
-  tier TEXT NOT NULL,                -- 'silver' (K350/mo) | 'gold' (K700/mo) | 'platinum' (K1500/mo)
+  tier TEXT NOT NULL,                -- 'silver' (K250/mo) | 'gold' (K500/mo) | 'platinum' (K750/mo)
   city TEXT NOT NULL,                -- pickup city, e.g. Lusaka
   pickup_window TEXT NOT NULL,       -- default sweep slot: 06:00 / 10:00 / 14:00
   status TEXT NOT NULL DEFAULT 'active',  -- active / cancelled / expired

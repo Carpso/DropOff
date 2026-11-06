@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS tiers (
   active INTEGER NOT NULL DEFAULT 1
 );
 INSERT OR IGNORE INTO tiers (tier, fee_zmw, parcels_per_day, rider_fee_zmw, tag) VALUES
-  ('silver', 350, 1, 0, NULL),
-  ('gold', 700, 3, 0, 'Most popular'),
-  ('platinum', 1500, 10, 0, NULL);
+  ('silver', 250, 1, 0, NULL),
+  ('gold', 500, 3, 0, 'Most popular'),
+  ('platinum', 750, 10, 0, NULL);
 
 CREATE TABLE IF NOT EXISTS promo_codes (
   code TEXT PRIMARY KEY,
