@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:io';
 
 import '../data/dropoff_api.dart';
 import '../main.dart';
@@ -218,6 +220,10 @@ class OperationsScreen extends StatelessWidget {
           const _RiderReviewsCard(),
           const SizedBox(height: 12),
           const _RiderPayCard(),
+          const SizedBox(height: 12),
+          const _RiderTargetsCard(),
+          const SizedBox(height: 12),
+          const _RiderVerificationCard(),
           const SizedBox(height: 12),
           Card(
             child: ListTile(
@@ -787,4 +793,347 @@ class _RiderPayCard extends StatelessWidget {
           ]),
         ),
       );
+}
+
+/// Driver's daily 30-parcel target, with the month pace line so a missed day
+/// is caught up inside the month instead of silently sliding.
+class _RiderTargetsCard extends StatefulWidget {
+  const _RiderTargetsCard();
+
+  @override
+  State<_RiderTargetsCard> createState() => _RiderTargetsCardState();
+}
+
+class _RiderTargetsCardState extends State<_RiderTargetsCard> {
+  Map<String, dynamic>? _t;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final res = await DropOffApi.riderTargets();
+    if (!mounted) return;
+    setState(() {
+      _t = (res?['targets'] as Map?)?.cast<String, dynamic>();
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _t;
+    final today = (t?['today'] as num?)?.toInt() ?? 0;
+    final daily = (t?['daily_target'] as num?)?.toInt() ?? 30;
+    final month = (t?['month'] as num?)?.toInt() ?? 0;
+    final monthTarget = (t?['month_target'] as num?)?.toInt() ?? 0;
+    final pace = (t?['pace_target'] as num?)?.toInt() ?? 0;
+    final met = t?['daily_met'] == true;
+    final onTrack = t?['on_track'] == true;
+    final behind = (t?['behind_by'] as num?)?.toInt() ?? 0;
+    final day = (t?['day_of_month'] as num?)?.toInt() ?? 0;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.flag_outlined, color: AppColors.forest),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Your targets', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: () { setState(() => _loading = true); _load(); },
+              icon: const Icon(Icons.refresh, size: 18),
+            ),
+          ]),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else if (t == null)
+            const Text('Targets unavailable offline.', style: TextStyle(color: AppColors.muted, fontSize: 12))
+          else ...[
+            Row(children: [
+              Expanded(child: Text('Today: $today / $daily parcels', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+              Text(met ? 'MET' : '${daily - today} to go',
+                  style: TextStyle(color: met ? AppColors.forest : const Color(0xFF8A5A00), fontWeight: FontWeight.w900, fontSize: 11.5)),
+            ]),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: daily == 0 ? 0 : (today / daily).clamp(0.0, 1.0),
+                minHeight: 8,
+                backgroundColor: AppColors.line.withValues(alpha: 0.4),
+                color: met ? AppColors.forest : AppColors.amber,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(child: Text('Month: $month / $monthTarget', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+              Text('pace $pace', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+            ]),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: monthTarget == 0 ? 0 : (month / monthTarget).clamp(0.0, 1.0),
+                minHeight: 8,
+                backgroundColor: AppColors.line.withValues(alpha: 0.4),
+                color: onTrack ? AppColors.forest : AppColors.amber,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              onTrack
+                  ? 'On pace: $pace expected by day $day of the month.'
+                  : '$behind behind pace - clear the daily $daily first, then use the rest of the month to catch up.',
+              style: TextStyle(color: onTrack ? AppColors.forest : const Color(0xFF8A5A00), fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// Rider KYC: NRC, licence, plate, vehicle details and photos. Submits to the
+/// owner/admin verification queue; riders cannot mark themselves verified.
+class _RiderVerificationCard extends StatefulWidget {
+  const _RiderVerificationCard();
+
+  @override
+  State<_RiderVerificationCard> createState() => _RiderVerificationCardState();
+}
+
+class _RiderVerificationCardState extends State<_RiderVerificationCard> {
+  final _nrc = TextEditingController();
+  final _license = TextEditingController();
+  final _plate = TextEditingController();
+  final _make = TextEditingController();
+  final _color = TextEditingController();
+  final Map<String, String> _local = {};
+  String? _selfieUrl, _nrcUrl, _plateUrl, _licenseUrl;
+  Map<String, dynamic>? _rider;
+  bool _loading = true;
+  bool _saving = false;
+  String? _busyField;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    for (final c in [_nrc, _license, _plate, _make, _color]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final res = await DropOffApi.riderProfile();
+    if (!mounted) return;
+    final rider = (res?['rider'] as Map?)?.cast<String, dynamic>();
+    setState(() {
+      _rider = rider;
+      _loading = false;
+      if (rider != null) {
+        _nrc.text = '${rider['nrc_number'] ?? ''}';
+        _license.text = '${rider['license_number'] ?? ''}';
+        _plate.text = '${rider['plate_number'] ?? ''}';
+        _make.text = '${rider['vehicle_make'] ?? ''}';
+        _color.text = '${rider['vehicle_color'] ?? ''}';
+        _selfieUrl = rider['photo_url'] as String?;
+        _nrcUrl = rider['nrc_photo_url'] as String?;
+        _plateUrl = rider['plate_photo_url'] as String?;
+        _licenseUrl = rider['license_photo_url'] as String?;
+      }
+    });
+  }
+
+  Future<void> _pick(String field) async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 82);
+    if (picked == null) return;
+    setState(() => _busyField = field);
+    final bytes = await picked.readAsBytes();
+    final name = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
+    final res = await DropOffApi.uploadImage(bytes, name);
+    if (!mounted) return;
+    setState(() => _busyField = null);
+    if (!res.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Photo upload failed (${res.error}).')));
+      return;
+    }
+    final url = '${res.body['url'] ?? ''}';
+    if (url.isEmpty) return;
+    setState(() {
+      _local[field] = picked.path;
+      switch (field) {
+        case 'selfie': _selfieUrl = url;
+        case 'nrc': _nrcUrl = url;
+        case 'plate': _plateUrl = url;
+        case 'license': _licenseUrl = url;
+      }
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_nrc.text.trim().length < 6) return _snack('Enter your NRC number.');
+    if (_plate.text.trim().length < 3) return _snack('Enter your number plate.');
+    if (_make.text.trim().isEmpty) return _snack('Enter the vehicle make/model.');
+    if (_selfieUrl == null || _nrcUrl == null || _plateUrl == null) {
+      return _snack('Add your selfie, NRC photo and number-plate photo.');
+    }
+    setState(() => _saving = true);
+    final res = await DropOffApi.riderProfileSubmit({
+      'nrc_number': _nrc.text.trim(),
+      'license_number': _license.text.trim(),
+      'plate_number': _plate.text.trim(),
+      'vehicle_make': _make.text.trim(),
+      'vehicle_color': _color.text.trim(),
+      'photo_url': _selfieUrl,
+      'nrc_photo_url': _nrcUrl,
+      'license_photo_url': _licenseUrl,
+      'plate_photo_url': _plateUrl,
+    });
+    if (!mounted) return;
+    setState(() => _saving = false);
+    _snack(res.ok
+        ? 'Submitted - the owner/admin will verify your documents.'
+        : 'Could not submit (${res.error}).');
+    if (res.ok) _load();
+  }
+
+  void _snack(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  Widget _photoTile(String field, String label, String? url) {
+    final local = _local[field];
+    final busy = _busyField == field;
+    Widget preview;
+    if (busy) {
+      preview = const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
+    } else if (local != null) {
+      preview = Image.file(File(local), fit: BoxFit.cover);
+    } else if (url != null && url.isNotEmpty) {
+      preview = Image.network(
+        '${DropOffApi.baseUrl}$url',
+        headers: DropOffApi.authHeaders,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: AppColors.muted),
+      );
+    } else {
+      preview = const Icon(Icons.add_a_photo_outlined, color: AppColors.muted);
+    }
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: busy ? null : () => _pick(field),
+      child: Column(children: [
+        Container(
+          width: 96,
+          height: 78,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: AppColors.line.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.line),
+          ),
+          child: preview,
+        ),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.muted)),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = '${_rider?['verification_status'] ?? 'pending'}';
+    final note = '${_rider?['verification_note'] ?? ''}'.trim();
+    final verified = status == 'verified';
+    final rejected = status == 'rejected';
+    final (chipColor, chipText) = verified
+        ? (AppColors.forest, 'VERIFIED')
+        : rejected
+            ? (const Color(0xFFB3261E), 'REJECTED')
+            : (const Color(0xFF8A5A00), 'PENDING REVIEW');
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.verified_user_outlined, color: AppColors.forest),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Driver verification', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: chipColor.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+              child: Text(chipText, style: TextStyle(color: chipColor, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          const Text('Your NRC, licence, plate and vehicle photos. The owner/admin verifies these before you can be assigned jobs.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          if (rejected && note.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: const Color(0xFFB3261E).withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)),
+              child: Text('Reviewer: $note', style: const TextStyle(color: Color(0xFFB3261E), fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600)),
+            ),
+          ],
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 14),
+              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else ...[
+            const SizedBox(height: 12),
+            TextField(controller: _nrc, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'NRC number', hintText: '123456/11/1', prefixIcon: Icon(Icons.badge_outlined))),
+            const SizedBox(height: 10),
+            TextField(controller: _plate, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Number plate', hintText: 'ABC 1234', prefixIcon: Icon(Icons.pin_outlined))),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: TextField(controller: _make, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Vehicle make/model'))),
+              const SizedBox(width: 10),
+              Expanded(child: TextField(controller: _color, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Colour'))),
+            ]),
+            const SizedBox(height: 10),
+            TextField(controller: _license, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Driving licence (optional)', prefixIcon: Icon(Icons.credit_card_outlined))),
+            const SizedBox(height: 12),
+            const Text('Photos', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 12, runSpacing: 10, children: [
+              _photoTile('selfie', 'Selfie', _selfieUrl),
+              _photoTile('nrc', 'NRC', _nrcUrl),
+              _photoTile('plate', 'Plate', _plateUrl),
+              _photoTile('license', 'Licence', _licenseUrl),
+            ]),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _saving ? null : _submit,
+                icon: _saving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.send_outlined, size: 18),
+                label: Text(verified
+                    ? 'Update details (re-review)'
+                    : rejected
+                        ? 'Fix and resubmit'
+                        : 'Submit for verification'),
+              ),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
 }

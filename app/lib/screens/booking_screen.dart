@@ -71,6 +71,7 @@ class _BookingScreenState extends State<BookingScreen> {
   String _payment = 'Mobile money';
   bool _packActive = false;
   bool _saving = false;
+  bool _aiBusy = false;
   List<String> _cities = cities;
   double? _promoPct;
   String _promoNote = '';
@@ -195,6 +196,26 @@ class _BookingScreenState extends State<BookingScreen> {
       DropOffApi.collectionFees(DropOffApi.round2(_dropOffLeg), riderFee: riderFee)['prompt_total_zmw'] ?? _dropOffLeg;
 
   void _message(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  /// AI tidy-up of the free-text pickup address (best-effort; never blocks).
+  Future<void> _aiTidyAddress() async {
+    final text = _pickup.text.trim();
+    if (text.length < 5) return _message('Type the address first, then tap AI.');
+    setState(() => _aiBusy = true);
+    final res = await DropOffApi.aiAddress(text);
+    if (!mounted) return;
+    setState(() => _aiBusy = false);
+    final parsed = res.body['parsed'];
+    if (!res.ok || parsed is! Map) return _message('AI is unavailable right now - your address is unchanged.');
+    final parts = [parsed['street'], parsed['area'], parsed['landmark']]
+        .map((e) => '${e ?? ''}'.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (parts.isNotEmpty) _pickup.text = parts.join(', ');
+    final phone = '${parsed['phone'] ?? ''}'.trim();
+    if (phone.isNotEmpty && _senderPhone.text.trim().isEmpty) _senderPhone.text = phone;
+    _message('AI tidied the address - check it before booking.');
+  }
 
   bool _validPhone(String value) => RegExp(r'^(?:\+?260|0)?[79][567]\d{7}$').hasMatch(value.replaceAll(RegExp(r'[\s-]'), ''));
 
@@ -428,7 +449,7 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 10),
         _cityDropdown('Parcel destination', _to, (value) => setState(() => _to = value)),
         const SizedBox(height: 18),
-        TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market', prefixIcon: Icon(Icons.location_on_outlined), alignLabelWithHint: true)),
+              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: TextButton(onPressed: _aiBusy ? null : _aiTidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')))),
         const SizedBox(height: 16),
         SwitchListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 14),

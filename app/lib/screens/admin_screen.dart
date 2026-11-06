@@ -155,6 +155,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const _PackCodesCard(),
             ],
             const SizedBox(height: 18),
+            const _RiderVerificationAdminCard(),
+            const SizedBox(height: 18),
             const _BranchManagerCard(),
             const SizedBox(height: 18),
             _smsCard(),
@@ -888,6 +890,264 @@ class _PackCodesCardState extends State<_PackCodesCard> {
             ),
           ],
         ]),
+      ),
+    );
+  }
+}
+
+/// Owner/admin verification queue: driver ID, plate and photo checks, plus the
+/// daily/monthly target line for every driver. Approval is admin-only server
+/// side; ops can view but not decide.
+class _RiderVerificationAdminCard extends StatefulWidget {
+  const _RiderVerificationAdminCard();
+
+  @override
+  State<_RiderVerificationAdminCard> createState() => _RiderVerificationAdminCardState();
+}
+
+class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard> {
+  List<Map<String, dynamic>> _riders = const [];
+  bool _loading = true;
+  String? _busy;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final res = await DropOffApi.adminRiders();
+    if (!mounted) return;
+    setState(() {
+      _riders = ((res?['riders'] as List?) ?? const [])
+          .map((e) => (e as Map).cast<String, dynamic>())
+          .toList();
+      _loading = false;
+    });
+  }
+
+  Future<void> _verify(Map<String, dynamic> rider, String status) async {
+    final id = (rider['id'] as num?)?.toInt();
+    if (id == null) return;
+    String? note;
+    if (status == 'rejected') {
+      final controller = TextEditingController();
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Reject driver'),
+          content: TextField(
+            controller: controller,
+            maxLines: 3,
+            decoration: const InputDecoration(labelText: 'Reason (sent to the driver)'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Reject')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      note = controller.text.trim();
+      if (note.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('A rejection reason is required.')));
+        return;
+      }
+    }
+    setState(() => _busy = 'verify-$id');
+    final res = await DropOffApi.adminVerifyRider(id, status: status, note: note);
+    if (!mounted) return;
+    setState(() => _busy = null);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
+        ? (status == 'verified' ? 'Driver verified.' : 'Driver rejected.')
+        : 'Could not update (${res.error}).')));
+    if (res.ok) _load();
+  }
+
+  Future<void> _aiCheck(Map<String, dynamic> rider) async {
+    final id = (rider['id'] as num?)?.toInt();
+    if (id == null) return;
+    setState(() => _busy = 'ai-$id');
+    final res = await DropOffApi.adminAiCheckRider(id);
+    if (!mounted) return;
+    setState(() => _busy = null);
+    if (!res.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('AI check failed (${res.error}).')));
+      return;
+    }
+    final text = '${res.body['text'] ?? ''}'.trim();
+    final plateMatch = res.body['plate_match'] == true;
+    final nrcMatch = res.body['nrc_match'] == true;
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('AI document check'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Plate match: ${plateMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: plateMatch ? AppColors.forest : const Color(0xFFB3261E))),
+          const SizedBox(height: 4),
+          Text('NRC match: ${nrcMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: nrcMatch ? AppColors.forest : const Color(0xFFB3261E))),
+          const SizedBox(height: 10),
+          const Text('Text read from the photo:', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+          const SizedBox(height: 4),
+          SelectableText(text.isEmpty ? '(nothing readable)' : text, style: const TextStyle(fontSize: 12, height: 1.4)),
+          const SizedBox(height: 10),
+          const Text('AI is an assist only - the decision is still yours.', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+        ]),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+    _load();
+  }
+
+  void _preview(String? url) {
+    if (url == null || url.isEmpty) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: InteractiveViewer(
+          child: Image.network('${DropOffApi.baseUrl}$url', headers: DropOffApi.authHeaders, fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Padding(padding: EdgeInsets.all(24), child: Text('Photo unavailable'))),
+        ),
+      ),
+    );
+  }
+
+  Widget _thumb(String? url, String label) {
+    if (url == null || url.isEmpty) return const SizedBox.shrink();
+    return InkWell(
+      onTap: () => _preview(url),
+      borderRadius: BorderRadius.circular(8),
+      child: Column(children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network('${DropOffApi.baseUrl}$url', headers: DropOffApi.authHeaders, width: 62, height: 50, fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(width: 62, height: 50, color: AppColors.line, child: const Icon(Icons.broken_image_outlined, size: 16))),
+        ),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(fontSize: 9, color: AppColors.muted, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = _riders.where((r) => '${r['verification_status']}' == 'pending').length;
+    final verified = _riders.where((r) => '${r['verification_status']}' == 'verified').length;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.verified_user_outlined, color: AppColors.forest),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Driver verification & targets', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(visualDensity: VisualDensity.compact, onPressed: _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          Text('$pending pending review - $verified verified. Daily target is 30 parcels; month pace carries any missed day.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          const SizedBox(height: 12),
+          if (_loading)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
+          else if (_riders.isEmpty)
+            const Text('No riders registered yet.', style: TextStyle(color: AppColors.muted, fontSize: 12))
+          else
+            for (final rider in _riders) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.line.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.line),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text('${rider['full_name'] ?? 'Driver'}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    _statusChip('${rider['verification_status'] ?? 'pending'}'),
+                  ]),
+                  const SizedBox(height: 2),
+                  Text('${rider['phone'] ?? ''} - ${rider['vehicle'] ?? ''} ${rider['vehicle_class'] ?? ''}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+                  const SizedBox(height: 4),
+                  Text('Plate: ${_orDash(rider['plate_number'])}   NRC: ${_orDash(rider['nrc_number'])}   ${_orDash(rider['vehicle_make'])} ${_orDash(rider['vehicle_color'])}',
+                      style: const TextStyle(fontSize: 11.5, height: 1.4)),
+                  _targetLine(rider),
+                  if (_hasPhotos(rider)) ...[
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 6, children: [
+                      _thumb(rider['photo_url'] as String?, 'Selfie'),
+                      _thumb(rider['nrc_photo_url'] as String?, 'NRC'),
+                      _thumb(rider['plate_photo_url'] as String?, 'Plate'),
+                      _thumb(rider['license_photo_url'] as String?, 'Licence'),
+                    ]),
+                  ],
+                  if ('${rider['verification_note'] ?? ''}'.trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text('Note: ${rider['verification_note']}', style: const TextStyle(color: Color(0xFFB3261E), fontSize: 11, height: 1.35)),
+                  ],
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 8, runSpacing: 6, children: [
+                    if ('${rider['verification_status']}' != 'verified')
+                      FilledButton(
+                        style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), minimumSize: const Size(0, 32)),
+                        onPressed: _busy != null ? null : () => _verify(rider, 'verified'),
+                        child: const Text('Approve', style: TextStyle(fontSize: 12)),
+                      ),
+                    TextButton(
+                      onPressed: _busy != null ? null : () => _verify(rider, 'rejected'),
+                      child: const Text('Reject', style: TextStyle(fontSize: 12)),
+                    ),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), minimumSize: const Size(0, 32)),
+                      onPressed: _busy != null ? null : () => _aiCheck(rider),
+                      child: Text(_busy == 'ai-${rider['id']}' ? 'Checking...' : 'AI check', style: const TextStyle(fontSize: 12)),
+                    ),
+                  ]),
+                ]),
+              ),
+            ],
+        ]),
+      ),
+    );
+  }
+
+  static String _orDash(Object? value) {
+    final text = '${value ?? ''}'.trim();
+    return text.isEmpty ? '-' : text;
+  }
+
+  static bool _hasPhotos(Map<String, dynamic> rider) =>
+      [rider['photo_url'], rider['nrc_photo_url'], rider['plate_photo_url'], rider['license_photo_url']]
+          .any((u) => u != null && '$u'.isNotEmpty);
+
+  Widget _statusChip(String status) {
+    final (color, label) = switch (status) {
+      'verified' => (AppColors.forest, 'VERIFIED'),
+      'rejected' => (const Color(0xFFB3261E), 'REJECTED'),
+      _ => (const Color(0xFF8A5A00), 'PENDING'),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+      child: Text(label, style: TextStyle(color: color, fontSize: 8.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
+    );
+  }
+
+  Widget _targetLine(Map<String, dynamic> rider) {
+    final targets = (rider['targets'] as Map?)?.cast<String, dynamic>();
+    final today = (targets?['today'] as num?)?.toInt() ?? 0;
+    final daily = (targets?['daily_target'] as num?)?.toInt() ?? 30;
+    final month = (targets?['month'] as num?)?.toInt() ?? 0;
+    final pace = (targets?['pace_target'] as num?)?.toInt() ?? 0;
+    final onTrack = targets?['on_track'] == true;
+    final met = today >= daily;
+    return Padding(
+      padding: const EdgeInsets.only(top: 5),
+      child: Text(
+        'Today $today/$daily${met ? ' (met)' : ''} - month $month vs pace $pace${onTrack ? ' (on track)' : ' (behind)'}',
+        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: onTrack ? AppColors.forest : const Color(0xFF8A5A00)),
       ),
     );
   }

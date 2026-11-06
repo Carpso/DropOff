@@ -264,3 +264,26 @@ it beside the pickup-window picker so sellers see real speed before booking.
 - **Driver pay visibility**: the K3,000/month flat + 30-parcels/day target line
   is shown only on the rider view (`_RiderPayCard`); seller-facing and public
   copy never mentions it.
+
+## 14. Driver KYC, daily targets and AI assist
+
+- **Driver verification** (owner/admins only): ops registers riders via
+  `POST /admin/riders` (NRC, licence, plate, vehicle make/colour live on the
+  rider row). A driver submits their own documents via the app (`POST
+  /rider/profile` + `POST /uploads` ? R2 bucket, served through `/media/*`
+  behind auth) landing in status `pending`. `POST /admin/riders/:id/verify`
+  flips to `verified`/`rejected` (note stored); unverified drivers are excluded
+  from auto-assign and manual job assignment (`409 rider_not_verified`).
+- **Daily/monthly targets**: sweep target is 30 parcels/day. `GET /rider/targets`
+  and `GET /admin/riders` return today vs target and month vs pace (pace =
+  30 x day-of-month, hard month = 30 x days-in-month), computed from
+  completion events (`at_depot` / `delivered` / `ready_for_collection`) keyed
+  to Central Africa Time. A daily 19:00 CAT cron SMSes any driver short on
+  their target and sends the owner a shortfall summary.
+- **AI assist** (never the auto-decision): `POST /ai/address` parses free-text
+  pickup addresses into structured fields (used by an "AI tidy" button on the
+  booking form); `POST /admin/support/threads/:id/ai-draft` drafts support
+  replies from ticket history; `POST /admin/riders/:id/ai-check` reads a
+  driver's plate/NRC photo via Workers AI vision and compares it against what
+  the driver submitted (`plate_match`/`nrc_match`) — admins still click
+  Approve/Reject themselves.

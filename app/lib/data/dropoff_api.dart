@@ -820,6 +820,58 @@ class DropOffApi {
     String kind = 'rider_earning',
   }) =>
       post('/admin/payouts', {'phone': phone, 'amount_zmw': amountZmw, 'kind': kind}, admin: true);
+
+  /// Auth headers without Content-Type (multipart sets its own boundary).
+  static Map<String, String> get authHeaders => {
+        if (apiKey.isNotEmpty) 'X-Api-Key': apiKey,
+        if (token != null) 'Authorization': 'Bearer $token',
+        if (adminKey.isNotEmpty) 'X-Admin-Key': adminKey,
+      };
+
+  /// Upload a driver document photo to R2 via the Worker; returns `{url}`.
+  static Future<ApiResponse> uploadImage(List<int> bytes, String filename) async {
+    if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
+    try {
+      final req = http.MultipartRequest('POST', _uri('/uploads'))
+        ..headers.addAll(authHeaders)
+        ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+      final streamed = await req.send().timeout(const Duration(seconds: 45));
+      final res = await http.Response.fromStream(streamed);
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
+      final ok = res.statusCode >= 200 && res.statusCode < 300;
+      return ApiResponse(
+        status: res.statusCode,
+        ok: ok,
+        body: decoded,
+        error: ok ? null : '${decoded['error'] ?? 'http_${res.statusCode}'}',
+      );
+    } catch (_) {
+      return const ApiResponse(error: 'network_error');
+    }
+  }
+
+  /* ------------------- rider onboarding + targets ------------------- */
+  static Future<Map<String, dynamic>?> riderProfile() => get('/rider/profile');
+
+  static Future<ApiResponse> riderProfileSubmit(Map<String, dynamic> body) =>
+      post('/rider/profile', body);
+
+  static Future<Map<String, dynamic>?> riderTargets() => get('/rider/targets');
+
+  /* --------------------- admin rider verification -------------------- */
+  static Future<Map<String, dynamic>?> adminRiders() => getAdmin('/admin/riders');
+
+  static Future<ApiResponse> adminVerifyRider(int id, {required String status, String? note}) =>
+      post('/admin/riders/$id/verify', {'status': status, if (note != null) 'note': note}, admin: true);
+
+  static Future<ApiResponse> adminAiCheckRider(int id) =>
+      post('/admin/riders/$id/ai-check', const {}, admin: true);
+
+  /* ------------------------------ AI helpers ------------------------- */
+  static Future<ApiResponse> aiAddress(String text) => post('/ai/address', {'text': text});
+
+  static Future<ApiResponse> supportAiDraft(int threadId) =>
+      post('/admin/support/threads/$threadId/ai-draft', const {}, admin: true);
 }
 
 class ApiResponse {
