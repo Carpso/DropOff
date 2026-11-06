@@ -98,6 +98,96 @@ function waitFeeFor(minutes: number): number {
   return Math.min(WAIT_CAP_ZMW, Math.round(Math.max(0, minutes - WAIT_FREE_MINUTES) * WAIT_RATE_PER_MIN));
 }
 
+/* --------------------- rider daily / monthly targets ---------------------- */
+// A driver's day is 30 parcels; if a day is missed the shortfall must still be
+// caught up inside the month, so the pace line is 30 x day-of-month and the
+// hard month target is 30 x days-in-month. Counted from completion events
+// (depot drop for first mile, delivered/ready for last mile), one job per day.
+interface RiderTargetStats {
+  today: number;
+  daily_target: number;
+  daily_remaining: number;
+  daily_met: boolean;
+  month: number;
+  month_target: number;
+  pace_target: number;
+  month_remaining: number;
+  behind_by: number;
+  on_track: boolean;
+  day_of_month: number;
+  days_in_month: number;
+}
+
+function monthCalendar(): { dayOfMonth: number; daysInMonth: number } {
+  const cat = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  return {
+    dayOfMonth: cat.getUTCDate(),
+    daysInMonth: new Date(Date.UTC(cat.getUTCFullYear(), cat.getUTCMonth() + 1, 0)).getUTCDate(),
+  };
+}
+
+function shapeTargets(today: number, month: number): RiderTargetStats {
+  const { dayOfMonth, daysInMonth } = monthCalendar();
+  const monthTarget = DRIVER_DAILY_TARGET * daysInMonth;
+  const paceTarget = DRIVER_DAILY_TARGET * dayOfMonth;
+  return {
+    today,
+    daily_target: DRIVER_DAILY_TARGET,
+    daily_remaining: Math.max(0, DRIVER_DAILY_TARGET - today),
+    daily_met: today >= DRIVER_DAILY_TARGET,
+    month,
+    month_target: monthTarget,
+    pace_target: paceTarget,
+    month_remaining: Math.max(0, monthTarget - month),
+    behind_by: Math.max(0, paceTarget - month),
+    on_track: month >= paceTarget,
+    day_of_month: dayOfMonth,
+    days_in_month: daysInMonth,
+  };
+}
+
+async function riderTargetStats(db: D1Database, riderId?: number): Promise<Map<number, RiderTargetStats>> {
+  const sql = `SELECT j.rider_id,
+      COUNT(DISTINCT CASE WHEN date(je.created_at, '${CAT_OFFSET}') = date('now', '${CAT_OFFSET}') THEN j.id END) AS today,
+      COUNT(DISTINCT CASE WHEN date(je.created_at, '${CAT_OFFSET}') >= date('now', 'start of month', '${CAT_OFFSET}') THEN j.id END) AS month
+    FROM job_events je JOIN jobs j ON j.id = je.job_id
+   WHERE je.status IN ('at_depot','delivered','ready_for_collection')
+     AND j.rider_id IS NOT NULL${riderId ? ' AND j.rider_id = ?1' : ''}
+   GROUP BY j.rider_id`;
+  try {
+    const stmt = db.prepare(sql);
+    const { results } = await (riderId ? stmt.bind(riderId) : stmt).all<any>();
+    const out = new Map<number, RiderTargetStats>();
+    for (const row of (results ?? []) as any[]) {
+      out.set(Number(row.rider_id), shapeTargets(Number(row.today ?? 0), Number(row.month ?? 0)));
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+/** R2 key from a stored /media/uploads/... path (uploads are served by /media). */
+function r2KeyFromUrl(url: string): string | null {
+  const clean = String(url ?? '').replace(/^https?:\/\/[^/]+/, '');
+  const m = clean.match(/^\/media\/(.+)$/);
+  return m ? m[1] : null;
+}
+
+const RIDER_DOC_FIELDS = [
+  'nrc_number', 'license_number', 'plate_number', 'vehicle_make', 'vehicle_color',
+  'photo_url', 'nrc_photo_url', 'license_photo_url', 'plate_photo_url',
+] as const;
+
+function riderDocSelect(): string {
+  return `id, phone, full_name, vehicle, vehicle_class, active, status, capacity, current_load,
+          nrc_number, license_number, plate_number, vehicle_make, vehicle_color,
+          photo_url, nrc_photo_url, license_photo_url, plate_photo_url,
+          verification_status, verification_note, verified_by, verified_at,
+          submitted_at, ai_check_json`;
+}
+
+
 /* --------------------------- request tracing/logs -------------------------- */
 // Every response carries X-Request-Id and emits one JSON access log line so
 // Workers Logs / Logpush can query p50/p95 latency and error rates. Errors are
@@ -3142,7 +3232,8 @@ function buildRoute(stops: { ref: string; address: string; lat: number; lng: num
 async function nearestAvailableRider(env: Env, lat: number, lng: number): Promise<{ rider: any; km: number } | null> {
   const riders = await env.DB.prepare(
     `SELECT id, phone, full_name, vehicle, last_lat, last_lng, status, active, capacity, current_load
-       FROM riders WHERE active = 1 AND status IN ('available', 'on_route')`
+       FROM riders WHERE active = 1 AND status IN ('available', 'on_route')
+        AND verification_status = 'verified'`
   ).all<any>();
   let best: { rider: any; km: number } | null = null;
   for (const r of (riders.results ?? [])) {
@@ -4007,8 +4098,9 @@ app.post('/admin/jobs/:ref/assign', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const phone = normalizeZmPhone(b?.phone ?? '');
   if (!phone) return c.json({ error: 'phone required' }, 400);
-  const rider = await c.env.DB.prepare('SELECT id, active FROM riders WHERE phone = ?1').bind(phone).first<any>();
+  const rider = await c.env.DB.prepare('SELECT id, active, verification_status FROM riders WHERE phone = ?1').bind(phone).first<any>();
   if (!rider || !rider.active) return c.json({ error: 'rider not found or inactive' }, 404);
+  if (rider.verification_status !== 'verified') return c.json({ error: 'rider_not_verified', detail: 'Verify this driver in the Rider verification queue first.' }, 409);
   const job = await c.env.DB.prepare('SELECT id FROM jobs WHERE ref = ?1').bind(c.req.param('ref')).first<any>();
   if (!job) return c.json({ error: 'job not found' }, 404);
   await c.env.DB.batch([
@@ -4100,6 +4192,262 @@ app.post('/rider/cod/remit', async (c) => {
   return c.json({ error: 'forbidden' }, 403);
 });
 
+/* ------------------------ rider docs: uploads + media ---------------------- */
+// Photos (driver selfie, NRC, licence, number plate) live in the existing R2
+// bucket under uploads/ and are served through an authenticated /media route -
+// never public. Used by rider onboarding and admin verification.
+const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
+const UPLOAD_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png',
+  'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif',
+};
+
+app.post('/uploads', async (c) => {
+  if (!c.get('phone') && !isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'sign_in_required' }, 401);
+  if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
+  let form: FormData;
+  try { form = await c.req.formData(); } catch { return c.json({ error: 'multipart_required' }, 400); }
+  const file = form.get('file');
+  if (!(file instanceof File)) return c.json({ error: 'file_required' }, 400);
+  if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) return c.json({ error: 'file_too_large', max_mb: 6 }, 400);
+  let type = String(file.type || '').toLowerCase();
+  let ext = UPLOAD_TYPES[type];
+  if (!ext) {
+    // Some mobile multipart clients send application/octet-stream; trust a
+    // known image extension from the filename instead of rejecting the photo.
+    const nameExt = String(file.name || '').split('.').pop()?.toLowerCase() ?? '';
+    if (['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(nameExt)) {
+      ext = nameExt === 'jpeg' ? 'jpg' : nameExt;
+      type = `image/${nameExt === 'jpg' ? 'jpeg' : nameExt}`;
+    }
+  }
+  if (!ext) return c.json({ error: 'unsupported_image_type', allowed: Object.keys(UPLOAD_TYPES) }, 400);
+  const key = `uploads/${crypto.randomUUID()}.${ext}`;
+  await c.env.BACKUPS.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: type } });
+  return c.json({ ok: true, key, url: `/media/${key}` });
+});
+
+app.get('/media/*', async (c) => {
+  if (!c.get('phone') && !isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'sign_in_required' }, 401);
+  if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
+  const key = decodeURIComponent(c.req.path.replace(/^\/media\//, ''));
+  if (!key) return c.json({ error: 'key_required' }, 400);
+  const object = await c.env.BACKUPS.get(key);
+  if (!object) return c.json({ error: 'not_found' }, 404);
+  return new Response(object.body, {
+    headers: {
+      'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream',
+      'Cache-Control': 'private, max-age=3600',
+    },
+  });
+});
+
+/* ---------------------- rider onboarding (ID / vehicle) -------------------- */
+// A rider submits their own NRC, licence, plate, vehicle details and photos;
+// the record flips to 'pending' and the owner/admins approve or reject it.
+app.get('/rider/profile', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (c.get('role') !== 'rider' && !isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const rider = await c.env.DB.prepare(
+    `SELECT ${riderDocSelect()} FROM riders WHERE phone = ?1 AND active = 1`,
+  ).bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  const targets = await riderTargetStats(c.env.DB, rider.id);
+  return c.json({ rider, targets: targets.get(rider.id) ?? shapeTargets(0, 0) });
+});
+
+app.post('/rider/profile', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (c.get('role') !== 'rider') return c.json({ error: 'rider_only' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT id, verification_status FROM riders WHERE phone = ?1 AND active = 1',
+  ).bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  const b: any = await c.req.json().catch(() => null);
+  if (!b) return c.json({ error: 'invalid JSON body' }, 400);
+  const clean = (v: unknown, max = 120) => String(v ?? '').trim().slice(0, max);
+  const nrc = clean(b.nrc_number, 40).toUpperCase();
+  const plate = clean(b.plate_number, 20).toUpperCase().replace(/\s+/g, ' ');
+  const vehicleMake = clean(b.vehicle_make, 60);
+  const photo = clean(b.photo_url, 300);
+  const nrcPhoto = clean(b.nrc_photo_url, 300);
+  const platePhoto = clean(b.plate_photo_url, 300);
+  if (nrc.length < 6) return c.json({ error: 'nrc_required' }, 400);
+  if (plate.length < 3) return c.json({ error: 'plate_required' }, 400);
+  if (!vehicleMake) return c.json({ error: 'vehicle_make_required' }, 400);
+  if (!photo || !nrcPhoto || !platePhoto) return c.json({ error: 'photos_required', detail: 'Selfie, NRC photo and plate photo are required.' }, 400);
+  await c.env.DB.prepare(
+    `UPDATE riders SET nrc_number = ?2, license_number = ?3, plate_number = ?4,
+        vehicle_make = ?5, vehicle_color = ?6, photo_url = ?7, nrc_photo_url = ?8,
+        license_photo_url = ?9, plate_photo_url = ?10,
+        verification_status = 'pending', verification_note = NULL,
+        submitted_at = datetime('now'), verified_by = NULL, verified_at = NULL,
+        ai_check_json = NULL
+      WHERE id = ?1`,
+  ).bind(
+    rider.id, nrc, clean(b.license_number, 40).toUpperCase() || null, plate,
+    vehicleMake, clean(b.vehicle_color, 40) || null, photo, nrcPhoto,
+    clean(b.license_photo_url, 300) || null, platePhoto,
+  ).run();
+  return c.json({ ok: true, verification_status: 'pending' });
+});
+
+/* ---------------------- rider daily / monthly targets ---------------------- */
+app.get('/rider/targets', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (c.get('role') !== 'rider' && !isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT id, full_name FROM riders WHERE phone = ?1 AND active = 1',
+  ).bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  const targets = await riderTargetStats(c.env.DB, rider.id);
+  return c.json({
+    rider: { id: rider.id, name: rider.full_name },
+    targets: targets.get(rider.id) ?? shapeTargets(0, 0),
+  });
+});
+
+/* ------------------ admin/owner: verify riders + fleet targets ------------ */
+app.get('/admin/riders', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT ${riderDocSelect()}, last_lat, last_lng, last_seen_at
+       FROM riders ORDER BY
+       CASE verification_status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END,
+       full_name COLLATE NOCASE`,
+  ).all<any>();
+  const targets = await riderTargetStats(c.env.DB);
+  const riders = ((results ?? []) as any[]).map((r) => ({
+    ...r,
+    targets: targets.get(Number(r.id)) ?? shapeTargets(0, 0),
+  }));
+  return c.json({
+    riders,
+    pending: riders.filter((r) => r.verification_status === 'pending').length,
+    verified: riders.filter((r) => r.verification_status === 'verified').length,
+    daily_target: DRIVER_DAILY_TARGET,
+  });
+});
+
+app.post('/admin/riders/:id/verify', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const id = Number(c.req.param('id'));
+  const b: any = await c.req.json().catch(() => null);
+  const status = String(b?.status ?? '');
+  if (!['verified', 'rejected'].includes(status)) return c.json({ error: 'status must be verified or rejected' }, 400);
+  const note = String(b?.note ?? '').trim().slice(0, 500) || null;
+  if (status === 'rejected' && !note) return c.json({ error: 'rejection_note_required' }, 400);
+  const rider = await c.env.DB.prepare(
+    `SELECT id, full_name, verification_status, nrc_number, plate_number FROM riders WHERE id = ?1`,
+  ).bind(id).first<any>();
+  if (!rider) return c.json({ error: 'not found' }, 404);
+  await c.env.DB.prepare(
+    `UPDATE riders SET verification_status = ?2, verification_note = ?3,
+        verified_by = ?4, verified_at = datetime('now'), active = ?5
+      WHERE id = ?1`,
+  ).bind(id, status, note, c.get('phone') ?? 'admin-key', status === 'verified' ? 1 : 0).run();
+  return c.json({ ok: true, id, verification_status: status });
+});
+
+// AI assist (never the decision): read the plate photo and compare the text it
+// finds with the rider's submitted plate/NRC. Admins still approve manually.
+app.post('/admin/riders/:id/ai-check', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const id = Number(c.req.param('id'));
+  const rider = await c.env.DB.prepare(
+    `SELECT id, plate_number, nrc_number, plate_photo_url, nrc_photo_url FROM riders WHERE id = ?1`,
+  ).bind(id).first<any>();
+  if (!rider) return c.json({ error: 'not found' }, 404);
+  if (!c.env.AI) return c.json({ error: 'ai_unavailable' }, 503);
+  if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
+  const key = r2KeyFromUrl(rider.plate_photo_url) ?? r2KeyFromUrl(rider.nrc_photo_url);
+  if (!key) return c.json({ error: 'no_document_photo' }, 400);
+  const object = await c.env.BACKUPS.get(key);
+  if (!object) return c.json({ error: 'photo_missing' }, 404);
+  const bytes = [...new Uint8Array(await object.arrayBuffer())];
+  let text = '';
+  try {
+    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+      image: bytes,
+      prompt: 'This is a photo of a vehicle number plate or a Zambian NRC. Transcribe every visible character exactly (letters, digits, slashes, spaces). Output only the transcribed text.',
+      max_tokens: 120,
+    });
+    text = String(out?.response ?? out?.description ?? '').trim().slice(0, 500);
+  } catch (e: any) {
+    return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
+  }
+  const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const found = norm(text);
+  const plateMatch = !!rider.plate_number && found.includes(norm(String(rider.plate_number)));
+  const nrcMatch = !!rider.nrc_number && found.includes(norm(String(rider.nrc_number)));
+  const result = { text, plate_match: plateMatch, nrc_match: nrcMatch, checked_at: new Date().toISOString() };
+  await c.env.DB.prepare('UPDATE riders SET ai_check_json = ?2 WHERE id = ?1')
+    .bind(id, JSON.stringify(result)).run().catch(() => {});
+  return c.json({ ok: true, ...result, submitted_plate: rider.plate_number, submitted_nrc: rider.nrc_number });
+});
+
+/* ------------------------------ AI helpers -------------------------------- */
+// Address cleanup for the booking form: free text in, structured Lusaka address
+// out. Best-effort; the app keeps the seller's original text when AI is off.
+app.post('/ai/address', async (c) => {
+  if (!c.get('phone')) return c.json({ error: 'sign_in_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const text = String(b?.text ?? '').trim().slice(0, 400);
+  if (text.length < 5) return c.json({ error: 'text_required' }, 400);
+  const fallback = () => {
+    const parts = text.split(',').map((p) => p.trim()).filter(Boolean);
+    return { street: parts[0] ?? text, area: parts[1] ?? '', landmark: parts.slice(2).join(', '), phone: '', notes: '' };
+  };
+  if (!c.env.AI) return c.json({ fallback: true, parsed: fallback() });
+  try {
+    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.' },
+        { role: 'user', content: `Address: ${text}` },
+      ],
+      max_tokens: 220,
+    });
+    const raw = String(out?.response ?? '');
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    const parsed = start >= 0 && end > start ? JSON.parse(raw.slice(start, end + 1)) : fallback();
+    return c.json({ fallback: false, parsed, raw: raw.slice(0, 400) });
+  } catch {
+    return c.json({ fallback: true, parsed: fallback() });
+  }
+});
+
+// Draft (never auto-send) a support reply from the ticket history.
+app.post('/admin/support/threads/:id/ai-draft', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  if (!c.env.AI) return c.json({ error: 'ai_unavailable' }, 503);
+  const id = Number(c.req.param('id'));
+  const thread = await c.env.DB.prepare(
+    `SELECT id, phone FROM chat_threads WHERE id = ?1 AND kind = 'support'`,
+  ).bind(id).first<any>();
+  if (!thread) return c.json({ error: 'not found' }, 404);
+  const { results } = await c.env.DB.prepare(
+    `SELECT sender_role, body FROM chat_messages WHERE thread_id = ?1 ORDER BY id DESC LIMIT 12`,
+  ).bind(id).all<any>();
+  const history = ((results ?? []) as any[]).reverse()
+    .map((m) => `${m.sender_role === 'ops' ? 'DropOff' : 'Customer'}: ${String(m.body).slice(0, 400)}`).join('\n');
+  try {
+    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: 'You are DropOff support in Lusaka, Zambia. Write a short, warm, concrete reply (max 90 words). Never promise refunds or payments you cannot verify; ask for the parcel reference when needed. Output the reply text only.' },
+        { role: 'user', content: `Support ticket history:\n${history}\n\nWrite the next reply from DropOff.` },
+      ],
+      max_tokens: 260,
+    });
+    return c.json({ draft: String(out?.response ?? '').trim().slice(0, 1200) });
+  } catch (e: any) {
+    return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
+  }
+});
+
 // Rider cash float: COD still sitting with the rider (collected, not yet remitted).
 app.get('/rider/cod', async (c) => {
   const phone = c.get('phone');
@@ -4133,7 +4481,7 @@ app.get('/rider/reviews', async (c) => {
   if (!phone) return c.json({ error: 'sign_in_required' }, 401);
   if (role !== 'rider' && !isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
   const rider = await c.env.DB.prepare(
-    'SELECT id, name FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>() as any;
+    'SELECT id, full_name FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>() as any;
   if (!rider) return c.json({ error: 'rider_not_found' }, 404);
   const sum = await c.env.DB.prepare(
     `SELECT COUNT(*) AS n, COALESCE(ROUND(AVG(stars), 1), 0) AS avg FROM ratings
@@ -4145,7 +4493,7 @@ app.get('/rider/reviews', async (c) => {
       ORDER BY created_at DESC, id DESC LIMIT 5`,
   ).bind(rider.id).all<any>();
   return c.json({
-    rider: { id: rider.id, name: rider.name },
+    rider: { id: rider.id, name: rider.full_name },
     n: Number(sum?.n ?? 0),
     average: Number(sum?.avg ?? 0),
     reviews: (recent.results ?? []),
@@ -4314,6 +4662,33 @@ async function notifyExpiryNudges(env: Env): Promise<void> {
         .bind(row.id, want).run().catch(() => {});
     }
   } catch { /* nudges are best-effort — never break the cron */ }
+}
+
+/* --------------------- cron: 19:00 driver target nudge --------------------- */
+// Daily 19:00 CAT: any verified driver under 30 parcels gets one SMS with the
+// day's remaining, month pace and deficit; the owner gets a compact shortfall
+// list so gaps are caught before month-end rather than after.
+async function notifyRiderTargets(env: Env): Promise<void> {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT id, phone, full_name FROM riders
+        WHERE active = 1 AND verification_status = 'verified'`,
+    ).all<any>();
+    const stats = await riderTargetStats(env.DB);
+    const short: { name: string; t: RiderTargetStats }[] = [];
+    for (const r of (results ?? []) as any[]) {
+      const t = stats.get(Number(r.id)) ?? shapeTargets(0, 0);
+      if (t.daily_met) continue;
+      short.push({ name: String(r.full_name ?? 'Driver'), t });
+      await sendSms(env, r.phone,
+        `DropOff target: ${t.today}/${t.daily_target} parcels today, ${t.daily_remaining} to go. Month ${t.month}/${t.month_target} (pace ${t.pace_target}) - ${t.on_track ? 'on track' : `${t.behind_by} behind pace`}. Check your queue in the app.`);
+    }
+    if (short.length > 0 && env.OWNER_PHONE) {
+      const lines = short.slice(0, 8).map((s) => `${s.name} ${s.t.today}/${s.t.daily_target}`).join(', ');
+      await sendSms(env, env.OWNER_PHONE,
+        `DropOff targets: ${short.length} driver(s) short today. ${lines}${short.length > 8 ? ` +${short.length - 8} more` : ''}. Full view in Admin > Driver verification & targets.`);
+    }
+  } catch { /* target nudges are best-effort */ }
 }
 
 /* --------------------- cron: 80%-cap renewal nudge ------------------------- */
@@ -4589,6 +4964,10 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
       try {
+        if (event.cron === '0 19 * * *') {
+          await notifyRiderTargets(env);
+          return;
+        }
         if (event.cron === '* * * * *') {
           await checkTimedPickups(env);
           await notifyCapNudges(env);

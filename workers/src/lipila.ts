@@ -23,6 +23,8 @@ export interface Env {
   SENTRY_DSN?: string;                        // optional error tracking (Sentry)
   LIPILA_WEBHOOK_SECRET?: string;             // optional shared secret for callback headers
   BACKUPS?: R2Bucket;                         // daily app-data exports land here (optional)
+  /** Workers AI binding: address parsing, support drafts, rider-doc checks. */
+  AI?: Ai;
   CHAT: DurableObjectNamespace;               // realtime chat rooms (one per thread)
   EMAIL?: { send(msg: { to: string; from: { email: string; name?: string }; subject: string; html?: string; text?: string }): Promise<Response> };
   /** Owner who receives intrusion / new-device alerts (260XXXXXXXXX). */

@@ -14,7 +14,7 @@ name = "EMAIL"
 # daily sweep: bill expiring Silver/Gold/Platinum packs 3 days before expiry,
 # export app-data backups to R2 at 02:00 CAT.
 # timed-pickup reminders: T-30 / T-10 pushes + missed flags (every minute).
-crons = ["0 2 * * *", "* * * * *"]
+crons = ["0 2 * * *", "* * * * *", "0 19 * * *"]
 
 [vars]
 # Lipila: PRODUCTION https://blz.lipila.io (live key required in LIPILA_API_KEY secret)
@@ -41,6 +41,9 @@ AT_FROM = "Carpso"                             # approved MNO sender ID — used
 # Flutter-web admin build). Empty = same-origin consoles only. e.g.
 # CORS_ORIGINS = "https://admin.yourdomain.com"
 CORS_ORIGINS = ""
+
+[ai]
+binding = "AI"
 
 [[r2_buckets]]
 binding = "BACKUPS"
