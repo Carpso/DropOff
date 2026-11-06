@@ -172,12 +172,36 @@ clean drill. Insert order is parent-first; delete order is reverse.
 - **Seller/owner Business tab**: every signed-in seller (customer + admin +
   owner identities, not riders) gets a Business dashboard tab built entirely
   from existing endpoints — active plan usage (`/subscriptions`), parcels in
-  flight / delivered from `/jobs` (own phone), and the referral funnel
-  (`/refer/code`). Tapping an in-flight parcel mints the tracking link
-  (`/jobs/:ref/tracking-link`) and opens the verified Track screen.
+  flight / delivered from `/jobs` (own phone), 30-day DropOff spend, and the
+  referral funnel (`/refer/code`). Tapping an in-flight parcel mints the
+  tracking link (`/jobs/:ref/tracking-link`) and opens the verified Track
+  screen; **Repeat last** clones the latest job into the booking form.
+  Retention banners are computed client-side from the same data: pay-for-itself
+  at 3+ parcels/mo with no pack, overage→upgrade nudge when the cap is hit, and
+  a one-tap **Renew now** inside the last 3 days of a cycle (re-posts
+  `/subscriptions`, worker sends the Lipila prompt).
+- **Renewal safety net (cron)**: auto-renewal prompts run 3 days before
+  `period_end`. If no prompt is outstanding, `notifyExpiryNudges` SMSes the
+  seller once per cycle; lapsed packs get a grace warning until the 7-day
+  lapse sweep. Dedupe column: `subscriptions.expiry_nudge_period`.
+- **Rider COD self-remittance**: `GET /rider/cod` lists the signed-in rider's
+  floated COD (`jobs.rider_id`, `cod_collected_zmw`, remitted flag);
+  `POST /rider/cod/remit {job_ref}` settles it via Lipila disbursement to the
+  sender's momo — only for jobs assigned to that rider. Admins still use
+  `/admin/payouts` (`kind=cod_remit`); both share one code path.
+- **Rider reputation**: `GET /rider/reviews` returns the rider's verified
+  rating average/count + five latest comments; the Team tab shows it.
+- **Delivery IQ cold start**: when a courier has no measured pickup→depot
+  history, `/iq/eta` returns the advertised window bands with `fallback: true`
+  so the app can show an estimate and label it "(advertised)".
+- **Jobs now store `from_city`** (migration 0037) so origin city survives for
+  repeat-booking prefill, city analytics and destination copy; older rows were
+  backfilled to Lusaka.
 - `GET /me` returns `{phone, role, superadmin}`; the app drives its Staff tab,
   admin console and Users-and-roles card off this — no role is trusted
-  client-side.
+  client-side. Admin-console API helpers send `X-Admin-Key` too, so a
+  key-only console device works without a JWT (the key header is omitted when
+  the build has no key configured).
 
 ## 10. Tracking verification (link ≠ access)
 
@@ -213,3 +237,30 @@ The in-app admin console renders both as the **Support inbox** card.
 pickup→depot minutes from real `job_events` (picked_up → at_depot) over the
 last 90 days (max 300 jobs). Signed-in callers only. The booking screen shows
 it beside the pickup-window picker so sellers see real speed before booking.
+
+## 13. Pack codes and collections (agent sales + last mile)
+
+- **Pack codes** let agents, market-day stalls and the counter sell a pack
+  offline. Superadmin mints batches with `POST /admin/pack-codes
+  {tier, count<=50, note}` (codes look like `DROP-XXXX-XXXX`; list them with
+  `GET /admin/pack-codes`). The seller redeems in the app (Account tab or the
+  booking form) via `POST /subscriptions/redeem {code}`: the code is consumed
+  atomically, the pack activates immediately on their number for the plan's
+  `cycle_days`, and **no payment prompt** is sent. Admin console ? Pack codes
+  card shows a "Copy all" batch for texting to the agent.
+- **Revised pack prices** (live in `tiers`): Daily K69 (1 day), Weekly K399
+  (7 days), Silver K250 / 10 parcels, Gold K500 / 25, Platinum K750 / 50 (30
+  days). Migration `0039_tier_prices.sql` is the price-only sync; `/plans`
+  merges the D1 chargebook over the built-in fallback.
+- **Collections** (courier point ? recipient door) are booked from the home
+  screen's second button: `POST /collections` creates a Lusaka last-mile job
+  (`last_mile=1`, `dest_address`, no counter fare) priced at the pay-as-you-go
+  rider fee + processing fee; the app then runs the normal Lipila payment and
+  status poll.
+- **Booking form simplifications**: DropOff is Lusaka-only (no intercity
+  courier-ticket copy), the seller no longer picks a depot branch (the rider
+  takes the parcel to the nearest point), and only the three booked windows
+  (06:00 / 10:00 / 14:00) are offered � no instant "now" or custom time.
+- **Driver pay visibility**: the K3,000/month flat + 30-parcels/day target line
+  is shown only on the rider view (`_RiderPayCard`); seller-facing and public
+  copy never mentions it.
