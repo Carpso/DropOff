@@ -905,8 +905,6 @@ class _TiersCardState extends State<_TiersCard> {
                                 Row(children: [
                                   Flexible(
                                     child: Text(entry.value.label,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.4)),
                                   ),
                                   if (currentActive && currentTier == entry.key) ...[
@@ -923,8 +921,7 @@ class _TiersCardState extends State<_TiersCard> {
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(20)),
-                                        child: Text('${models[entry.key]['tag']}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(color: Color(0xFF7B5710), fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
+                                        child: Text('${models[entry.key]['tag']}', style: const TextStyle(color: Color(0xFF7B5710), fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
                                       ),
                                     ),
                                   ],
