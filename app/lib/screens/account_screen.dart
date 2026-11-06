@@ -729,7 +729,7 @@ class _TiersCardState extends State<_TiersCard> {
   String? _busyTier;
   int _usageCycle = 0;
   Map<String, dynamic>? _current;
-  static const Map<String, int> _tierRank = {'daily': 0, 'weekly': 1, 'silver': 2, 'gold': 3, 'platinum': 4};
+  static const Map<String, int> _tierRank = {'weekly': 1, 'silver': 2, 'gold': 3, 'platinum': 4};
 
   @override
   void initState() {
@@ -834,8 +834,7 @@ class _TiersCardState extends State<_TiersCard> {
       context: 'account_tiers',
       meta: {'tier': tier, 'status': status},
     );
-    messenger.showSnackBar(SnackBar(content: Text(switch (status) {
-      'success' when tier == 'daily' => 'Daily Dash is LIVE — today\u2019s parcels are ready.',
+      messenger.showSnackBar(SnackBar(content: Text(switch (status) {
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
       'success' => '$tier pack is LIVE — your monthly parcels are ready.',
       'failed' => 'The mobile-money prompt was rejected — pay again from this screen.',
@@ -856,8 +855,8 @@ class _TiersCardState extends State<_TiersCard> {
             children: [
               const Text('Send more, pay less', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
               const SizedBox(height: 4),
-              const Text(
-                'Plans bundle the rider into ONE mobile-money prompt — a Daily Dash pass, a 7-day Weekly Sprint, or a monthly pack. Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.',
+               const Text(
+                'Plans bundle the rider into ONE mobile-money prompt — a 7-day Weekly Sprint, or a monthly Silver / Gold / Platinum pack. Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.',
                 style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.45),
               ),
               const SizedBox(height: 12),
@@ -870,7 +869,6 @@ class _TiersCardState extends State<_TiersCard> {
                     return const Text('Tier prices load when the server is reachable.', style: TextStyle(color: AppColors.muted, fontSize: 12));
                   }
                   const display = <String, ({String label, String blurb})>{
-                    'daily': (label: 'DAILY DASH', blurb: '6 parcels, today only — vendors & daily traders'),
                     'weekly': (label: 'WEEKLY SPRINT', blurb: '20 parcels / 7 days — no monthly lock-in'),
                     'silver': (label: 'SILVER', blurb: '10 parcels / month — low-volume senders'),
                     'gold': (label: 'GOLD', blurb: '25 parcels / month — weekly shippers'),

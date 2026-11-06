@@ -52,12 +52,13 @@ export function haversineKm(aLat: number, aLng: number, bLat: number, bLng: numb
 
 export function baseRiderFee(city: string, lat: number, lng: number,
                              vehicleClass: VehicleClass = 'motorcycle'): number {
-  let base = 45; // non-Lusaka default
+  // Pay-as-you-go walk-up rate at Yango-competitive pricing (no plan).
+  let base = 70; // non-Lusaka default
   if (city === 'Lusaka' && lat && lng) {
     const km = haversineKm(lat, lng, depotLat, depotLng);
-    if (km <= 5) base = 35;
-    else if (km <= 12) base = 50;
-    else base = 75;
+    if (km <= 5) base = 55;
+    else if (km <= 12) base = 75;
+    else base = 95;
   }
   base = round2(base * VEHICLE_MULTIPLIER[vehicleClass]);
   if (vehicleClass === 'truck') base = Math.max(base, TRUCK_MIN_FEE_ZMW);
@@ -66,7 +67,7 @@ export function baseRiderFee(city: string, lat: number, lng: number,
 
 /** Per-trip rider fee after the plan cap, keeping the tier discount off PAYG. */
 export function tierOverageFee(tier: string, walkUpFeeZmw: number): number {
-  const discount: Record<string, number> = { daily: 5, weekly: 10, silver: 15, gold: 25, platinum: 35 };
+  const discount: Record<string, number> = { weekly: 10, silver: 15, gold: 25, platinum: 35 };
   const pct = discount[tier] ?? 0;
   return round2(Math.max(0, walkUpFeeZmw * (1 - pct / 100)));
 }

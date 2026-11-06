@@ -22,18 +22,30 @@ export { ChatRoom };
 const app = new Hono<{ Bindings: Env; Variables: { phone?: string; role?: 'customer' | 'partner' | 'ops' | 'admin' | 'rider'; riderId?: number; courierId?: number; reqId?: string } }>();
 
 /* ------------------------- seller subscription packs ----------------------- */
-// Silver (K350/mo, 1 parcel/day) / Gold (K700/mo, 3) / Platinum (K1500/mo, 10),
-// each with one guaranteed daily sweep window (6am / 10am / 2pm). Inside the
-// pack the SENDER pays no rider fee (bundled); Sweep riders are paid a flat
-// per-parcel wage; pay-as-you-go riders keep 90% of the fee (platform take 10%).
-type PlanTier = 'daily' | 'weekly' | 'silver' | 'gold' | 'platinum';
+// MODEL (post-reprice, Daily Dash removed):
+//   • Plans are monthly: Silver K250 / 10 trips, Gold K500 / 25 trips,
+//     Platinum K750 / 50 trips. Plus Weekly Sprint K399 / 20 trips / 7 days.
+//   • Each trip (booking) consumes ONE plan slot no matter how many parcels
+//     are inside it. Cycle = 30 days from activation (weekly = 7 days).
+//   • Inside the cap the sender pays no per-trip rider fee (bundled).
+//   • After the cap, the seller keeps the plan's discount off pay-as-you-go:
+//     Silver 15%, Gold 25%, Platinum 35% off the normal rider fee.
+//   • Truck runs cost more (big cargo: fridges, sofas). Multipliers apply to
+//     the normal rider fee; trucks have a K100 minimum.
+//   • Pay-as-you-go (no plan) is the default at a Yango-competitive rate —
+//     see baseRiderFee() in pricing.ts.
+//   • Daily Dash removed: not offered for new purchase; existing subscribers
+//     run out their cycle.
+// PlanTier excludes 'daily'.
+type PlanTier = 'weekly' | 'silver' | 'gold' | 'platinum';
 interface PlanDef { fee_zmw: number; windows: string[]; parcels_per_day: number; parcels_per_month: number; rider_fee_zmw: number; overage_discount_pct: number; cycle_days: number; tag?: string | null }
 // Editable live in D1 via /admin/tiers. These are the fallback/seed values.
 // One trip (booking) consumes ONE plan slot no matter how many parcels are in it.
 // Cycle = cycle_days from activation (daily pass = 1 day, weekly = 7, monthly
 // packs = 30); overage keeps the tier discount off PAYG.
 const PLANS: Record<PlanTier, PlanDef> = {
-  daily:   { fee_zmw: 69, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 6, parcels_per_month: 6, rider_fee_zmw: 0, overage_discount_pct: 5, cycle_days: 1, tag: 'Daily Dash' },
+  // Daily Dash removed per product decision - Pay-as-you-go is the default
+  // (high Yango-competitive rate), Weekly Sprint + monthly packs remain.
   weekly:  { fee_zmw: 399, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 20, rider_fee_zmw: 0, overage_discount_pct: 10, cycle_days: 7, tag: 'Weekly Sprint' },
   silver: { fee_zmw: 250, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 10, rider_fee_zmw: 0, overage_discount_pct: 15, cycle_days: 30 },
   gold:   { fee_zmw: 500, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 25, rider_fee_zmw: 0, overage_discount_pct: 25, cycle_days: 30 },
@@ -43,7 +55,6 @@ const PLANS: Record<PlanTier, PlanDef> = {
 /** DB-backed catalogue (price, per-day cap, tag) â€” constants only as fallback. */
 async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
   const merged: Record<PlanTier, PlanDef> = {
-    daily: { ...PLANS.daily, tag: null },
     weekly: { ...PLANS.weekly, tag: null },
     silver: { ...PLANS.silver, tag: null },
     gold: { ...PLANS.gold, tag: null },
@@ -53,6 +64,8 @@ async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
   const { results } = await db.prepare('SELECT tier, fee_zmw, parcels_per_day, parcels_per_month, rider_fee_zmw, overage_discount_pct, cycle_days, tag FROM tiers WHERE active = 1').all();
   for (const row of results as any[]) {
     const key = row.tier as PlanTier;
+    // Daily Dash is removed - never surface it even if a stale row lingers in D1.
+    if ((key as unknown) === 'daily') continue;
     if (merged[key]) {
       merged[key] = {
         ...merged[key],

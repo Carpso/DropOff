@@ -826,14 +826,13 @@ class _PackCodesCard extends StatefulWidget {
 }
 
 class _PackCodesCardState extends State<_PackCodesCard> {
-  String _tier = 'daily';
+  String _tier = 'weekly';
   int _count = 5;
   final _note = TextEditingController();
   List<String> _codes = const [];
   bool _busy = false;
 
   static const Map<String, String> _labels = {
-    'daily': 'Daily Dash',
     'weekly': 'Weekly Sprint',
     'silver': 'Silver',
     'gold': 'Gold',

@@ -28,7 +28,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
   bool _loading = true;
 
   /// Plan ladder for upgrade suggestions (matches the worker's TIER_RANK).
-  static const List<String> _tierLadder = ['daily', 'weekly', 'silver', 'gold', 'platinum'];
+  static const List<String> _tierLadder = ['weekly', 'silver', 'gold', 'platinum'];
 
   @override
   void initState() {
@@ -159,7 +159,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       return _banner(
         icon: Icons.trending_up_rounded,
         title: '3+ parcels a month pays off with a pack',
-        body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying per trip. A Daily Dash (K69, 6 parcels/day) or Weekly Sprint (K399, 20 parcels/cycle) removes the per-parcel rider cost — most regulars save K${(s.k).toStringAsFixed(0)}+.',
+        body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying per trip. A Weekly Sprint (K399, 20/cycle) or monthly Silver / Gold / Platinum removes the per-parcel rider cost — most regulars save K${(s.k).toStringAsFixed(0)}+.',
         cta: 'Browse packs',
         onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
       );
@@ -286,7 +286,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
             const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('No pack yet', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
               SizedBox(height: 3),
-              Text('Packs bundle the rider — from K69 for a Daily Dash. Pay once, no rider fee per parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+              Text('Packs bundle the rider — Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
             ])),
             FilledButton.tonal(
               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
