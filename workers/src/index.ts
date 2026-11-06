@@ -4517,7 +4517,7 @@ input, select { padding: 6px 10px; border: 1px solid #e2e6e1; border-radius: 8px
 .foot { margin-top: 24px; color: #65736d; font-size: 11px; border-top: 1px solid #e2e6e1; padding-top: 12px; }
 @media (max-width: 700px) { .wrap { padding: 10px; } .metrics { grid-template-columns: 1fr; } table { font-size: 11px; } th, td { padding: 6px 4px; } }
 </style></head><body>
-<div class="top"><strong style="font-size:18px;letter-spacing:-0.6px;">DropOff</strong> <span style="opacity:.8">first-mile · Zambia</span> <a href="/dashboard">Dashboard</a> <span style="opacity:.6">·</span> <a href="/admin/riders">Riders</a> <span style="opacity:.6">·</span> <a href="/admin/fraud">Fraud</a> <span style="opacity:.6">·</span> <a href="/security/alerts">Alerts</a> <span style="opacity:.6">·</span> <strong>${h(user)}</strong> <a href="/auth/logout" style="margin-left:10px;">Sign out</a></div>
+<div class="top"><strong style="font-size:18px;letter-spacing:-0.6px;">DropOff</strong> <span style="opacity:.8">first-mile · Zambia</span> <a href="/dashboard">Dashboard</a> <span style="opacity:.6">·</span> <a href="/admin/riders">Riders</a> <span style="opacity:.6">·</span> <a href="/dashboard/analytics">Analytics</a> <span style="opacity:.6">·</span> <a href="/admin/fraud">Fraud</a> <span style="opacity:.6">·</span> <a href="/security/alerts">Alerts</a> <span style="opacity:.6">·</span> <strong>${h(user)}</strong> <a href="/auth/logout" style="margin-left:10px;">Sign out</a></div>
 <div class="wrap">${body}</div>
 <div class="foot">DropOff — home or shop pickup to your courier depot. Internal admin surface. Not for sellers or recipients.</div>
 </body></html>`;
@@ -4645,6 +4645,199 @@ app.get('/dashboard/jobs', async (c) => {
   </div>
   `;
   return new Response(layout('Jobs', c.get('phone') ?? 'admin', b), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+});
+
+/* ------------------------------ app analytics ----------------------------- */
+// Feature usage / click KPI for superadmin & admin (app-first).
+// The Flutter app batches events locally (offline-first outbox) and POSTs them
+// here; the worker only stores them — aggregation happens on read via KPI.
+// Auth: any signed-in caller (phone JWT) or admin key. Rate-limited per IP.
+app.post('/analytics/ingest', async (c) => {
+  if (await rateLimited(c, 'analytics_ingest', 120)) return c.json({ error: 'too_many_requests' }, 429);
+  const phone = c.get('phone') ?? null;
+  const role = c.get('role') ?? null;
+  if (!phone && !isAdmin(c)) return c.json({ error: 'sign_in_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  if (!b || !Array.isArray(b.events)) return c.json({ error: 'events array required' }, 400);
+  const events = b.events.slice(0, 200); // cap batch size
+  const now = new Date().toISOString();
+  const stmts: D1PreparedStatement[] = [];
+  for (const e of events) {
+    const feature = String(e.feature ?? '').slice(0, 60);
+    const action = String(e.action ?? '').slice(0, 60);
+    if (!feature || !action) continue;
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO analytics_events (phone, role, feature, action, context, meta, created_at)
+       VALUES (?1,?2,?3,?4,?5,?6,?7)`,
+    ).bind(
+      phone,
+      role,
+      feature,
+      action,
+      String(e.context ?? '').slice(0, 80) || null,
+      e.meta != null ? JSON.stringify(e.meta) : null,
+      String(e.created_at ?? now).slice(0, 30) || now,
+    ));
+  }
+  if (stmts.length) await c.env.DB.batch(stmts);
+  return c.json({ ok: true, inserted: stmts.length });
+});
+
+// Aggregated feature-usage KPI for the owner/admin console (web + mobile app).
+// Superadmin sees everything; admin/ops see the same aggregate (no PII beyond
+// phone which is already their own account identity).
+app.get('/admin/analytics/kpi', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const days = Math.min(Math.max(Number(c.req.query('days') ?? '30'), 1), 90);
+  const since = `datetime('now', '-${days} days')`;
+  const base = `FROM analytics_events WHERE created_at >= ${since}`;
+  // Top features by event count (last N days).
+  const topFeatures = await c.env.DB.prepare(
+    `SELECT feature, COUNT(*) AS n, COUNT(DISTINCT phone) AS users ${base}
+      GROUP BY feature ORDER BY n DESC LIMIT 12`,
+  ).all<any>();
+  // Top actions within the top feature.
+  const topActions = await c.env.DB.prepare(
+    `SELECT feature, action, COUNT(*) AS n ${base}
+      GROUP BY feature, action ORDER BY n DESC LIMIT 24`,
+  ).all<any>();
+  // Conversion funnel: key milestones (unique users).
+  const funnel = await c.env.DB.prepare(
+    `SELECT feature, COUNT(DISTINCT phone) AS users ${base}
+      AND feature IN ('booking','subscriptions','pack_codes','rider_verification','collections')
+      GROUP BY feature ORDER BY users DESC`,
+  ).all<any>();
+  // Daily active users (distinct phones with >=1 event).
+  const dau = await c.env.DB.prepare(
+    `SELECT date(created_at) AS day, COUNT(DISTINCT phone) AS users ${base}
+      GROUP BY day ORDER BY day`,
+  ).all<any>();
+  // Usage by role.
+  const byRole = await c.env.DB.prepare(
+    `SELECT role, COUNT(*) AS n, COUNT(DISTINCT phone) AS users ${base}
+      GROUP BY role ORDER BY n DESC`,
+  ).all<any>();
+  // Hour of day heatmap (CAT-agnostic: stored UTC; fine for relative shape).
+  const byHour = await c.env.DB.prepare(
+    `SELECT CAST(strftime('%H', created_at) AS INTEGER) AS hour, COUNT(*) AS n ${base}
+      GROUP BY hour ORDER BY hour`,
+  ).all<any>();
+  const totalEvents = await c.env.DB.prepare(`SELECT COUNT(*) AS n ${base}`).first<any>();
+  return c.json({
+    days,
+    total_events: Number(totalEvents?.n ?? 0),
+    top_features: ((topFeatures?.results ?? []) as any[]).map((r) => ({ feature: r.feature, n: Number(r.n), users: Number(r.users) })),
+    top_actions: ((topActions?.results ?? []) as any[]).map((r) => ({ feature: r.feature, action: r.action, n: Number(r.n) })),
+    funnel: ((funnel?.results ?? []) as any[]).map((r) => ({ feature: r.feature, users: Number(r.users) })),
+    dau: ((dau?.results ?? []) as any[]).map((r) => ({ day: r.day, users: Number(r.users) })),
+    by_role: ((byRole?.results ?? []) as any[]).map((r) => ({ role: r.role, n: Number(r.n), users: Number(r.users) })),
+    by_hour: ((byHour?.results ?? []) as any[]).map((r) => ({ hour: Number(r.hour), n: Number(r.n) })),
+  });
+});
+
+/* Analytics KPI page (HTML) — server-rendered view of the same aggregation. */
+app.get('/dashboard/analytics', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const phone = c.get('phone') ?? 'admin';
+  const days = Math.min(Math.max(Number(c.req.query('days') ?? '30'), 1), 90);
+  const since = `datetime('now', '-${days} days')`;
+  const base = `FROM analytics_events WHERE created_at >= ${since}`;
+  const total = await c.env.DB.prepare(`SELECT COUNT(*) AS n ${base}`).first<any>();
+  const feats = await c.env.DB.prepare(
+    `SELECT feature, COUNT(*) AS n, COUNT(DISTINCT phone) AS users ${base}
+      GROUP BY feature ORDER BY n DESC LIMIT 10`,
+  ).all<any>();
+  const acts = await c.env.DB.prepare(
+    `SELECT feature, action, COUNT(*) AS n ${base}
+      GROUP BY feature, action ORDER BY n DESC LIMIT 14`,
+  ).all<any>();
+  const fun = await c.env.DB.prepare(
+    `SELECT feature, COUNT(DISTINCT phone) AS users ${base}
+      AND feature IN ('booking','subscriptions','pack_codes','rider_verification','collections')
+      GROUP BY feature ORDER BY users DESC`,
+  ).all<any>();
+  const dau = await c.env.DB.prepare(
+    `SELECT date(created_at) AS day, COUNT(DISTINCT phone) AS users ${base}
+      GROUP BY day ORDER BY day`,
+  ).all<any>();
+  const byRole = await c.env.DB.prepare(
+    `SELECT role, COUNT(*) AS n, COUNT(DISTINCT phone) AS users ${base}
+      GROUP BY role ORDER BY n DESC`,
+  ).all<any>();
+  const featureRows = ((feats?.results ?? []) as any[]).map((r) => `<tr>
+    <td>${h(r.feature)}</td>
+    <td>${Number(r.n)}</td>
+    <td>${Number(r.users)}</td>
+  </tr>`).join('');
+  const actionRows = ((acts?.results ?? []) as any[]).map((r) => `<tr>
+    <td>${h(r.feature)}</td>
+    <td>${h(r.action)}</td>
+    <td>${Number(r.n)}</td>
+  </tr>`).join('');
+  const funnelRows = ((fun?.results ?? []) as any[]).map((r) => `<tr>
+    <td>${h(r.feature)}</td>
+    <td>${Number(r.users)}</td>
+  </tr>`).join('');
+  const dauRows = ((dau?.results ?? []) as any[]).map((r) => `<tr>
+    <td>${r.day}</td>
+    <td>${Number(r.users)}</td>
+  </tr>`).join('');
+  const roleRows = ((byRole?.results ?? []) as any[]).map((r) => `<tr>
+    <td>${h(r.role ?? 'anonymous')}</td>
+    <td>${Number(r.n)}</td>
+    <td>${Number(r.users)}</td>
+  </tr>`).join('');
+  const dayOpts = [7, 14, 30, 60, 90].map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>${d} days</option>`).join('');
+  const b = `
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+    <div class="metrics">
+      <div class="metric"><div class="v">${Number(total?.n ?? 0)}</div><div class="l">Events (${days} days)</div></div>
+      <div class="metric"><div class="v">${((feats?.results ?? []) as any[]).reduce((a: number, r: any) => a + Number(r.users), 0)}</div><div class="l">Active users</div></div>
+    </div>
+    <form style="display:flex;gap:6px;align-items:flex-end">
+      <label style="font-size:12px;color:#65736d">Days</label>
+      <select name="days" onchange="this.form.submit()" style="padding:6px 10px;border-radius:8px;border:1px solid #e2e6e1;font-size:13px">${dayOpts}</select>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Feature usage leaderboard</h2>
+    <table>
+      <thead><tr><th>Feature</th><th>Events</th><th>Users</th></tr></thead>
+      <tbody>${featureRows || '<tr><td colspan="3" class="empty">No events yet.</td></tr>'}</tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Top actions</h2>
+    <table>
+      <thead><tr><th>Feature</th><th>Action</th><th>Count</th></tr></thead>
+      <tbody>${actionRows || '<tr><td colspan="3" class="empty">—</td></tr>'}</tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Conversion funnel (unique users)</h2>
+    <table>
+      <thead><tr><th>Milestone</th><th>Users</th></tr></thead>
+      <tbody>${funnelRows || '<tr><td colspan="2" class="empty">—</td></tr>'}</tbody>
+    </table>
+  </div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    <div class="card" style="flex:1;min-width:260px">
+      <h2>Daily active users</h2>
+      <table style="font-size:12px">
+        <thead><tr><th>Day</th><th>Users</th></tr></thead>
+        <tbody>${dauRows || '<tr><td colspan="2" class="empty">—</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="card" style="flex:1;min-width:260px">
+      <h2>Usage by role</h2>
+      <table style="font-size:12px">
+        <thead><tr><th>Role</th><th>Events</th><th>Users</th></tr></thead>
+        <tbody>${roleRows || '<tr><td colspan="3" class="empty">—</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+  `;
+  return new Response(layout('Analytics', phone, b), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 });
 
 /* ------------------------------ AI helpers -------------------------------- */
