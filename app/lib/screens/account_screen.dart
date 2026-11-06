@@ -689,13 +689,14 @@ class _TiersCardState extends State<_TiersCard> {
 
   String _windowLabel(Object? windows) {
     final list = (windows as List?)?.cast<Object>() ?? const [];
-    // Arrival ranges (CAT) — matches the booking slot picker.
+    // Arrival ranges (CAT) — matches the booking slot picker. Cap at 3 so the
+    // label can never balloon into a tall vertical stack.
     const ranges = {
       '06:00': '6:00–7:30 AM',
       '10:00': '10:00–11:30 AM',
       '14:00': '2:00–3:30 PM',
     };
-    return list.map((w) => ranges['$w'] ?? '$w').join(' / ');
+    return list.take(3).map((w) => ranges['$w'] ?? '$w').join(' / ');
   }
 
   Future<void> _chooseTier(String tier) async {
@@ -778,46 +779,70 @@ class _TiersCardState extends State<_TiersCard> {
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(color: AppColors.line),
                           ),
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Expanded(
-                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Row(children: [
-                                    Text(entry.value.label, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.4)),
-                                    if (models[entry.key]?['tag'] != null) ...[
-                                      const SizedBox(width: 6),
-                                      Container(
+                          // Fixed-width price/button rail on the right keeps the
+                          // left text block wide enough to read HORIZONTALLY —
+                          // the rail can never expand and crush the blurb into a
+                          // one-word-per-line vertical ribbon.
+                          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Row(children: [
+                                  Flexible(
+                                    child: Text(entry.value.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.4)),
+                                  ),
+                                  if (models[entry.key]?['tag'] != null) ...[
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(20)),
-                                        child: Text('${models[entry.key]['tag']}', style: const TextStyle(color: Color(0xFF7B5710), fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
+                                        child: Text('${models[entry.key]['tag']}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(color: Color(0xFF7B5710), fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
                                       ),
-                                    ],
-                                  ]),
-                                  const SizedBox(height: 4),
-                                  Text(entry.value.blurb, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
-                                  const SizedBox(height: 2),
-                                  Text(_windowLabel(models[entry.key]?['windows']), style: const TextStyle(color: AppColors.forest, fontSize: 11, height: 1.35, fontWeight: FontWeight.w600)),
-                                ]),
-                              ),
-                              const SizedBox(width: 10),
-                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                Text('K${models[entry.key]?['fee_zmw'] ?? '—'}/mo', maxLines: 1, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.forest)),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: 92,
-                                  child: FilledButton(
-                                    style: FilledButton.styleFrom(
-                                      visualDensity: VisualDensity.compact,
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                     ),
-                                    onPressed: _busyTier != null ? null : () => _chooseTier(entry.key),
-                                    child: _busyTier == entry.key
-                                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                                        : const Text('Choose', maxLines: 1, textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                                  ],
+                                ]),
+                                const SizedBox(height: 4),
+                                Text(entry.value.blurb,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    softWrap: true,
+                                    style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+                                const SizedBox(height: 2),
+                                Text(_windowLabel(models[entry.key]?['windows']),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    softWrap: true,
+                                    style: const TextStyle(color: AppColors.forest, fontSize: 11, height: 1.35, fontWeight: FontWeight.w600)),
+                              ]),
+                            ),
+                            const SizedBox(width: 10),
+                            SizedBox(
+                              width: 96,
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Text('K${models[entry.key]?['fee_zmw'] ?? '—'}/mo',
+                                      maxLines: 1,
+                                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.forest)),
+                                ),
+                                const SizedBox(height: 8),
+                                FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                   ),
+                                  onPressed: _busyTier != null ? null : () => _chooseTier(entry.key),
+                                  child: _busyTier == entry.key
+                                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                      : const Text('Choose', maxLines: 1, textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
                                 ),
                               ]),
-                            ]),
+                            ),
                           ]),
                         ),
                       ),
