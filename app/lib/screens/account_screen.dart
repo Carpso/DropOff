@@ -928,15 +928,9 @@ class _TiersCardState extends State<_TiersCard> {
                                 ]),
                                 const SizedBox(height: 4),
                                 Text(entry.value.blurb,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    softWrap: true,
                                     style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
                                 const SizedBox(height: 2),
                                 Text(_windowLabel(models[entry.key]?['windows']),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    softWrap: true,
                                     style: const TextStyle(color: AppColors.forest, fontSize: 11, height: 1.35, fontWeight: FontWeight.w600)),
                               ]),
                             ),
@@ -948,7 +942,6 @@ class _TiersCardState extends State<_TiersCard> {
                                   fit: BoxFit.scaleDown,
                                   alignment: Alignment.centerRight,
                                   child: Text('K${models[entry.key]?['fee_zmw'] ?? '—'}${_cycleUnit(models[entry.key])}',
-                                      maxLines: 1,
                                       style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.forest)),
                                 ),
                                 const SizedBox(height: 8),
@@ -966,7 +959,6 @@ class _TiersCardState extends State<_TiersCard> {
                                               : currentActive && (_tierRank[entry.key] ?? 0) > (_tierRank[currentTier] ?? 0)
                                                   ? 'Upgrade'
                                                   : 'Choose',
-                                          maxLines: 1,
                                           textAlign: TextAlign.center,
                                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
                                         ),
@@ -1162,15 +1154,11 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
               // squeeze the label into a vertical ribbon.
               Expanded(
                 child: Text('$tier pack — $used of $cap parcels used',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
               ),
               const SizedBox(width: 8),
               Flexible(
                 child: Text('$remaining left',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest)),
               ),
             ]),
