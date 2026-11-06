@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/dropoff_api.dart';
+import '../data/analytics_service.dart';
 import '../ui/app_theme.dart';
 
 /// Owner / admin console inside the app: live business stats, security
@@ -73,7 +74,13 @@ class _AdminScreenState extends State<AdminScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
         ? (broadcast ? 'Broadcast queued — sends run in the background.' : 'SMS sent.')
         : 'Send failed: ${res.error}')));
-    if (res.ok) _smsBody.clear();
+    if (res.ok) {
+      _smsBody.clear();
+      AnalyticsService.instance.track(
+        feature: 'sms_broadcast', action: broadcast ? 'broadcast' : 'send', context: 'admin_sms',
+        meta: {'audience': _audience},
+      );
+    }
   }
 
   @override
@@ -142,6 +149,8 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
             const SizedBox(height: 16),
             _statsCard(),
+            const SizedBox(height: 18),
+            const _AnalyticsKpiCard(),
             const SizedBox(height: 18),
             _alertsCard(),
             const SizedBox(height: 18),
@@ -273,8 +282,28 @@ class _AdminScreenState extends State<AdminScreen> {
                     Text('${f['job_ref']} · score ${f['score']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                     Text('${f['reasons']}', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                   ])),
-                  TextButton(onPressed: () async { await DropOffApi.reviewFraud((f['id'] as num).toInt(), status: 'cleared'); _load(); }, child: const Text('Clear')),
-                  TextButton(onPressed: () async { await DropOffApi.reviewFraud((f['id'] as num).toInt(), status: 'confirmed'); _load(); }, child: const Text('Confirm')),
+                  TextButton(
+                    onPressed: () async {
+                      await DropOffApi.reviewFraud((f['id'] as num).toInt(), status: 'cleared');
+                      AnalyticsService.instance.track(
+                        feature: 'fraud', action: 'clear', context: 'admin_fraud_queue',
+                        meta: {'fraud_id': f['id']},
+                      );
+                      _load();
+                    },
+                    child: const Text('Clear'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      await DropOffApi.reviewFraud((f['id'] as num).toInt(), status: 'confirmed');
+                      AnalyticsService.instance.track(
+                        feature: 'fraud', action: 'confirm', context: 'admin_fraud_queue',
+                        meta: {'fraud_id': f['id']},
+                      );
+                      _load();
+                    },
+                    child: const Text('Confirm'),
+                  ),
                 ]),
               ),
           ]),
@@ -597,7 +626,13 @@ class _UsersCardState extends State<_UsersCard> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
         ? '$email is now $role.'
         : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'the owner account cannot be demoted' : res.error}')));
-    if (res.ok) _load();
+    if (res.ok) {
+      _load();
+      AnalyticsService.instance.track(
+        feature: 'admin_users', action: 'set_role', context: 'admin_users',
+        meta: {'email': email, 'role': role},
+      );
+    }
   }
 
   @override
@@ -721,7 +756,13 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
     if (!mounted) return;
     setState(() => _saving = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok ? 'Branch added.' : 'Failed: ${res.error}')));
-    if (res.ok) { _name.clear(); _address.clear(); _lat.clear(); _lng.clear(); _phone.clear(); _loadBranches(); }
+    if (res.ok) {
+      _name.clear(); _address.clear(); _lat.clear(); _lng.clear(); _phone.clear(); _loadBranches();
+      AnalyticsService.instance.track(
+        feature: 'branches', action: 'add', context: 'admin_branch_manager',
+        meta: {'courier_id': _courierId},
+      );
+    }
   }
 
   @override
@@ -816,6 +857,10 @@ class _PackCodesCardState extends State<_PackCodesCard> {
     }
     final codes = ((res.body['codes'] as List?) ?? const []).map((c) => '$c').toList();
     setState(() => _codes = codes);
+    AnalyticsService.instance.track(
+      feature: 'pack_codes', action: 'generate', context: 'admin_pack_codes',
+      meta: {'tier': _tier, 'count': codes.length},
+    );
     if (codes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No codes generated � try again.')));
     }
@@ -962,7 +1007,13 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
         ? (status == 'verified' ? 'Driver verified.' : 'Driver rejected.')
         : 'Could not update (${res.error}).')));
-    if (res.ok) _load();
+    if (res.ok) {
+      _load();
+      AnalyticsService.instance.track(
+        feature: 'rider_verification', action: status, context: 'admin_verification_queue',
+        meta: {'rider_id': id},
+      );
+    }
   }
 
   Future<void> _aiCheck(Map<String, dynamic> rider) async {
@@ -976,6 +1027,10 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('AI check failed (${res.error}).')));
       return;
     }
+    AnalyticsService.instance.track(
+      feature: 'rider_verification', action: 'ai_check', context: 'admin_verification_queue',
+      meta: {'rider_id': id, 'plate_match': res.body['plate_match'], 'nrc_match': res.body['nrc_match']},
+    );
     final text = '${res.body['text'] ?? ''}'.trim();
     final plateMatch = res.body['plate_match'] == true;
     final nrcMatch = res.body['nrc_match'] == true;
@@ -1149,6 +1204,117 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
         'Today $today/$daily${met ? ' (met)' : ''} - month $month vs pace $pace${onTrack ? ' (on track)' : ' (behind)'}',
         style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: onTrack ? AppColors.forest : const Color(0xFF8A5A00)),
       ),
+    );
+  }
+}
+
+/// Feature usage / click KPI for the admin console — which app features are
+/// used frequently (superadmin and admin). Reads the aggregated analytics
+/// from GET /admin/analytics/kpi.
+class _AnalyticsKpiCard extends StatefulWidget {
+  const _AnalyticsKpiCard();
+
+  @override
+  State<_AnalyticsKpiCard> createState() => _AnalyticsKpiCardState();
+}
+
+class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
+  Map<String, dynamic>? _kpi;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final data = await DropOffApi.getAdmin('/admin/analytics/kpi?days=30');
+    if (!mounted) return;
+    setState(() {
+      _kpi = data;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final kpi = _kpi;
+    final total = kpi?['total_events'] as num? ?? 0;
+    final features = ((kpi?['top_features'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    final funnel = ((kpi?['funnel'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    final dau = ((kpi?['dau'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.insights_outlined, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('App usage KPI (30 days)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: _KpiMetric('Events', '$total', Icons.event_note)),
+            Expanded(child: _KpiMetric('Features', '${features.length}', Icons.apps)),
+            Expanded(child: _KpiMetric('Active days', '${dau.length}', Icons.today)),
+          ]),
+          const SizedBox(height: 12),
+          if (_loading)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
+          else ...[
+            const Text('Most used features', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+            const SizedBox(height: 6),
+            ...features.take(8).map((f) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12.5), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                Text('${f['n']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.forest)),
+                const SizedBox(width: 6),
+                Text('${f['users']} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+              ]),
+            )),
+            const SizedBox(height: 10),
+            const Text('Conversion funnel (unique users)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+            const SizedBox(height: 6),
+            ...funnel.take(5).map((f) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12.5), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                Text('${f['users']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.forest)),
+              ]),
+            )),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+class _KpiMetric extends StatelessWidget {
+  const _KpiMetric(this.label, this.value, this.icon);
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(icon, size: 16, color: AppColors.forest),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w700)),
+        ]),
+        const SizedBox(height: 6),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
+      ]),
     );
   }
 }

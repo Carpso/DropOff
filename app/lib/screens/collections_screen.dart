@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
+import '../data/analytics_service.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
@@ -68,6 +69,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     super.dispose();
   }
 
+  @override
+  void initState() {
+    super.initState();
+    AnalyticsService.instance.track(
+      feature: 'collections', action: 'view', context: 'collections_form',
+    );
+  }
+
   bool _slotClosed(String key) {
     final parts = _cutoffs[key]!.split(':');
     final now = TimeOfDay.now();
@@ -130,6 +139,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
     if (!mounted) return;
     Navigator.of(context).pop();
+    AnalyticsService.instance.track(
+      feature: 'collections', action: 'submit', context: 'collections_form',
+      meta: {
+        'parcels': _parcels,
+        'vehicle_class': _vehicleClass,
+        'pay_method': _payment,
+        'courier_id': _courierId,
+      },
+    );
   }
 
   void _message(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));

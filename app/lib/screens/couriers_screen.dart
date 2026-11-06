@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/analytics_service.dart';
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
@@ -23,6 +24,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AnalyticsService.instance.trackScreenView('couriers');
     final store = AppScope.of(context);
     if (!store.linked) {
       // The courier directory is seller tooling — sign up first.

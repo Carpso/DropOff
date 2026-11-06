@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/analytics_service.dart';
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
@@ -20,6 +21,13 @@ class BookingsScreen extends StatefulWidget {
 }
 
 class _BookingsScreenState extends State<BookingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    AnalyticsService.instance.trackScreenView('bookings');
+    _refresh();
+  }
+
   Future<void> _refresh() async {
     if (!mounted) return;
     // Bookings live in the local store; pull-to-refresh re-reads the latest

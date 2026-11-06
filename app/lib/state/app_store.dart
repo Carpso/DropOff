@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/dropoff_api.dart';
+import '../data/analytics_service.dart';
 import '../data/push_service.dart';
 import '../models/booking.dart';
 
@@ -12,6 +14,7 @@ class AppStore extends ChangeNotifier {
   static const _bookingsKey = 'dropoff_bookings_v1';
   static const _ridersKey = 'dropoff_riders_v1';
   static const _tokenKey = 'dropoff_token_v1';
+  static const _secureTokenKey = 'dropoff_token';
   static const _phoneKey = 'dropoff_phone_v1';
   static const _emailKey = 'dropoff_email_v1';
   static const _outboxKey = 'dropoff_outbox_v1';
@@ -26,6 +29,10 @@ class AppStore extends ChangeNotifier {
   String? _email;
   String? _role;
   bool _superadmin = false;
+
+  /// Encrypted at rest (keystore/keychain). The JWT is the only credential that
+  /// grants API access, so it never lives in plaintext SharedPreferences.
+  final _secureStorage = const FlutterSecureStorage();
 
   List<Booking> get bookings => List.unmodifiable(_bookings);
   List<Rider> get riders => List.unmodifiable(_riders);
@@ -52,11 +59,13 @@ class AppStore extends ChangeNotifier {
     final remember = preferences.getBool(_rememberKey) ?? true;
     if (!remember) {
       // Session-only login: drop any persisted credential on cold start.
+      await _secureStorage.delete(key: _secureTokenKey);
       await preferences.remove(_tokenKey);
       await preferences.remove(_phoneKey);
       await preferences.remove(_emailKey);
     }
-    _token = preferences.getString(_tokenKey);
+    _token = await _secureStorage.read(key: _secureTokenKey);
+    DropOffApi.token = _token;
     _linkedPhone = preferences.getString(_phoneKey);
     _email = preferences.getString(_emailKey);
     try {
@@ -154,6 +163,7 @@ class AppStore extends ChangeNotifier {
       }
     }
     unawaited(DropOffApi.flushRatingOutbox());
+    unawaited(AnalyticsService.instance.flush());
   }
 
   /// Phone-OTP device link: request the SMS code, then confirm it.
@@ -232,11 +242,13 @@ class AppStore extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setBool(_rememberKey, remember);
     if (token != null && remember) {
+      await _secureStorage.write(key: _secureTokenKey, value: token);
       await preferences.setString(_tokenKey, token);
       if (_linkedPhone != null) await preferences.setString(_phoneKey, _linkedPhone!);
       if (_email != null) await preferences.setString(_emailKey, _email!);
     } else if (token != null && !remember) {
       // Keep the session in memory only — never write credentials to disk.
+      await _secureStorage.delete(key: _secureTokenKey);
       await preferences.remove(_tokenKey);
       await preferences.remove(_phoneKey);
       await preferences.remove(_emailKey);
@@ -284,6 +296,8 @@ class AppStore extends ChangeNotifier {
         return 'Too many tries - wait an hour, then retry.';
       case 'session_revoked':
         return 'Your session was revoked - sign in again.';
+      case 'account_already_exists':
+        return 'An account with those details already exists - sign in instead.';
       case 'internal_error':
         return 'DropOff is having a moment - please try again in a minute.';
       case 'unknown':
@@ -302,6 +316,7 @@ class AppStore extends ChangeNotifier {
     _role = null;
     _superadmin = false;
     DropOffApi.token = null;
+    await _secureStorage.delete(key: _secureTokenKey);
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_tokenKey);
     await preferences.remove(_phoneKey);

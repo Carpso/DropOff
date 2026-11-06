@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 
+import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
@@ -166,6 +167,7 @@ class OperationsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AnalyticsService.instance.trackScreenView('operations');
     final store = AppScope.of(context);
     if (!store.linked) {
       // Rider/ops tools need an identity — show the link door only.

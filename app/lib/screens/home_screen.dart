@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/analytics_service.dart';
 import '../data/catalog.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
@@ -49,6 +50,7 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AnalyticsService.instance.trackScreenView('home');
     final store = AppScope.of(context);
     final active = store.bookings.where((item) => item.stage < item.timeline.length - 1).toList();
     return SafeArea(

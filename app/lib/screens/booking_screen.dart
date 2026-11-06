@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
+import '../data/analytics_service.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
@@ -136,6 +137,9 @@ class _BookingScreenState extends State<BookingScreen> {
         }
       });
     }
+    AnalyticsService.instance.track(
+      feature: 'booking', action: 'view', context: 'booking_step_1',
+    );
   }
 
   @override
@@ -355,6 +359,22 @@ class _BookingScreenState extends State<BookingScreen> {
     }
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => BookingSuccessScreen(bookingId: booking.id)));
+    AnalyticsService.instance.track(
+      feature: 'booking', action: 'submit', context: 'booking_step_3',
+      meta: {
+        'parcels': _parcels,
+        'weight_class': switch (_size) {
+          ParcelSize.small => '0-5kg',
+          ParcelSize.medium => '5-15kg',
+          ParcelSize.large => '15kg+',
+        },
+        'vehicle_class': _vehicleClass,
+        'pay_method': _payment,
+        'last_mile': _lastMile,
+        'round_trip': _roundTrip,
+        'dispatch': booking.dispatched,
+      },
+    );
   }
 
   @override

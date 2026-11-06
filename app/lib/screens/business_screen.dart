@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
@@ -32,6 +33,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.trackScreenView('business');
     _load();
   }
 

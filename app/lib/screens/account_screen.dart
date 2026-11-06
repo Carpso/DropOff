@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
+import '../data/analytics_service.dart';
 import '../data/push_service.dart';
 import '../main.dart';
 import '../screens/admin_screen.dart';
@@ -796,6 +797,10 @@ class _TiersCardState extends State<_TiersCard> {
             : '${tier.toUpperCase()} is live — nothing extra to pay this cycle.')));
         setState(() => _usageCycle++);
         _loadCurrent();
+        AnalyticsService.instance.track(
+          feature: 'subscriptions', action: 'upgrade', context: 'account_tiers',
+          meta: {'tier': tier},
+        );
         return;
       }
     }
@@ -824,6 +829,11 @@ class _TiersCardState extends State<_TiersCard> {
     if (!mounted) return;
     setState(() { _busyTier = null; _usageCycle++; });
     _loadCurrent();
+    AnalyticsService.instance.track(
+      feature: 'subscriptions', action: status == 'success' ? 'subscribe' : 'subscribe_pending',
+      context: 'account_tiers',
+      meta: {'tier': tier, 'status': status},
+    );
     messenger.showSnackBar(SnackBar(content: Text(switch (status) {
       'success' when tier == 'daily' => 'Daily Dash is LIVE — today\u2019s parcels are ready.',
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
@@ -1020,6 +1030,10 @@ class _PackCodeCardState extends State<_PackCodeCard> {
       final tier = '${res.body['tier'] ?? 'pack'}';
       final end = '${res.body['period_end'] ?? ''}'.split(' ').first;
       messenger.showSnackBar(SnackBar(content: Text('$tier pack activated${end.isEmpty ? '' : ' — runs to $end'}. No payment needed.')));
+      AnalyticsService.instance.track(
+        feature: 'pack_codes', action: 'redeem', context: 'account_pack_code',
+        meta: {'tier': tier},
+      );
     } else {
       messenger.showSnackBar(SnackBar(content: Text(res.error == 'code_not_found'
           ? 'That pack code was not recognised.'
