@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/dropoff_api.dart';
+import '../main.dart';
 import '../ui/app_theme.dart';
 
 /// The rider's day as slot-batched task queues:
@@ -36,6 +37,27 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Fleet view is staff-only (Team tab + this gate). The server also
+    // validates the phone belongs to an active rider — a seller whose phone
+    // is not a rider row gets an empty queue, never someone else's stops.
+    final store = AppScope.of(context);
+    if (!store.linked) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Task queue', style: TextStyle(fontWeight: FontWeight.w900))),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.lock_outline, size: 44, color: AppColors.muted),
+              SizedBox(height: 16),
+              Text('Sign in for the task queue', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+              SizedBox(height: 8),
+              Text('Link this device to a rider account to see slot-batched pickup runs.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+            ]),
+          ),
+        ),
+      );
+    }
     final batches = ((_data?['batches'] as List?) ?? const []).cast<Map<String, dynamic>>();
     return Scaffold(
       appBar: AppBar(title: const Text('Task queue', style: TextStyle(fontWeight: FontWeight.w900))),

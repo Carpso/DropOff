@@ -1475,17 +1475,35 @@ app.get('/ratings/summary', async (c) => {
 });
 
 /* --------------------------- rating reports ------------------------------- */
-// Anyone signed in can flag a comment; it stays out of admin-hidden lists only
-// after moderation (reports are evidence, not automatic censorship).
+// Flagging a comment is limited to parties of the rated job (sender,
+// recipient, assigned rider) or staff — arbitrary signed-in users cannot
+// mass-report ratings they have nothing to do with.
 app.post('/ratings/:id/report', async (c) => {
   const id = Number(c.req.param('id'));
   const b: any = await c.req.json().catch(() => null);
-  const rating = await c.env.DB.prepare('SELECT id FROM ratings WHERE id = ?1').bind(id).first();
+  const rating = await c.env.DB.prepare(
+    `SELECT r.id, r.job_id, j.sender_phone, j.recipient_phone, j.rider_id
+       FROM ratings r LEFT JOIN jobs j ON j.id = r.job_id
+      WHERE r.id = ?1`,
+  ).bind(id).first<any>();
   if (!rating) return c.json({ error: 'not found' }, 404);
+  const role = c.get('role');
+  const staff = role === 'ops' || isAdmin(c);
+  const phone = c.get('phone') ?? '';
+  if (!staff) {
+    if (!phone || !rating.job_id) return c.json({ error: 'forbidden' }, 403);
+    let riderPhone: string | null = null;
+    if (rating.rider_id) {
+      riderPhone = ((await c.env.DB.prepare('SELECT phone FROM riders WHERE id = ?1')
+        .bind(rating.rider_id).first<any>())?.phone) ?? null;
+    }
+    const tied = phone === rating.sender_phone || phone === rating.recipient_phone || phone === riderPhone;
+    if (!tied) return c.json({ error: 'forbidden' }, 403);
+  }
   const reason = String(b?.reason ?? '').trim().slice(0, 300);
   await c.env.DB.batch([
     c.env.DB.prepare('INSERT INTO rating_reports (rating_id, reporter_phone, reason) VALUES (?1, ?2, ?3)')
-      .bind(id, c.get('phone') ?? null, reason || null),
+      .bind(id, phone || null, reason || null),
     c.env.DB.prepare(`UPDATE ratings SET report_reason = ?2, reported_at = datetime('now') WHERE id = ?1`)
       .bind(id, reason || null),
   ]);
@@ -1955,8 +1973,17 @@ app.delete('/push/register', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const token = b?.token ? String(b.token).trim() : c.req.header('X-Push-Token') ?? '';
   if (!token) return c.json({ error: 'missing token' }, 400);
-  await c.env.DB.prepare('DELETE FROM push_tokens WHERE token = ?1').bind(token).run();
-  return c.json({ ok: true });
+  // Ownership: a signed-in user may only remove their OWN device token;
+  // staff (ops/admin key) may remove any. Prevents IDOR token-hijack.
+  const role = c.get('role');
+  const staff = role === 'ops' || isAdmin(c);
+  const phone = c.get('phone') ?? '';
+  if (!staff && !phone) return c.json({ error: 'sign in with your account' }, 403);
+  const res = staff
+    ? await c.env.DB.prepare('DELETE FROM push_tokens WHERE token = ?1').bind(token).run()
+    : await c.env.DB.prepare('DELETE FROM push_tokens WHERE token = ?1 AND phone = ?2')
+        .bind(token, phone).run();
+  return c.json({ ok: true, removed: res.meta.changes ?? 0 });
 });
 
 /* ------------------------------ wallet float ------------------------------ */
@@ -3167,8 +3194,22 @@ th{background:#eef4f1} .kpi{display:inline-block;background:#eef4f1;border-radiu
 .kpi b{display:block;font-size:20px} input,button,select{padding:8px;border-radius:8px;border:1px solid #cfd8d4;font-size:14px}
 button{background:#17855f;color:#fff;border:0;font-weight:700}`;
 
-/** Superadmin console â€” open as https://<worker>/console?key=<ADMIN_AUTH_KEY> */
-app.get('/console', (c) => c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+/** Superadmin console — open as https://<worker>/console#key=<ADMIN_AUTH_KEY>
+ *  The FRAGMENT form is preferred: fragments never reach the server, so the
+ *  key stays out of access logs, Referer headers and browser history.
+ *  A legacy ?key= is validated server-side — wrong key 403s, right key is
+ *  bounced to the #key= form so it never lingers in a query string. */
+app.get('/console', (c) => {
+  const qKey = c.req.query('key');
+  if (qKey !== undefined) {
+    if (qKey !== c.env.ADMIN_AUTH_KEY) {
+      return c.html(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Denied</title>
+<body style="font-family:sans-serif;color:#10312a;padding:40px"><h1>403 — wrong admin key</h1>
+<p>Open <code>/console#key=YOUR_KEY</code> instead (the fragment never leaves your browser).</p></body>`, 403);
+    }
+    return c.redirect(`/console#key=${encodeURIComponent(qKey)}`);
+  }
+  return c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">
 <title>DropOff â€” Admin</title><style>${CONSOLE_CSS}</style></head><body>
 <h1>DropOff â€” superadmin console</h1>
 <div id="kpis">Loadingâ€¦</div>
@@ -3212,8 +3253,10 @@ app.get('/console', (c) => c.html(`<!doctype html><html><head><meta name="viewpo
 <button onclick="savePos()">Save POS</button><span id="posMsg"></span>
 </div>
 <script>
-const key = new URLSearchParams(location.search).get('key') || '';
-// keep the admin key out of browser history / Referer headers
+// Key comes from the URL fragment (#key=…, never sent to the server) with a
+// one-shot ?key= fallback; scrubbed from history either way.
+const key = new URLSearchParams(location.hash.slice(1)).get('key')
+  || new URLSearchParams(location.search).get('key') || '';
 if (key) history.replaceState(null, '', location.pathname);
 const H = { 'X-Admin-Key': key };
 fetch('/admin/stats', { headers: H }).then(r => r.json()).then(s => {
@@ -3233,7 +3276,7 @@ fetch('/admin/stats', { headers: H }).then(r => r.json()).then(s => {
   }
   const tiers = s.subs_by_tier ?? [];
   for (const t of tiers) tb.insertAdjacentHTML('beforeend', '<tr><td>pack: ' + esc(t.tier) + '</td><td>' + esc(t.n) + ' active</td></tr>');
-}).catch(() => document.getElementById('kpis').textContent = 'Admin key wrong â€” reload with ?key=');
+}).catch(() => document.getElementById('kpis').textContent = 'Admin key wrong — open /console#key=YOUR_KEY');
 // note: esc() is defined further down â€” hoisted function, safe here
 async function makePartner() {
   const r = await fetch('/admin/partners', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
@@ -3270,7 +3313,8 @@ async function savePos() {
   const j = await r.json(); posMsg.textContent = r.ok ? ' âœ” saved' : ' âœ– ' + esc(j.error || 'failed'); loadPos();
 }
 loadTiers(); loadPromos(); loadPos();
-</script></body></html>`));
+</script></body></html>`);
+});
 
 /** Partner console â€” the partner logs in (email) and pastes the token. */
 app.get('/partner/console', (c) => c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">

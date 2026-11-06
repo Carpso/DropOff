@@ -61,7 +61,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
             decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search couriers'),
           ),
           const SizedBox(height: 20),
-          const _LiveDepotsSection(query: ''),
+          _LiveDepotsSection(query: _query),
           const SizedBox(height: 26),
           const Text('FEATURED — published local rates', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.muted)),
           const SizedBox(height: 12),

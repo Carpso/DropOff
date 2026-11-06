@@ -26,38 +26,30 @@ class DropOffApi {
   /// these helpers only render the estimate before the job is created.
   ///
   /// MODEL: the customer pays the base + ONE "processing fee" (platform cut +
-  /// momo collection leg). The customer NEVER pays for the rider's payout —
-  /// the rider keeps 90% of the rider fee MINUS the payout transaction fees.
+  /// momo collection leg). Driver/rider earnings are NEVER computed here —
+  /// they live server-side between DropOff and the driver.
   static const double platformFeePct = 1.0;
   static const double platformFixedFee = 0.48;
   static const double platformMinFee = 3.0;
   static const double momoCollectionFee = 2.5;
-  static const double momoDisbursementFee = 1.5;
-  static const double riderTakePct = 10.0;
 
   static double round2(double v) => (v * 100).roundToDouble() / 100;
 
-  /// Platform fee: 1% + K0.48 fixed, minimum K3.48 (also the payout cut).
+  /// Platform fee: 1% + K0.48 fixed, minimum K3.48.
   static double platformFee(double amount) =>
       platformMinFee + platformFixedFee > round2(amount * platformFeePct / 100) + platformFixedFee
           ? platformMinFee + platformFixedFee
           : round2(amount * platformFeePct / 100) + platformFixedFee;
 
-  /// What the RIDER receives at payout: 90% share minus transaction fees.
-  static double riderPayoutOf(double riderFee) {
-    final share = round2(riderFee * (1 - riderTakePct / 100));
-    return round2(share - momoDisbursementFee - platformFee(share));
-  }
-
   /// Processing-only breakdown shown before the job is created — mirrors
-  /// collectionFees() in workers/src/fees.ts.
+  /// collectionFees() in workers/src/fees.ts (customer-visible fields only;
+  /// the server strips rider payout before responses leave the Worker).
   static Map<String, double> collectionFees(double base, {double? riderFee}) {
     if (riderFee == null) return {'base': round2(base), 'prompt_total_zmw': round2(base)};
     final platform = platformFee(base);
     final processing = round2(platform + momoCollectionFee);
     return {
       'base': round2(base),
-      'rider_payout_zmw': riderPayoutOf(riderFee),
       'processing_fee_zmw': processing,
       'platform_fee_zmw': platform,
       'lipila_fee_zmw': momoCollectionFee,

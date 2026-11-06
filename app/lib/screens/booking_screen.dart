@@ -780,14 +780,22 @@ class BookingSuccessScreen extends StatelessWidget {
 
 /// Shows the signed-in seller which pack is active and how this trip deducts
 /// from it — no more guessing between plan parcels and pay-as-you-go.
-class _PlanBanner extends StatelessWidget {
+class _PlanBanner extends StatefulWidget {
   final int parcels;
   const _PlanBanner({required this.parcels});
 
   @override
+  State<_PlanBanner> createState() => _PlanBannerState();
+}
+
+class _PlanBannerState extends State<_PlanBanner> {
+  // Cached so the subscription is fetched ONCE — not on every rebuild/keystroke.
+  late final Future<Map<String, dynamic>?> _future = DropOffApi.subscription();
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<Map<String, dynamic>?>(
-      future: DropOffApi.subscription(),
+      future: _future,
       builder: (context, snap) {
         final sub = snap.data?['subscription'] as Map<String, dynamic>?;
         final plan = snap.data?['plan'] as Map<String, dynamic>?;
@@ -808,7 +816,7 @@ class _PlanBanner extends StatelessWidget {
         final remaining = (snap.data?['remaining_this_period'] as num?)?.toInt() ?? 0;
         final pct = (plan['overage_discount_pct'] as num?)?.toInt() ?? 0;
         final renews = '${sub['period_end'] ?? ''}'.split(' ').first;
-        final covered = remaining >= parcels;
+        final covered = remaining >= widget.parcels;
         return Container(
           padding: const EdgeInsets.all(13),
           decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(13), border: Border.all(color: AppColors.forest.withValues(alpha: 0.35))),
@@ -821,7 +829,7 @@ class _PlanBanner extends StatelessWidget {
             const SizedBox(height: 5),
             Text(
               covered
-                  ? 'This trip deducts $parcels parcel${parcels == 1 ? '' : 's'} — $remaining left. Renews $renews.'
+                  ? 'This trip deducts ${widget.parcels} parcel${widget.parcels == 1 ? '' : 's'} — $remaining left. Renews $renews.'
                   : 'Only $remaining left on your $tier pack — this trip pays your tier discount ($pct% off pay-as-you-go). Renews $renews.',
               style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
             ),
@@ -847,6 +855,25 @@ class _BranchSelector extends StatefulWidget {
 class _BranchSelectorState extends State<_BranchSelector> {
   /// Whether the parent has been given a branch yet (default = first loaded).
   bool _reported = false;
+
+  // Cached future: one network round-trip per selected courier, not one per
+  // parent rebuild (the booking form rebuilds on every keystroke).
+  late Future<List<String>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _BranchSelector old) {
+    super.didUpdateWidget(old);
+    if (old.selected.id != widget.selected.id) {
+      _reported = false;
+      _future = _load();
+    }
+  }
 
   Future<List<String>> _load() async {
     final live = <String>[];
@@ -874,7 +901,7 @@ class _BranchSelectorState extends State<_BranchSelector> {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<String>>(
-      future: _load(),
+      future: _future,
       builder: (context, snap) {
         final branches = snap.data ?? const <String>[];
         if (branches.isEmpty) return const SizedBox.shrink();

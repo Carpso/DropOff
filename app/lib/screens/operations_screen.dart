@@ -124,12 +124,15 @@ class OperationsScreen extends StatelessWidget {
       )),
     );
     if (saved == true && context.mounted) {
-      await AppScope.of(context).addRider(
+      final error = await AppScope.of(context).addRider(
         name: name.text,
         phone: phone.text,
         vehicle: vehicle,
         vehicleClass: _vehicleClassOf(vehicle),
       );
+      if (error != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+      }
     }
     name.dispose();
     phone.dispose();

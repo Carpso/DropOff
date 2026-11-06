@@ -431,7 +431,11 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addRider({required String name, required String phone, required String vehicle, String vehicleClass = 'motorcycle'}) async {
+  /// Adds a rider to the local roster and mirrors it server-side.
+  /// Returns null on full success (or offline demo mode), or an error message
+  /// when the server rejected the write (e.g. 403 — caller is not staff), so
+  /// the UI can say the rider exists on THIS device only.
+  Future<String?> addRider({required String name, required String phone, required String vehicle, String vehicleClass = 'motorcycle'}) async {
     _riders.add(Rider(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       name: name.trim(),
@@ -443,13 +447,19 @@ class AppStore extends ChangeNotifier {
     // Server mirror (pricing class matters for truck/van runs). Plain post
     // carries the ops key (rider device) or the owner JWT.
     if (DropOffApi.enabled) {
-      await DropOffApi.post('/admin/riders', {
+      final res = await DropOffApi.post('/admin/riders', {
         'phone': phone.trim(),
         'full_name': name.trim(),
         'vehicle': vehicle,
         'vehicle_class': vehicleClass,
       });
+      if (!res.ok) {
+        return res.error == 'admin_key_required' || res.error == 'forbidden'
+            ? 'Saved on this device only — the server requires a staff account to sync riders.'
+            : 'Saved on this device only — server sync failed (${res.error ?? 'network'}).';
+      }
     }
+    return null;
   }
 
   Future<void> toggleRider(String id, bool active) async {
