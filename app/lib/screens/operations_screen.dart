@@ -210,7 +210,8 @@ class OperationsScreen extends StatelessWidget {
               Text('Signed in as ${store.linkedPhone} — jobs assigned to you land here automatically.', style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
             ])),
           ]),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          const _SelfieBanner(),
           Row(children: [
             Expanded(child: _Metric(value: '${store.bookings.length}', label: 'Bookings on device', icon: Icons.inventory_2_outlined)),
             const SizedBox(width: 12),
@@ -1011,7 +1012,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
     setState(() => _busyField = field);
     final bytes = await picked.readAsBytes();
     final name = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
-    final res = await DropOffApi.uploadImage(bytes, name);
+    final res = await DropOffApi.uploadImage(bytes, name, kind: field == 'selfie' ? 'selfie' : 'kyc');
     if (!mounted) return;
     setState(() => _busyField = null);
     if (!res.ok) {
@@ -1227,6 +1228,106 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
               ),
             ),
           ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// Grandfathered verified riders have no selfie yet - sellers still see
+/// initials. A slim nudge to add one (uploaded as kind=selfie). The Worker
+/// AI-reviews inline; a clear fail demotes a verified rider back to pending
+/// until an admin re-verifies - pass/review keeps verified standing.
+class _SelfieBanner extends StatefulWidget {
+  const _SelfieBanner();
+
+  @override
+  State<_SelfieBanner> createState() => _SelfieBannerState();
+}
+
+class _SelfieBannerState extends State<_SelfieBanner> {
+  bool _loading = true;
+  bool _needed = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _probe();
+  }
+
+  Future<void> _probe() async {
+    final res = await DropOffApi.riderProfile();
+    if (!mounted) return;
+    final rider = (res?['rider'] as Map?)?.cast<String, dynamic>();
+    setState(() {
+      _loading = false;
+      // banner only when we KNOW the rider has no photo on file
+      _needed = rider != null && '${rider['photo_url'] ?? ''}'.isEmpty;
+    });
+  }
+
+  Future<void> _addPhoto() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 82);
+    if (picked == null) return;
+    setState(() => _busy = true);
+    final bytes = await picked.readAsBytes();
+    final name = picked.name.isNotEmpty ? picked.name : 'selfie.jpg';
+    final up = await DropOffApi.uploadImage(bytes, name, kind: 'selfie');
+    if (!mounted) return;
+    if (!up.ok) {
+      setState(() => _busy = false);
+      _snack('Upload failed (${up.error}).');
+      return;
+    }
+    final url = '${up.body['url'] ?? ''}';
+    final res = await DropOffApi.addMePhoto(url);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (!res.ok) {
+      _snack('Could not save photo (${res.error}).');
+      return;
+    }
+    final st = '${res.body['verification_status'] ?? ''}';
+    _snack(st == 'pending'
+        ? 'This photo does not look like one person - you are back in the review queue.'
+        : 'Photo added - sellers will see you on the tracking page.');
+    setState(() => _needed = false);
+  }
+
+  void _snack(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading || !_needed) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.amber.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.amber.withValues(alpha: 0.4)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.face, color: AppColors.forest, size: 26),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text("Sellers can't see you yet", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+              SizedBox(height: 3),
+              Text('Add your photo - the person collecting their parcel should be a face, not an icon.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+            ]),
+          ),
+          const SizedBox(width: 10),
+          FilledButton(
+            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+            onPressed: _busy ? null : _addPhoto,
+            child: _busy
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Add'),
+          ),
         ]),
       ),
     );

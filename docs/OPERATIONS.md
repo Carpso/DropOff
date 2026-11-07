@@ -238,7 +238,29 @@ matches `jobs.recipient_phone` to their account phone automatically:
   high confidence · courier's last 82 parcels (180d)".
 - Parcels addressed to you but not yet delivered appear on top of your own bookings (as the sender).
 
-## 11. Support inbox (visible tickets)
+## 11. Profile photos (account-wide, 2026-11-08)
+
+Every account type can carry one avatar — customer, sender, recipient, seller, rider, partner, admin/ops.
+
+- **Upload** — Account tab → tap the avatar circle (or *Add photo*). Stored in the `uploads/selfie/` R2
+  namespace (`POST /uploads?kind=selfie`), then linked via `POST /me/photo {photo_url}`. For riders the SAME
+  call also sets `riders.photo_url` — sellers see it on the tracking page with the "VERIFIED rider" badge.
+- **Remove** — the *Remove* button (or `DELETE /me/photo`) resets to initials everywhere.
+- **Inline AI review** — riders (and only riders) get the face review inline: a clear `fail` demotes a
+  *verified* rider to `pending` (assignments stop until re-review); `pass`/`review` keeps standing.
+  Non-riders upload freely (no one approves them anyway — an AI gate would just be friction theatre).
+- **Where it shows up**: Account (tap-to-edit avatar), every chat bubble in job/support/recipient threads
+  (`GET` payloads now carry `sender_photo_url` via a join of `auth_users` + `riders`), and the admin Support
+  inbox (ticket row + ticket sheet header + the AI-draft dialog context shows the customer's face).
+- The old rider-only `/rider/photo` stays as an alias for the 0.4.1 client; new builds call `/me/photo`.
+- Migration `0044_account_photos.sql` adds `auth_users.photo_url` (NULL = initials).
+
+## 11.1 Media access recap (unchanged by this)
+
+`uploads/selfie/*` any signed-in user; `uploads/kyc/<phone>/*` staff or that phone; everything else under
+`uploads/` staff only. Sellers never receive NRC/plate/licence bytes.
+
+## 12. Support inbox (visible tickets)
 
 Support chats live in `chat_threads.kind='support'` and are no longer hidden:
 
@@ -265,7 +287,7 @@ renders every `kind='support'` thread regardless of status. (4) If the app shows
 "SELECT count(*) FROM chat_threads WHERE kind='support'"` shows rows — the build is a store build
 without `DROPOFF_ADMIN_KEY` or a stale JWT; sign out/in again.
 
-## 12. Predictive features — Delivery IQ and DropOff Predict
+## 13. Predictive features — Delivery IQ and DropOff Predict
 
 ### Delivery IQ (booking screen)
 `GET /iq/eta?courier_id=&window=` computes the typical and slow-day
@@ -293,7 +315,7 @@ Four explainable surfaces — no opaque model, every number carries basis + samp
 - **Prediction honesty rule:** cold start returns labelled fallbacks (`fallback: true` /
   `basis: "advertised window bands…"`), never invented confidence.
 
-## 13. Plan codes and collections (agent sales + last mile)
+## 14. Plan codes and collections (agent sales + last mile)
 
 - **Plan codes** let agents, market-day stalls and the counter sell a plan
   offline. Superadmin mints batches with `POST /admin/pack-codes
@@ -326,7 +348,7 @@ Four explainable surfaces — no opaque model, every number carries basis + samp
   is shown only on the rider view (`_RiderPayCard`); seller-facing and public
   copy never mentions it.
 
-## 14. Driver KYC, daily targets and AI assist
+## 15. Driver KYC, daily targets and AI assist
 
 - **Driver verification** (owner/admins only): ops registers riders via
   `POST /admin/riders` (NRC, licence, plate, vehicle make/colour live on the
@@ -335,6 +357,14 @@ Four explainable surfaces — no opaque model, every number carries basis + samp
   behind auth) landing in status `pending`. `POST /admin/riders/:id/verify`
   flips to `verified`/`rejected` (note stored); unverified drivers are excluded
   from auto-assign and manual job assignment (`409 rider_not_verified`).
+- **Moderation endpoint uploads are namespaced** (2026-11-08): `POST /uploads?kind=selfie|kyc` routes to
+  `uploads/selfie/<uuid>` (any signed-in user, sellers use it) or `uploads/kyc/<phone>/<uuid>` (staff or the
+  uploading phone). Missing `kind` defaults to `kyc` — docs can never leak as seller-visible by accident.
+  `GET /media/*` enforces the same by key prefix; legacy root keys are staff-only.
+- **Grandfathered riders add a selfie without touching KYC docs**: `POST /rider/photo {photo_url}` (rider
+  role) — validates the selfie key, runs the AI face review inline, and a clear `fail` demotes a verified
+  rider to `pending` (assignments stop until re-review). `pass`/`review` keep verified standing. The Team
+  tab shows an "Add photo" nudge only when the rider has no selfie on file.
 - **Selfie + seller-visible photo**: the KYC card *requires* a selfie (`photo_url`).
   Sellers see that selfie (with name, vehicle and a "VERIFIED rider" badge when the
   rider is approved) on the tracking page — `GET /track/:token` includes

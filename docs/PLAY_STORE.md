@@ -1,6 +1,6 @@
 # Play Store release checklist
 
-App id: `zm.dropoff.dropoff` - current version `0.4.1+8` (`pubspec.yaml`).
+App id: `zm.dropoff.dropoff` - current version `0.4.3+10` (`pubspec.yaml`).
 
 ## 1. Upload keystore (one-time)
 
@@ -84,18 +84,18 @@ to customers. Only `DROPOFF_API_URL` belongs in the Play build.
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 7. What is new in 0.4.1+8
+## 7. What is new in 0.4.3+10
 
-- **You can now track parcels sent to you** — sign up with the phone your parcel was
-  addressed to and every incoming parcel appears automatically ("Parcels for you").
-  Tracking links now require proof that you own that number; strangers with the link see nothing.
-- **DropOff Predict** — the app learns each courier's real speed and shows a predicted
-  arrival on the tracking page, and the Business tab forecasts your next 30 days
-  (with the plan that fits best).
-- **Plans, not packs** — introduce the Daily Rider (K49/day) next to Weekly Sprint and
-  monthly plans; subscription plan benefits now cover every delivery you book.
-- Reliability fixes: chat/support tickets now reliably reachable, and the AI depot
-  proof-of-delivery check is back.
+- **Every account can now have a photo** — riders, sellers, recipients, courier partners, admins.
+  Your avatar shows on your account, in chat bubbles, and to support agents. Rider selfies now AI-
+  checked (documents, screenshots and memes are rejected automatically).
 
-Data safety reminder: the app requests no background location; rider location is
-collected only during active deliveries shown on the map.
+## 7a. 0.4.2+9
+- Riders can add one selfie from the Team tab without re-submitting KYC; AI reviews it inline.
+- Media access is prefix-scoped: rider selfies visible to signed-in users, KYC docs staff-only.
+
+## 7b. 0.4.1+8 (build 8)
+- Rider selfies show to sellers on the tracking page (with a 'Verified rider' badge),
+  and every upload is AI-reviewed for being one genuine person's face.
+- Everything from 0.4.0: recipient auto-claimed parcels, DropOff Predict, Daily
+  Rider plan, subscription-plan usage across all normal deliveries.

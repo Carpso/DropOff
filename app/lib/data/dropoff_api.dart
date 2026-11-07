@@ -844,12 +844,17 @@ class DropOffApi {
         if (adminKey.isNotEmpty) 'X-Admin-Key': adminKey,
       };
 
-  /// Upload a driver document photo to R2 via the Worker; returns `{url}`.
-  static Future<ApiResponse> uploadImage(List<int> bytes, String filename) async {
+  /// Upload a photo to the Worker. [kind] selects the storage namespace:
+  ///   'selfie' → uploads/selfie/<uuid> — any signed-in user may fetch it
+  ///              (sellers see the rider collecting their parcel);
+  ///   'kyc'    → uploads/kyc/<phone>/<uuid> — staff or the uploading rider only.
+  /// Defaults to the PRIVATE one.
+  static Future<ApiResponse> uploadImage(List<int> bytes, String filename, {String kind = 'kyc'}) async {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
       final req = http.MultipartRequest('POST', _uri('/uploads'))
         ..headers.addAll(authHeaders)
+        ..fields['kind'] = kind
         ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
       final streamed = await req.send().timeout(const Duration(seconds: 45));
       final res = await http.Response.fromStream(streamed);
@@ -877,6 +882,21 @@ class DropOffApi {
   /// illustration_or_avatar, verdict: pass|review|fail, note}}`.
   static Future<ApiResponse> riderFaceCheck() =>
       post('/rider/profile/ai-face-check', const {});
+
+  /// Add ONLY a selfie (grandfathered verified riders keep their standing).
+  /// Server AI-reviews it inline; a clear fail demotes a verified rider to
+  /// pending until an admin re-verifies. Never touches KYC documents.
+  static Future<ApiResponse> addRiderPhoto(String photoUrl) =>
+      post('/rider/photo', {'photo_url': photoUrl});
+
+  /// ANY signed-in user sets their profile photo (upload via kind=selfie
+  /// first). Riders get the same inline AI review as the KYC selfie flow.
+  static Future<ApiResponse> addMePhoto(String photoUrl) =>
+      post('/me/photo', {'photo_url': photoUrl});
+
+  /// Remove the caller's profile photo (back to initials).
+  static Future<ApiResponse> removeMePhoto() =>
+      delete('/me/photo');
 
   static Future<Map<String, dynamic>?> riderTargets() => get('/rider/targets');
 

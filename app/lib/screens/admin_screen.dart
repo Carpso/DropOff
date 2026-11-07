@@ -393,9 +393,45 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-      builder: (_) => _SupportTicketSheet(threadId: (thread['id'] as num).toInt(), phone: '${thread['phone'] ?? ''}'),
+      builder: (_) => _SupportTicketSheet(
+        threadId: (thread['id'] as num).toInt(),
+        phone: '${thread['phone'] ?? ''}',
+        photoUrl: '${thread['customer_photo_url'] ?? ''}'.isEmpty ? null : '${thread['customer_photo_url']}',
+        customerName: '${thread['customer_name'] ?? ''}'.trim().isEmpty ? null : '${thread['customer_name']}'.trim(),
+      ),
     );
     if (mounted) _load();
+  }
+
+  static String _initialsOf(String seed) {
+    final parts = seed.trim().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    return parts.take(2).map((s) => s[0].toUpperCase()).join();
+  }
+
+  Widget _customerAvatar(String seed, String? photoUrl, double radius) {
+    final initials = _initialsOf(seed);
+    if (photoUrl == null || photoUrl.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: AppColors.forest.withValues(alpha: 0.10),
+        child: Text(initials, style: TextStyle(fontWeight: FontWeight.w900, fontSize: radius * 0.66, color: AppColors.forest)),
+      );
+    }
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: AppColors.forest.withValues(alpha: 0.10),
+      child: ClipOval(
+        child: Image.network(
+          '${DropOffApi.baseUrl}$photoUrl',
+          headers: DropOffApi.authHeaders,
+          width: radius * 2,
+          height: radius * 2,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Text(initials, style: TextStyle(fontWeight: FontWeight.w900, fontSize: radius * 0.66, color: AppColors.forest)),
+        ),
+      ),
+    );
   }
 
   @override
@@ -418,6 +454,9 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
           else
             ..._threads.take(12).map((t) {
               final unread = (t['unread'] as num?)?.toInt() ?? 0;
+              final threadName = '${t['customer_name'] ?? ''}'.trim();
+              final seed = threadName.isNotEmpty ? threadName : '${t['phone'] ?? ''}';
+              final photoUrl = '${t['customer_photo_url'] ?? ''}'.trim();
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: InkWell(
@@ -426,10 +465,11 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                     child: Row(children: [
-                      const Icon(Icons.chat_bubble_outline, size: 16, color: AppColors.forest),
+                      _customerAvatar(seed, photoUrl.isEmpty ? null : photoUrl, 16),
                       const SizedBox(width: 10),
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('Ticket #${t['id']} · ${t['phone'] ?? ''}',
+                        Text('Ticket #${t['id']} · $seed',
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
                         if ('${t['last_message'] ?? ''}'.isNotEmpty)
                           Text('${t['last_message']}', maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -454,10 +494,12 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
 
 /// One open support ticket: full message history + a reply box.
 class _SupportTicketSheet extends StatefulWidget {
-  const _SupportTicketSheet({required this.threadId, required this.phone});
+  const _SupportTicketSheet({required this.threadId, required this.phone, this.photoUrl, this.customerName});
 
   final int threadId;
   final String phone;
+  final String? photoUrl;
+  final String? customerName;
 
   @override
   State<_SupportTicketSheet> createState() => _SupportTicketSheetState();
@@ -528,6 +570,54 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
     _reply.selection = TextSelection.collapsed(offset: draft.length);
   }
 
+  Widget _bubble(Map<String, dynamic> m, bool fromOps, String time) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.62),
+      decoration: BoxDecoration(
+        color: fromOps ? AppColors.forest : AppColors.line.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('${m['sender_role'] ?? 'user'} · $time',
+            style: TextStyle(color: fromOps ? Colors.white70 : AppColors.muted, fontSize: 10.5, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 3),
+        Text('${m['body'] ?? ''}',
+            style: TextStyle(color: fromOps ? Colors.white : Colors.black87, fontSize: 13, height: 1.3)),
+      ]),
+    );
+  }
+
+  Widget _sheetAvatar() {
+    final name = (widget.customerName ?? widget.phone).trim();
+    final parts = name.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+    final initials = parts.isEmpty ? '?' : parts.take(2).map((s) => s[0].toUpperCase()).join();
+    const radius = 17.0;
+    if (widget.photoUrl == null || widget.photoUrl!.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: AppColors.forest.withValues(alpha: 0.10),
+        child: Text(initials, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.forest)),
+      );
+    }
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: AppColors.forest.withValues(alpha: 0.10),
+      child: ClipOval(
+        child: Image.network(
+          '${DropOffApi.baseUrl}${widget.photoUrl}',
+          headers: DropOffApi.authHeaders,
+          width: radius * 2,
+          height: radius * 2,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Text(initials,
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.forest)),
+        ),
+      ),
+    );
+  }
+
   void _copyPhone() {
     Clipboard.setData(ClipboardData(text: widget.phone));
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Copied ${widget.phone}')));
@@ -543,11 +633,16 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
             child: Row(children: [
-              const Icon(Icons.support_agent, color: AppColors.forest),
+              _sheetAvatar(),
               const SizedBox(width: 10),
               Expanded(
-                child: Text('Ticket #${widget.threadId} · ${widget.phone}',
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Ticket #${widget.threadId}',
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                  Text(widget.customerName ?? widget.phone,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                ]),
               ),
               IconButton(tooltip: 'Reload', onPressed: _load, icon: const Icon(Icons.refresh, size: 18)),
             ]),
@@ -564,23 +659,12 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
                       final m = _messages[i];
                       final fromOps = '${m['sender_role'] ?? ''}' == 'ops';
                       final time = '${m['created_at'] ?? ''}'.split(' ').last;
+                      final senderPhoto = '${m['sender_photo_url'] ?? ''}'.trim();
+                      final avatar = _SheetAvatar(photoUrl: senderPhoto.isEmpty ? null : senderPhoto, label: '${m['sender_role'] ?? 'user'}', mine: fromOps);
                       return Align(
                         alignment: fromOps ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-                          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-                          decoration: BoxDecoration(
-                            color: fromOps ? AppColors.forest : AppColors.line.withValues(alpha: 0.22),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text('${m['sender_role'] ?? 'user'} · $time',
-                                style: TextStyle(color: fromOps ? Colors.white70 : AppColors.muted, fontSize: 10.5, fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 3),
-                            Text('${m['body'] ?? ''}',
-                                style: TextStyle(color: fromOps ? Colors.white : Colors.black87, fontSize: 13, height: 1.3)),
-                          ]),
+                        child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end,
+                          children: fromOps ? [_bubble(m, fromOps, time), const SizedBox(width: 7), avatar] : [avatar, const SizedBox(width: 7), _bubble(m, fromOps, time)],
                         ),
                       );
                     },
@@ -1512,6 +1596,49 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
         child: Text(text,
             style: TextStyle(fontSize: header ? 10 : 11, fontWeight: header ? FontWeight.w800 : FontWeight.w700,
                 color: header ? AppColors.ink : AppColors.forest)),
+      ),
+    );
+  }
+}
+
+/// Tiny sender avatar for support-ticket bubbles (the account photo, or initials).
+class _SheetAvatar extends StatelessWidget {
+  const _SheetAvatar({this.photoUrl, required this.label, required this.mine});
+  final String? photoUrl;
+  final String label;
+  final bool mine;
+
+  String get _initials {
+    final parts = label.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    return parts.take(2).map((w) => w[0].toUpperCase()).join();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = 14.0;
+    final bg = mine ? AppColors.forest.withValues(alpha: 0.25) : AppColors.line.withValues(alpha: 0.6);
+    if (photoUrl == null || photoUrl!.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: bg,
+        child: Text(_initials,
+            style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: AppColors.forest)),
+      );
+    }
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: bg,
+      child: ClipOval(
+        child: Image.network(
+          '${DropOffApi.baseUrl}$photoUrl',
+          headers: DropOffApi.authHeaders,
+          width: radius * 2,
+          height: radius * 2,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Text(_initials,
+              style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: AppColors.forest)),
+        ),
       ),
     );
   }

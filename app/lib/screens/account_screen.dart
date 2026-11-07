@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -40,6 +41,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _obscure = true;
   bool _otpBusy = false;
   bool _otpSent = false;
+  bool _photoBusy = false;
   String? _otpMsg;
   String? _error;
 
@@ -229,6 +231,80 @@ class _AccountScreenState extends State<AccountScreen> {
     if (mounted) setState(() {});
   }
 
+  // ---- profile photo (every account type) -----------------------------------
+
+  Future<void> _editPhoto() async {
+    if (_photoBusy) return;
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1200, imageQuality: 85);
+    if (picked == null) return;
+    setState(() => _photoBusy = true);
+    final bytes = await picked.readAsBytes();
+    final name = picked.name.isNotEmpty ? picked.name : 'me.jpg';
+    final up = await DropOffApi.uploadImage(bytes, name, kind: 'selfie');
+    if (!mounted) return;
+    if (!up.ok) {
+      setState(() => _photoBusy = false);
+      _snackPhoto('Upload failed (${up.error}).');
+      return;
+    }
+    final url = '${up.body['url'] ?? ''}';
+    final res = await DropOffApi.addMePhoto(url);
+    if (!mounted) return;
+    setState(() => _photoBusy = false);
+    if (!res.ok) {
+      _snackPhoto('Could not save photo (${res.error}).');
+      return;
+    }
+    await AppScope.of(context).refreshRole();
+    if (!mounted) return;
+    final st = '${res.body['verification_status'] ?? ''}';
+    _snackPhoto(st == 'pending'
+        ? 'Photo saved — it does not look like one person, so you are back in the review queue.'
+        : 'Photo saved — sellers will see you on the tracking page.');
+  }
+
+  Future<void> _removePhoto() async {
+    if (_photoBusy) return;
+    setState(() => _photoBusy = true);
+    final res = await DropOffApi.removeMePhoto();
+    if (!mounted) return;
+    setState(() => _photoBusy = false);
+    if (!res.ok) {
+      _snackPhoto('Could not remove photo (${res.error}).');
+      return;
+    }
+    await AppScope.of(context).refreshRole();
+    if (mounted) _snackPhoto('Photo removed.');
+  }
+
+  void _snackPhoto(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
+
+  String _initialsOf(String? seed) {
+    final parts = (seed ?? '').trim().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    return parts.take(2).map((s) => s[0].toUpperCase()).join();
+  }
+
+  Widget _avatar(String? photoUrl, String? seed, double radius) {
+    final initials = _initialsOf(seed);
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: AppColors.forest.withValues(alpha: 0.12),
+      child: photoUrl == null || photoUrl.isEmpty
+          ? Text(initials, style: TextStyle(fontWeight: FontWeight.w900, fontSize: radius * 0.62, color: AppColors.forest))
+          : ClipOval(
+              child: Image.network(
+                '${DropOffApi.baseUrl}$photoUrl',
+                headers: DropOffApi.authHeaders,
+                width: radius * 2,
+                height: radius * 2,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Text(initials, style: TextStyle(fontWeight: FontWeight.w900, fontSize: radius * 0.62, color: AppColors.forest)),
+              ),
+            ),
+    );
+  }
+
   Future<void> _forgotPassword() async {
     final email = _email.text.trim();
     if (!email.contains('@')) {
@@ -291,10 +367,51 @@ class _AccountScreenState extends State<AccountScreen> {
         children: [
           if (signedIn) ...[
             Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Signed in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
-              const SizedBox(height: 6),
-              Text(store.email ?? store.linkedPhone ?? 'Linked device', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.forest)),
-              if (store.email != null && store.linkedPhone != null) Text(store.linkedPhone!, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+              Row(children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(40),
+                  onTap: _photoBusy ? null : _editPhoto,
+                  child: Stack(children: [
+                    _avatar(store.photoUrl, store.fullName ?? store.email ?? store.linkedPhone, 30),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        decoration: BoxDecoration(color: AppColors.forest, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                        padding: const EdgeInsets.all(3),
+                        child: const Icon(Icons.camera_alt, color: Colors.white, size: 12),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(width: 14),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Signed in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+                  const SizedBox(height: 2),
+                  Text(store.fullName ?? store.email ?? store.linkedPhone ?? 'Linked device', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest)),
+                  if (store.fullName != null && store.email != null) Text(store.email!, style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
+                  if (store.linkedPhone != null && store.email != null) Text(store.linkedPhone!, style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
+                ])),
+                if (_photoBusy) const Padding(padding: EdgeInsets.only(left: 6), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+              ]),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                    onPressed: _photoBusy ? null : _editPhoto,
+                    icon: const Icon(Icons.photo_camera_outlined, size: 18),
+                    label: Text(store.photoUrl == null ? 'Add photo' : 'Change photo'),
+                  ),
+                ),
+                if (store.photoUrl != null) ...[
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: _photoBusy ? null : _removePhoto,
+                    child: const Text('Remove'),
+                  ),
+                ],
+              ]),
               const Divider(height: 24),
               FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(backgroundColor: AppColors.line.withValues(alpha: 0.3), foregroundColor: AppColors.ink),

@@ -302,12 +302,11 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _bubble(Map<String, dynamic> m) {
     final alignRight = _myRole != null && m['sender_role'] == _myRole;
     final time = '${m['created_at'] ?? ''}'.split(' ').last;
-    return Align(
-      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
+    final avatar = _ChatAvatar(photoUrl: m['sender_photo_url'] as String?, label: _roleLabel(m['sender_role']));
+    final bubble = Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
         decoration: BoxDecoration(
           color: alignRight ? AppColors.forest : Colors.white,
           borderRadius: BorderRadius.circular(15),
@@ -323,7 +322,53 @@ class _ChatScreenState extends State<ChatScreen> {
           const SizedBox(height: 3),
           Text(time, style: TextStyle(fontSize: 9.5, color: alignRight ? Colors.white70 : AppColors.muted)),
         ]),
+    );
+    return Align(
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: alignRight ? [bubble, const SizedBox(width: 7), avatar] : [avatar, const SizedBox(width: 7), bubble],
       ),
+    );
+  }
+}
+
+/// Sender avatar in the chat bubble (the account photo, or initials).
+class _ChatAvatar extends StatelessWidget {
+  const _ChatAvatar({this.photoUrl, required this.label});
+
+  final String? photoUrl;
+  final String label;
+
+  String get _initials => label
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((s) => s.isNotEmpty)
+      .take(2)
+      .map((s) => s[0].toUpperCase())
+      .join();
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = 15.0;
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: AppColors.line.withValues(alpha: 0.55),
+      child: photoUrl == null || photoUrl!.isEmpty
+          ? Text(_initials.isEmpty ? '?' : _initials,
+              style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.forest))
+          : ClipOval(
+              child: Image.network(
+                '${DropOffApi.baseUrl}$photoUrl',
+                headers: DropOffApi.authHeaders,
+                width: radius * 2,
+                height: radius * 2,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Text(_initials.isEmpty ? '?' : _initials,
+                    style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.forest)),
+              ),
+            ),
     );
   }
 }

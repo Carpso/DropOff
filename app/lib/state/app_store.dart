@@ -28,6 +28,8 @@ class AppStore extends ChangeNotifier {
   String? _linkedPhone;
   String? _email;
   String? _role;
+  String? _photoUrl;
+  String? _fullName;
   bool _superadmin = false;
 
   /// Encrypted at rest (keystore/keychain). The JWT is the only credential that
@@ -41,6 +43,11 @@ class AppStore extends ChangeNotifier {
   String? get linkedPhone => _linkedPhone;
   String? get email => _email;
   bool get linked => _token != null;
+
+  /// Profile photo the signed-in user uploaded (or a rider selfie). Null = no
+  /// photo on file — views fall back to initials.
+  String? get photoUrl => _photoUrl;
+  String? get fullName => _fullName;
 
   /// Server role for the signed-in identity: customer | partner | admin | ops |
   /// rider. Admin/ops unlock the Team tab and the admin console; rider unlocks
@@ -116,9 +123,13 @@ class AppStore extends ChangeNotifier {
     final next = '${me?['role'] ?? ''}';
     final role = next.isEmpty ? null : next;
     final sa = me?['superadmin'] == true;
-    if (role != _role || sa != _superadmin) {
+    final photo = me?['photo_url'] as String?;
+    final name = me?['full_name'] as String?;
+    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName) {
       _role = role;
       _superadmin = sa;
+      _photoUrl = photo;
+      _fullName = name;
       notifyListeners();
     }
   }
@@ -314,6 +325,8 @@ class AppStore extends ChangeNotifier {
     _token = null;
     _linkedPhone = null;
     _role = null;
+    _photoUrl = null;
+    _fullName = null;
     _superadmin = false;
     DropOffApi.token = null;
     await _secureStorage.delete(key: _secureTokenKey);

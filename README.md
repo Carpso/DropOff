@@ -253,7 +253,7 @@ DropOff/
 
 ---
 
-## 6. Deployed (2026-11-06, v0.4.0+7)
+## 6. Deployed (2026-11-08, v0.4.3+10)
 
 - **API:** https://dropoff-api.godfreymoseskalambo.workers.dev — health `GET /health` → `{"ok":true}`
 - **Auth:** email + password accounts (`POST /auth/register`, `POST /auth/login`, PBKDF2-210k, migration `0007_email_auth.sql`) — the JWT still carries the momo **phone** as identity; phone-OTP stays for the ops/rider device-link. Login UI: `AccountScreen` from the Home avatar. PBKDF2 verify is iteration-aware (hashes minted at older iteration counts self-upgrade transparently on next login); OTP sessions carry the account `token_version` so a password reset revokes them too.
@@ -348,6 +348,9 @@ Sellers get a permanent code (`/refer/code`); a seller who signs up via the code
   Grants are per-token, checked on every `/track/*` read/chat. Verify + token-chat are throttled **per token**
   (10 and 20 per 10 min respectively) on top of the per-IP buckets, so one leaked grant cannot flood a thread or brute-force the phone hint.
   Newly minted tracking tokens expire after **180 days**; expired tokens 404 everywhere.
+- **Media access is prefix-scoped** (2026-11-08): `uploads/selfie/*` serves any signed-in user (sellers see riders); `uploads/kyc/<phone>/*` serves staff or that phone only; everything else under `uploads/` is staff-only. KYC documents never render outside staff/seller-or-admin views; the seller tracking page exposes only the selfie.
+- `POST /rider/photo` (rider-only) adds JUST a selfie without touching KYC docs; inline AI review, `fail` demotes a verified rider to `pending` (auto re-review queue), `pass`/`review` keep standing.
+
 - **Recipient identity is enforced, not hinted:** `POST /track/:token/verify` returns `403 phone_does_not_match`
   for wrong numbers. The tracking payload reports `you_are: sender|recipient|staff` so the app can tag the parcel
   "Addressed to you — belongs to your number". Nobody else sees parcel data, rider location or events — never prices.
@@ -366,7 +369,7 @@ Everyone signs in through the same Account screen; what they see afterwards is d
 |---|---|---|
 | **Customer / Sender** | App → Account → Create account (email + password + the momo phone). No approval needed. | Home, Bookings, Business tab (Seller dashboard), pay-as-you-go & subscription plans, support chat. |
 | **Recipient** | Same flow. Use the **phone the parcel was addressed to** — parcels auto-claim by phone match. | Bookings shows **"Parcels for you"** with live tracking; tracking page tags the parcel "Addressed to you". |
-| **Rider** | Ops creates the rider (`POST /admin/riders`) with their phone, OR the rider completes the in-app KYC card (NRC, licence, plate, vehicle details and a **selfie**) and an admin approves (`POST /admin/riders/:id/verify`). The selfie is AI-checked for "one real person's face" before/at review. Sign-in: Account → phone OTP with that phone. | Team tab → personal rider view (jobs, route, COD, targets, verification status). |
+| **Rider** | Ops creates the rider (`POST /admin/riders`) with their phone, OR the rider completes the in-app KYC card (NRC, licence, plate, vehicle details and a **selfie**) and an admin approves (`POST /admin/riders/:id/verify`). The selfie is AI-checked for "one real person's face" before/at review. **Grandfathered riders with no selfie** get a one-tap "Add photo" nudge on their Team tab; the AI reviews it inline and a clear fail demotes them to re-review. Sign-in: Account → phone OTP with that phone. | Team tab → personal rider view (jobs, route, COD, targets, verification status). |
 | **Courier partner** | Ops promotes an email account to partner for a depot (`POST /admin/partners {email, courier_id}`, admin-guarded). | Team tab → partner console (counter prices, ride confirms) at `/partner/*`. |
 | **Admin** | Owner promotes the email (`Account → Admin console → Users & roles`, or `POST /admin/users/role`). Owner is always admin+superadmin via `OWNER_PHONE`. | Everything above plus stats, security, fraud, support inbox, branches, SMS. |
 | **Ops** | Devices/builds configured with `API_AUTH_KEY` (`X-Api-Key`). | Ops console APIs (device service account), not superadmin powers. |
@@ -403,7 +406,18 @@ All four surfaces are gated exactly like their siblings: predictive ETA rides th
 The subscription product is **subscription plans** — Weekly Sprint K399 (20/7d), Silver K250, Gold K500, Platinum K750 (30-day cycles), and **Daily Rider K49** (1-day cycle, 2 parcels/day included, overage 45% off, on-demand windows including `now`). See `docs/ECONOMICS.md` §2/§5b for economics and `docs/GROWTH.md` for positioning.
 Internal identifiers (`_packs`, `redeemPackCode`, `/admin/pack-codes`) keep the old codename; everything user-facing says **plan**.
 
-## 17. 2026-11-07 release (v0.4.0+7) — what changed
+## 17. 2026-11-08 release (v0.4.3+10) — what changed
+- **Universal profile photos**: every account (customer, sender, recipient, seller, rider, partner, admin)
+  can upload one avatar — Account → tap the circle (or Add photo). It syncs from `auth_users.photo_url`
+  (0044) via `GET /me` → shown on Account, in every chat bubble (signed in users), and on support tickets
+  (assignees see the customer's face). Riders' avatars also land on `riders.photo_url` (that's the photo
+  sellers see on tracking). Photos live in the `uploads/selfie/` namespace (any signed-in user), KYC
+  documents stay `uploads/kyc/<phone>/` staff-or-owner only. `DELETE /me/photo` removes back to initials.
+  Inline AI review — a clear "fail" demotes a *verified rider* to re-review; pass/review keeps standing.
+- Rider "Add photo" nudge on Team tab when no selfie on file (0.4.1).
+- Support: ticket list/detail shows customer avatar + AI draft reply (0.4.1 support).
+
+## 18. 2026-11-07 release (v0.4.0+7) — what changed
 - Recipient accounts + auto-claimed "Parcels for you" + tracking "Addressed to you" tag + Claim CTA.
 - Tracking hardened: 180-day token expiry, per-token verify/chat throttles, JWT-participant grants, `/admin/partners` admin-guard.
 - DropOff Predict: seller forecast, predictive ETA, ops demand heatmap, one-tap plan switch from Business.
@@ -413,5 +427,5 @@ Internal identifiers (`_packs`, `redeemPackCode`, `/admin/pack-codes`) keep the 
 - Home: tagline under the wordmark renders full-width (no more cut-off).
 - "pack" → "subscription plan" across all user-facing copy (app, store listing, legal docs).
 
-## 18. Growth, trendiness & the moat
+## 19. Growth, trendiness & the moat
 See **`docs/GROWTH.md`** — seller-acquisition playbook, retention flywheel, what makes DropOff share-worthy, and the four moats (density, data, trust, plan lock-in) with the 90-day action list.

@@ -584,16 +584,25 @@ app.get('/health', (c) => c.json({ ok: true, ts: Date.now() }));
 app.get('/me', async (c) => {
   const phone = c.get('phone');
   let rider: { id: number; name: string } | null = null;
+  let photoUrl: string | null = null;
+  let fullName: string | null = null;
   if (phone) {
-    const r = await c.env.DB.prepare('SELECT id, full_name FROM riders WHERE phone = ?1 AND active = 1')
-      .bind(phone).first<{ id: number; full_name: string }>();
-    if (r) rider = { id: r.id, name: r.full_name };
+    const r = await c.env.DB.prepare('SELECT id, full_name, photo_url FROM riders WHERE phone = ?1 AND active = 1')
+      .bind(phone).first<{ id: number; full_name: string; photo_url: string | null }>();
+    if (r) { rider = { id: r.id, name: r.full_name }; photoUrl = r.photo_url; fullName = r.full_name; }
+    const u = await c.env.DB.prepare('SELECT full_name, photo_url FROM auth_users WHERE phone = ?1')
+      .bind(phone).first<{ full_name: string | null; photo_url: string | null }>();
+    if (u?.full_name) fullName = u.full_name;
+    // Account photo (incl. seller uploads) wins for display; rider photo is the tracking identity.
+    if (u?.photo_url) photoUrl = u.photo_url;
   }
   return c.json({
     phone: phone ?? null,
     role: c.get('role') ?? null,
     superadmin: isSuperAdmin(c),
     rider,
+    photo_url: photoUrl,
+    full_name: fullName,
   });
 });
 
@@ -2492,8 +2501,12 @@ async function getOrCreateJobThread(env: Env, jobId: number): Promise<number> {
 
 async function chatMessages(env: Env, threadId: number) {
   const { results } = await env.DB.prepare(
-    `SELECT id, sender_phone, sender_role, body, created_at FROM chat_messages
-      WHERE thread_id = ?1 ORDER BY id ASC LIMIT 200`,
+    `SELECT m.id, m.sender_phone, m.sender_role, m.body, m.created_at,
+            COALESCE(au.photo_url, r.photo_url) AS sender_photo_url
+       FROM chat_messages m
+       LEFT JOIN auth_users au ON au.phone = m.sender_phone
+       LEFT JOIN riders r ON r.phone = m.sender_phone
+      WHERE m.thread_id = ?1 ORDER BY m.id ASC LIMIT 200`,
   ).bind(threadId).all();
   return results;
 }
@@ -2681,13 +2694,14 @@ app.get('/chat/threads', async (c) => {
 app.get('/admin/support/threads', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const { results } = await c.env.DB.prepare(
-    `SELECT t.id, t.phone, t.created_at,
+    `SELECT t.id, t.phone, t.created_at, u.photo_url AS customer_photo_url, u.full_name AS customer_name,
             (SELECT m.body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_message,
             (SELECT m.created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_at,
             (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id) AS message_count,
             (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id AND m.sender_role <> 'ops'
                AND m.id > COALESCE((SELECT MAX(m2.id) FROM chat_messages m2 WHERE m2.thread_id = t.id AND m2.sender_role = 'ops'), 0)) AS unread
        FROM chat_threads t
+       LEFT JOIN auth_users u ON u.phone = t.phone
       WHERE t.kind = 'support'
       ORDER BY COALESCE((SELECT m.created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1), t.created_at) DESC
       LIMIT 100`,
@@ -2699,12 +2713,12 @@ app.get('/admin/support/threads/:id', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const id = Number(c.req.param('id'));
   const thread = await c.env.DB.prepare(
-    `SELECT id, kind, phone, created_at FROM chat_threads WHERE id = ?1 AND kind = 'support'`,
+    `SELECT t.id, t.kind, t.phone, t.created_at, u.photo_url AS customer_photo_url, u.full_name AS customer_name
+       FROM chat_threads t LEFT JOIN auth_users u ON u.phone = t.phone
+      WHERE t.id = ?1 AND t.kind = 'support'`,
   ).bind(id).first();
   if (!thread) return c.json({ error: 'not found' }, 404);
-  const { results: messages } = await c.env.DB.prepare(
-    'SELECT id, sender_phone, sender_role, body, created_at FROM chat_messages WHERE thread_id = ?1 ORDER BY id',
-  ).bind(id).all();
+  const messages = await chatMessages(c.env, id);
   return c.json({ thread, messages });
 });
 
@@ -2715,7 +2729,7 @@ app.get('/admin/support/threads/:id', async (c) => {
 app.get('/admin/users', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const { results } = await c.env.DB.prepare(
-    `SELECT email, phone, full_name, role, email_verified, created_at
+    `SELECT email, phone, full_name, role, email_verified, created_at, photo_url
        FROM auth_users ORDER BY created_at DESC LIMIT 200`,
   ).all();
   return c.json({ users: results });
@@ -4689,6 +4703,10 @@ app.post('/uploads', async (c) => {
   if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
   let form: FormData;
   try { form = await c.req.formData(); } catch { return c.json({ error: 'multipart_required' }, 400); }
+  // 'kyc' = identity/KYC documents (staff + the uploading rider only);
+  // 'selfie' = the rider's face for sellers to see (any signed-in user).
+  // Missing kind defaults to the PRIVATE one - never leak docs by accident.
+  const kind = String((form as any).get?.('kind') ?? '') === 'selfie' ? 'selfie' : 'kyc';
   const file = form.get('file');
   if (!(file instanceof File)) return c.json({ error: 'file_required' }, 400);
   if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) return c.json({ error: 'file_too_large', max_mb: 6 }, 400);
@@ -4704,7 +4722,12 @@ app.post('/uploads', async (c) => {
     }
   }
   if (!ext) return c.json({ error: 'unsupported_image_type', allowed: Object.keys(UPLOAD_TYPES) }, 400);
-  const key = `uploads/${crypto.randomUUID()}.${ext}`;
+  // Selfies go under uploads/selfie/; KYC documents under uploads/kyc/<phone>/ so
+  // /media can enforce staff-or-owner access by key prefix alone.
+  const callerPhone = c.get('phone') ?? 'staff';
+  const key = kind === 'selfie'
+    ? `uploads/selfie/${crypto.randomUUID()}.${ext}`
+    : `uploads/kyc/${callerPhone}/${crypto.randomUUID()}.${ext}`;
   const bytes = await file.arrayBuffer();
   if (!looksLikeImage(new Uint8Array(bytes), ext)) {
     return c.json({ error: 'file_not_an_image' }, 400);
@@ -4720,6 +4743,22 @@ app.get('/media/*', async (c) => {
   if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
   const key = decodeURIComponent(c.req.path.replace(/^\/media\//, ''));
   if (!key) return c.json({ error: 'key_required' }, 400);
+  // Prefix rules - see /uploads:
+  //   uploads/selfie/<uuid>              any signed-in user (sellers track their parcel)
+  //   uploads/kyc/<phone>/<uuid>         staff OR that phone (the rider's own docs)
+  //   anything else under uploads/       staff only (legacy root keys, POD photos)
+  if (key.startsWith('uploads/selfie/')) {
+    // any signed-in identity - still no anonymous access
+  } else if (key.startsWith('uploads/kyc/')) {
+    const owner = key.split('/')[2] ?? '';
+    if (c.get('phone') !== owner && !isAdmin(c) && c.get('role') !== 'ops') {
+      return c.json({ error: 'kyc_media_staff_only' }, 403);
+    }
+  } else {
+    if (!isAdmin(c) && c.get('role') !== 'ops') {
+      return c.json({ error: 'kyc_media_staff_only' }, 403);
+    }
+  }
   const object = await c.env.BACKUPS.get(key);
   if (!object) return c.json({ error: 'not_found' }, 404);
   return new Response(object.body, {
@@ -4942,6 +4981,97 @@ app.post('/admin/riders/:id/ai-check', async (c) => {
   await c.env.DB.prepare('UPDATE riders SET ai_check_json = ?2 WHERE id = ?1')
     .bind(id, JSON.stringify(result)).run().catch(() => {});
   return c.json({ ok: true, ...result, submitted_plate: rider.plate_number, submitted_nrc: rider.nrc_number });
+});
+
+// Rider adds JUST their selfie (grandfathered verified riders keep their
+// standing). The photo is AI-reviewed inline: a clear 'fail' (not one real
+// person) demotes a verified rider back to pending until an admin re-checks -
+/** Shared selfie-apply for the two ways a selfie can be linked:
+ *   POST /me/photo     - any signed-in user (riders, sellers, recipients, admins)
+ *   POST /rider/photo  - rider alias kept for 0.4.1 clients
+ * One behaviour, two doors: auth_users.photo_url (and riders.photo_url when the
+ * caller is an active rider; KYC documents untouched). Inline AI review; a clear
+ * fail demotes a VERIFIED rider to pending. A clear pass keeps verified standing. */
+async function applySelfie(c: any, rawUrl: unknown) {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const url = String(rawUrl ?? '').trim();
+  const m = /^\/media\/uploads\/selfie\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|webp|heic|heif)$/i
+    .exec(url);
+  if (!m) return c.json({ error: 'bad_photo_url', detail: 'Upload the selfie first, then link it here.' }, 400);
+  const key = url.replace(/^\/media\//, '');
+  if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
+  const object = await c.env.BACKUPS.get(key);
+  if (!object) return c.json({ error: 'photo_missing' }, 404);
+  let verdict: FaceCheck['verdict'] | 'skipped' = 'skipped';
+  let face: FaceCheck | null = null;
+  if (c.env.AI) {
+    try {
+      face = await analyzeSelfieFace(c.env, [...new Uint8Array(await object.arrayBuffer())]);
+      verdict = face.verdict;
+    } catch {
+      verdict = 'skipped'; // AI down: keep the photo, let a human decide
+    }
+  }
+  const db = c.env.DB as D1Database;
+  // Rider row? Apply to riders.photo_url too (sellers see this one).
+  const rider = await db.prepare(
+    'SELECT id, verification_status FROM riders WHERE phone = ?1 AND active = 1',
+  ).bind(phone).first<any>();
+  if (rider && face) await persistFaceCheck(db, rider.id, face);
+  const demote = Boolean(rider) && verdict === 'fail' && rider.verification_status === 'verified';
+  if (rider) {
+    await db.prepare(
+      `UPDATE riders SET photo_url = ?2, submitted_at = datetime('now'),
+          verification_status = CASE WHEN ?3 THEN 'pending' ELSE verification_status END,
+          verification_note = CASE WHEN ?3 THEN 'Selfie failed automatic face review - re-verify before assignment.' ELSE NULL END,
+          verified_by = CASE WHEN ?3 THEN NULL ELSE verified_by END,
+          verified_at = CASE WHEN ?3 THEN NULL ELSE verified_at END
+        WHERE id = ?1`,
+    ).bind(rider.id, url, demote ? 1 : 0).run();
+  }
+  await c.env.DB.prepare('UPDATE auth_users SET photo_url = ?2 WHERE phone = ?1')
+    .bind(phone, url).run().catch(() => {}); // OTP-only riders have no auth_users row
+  return {
+    ok: true as const, verdict, demote,
+    rider: rider ? { verification_status: demote ? 'pending' : rider.verification_status } : null,
+    verification_status: rider ? (demote ? 'pending' : rider.verification_status) : null,
+    photo_url: url,
+    detail: demote
+      ? 'This photo does not look like one person - an admin will re-verify you before assignments resume.'
+      : 'Photo saved.',
+  };
+}
+
+// pass/review keep the current status. Never touches KYC documents.
+app.post('/rider/photo', async (c) => {
+  if (c.get('role') !== 'rider') return c.json({ error: 'rider_only' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT id FROM riders WHERE phone = ?1 AND active = 1',
+  ).bind(c.get('phone') ?? '').first<any>();
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  const b: any = await c.req.json().catch(() => null);
+  const r = await applySelfie(c, b?.photo_url);
+  return r instanceof Response ? r : c.json(r);
+});
+
+// ANY signed-in user sets their profile photo (upload via kind=selfie first).
+// Riders get the same inline AI review as /rider/photo (sellers see it).
+app.post('/me/photo', async (c) => {
+  const b: any = await c.req.json().catch(() => null);
+  const r = await applySelfie(c, b?.photo_url);
+  return r instanceof Response ? r : c.json(r);
+});
+
+// Remove the caller's profile photo (back to initials).
+app.delete('/me/photo', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE auth_users SET photo_url = NULL WHERE phone = ?1').bind(phone),
+    c.env.DB.prepare('UPDATE riders SET photo_url = NULL WHERE phone = ?1 AND active = 1').bind(phone),
+  ]);
+  return c.json({ ok: true });
 });
 
 // Rider self-check: run the AI face review on their OWN current selfie
