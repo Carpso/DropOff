@@ -188,13 +188,13 @@ class _AccountScreenState extends State<AccountScreen> {
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Create account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
             const SizedBox(height: 4),
-            const Text('Your phone is the mobile-money identity for refunds; email is the sign-in key.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+            const Text('Your phone is the mobile-money identity for refunds, and the address parcels find you by — every parcel sent to this number appears automatically. Email is the sign-in key.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
             const SizedBox(height: 14),
             TextField(controller: _cEmail, keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email], decoration: const InputDecoration(labelText: 'Email')),
             const SizedBox(height: 12),
             TextField(controller: _cPassword, obscureText: true, autofillHints: const [AutofillHints.password], decoration: const InputDecoration(labelText: 'Password (8+ chars)', helperText: 'At least 8 characters')),
             const SizedBox(height: 12),
-            TextField(controller: _cPhone, keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber], decoration: const InputDecoration(labelText: 'Mobile money phone', helperText: '09…, 097… or +260…')),
+            TextField(controller: _cPhone, keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber], decoration: const InputDecoration(labelText: 'Mobile money phone', helperText: '09…, 097… or +260… — parcels addressed to it appear automatically')),
             const SizedBox(height: 12),
             TextField(controller: _cFullName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Full name (optional)')),
             const SizedBox(height: 12),
@@ -306,7 +306,7 @@ class _AccountScreenState extends State<AccountScreen> {
           ] else ...[
             const Text('Sign in to your account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
             const SizedBox(height: 6),
-            const Text('Phone code or email — your parcels, packs and bookings live behind your account.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+            const Text('Phone code or email — your parcels, plans and bookings live behind your account.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
             const SizedBox(height: 14),
             TextField(
               controller: _email,
@@ -380,7 +380,7 @@ class _AccountScreenState extends State<AccountScreen> {
             Text(
               _creating
                   ? 'Your phone number is the mobile-money identity for refunds and payouts — the email is just the key.'
-                  : 'Signing in restores your packs and booking history from the server.',
+                  : 'Signing in restores your plans and booking history from the server.',
               style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.5),
               textAlign: TextAlign.center,
             ),
@@ -479,8 +479,8 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 }
 
-/// Silver / Gold / Platinum packs, exactly what the server bills (the fee line
-/// shows the pack price + processing fee charged on the renewal prompt).
+/// Silver / Gold / Platinum plans, exactly what the server bills (the fee line
+/// shows the plan price + processing fee charged on the renewal prompt).
 class _RecurringCard extends StatefulWidget {
   const _RecurringCard();
 
@@ -768,7 +768,7 @@ class _TiersCardState extends State<_TiersCard> {
     final store = AppScope.of(context);
     final messenger = ScaffoldMessenger.of(context);
     if (!store.linked) {
-      messenger.showSnackBar(const SnackBar(content: Text('Sign in first — your pack is tied to your phone.')));
+      messenger.showSnackBar(const SnackBar(content: Text('Sign in first — your plan is tied to your phone.')));
       return;
     }
     final currentTier = '${_current?['tier'] ?? ''}';
@@ -809,15 +809,15 @@ class _TiersCardState extends State<_TiersCard> {
     if (!res.ok) {
       if (!mounted) return;
       setState(() => _busyTier = null);
-      messenger.showSnackBar(SnackBar(content: Text('Could not start the pack (${res.error}). Try again.')));
+      messenger.showSnackBar(SnackBar(content: Text('Could not start the plan (${res.error}). Try again.')));
       return;
     }
-    // Lipila prompt for the pack price; success activates the pack server-side.
+    // Lipila prompt for the plan price; success activates the plan server-side.
     final pay = await DropOffApi.paySubscription();
     if (!mounted) return;
     if (!pay.ok) {
       setState(() => _busyTier = null);
-      messenger.showSnackBar(SnackBar(content: Text('Pack saved — pay anytime from this screen. (${pay.error})')));
+      messenger.showSnackBar(SnackBar(content: Text('Plan saved — pay anytime from this screen. (${pay.error})')));
       return;
     }
     final paymentId = '${pay.body['payment_id']}';
@@ -836,9 +836,9 @@ class _TiersCardState extends State<_TiersCard> {
     );
       messenger.showSnackBar(SnackBar(content: Text(switch (status) {
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
-      'success' => '$tier pack is LIVE — your monthly parcels are ready.',
+      'success' => '$tier plan is LIVE — your monthly parcels are ready.',
       'failed' => 'The mobile-money prompt was rejected — pay again from this screen.',
-      _ => 'Payment still pending — the pack activates the moment it lands.',
+      _ => 'Payment still pending — the plan activates the moment it lands.',
     })));
   }
 
@@ -856,7 +856,7 @@ class _TiersCardState extends State<_TiersCard> {
               const Text('Send more, pay less', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
               const SizedBox(height: 4),
                const Text(
-                'Plans bundle the rider into ONE mobile-money prompt — a 7-day Weekly Sprint, or a monthly Silver / Gold / Platinum pack. Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.',
+                'Plans bundle the rider into ONE mobile-money prompt — a 7-day Weekly Sprint, or a monthly Silver / Gold / Platinum plan. Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.',
                 style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.45),
               ),
               const SizedBox(height: 12),
@@ -980,8 +980,8 @@ class _TiersCardState extends State<_TiersCard> {
   }
 }
 
-/// Bulk/offline pack codes: sold by agents or at market days; redeeming one
-/// activates the pack on this number with no payment prompt.
+/// Bulk/offline plan codes: sold by agents or at market days; redeeming one
+/// activates the plan on this number with no payment prompt.
 class _PackCodeCard extends StatefulWidget {
   const _PackCodeCard();
 
@@ -1005,7 +1005,7 @@ class _PackCodeCardState extends State<_PackCodeCard> {
     final store = AppScope.of(context);
     final messenger = ScaffoldMessenger.of(context);
     if (!store.linked) {
-      messenger.showSnackBar(const SnackBar(content: Text('Sign in first — the pack attaches to your number.')));
+      messenger.showSnackBar(const SnackBar(content: Text('Sign in first — the plan attaches to your number.')));
       return;
     }
     setState(() => _busy = true);
@@ -1014,18 +1014,18 @@ class _PackCodeCardState extends State<_PackCodeCard> {
     setState(() => _busy = false);
     if (res.ok) {
       _code.clear();
-      final tier = '${res.body['tier'] ?? 'pack'}';
+      final tier = '${res.body['tier'] ?? 'plan'}';
       final end = '${res.body['period_end'] ?? ''}'.split(' ').first;
-      messenger.showSnackBar(SnackBar(content: Text('$tier pack activated${end.isEmpty ? '' : ' — runs to $end'}. No payment needed.')));
+      messenger.showSnackBar(SnackBar(content: Text('$tier plan activated${end.isEmpty ? '' : ' — runs to $end'}. No payment needed.')));
       AnalyticsService.instance.track(
         feature: 'pack_codes', action: 'redeem', context: 'account_pack_code',
         meta: {'tier': tier},
       );
     } else {
       messenger.showSnackBar(SnackBar(content: Text(res.error == 'code_not_found'
-          ? 'That pack code was not recognised.'
+          ? 'That plan code was not recognised.'
           : res.error == 'code_used'
-              ? 'That pack code has already been used.'
+              ? 'That plan code has already been used.'
               : 'Could not redeem (${res.error}).')));
     }
   }
@@ -1042,16 +1042,16 @@ class _PackCodeCardState extends State<_PackCodeCard> {
             const Row(children: [
               Icon(Icons.card_membership_outlined, color: AppColors.forest),
               SizedBox(width: 10),
-              Expanded(child: Text('Have a pack code?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+              Expanded(child: Text('Have a plan code?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             ]),
             const SizedBox(height: 4),
-            const Text('Bought a pack from an agent or at a market day? Redeem the code — it activates instantly on your number.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+            const Text('Bought a plan from an agent or at a market day? Redeem the code — it activates instantly on your number.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
             const SizedBox(height: 12),
             TextField(
               controller: _code,
               textCapitalization: TextCapitalization.characters,
               decoration: InputDecoration(
-                labelText: 'Pack code',
+                labelText: 'Plan code',
                 hintText: 'DROP-8F2K-19QA',
                 prefixIcon: const Icon(Icons.qr_code_2),
                 suffixIcon: TextButton(onPressed: _busy ? null : _redeem, child: _busy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Redeem')),
@@ -1064,7 +1064,7 @@ class _PackCodeCardState extends State<_PackCodeCard> {
   }
 }
 
-/// Live "X of Y parcels used this cycle" meter for the signed-in seller's pack.
+/// Live "X of Y parcels used this cycle" meter for the signed-in seller's plan.
 /// Shows the Admin console door only when the server says this identity is
 /// admin/ops (the owner's phone resolves to admin via OWNER_PHONE).
 class _AdminGate extends StatefulWidget {  const _AdminGate();
@@ -1153,7 +1153,7 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
               // Expanded label + FLEXIBLE counter: the trailing count can never
               // squeeze the label into a vertical ribbon.
               Expanded(
-                child: Text('$tier pack — $used of $cap parcels used',
+                child: Text('$tier plan — $used of $cap parcels used',
                     style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
               ),
               const SizedBox(width: 8),

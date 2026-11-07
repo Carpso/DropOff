@@ -75,7 +75,7 @@ DropOff is driver+rider ourselves for the first months, then we push one rider p
 
 - **Who**: 700cc+ motorbike holders with own helmets & phone, 22–38, living along
   our Lusaka route (Kanyama / Chilenje / Kalingalinga / Kabwata / Chelstone / Libala).
-- **Pay**: per-parcel split — rider keeps **90% of K45 = K40.50** (90/10), plus pack-included
+- **Pay**: per-parcel split - rider keeps **90% of K45 = K40.50** (90/10), plus plan-included
   routes; average 25–40 parcels on busy days once the directory covers the route map.
   Never fixed salary until route density justifies it.
 - **Kit**: branded reflector vest + courier bag + DropOff receipts book + depot drop stamp sheet.

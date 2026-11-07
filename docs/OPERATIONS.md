@@ -177,12 +177,12 @@ clean drill. Insert order is parent-first; delete order is reverse.
   tracking link (`/jobs/:ref/tracking-link`) and opens the verified Track
   screen; **Repeat last** clones the latest job into the booking form.
   Retention banners are computed client-side from the same data: pay-for-itself
-  at 3+ parcels/mo with no pack, overage→upgrade nudge when the cap is hit, and
+  at 3+ parcels/mo with no plan, overage→upgrade nudge when the cap is hit, and
   a one-tap **Renew now** inside the last 3 days of a cycle (re-posts
   `/subscriptions`, worker sends the Lipila prompt).
 - **Renewal safety net (cron)**: auto-renewal prompts run 3 days before
   `period_end`. If no prompt is outstanding, `notifyExpiryNudges` SMSes the
-  seller once per cycle; lapsed packs get a grace warning until the 7-day
+  seller once per cycle; lapsed plans get a grace warning until the 7-day
   lapse sweep. Dedupe column: `subscriptions.expiry_nudge_period`.
 - **Rider COD self-remittance**: `GET /rider/cod` lists the signed-in rider's
   floated COD (`jobs.rider_id`, `cod_collected_zmw`, remitted flag);
@@ -203,9 +203,9 @@ clean drill. Insert order is parent-first; delete order is reverse.
   key-only console device works without a JWT (the key header is omitted when
   the build has no key configured).
 
-## 10. Tracking verification (link ≠ access)
+## 10. Tracking verification (link ≠ access) and recipient signup
 
-A tracking link now proves nothing by itself. Every `/track/:token` route
+A tracking link proves nothing by itself. Every `/track/:token` route
 (GET status, GET/POST chat) requires one of:
 
 1. a signed-in JWT whose phone equals the job's sender or recipient phone,
@@ -214,11 +214,29 @@ A tracking link now proves nothing by itself. Every `/track/:token` route
    stored in-memory per app session, or
 3. staff keys (`X-Admin-Key` / `X-Api-Key`).
 
+**Hardened 2026-11-07:** newly minted tracking tokens expire after **180 days**; `/track/:token/verify`
+and `POST /track/:token/chat` are throttled **per token** (10 and 20 per 10 minutes) on top of the per-IP
+buckets, so a leaked grant cannot brute-force the phone hint or flood the thread. `POST /track/:token/chat`
+is grant-gated like every other track route. `GET /track/:token` reports `you_are: sender|recipient|staff`
+so the app can tag the parcel "Addressed to you — belongs to your number".
+
 Unknown token → `404`. Stranger with the link →
 `{requires_verification: true, hint_phone: "••••1234"}` only — no parcel data,
 no prices, no rider location. The in-app TrackScreen shows a phone-verify card
-in exactly that case; the verify call is rate-limited (15/min) to stop
+in exactly that case; the verify call is rate-limited (15/hour per IP, 10/hour per token) to stop
 brute-forcing. Chat reuses the same gate.
+
+**Recipients are first-class users now.** A recipient who installs the app signs up with the
+**phone the parcel was addressed to** (same create-account flow — no separate role). The server then
+matches `jobs.recipient_phone` to their account phone automatically:
+
+- `GET /track/incoming` (JWT required, NOT on the public token bypass) lists every parcel addressed to
+  the caller — live or delivered — each with a ready tracking URL. The app renders these under
+  **Bookings → "Parcels for you"** with one-tap tracking; no link-pasting needed, ever again.
+- Opening the tracking page (from the SMS link or the card) answers immediately with the
+  **"Addressed to you"** tag plus a **Predictive ETA** (see §12): "Predicted: around tomorrow 10:30 ·
+  high confidence · courier's last 82 parcels (180d)".
+- Parcels addressed to you but not yet delivered appear on top of your own bookings (as the sender).
 
 ## 11. Support inbox (visible tickets)
 
@@ -229,38 +247,81 @@ Support chats live in `chat_threads.kind='support'` and are no longer hidden:
 - `GET /admin/support/threads/:id` — full message history,
 - replies reuse `POST /chat/support/:id/reply` (admin / ops / admin key).
 
-The in-app admin console renders both as the **Support inbox** card.
+The in-app admin console renders both as the **Support inbox** card, with per-ticket
+unread badges. Tap a ticket to open the full thread; the reply box sits beside an
+**AI draft reply** button (`POST /admin/support/threads/:id/ai-draft`, Workers AI,
+never auto-sends — you review and press send) and a one-tap copy of the customer's
+phone number. Seller side: Account → *Chat with DropOff support* → `POST /chat/support`
+(creates/reuses the `kind='support'` thread for the caller's phone; push notification
+on every ops reply). Inbox → support thread shows the full conversation.
 
-## 12. Delivery IQ
+**"Why can't I see tickets?" — checklist.** (1) You must be signed in as owner (phone in
+`OWNER_PHONE`) or an email account promoted to `admin` — `GET /me` must report role
+`admin`/`ops` (the Admin console door on the Account tab appears only then). (2) `OWNER_PHONE`
+must match the phone you signed in with — a typo means you're a plain customer with no admin
+door. (3) Tickets only appear once at least one seller has opened support chat; the inbox card
+renders every `kind='support'` thread regardless of status. (4) If the app shows
+"Admin console" but the inbox stays empty while `wrangler d1 execute dropoff-db --remote --command
+"SELECT count(*) FROM chat_threads WHERE kind='support'"` shows rows — the build is a store build
+without `DROPOFF_ADMIN_KEY` or a stale JWT; sign out/in again.
 
+## 12. Predictive features — Delivery IQ and DropOff Predict
+
+### Delivery IQ (booking screen)
 `GET /iq/eta?courier_id=&window=` computes the typical and slow-day
 pickup→depot minutes from real `job_events` (picked_up → at_depot) over the
 last 90 days (max 300 jobs). Signed-in callers only. The booking screen shows
 it beside the pickup-window picker so sellers see real speed before booking.
 
-## 13. Pack codes and collections (agent sales + last mile)
+### DropOff Predict (tracking page, Business tab, Admin console)
+Four explainable surfaces — no opaque model, every number carries basis + sample size:
 
-- **Pack codes** let agents, market-day stalls and the counter sell a pack
+- **Predictive ETA (tracking page).** Included as `predicted` on `GET /track/:token`:
+  measured p50 of this courier's last-180-day `picked_up→at_depot` and
+  `at_depot→delivered` legs, applied to wherever the parcel is now → `eta_minutes`,
+  `arrival_by`, `confidence` (high ≥30 samples, medium ≥8, else low). Completed parcels
+  answer `eta_minutes: 0` ("delivered — nothing left to wait for").
+- **Seller forecast** `GET /predict/seller`: next-30-day parcels (least-squares over six
+  CAT months, blended 50/50 with the trailing 3-month average), month-over-month trend,
+  peak window and weekday, plus the **cheapest plan that covers the forecast**
+  (`recommended_plan`, with est. savings vs pay-as-you-go) and a Daily-Rider-vs-monthly
+  comparison (`daily_option`). Business tab renders this with a one-tap plan switch.
+- **Ops demand heatmap** `GET /admin/demand-forecast`: next 7 days per depot branch ×
+  pickup window — the same weekday+window parcel average of the trailing 8 weeks (CAT),
+  every weekday occurs exactly once — for sweep scheduling and staffing. Admin console →
+  "DropOff Predict — next 7 days" card.
+- **Prediction honesty rule:** cold start returns labelled fallbacks (`fallback: true` /
+  `basis: "advertised window bands…"`), never invented confidence.
+
+## 13. Plan codes and collections (agent sales + last mile)
+
+- **Plan codes** let agents, market-day stalls and the counter sell a plan
   offline. Superadmin mints batches with `POST /admin/pack-codes
   {tier, count<=50, note}` (codes look like `DROP-XXXX-XXXX`; list them with
   `GET /admin/pack-codes`). The seller redeems in the app (Account tab or the
   booking form) via `POST /subscriptions/redeem {code}`: the code is consumed
-  atomically, the pack activates immediately on their number for the plan's
-  `cycle_days`, and **no payment prompt** is sent. Admin console ? Pack codes
+  atomically, the plan activates immediately on their number for the plan's
+  `cycle_days`, and **no payment prompt** is sent. Admin console → Plan codes
   card shows a "Copy all" batch for texting to the agent.
-- **Revised pack prices** (live in `tiers`): Daily K69 (1 day), Weekly K399
-  (7 days), Silver K250 / 10 parcels, Gold K500 / 25, Platinum K750 / 50 (30
-  days). Migration `0039_tier_prices.sql` is the price-only sync; `/plans`
-  merges the D1 chargebook over the built-in fallback.
-- **Collections** (courier point ? recipient door) are booked from the home
+- **Plans in D1** (source of truth, editable live): Daily Rider `rider_daily`
+  **K49/day, 2 parcels/day**, Weekly Sprint K399 (7 days), Silver K250 / 10
+  parcels, Gold K500 / 25, Platinum K750 / 50 (30 days). Migration
+  `0043_rider_daily.sql` seeds Daily Rider; `0039_tier_prices.sql` the price sync.
+  `/plans` merges the D1 chargebook over the built-in fallback.
+- **One allowance, every normal delivery**: a plan's parcels pay for pickups,
+  courier-point collections → door, and the optional last mile — all return
+  `plan_inclusion` / `plan_used` / `plan_cap` and consume the same slots. Daily
+  plans meter the cap per day; monthly per cycle (`period_start..period_end`).
+- **Collections** (courier point → recipient door) are booked from the home
   screen's second button: `POST /collections` creates a Lusaka last-mile job
-  (`last_mile=1`, `dest_address`, no counter fare) priced at the pay-as-you-go
-  rider fee + processing fee; the app then runs the normal Lipila payment and
+  (`last_mile=1`, `dest_address`, no counter fare). If the sender holds an active
+  plan with slots left it consumes one slot at K0 rider fee; otherwise it bills the
+  pay-as-you-go rider fee + processing fee; the app then runs the normal Lipila payment and
   status poll.
 - **Booking form simplifications**: DropOff is Lusaka-only (no intercity
   courier-ticket copy), the seller no longer picks a depot branch (the rider
   takes the parcel to the nearest point), and only the three booked windows
-  (06:00 / 10:00 / 14:00) are offered � no instant "now" or custom time.
+  (06:00 / 10:00 / 14:00) are offered except on Daily Rider, which also exposes `now`.
 - **Driver pay visibility**: the K3,000/month flat + 30-parcels/day target line
   is shown only on the rider view (`_RiderPayCard`); seller-facing and public
   copy never mentions it.
@@ -285,5 +346,5 @@ it beside the pickup-window picker so sellers see real speed before booking.
   booking form); `POST /admin/support/threads/:id/ai-draft` drafts support
   replies from ticket history; `POST /admin/riders/:id/ai-check` reads a
   driver's plate/NRC photo via Workers AI vision and compares it against what
-  the driver submitted (`plate_match`/`nrc_match`) � admins still click
+  the driver submitted (`plate_match`/`nrc_match`) � admins still click
   Approve/Reject themselves.

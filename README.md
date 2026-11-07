@@ -15,9 +15,10 @@
 | Actor | What they do |
 |---|---|
 | **Sender** (biz or individual) | Opens app → picks courier + service level → rider collects from home → parcel lands at depot → tracked to recipient's city |
+| **Recipient** | Gets the parcel where it's going. Creates a DropOff account with the phone the parcel was addressed to — every parcel sent to that number shows up automatically under **Bookings → "Parcels for you"**, tagged "addressed to you" |
 | **Rider / Runner** (bike, trimoto, car) | Fills a job — collects parcels in the area, delivers to the right depots (and replies to pick up released parcels) |
 | **Depot** (Platinum, Mercury…) | Receives the parcel, takes over the intercity leg, and hands it back to a runner on the far side |
-| **Recipient** | Gets a door delivery in their city (optional add-on), or maps to the depot to collect |
+| **Courier partner** | The shop/depot counter account (`role=partner`) — confirms counter prices and hand-offs in the depot console |
 | **DropOff Ops** | Riders, dispute support, cash-float handling, and courier partnership management |
 
 ### Core flow (booking → handover)
@@ -111,38 +112,46 @@ Notes: prices are from Lusaka only; large parcels start at the shown amount; han
 > **Never compete on the courier ticket itself.** DropOff is a *value-add* to Platinum / Mercury / One World —
 > that positioning makes depot partnerships win-wins instead of defensive.
 
-### 3.1 Seller packs, rider split & timed daily windows (implemented, Worker v5)
+### 3.1 Seller subscription plans, rider split & timed daily windows (implemented)
 
 Batching is the whole margin story: a rider who sweeps one neighbourhood is cheaper per parcel
 than a rider doing one run per booking. Timed windows (6am / 10am / 2pm) also respect depot
 cut-offs (e.g. Platinum closes ~16:30, so an afternoon sweep still lands same-day).
 
-| Tier | Price | Parcels/day | Seller cost per parcel | Break-even |
+| Plan | Price | Parcels | Seller cost per parcel | Break-even |
 |---|---|---:|---|---|
 | Pay-as-you-go | K45/pickup | ∞ (on demand) | K45 | — |
-| **Silver** | **K350/mo** | 1 | **K11.70** | 10 parcels/mo |
-| **Gold** | **K700/mo** | 3 | **K7.80** | 20 parcels/mo |
-| **Platinum** | **K1,500/mo** | 10 | **K5.00** | ~43 parcels/mo |
+| **Daily Rider** | **K49/day** | 2 / day | **K24.50** at full use | first parcel pays for the day |
+| **Weekly Sprint** | **K399/wk** | 20 / wk | **K19.95** | 9 parcels/wk |
+| **Silver** | **K250/mo** | 10 / mo | **K25.00** | 10 parcels/mo |
+| **Gold** | **K500/mo** | 25 / mo | **K20.00** | 20 parcels/mo |
+| **Platinum** | **K750/mo** | 50 / mo | **K15.00** | ~38 parcels/mo |
+
+(Live prices live in the `tiers` D1 table — Silver/Gold/Platinum were re-based in 0039; `/admin/tiers` edits them without a deploy.)
 
 **Rider/driver earnings per parcel (the split):**
 
 | Job type | Rider earns | DropOff keeps | Notes |
 |---|---|---|---|
 | Pay-as-you-go K45 | **K40.50** | K4.50 (10%) | + the **customer** pays the K2.50 Lipila prompt fee — the rider split is untouched |
-| Pack parcel (swept) | **K5.00 flat** | pack fee − K5 | `PACK_RIDER_PAY_ZMW`; sweep riders carry 20–80 parcels/window, so a sweep of 60 = K300/day wage on top of paygo catch |
+| Plan parcel (swept) | **K5.00 flat** | plan fee − K5 | sweep riders carry 20–80 parcels/window, so a sweep of 60 = K300/day wage on top of paygo catch |
 | Waiting >10 min | bill passed through | K2/min → sender | logged as evidence per event |
 
-Pack margin is honest: at full Platinum usage the pack fee ≈ rider cost (~K5×300 parcels/month).
-Real profitability comes from three lifts: (1) Platinum sellers rarely max the 10/day cap,
-(2) over-cap parcels fall back to K45 paygo, (3) density — one rider sweep amortises across *all*
+Plan margin is honest: at full Platinum usage the plan fee ≈ rider cost (~K5×300 parcels/month).
+Real profitability comes from three lifts: (1) Platinum sellers rarely max the 50/month cap,
+(2) over-cap parcels fall back to pay-as-you-go at the tier overage discount, never blocked, (3) density — one rider sweep amortises across *all*
 sellers in the neighbourhood. Guardrail: run a fleet-margin report (`GET /admin/stats`) weekly and
-move `PACK_RIDER_PAY_ZMW` if rider sweeps out-earn the pack revenue.
+re-price `rider_daily` / `weekly` in `/admin/tiers` if sweeps out-earn revenue.
 
-Upsell order: pay-as-you-go → (week 2: 3+ pickups seen = "regular") → Silver offer on WhatsApp →
-Gold at 3/day cadence → Platinum for depot-class shippers. **Targets: 100 paying pack sellers/month
-+ 50 active paygo customers, of which aim ≥20 regular paygo sellers (3+ parcels/mo) converting to
-Silver.** Growth funnel is instrumented at `GET /admin/stats` (regulars counter included). APIs:
-`GET /plans`, `POST /subscriptions`; over-cap jobs fall back to pay-as-you-go — never block a paid drop.
+**One allowance for every normal delivery (2026-11-06):** a plan's parcels pay for *any* in-app
+delivery — door pickup, courier-depot collection → door, and the optional last mile — not just
+bookings. Collections consume the same slots as pickups. Daily Rider meters 2/day; the monthly
+plans meter 10/25/50 per cycle; the day/week cycles start at payment, not at a calendar boundary.
+
+Upsell order: pay-as-you-go → (week 2: 3+ pickups seen = "regular") → Daily Rider for burst days →
+Weekly Sprint at 3+/week → Silver→Gold→Platinum for depot-class shippers. **Targets: 100 paying plan sellers/month
++ 50 active paygo customers, of which aim ≥20 regular paygo sellers (3+ parcels/mo) converting up.** Growth funnel is instrumented at `GET /admin/stats` (regulars counter included). APIs:
+`GET /plans`, `POST /subscriptions` (Day/Week/Month by `cycle_days`); over-cap jobs fall back to pay-as-you-go — never block a paid drop.
 
 ### 3.2 Client ↔ Worker wiring (implemented)
 
@@ -163,8 +172,9 @@ Silver.** Growth funnel is instrumented at `GET /admin/stats` (regulars counter 
 - COD: rider logs `cod_collected_zmw` on delivery → seller wallet credited net of 2%.
 - Timed pickups: `pickup_window` ∈ `now / 06:00 / 10:00 / 14:00`.
 - Waiting time: `wait_minutes` in `POST /jobs/:ref/events`.
-- Auto-renewal: daily **cron** (02:00 UTC) collects expiring packs 3 days early via Lipila;
-  grace of 7 days before a pack lapses to `expired`.
+- Auto-renewal: daily **cron** (02:00 UTC) collects expiring plans 3 days early via Lipila;
+  grace of 7 days before a plan lapses to `expired`.
+- Plans are **one allowance for every normal delivery**: pickups, courier-depot collections → door, and the optional last-mile leg all consume the same slots (`plan_inclusion` returned by both `/jobs` and `/collections`); daily caps meter per day, monthly per cycle (`period_start..period_end`).
 
 ### 3.3 Partnership management & price capture (superadmin)
 
@@ -177,10 +187,10 @@ maintains everything with `X-Admin-Key`:
 - `POST /admin/riders` — rider roster (their phone becomes their login identity).
 - `POST /admin/jobs/:ref/assign` — dispatch a rider onto a job (rider events then authenticate as that phone).
 - `POST /admin/payouts` — rider earnings & cash-outs in the ledger.
-- `GET /admin/stats` — growth cockpit: active pack sellers by tier, paygo regulars (3+ parcels/30d),
-  parcels, revenues, wallet float, COD volumes → track the 100 pack + 50 paygo target here.
+- `GET /admin/stats` — growth cockpit: active plan sellers by tier, paygo regulars (3+ parcels/30d),
+  parcels, revenues, wallet float, COD volumes → track the 100 plan + 50 paygo target here.
 
-### 3.4 Growth targets (100 pack sellers / month)
+### 3.4 Growth targets (100 plan sellers / month)
 
 | Funnel stage | Signal | Goal |
 |---|---|---|
@@ -243,18 +253,24 @@ DropOff/
 
 ---
 
-## 6. Deployed (2026-11-04)
+## 6. Deployed (2026-11-06, v0.4.0+7)
 
 - **API:** https://dropoff-api.godfreymoseskalambo.workers.dev — health `GET /health` → `{"ok":true}`
-- **Auth:** email + password accounts (`POST /auth/register`, `POST /auth/login`, PBKDF2-100k, migration `0007_email_auth.sql`) — verified live 201/200/401/409. The JWT still carries the momo **phone** as identity, so jobs/payments/wallets are unchanged; phone-OTP stays for the ops/rider device-link (needs an SMS gateway). Login UI: `AccountScreen` from the Home avatar.
-- **D1:** `dropoff-db` (`1100c702-d4c2-4114-8926-7e113350ad17`, region WEUR); migrations 0001–0017 applied remotely
+- **Auth:** email + password accounts (`POST /auth/register`, `POST /auth/login`, PBKDF2-210k, migration `0007_email_auth.sql`) — the JWT still carries the momo **phone** as identity; phone-OTP stays for the ops/rider device-link. Login UI: `AccountScreen` from the Home avatar. PBKDF2 verify is iteration-aware (hashes minted at older iteration counts self-upgrade transparently on next login); OTP sessions carry the account `token_version` so a password reset revokes them too.
+- **D1:** `dropoff-db` (`1100c702-d4c2-4114-8926-7e113350ad17`, region WEUR); migrations 0001–**0043** (0043 = `rider_daily`, the K49 Daily Rider subscription plan)
 - **Secrets set:** `JWT_SECRET`, `API_AUTH_KEY`, `ADMIN_AUTH_KEY`, `LIPILA_API_KEY` (values in `workers/.prod-secrets.txt`, gitignored)
-- **Artifacts:** signed APK + AAB (`--release`, upload keystore in `app/android/app/upload-keystore.jks` + gitignored `app/android/key.properties`; store password in `workers/.prod-secrets.txt` / `C:\Users\User\AppData\Local\Temp\prodkeys.txt`). Built with
+- **Artifacts:** signed APK + AAB (`--release`, upload keystore in `app/android/app/upload-keystore.jks` + gitignored `app/android/key.properties`; store password in `workers/.prod-secrets.txt`). Built with
   `--dart-define=DROPOFF_API_URL=…` — **customer/store builds carry no API or admin key** (JWT-only
   auth); rider/ops builds additionally get `--dart-define=DROPOFF_API_KEY=…`, the owner's console
   build `DROPOFF_ADMIN_KEY=…`. Keys are injected on-device only, never committed or defaulted.
 - **D1 = the only store:** zero data lives on-device for server truth; the app persists only local
-  prefs (JWT, bookings cache) and falls back to REST. Migrations 0001–0017 applied remotely.
+  prefs (JWT, bookings cache) and falls back to REST.
+- **Release v0.4.0+7 (2026-11-07):** recipient accounts with auto-claimed parcels ("Parcels for you"),
+  DropOff Predict (seller forecast, predictive ETA on the tracking page, ops 7-day demand heatmap),
+  subscription-plan usage for *all* in-app deliveries (pickup + depot collection + last mile) and the
+  Daily Rider plan, AI draft replies in the support inbox, hardened tracking links (per-token throttles,
+  180-day token expiry), and the return of the AI depot POD check (`/ai/receipt/:ref`) which had been
+  swallowed inside another handler and never registered. See `docs/GROWTH.md` for the moat strategy.
 
 ## 7. Offline capability & storage truth
 
@@ -270,38 +286,33 @@ DropOff/
 
 ## 8. Admin / Superadmin access
 
-**Account:** the owner's `auth_users` row with `role='admin'` (seeded in migration `0007`; the phone
-is the momo identity). The password is **not** recorded here — it was seeded once and must be
-rotated via app → Account → Forgot password (a reset also revokes all prior JWT sessions via
-`token_version`). JWT sessions for that phone carry admin rights for `/admin/*` (DB-role based, no key needed).
+**Who is what.** The owner (the `OWNER_PHONE` secret) is **both superadmin and admin**:
+- `admin` — sees and uses every admin surface (`/admin/*`, support inbox, stats, tiers, fraud, security alerts, depot branches, SMS broadcasts).
+- `superadmin` — everything `admin` can do, **plus** the owner-only powers: mint/demote `admin` accounts (`POST /admin/users/role`), mint plan codes (`POST /admin/pack-codes`), and manage the depot branches.
 
-**Superadmin console (owner):**
-1. Open `https://dropoff-api.godfreymoseskalambo.workers.dev/console?key=<ADMIN_AUTH_KEY>` — KPIs
-   (active paying senders, parcels 30d, platform/Lipila fees, COD float, referrals funnel) + tier/promo/POS editors + partner promotion.
-2. The same admin key authorizes the management API: `X-Admin-Key: <ADMIN_AUTH_KEY>`:
-   - `POST /admin/couriers` — add/verify depots (`{name, depot_name, city, website, logo_url, ...}`)
-   - `POST /admin/partners` — promote an email to partner shop (`{email, courier_id}`)
-   - `POST /admin/quotes` — insert a chargebook rate
-   - `POST /admin/payouts` — rider earnings (`{phone, amount_zmw, kind: rider_earning|rider_payout}`)
-     or settle door-collected COD (`{kind: 'cod_remit', job_ref}`) — Lipila disbursement to the seller's momo, net of the 2% cut.
-   - `POST /admin/partner-keys` — mint a webhook key for a courier.
-   - `POST /admin/pos` — set a courier's collection rail (momo/bank/POS terminal/WhatsApp/cash).
-   - `GET /admin/referrals` — full referral funnel.
-   - `GET /admin/tiers` / `POST /admin/tiers` — edit pack prices/tags live.
-   - `GET /admin/promos` / `POST /admin/promos` — create seller promo codes.
-3. **Partner (courier shop) console:** `GET /partner/console`, paste a login token; they confirm
-   quote prices and rides at `/partner/quotes` / `/partner/rides` (`role=partner` JWT).
+**Granting an assistant (e.g. a spouse) admin.** Sign in as the owner → Account → Admin console → *Accounts & roles* → set that email to `admin`. Backend: `POST /admin/users/role {"email":"…","role":"admin"}` — superadmin only; the owner's own row can never be demoted, and plain admins **cannot** mint more admins. Admins can reply into support tickets and see stats; only the owner (superadmin) can manage roles and plan codes.
+
+**In-app console (owner & admins).** Account tab → *Admin console* (visible when `GET /me` says `role: "admin"` or `"ops"`). Shows: last-30-day KPI chips, usage analytics KPI (DAU/funnel), **DropOff Predict — next 7 days** heatmap (branch × pickup window), security alerts, fraud queue, **support inbox** (every ticket with unread count, tap to open the thread), branch manager, SMS broadcast, and (owner-only) Users & roles + plan-code generator.
+
+**Support tickets end-to-end (they do work — here's the whole path).**
+1. Seller/anyone signed in in the app → Account → *Chat with DropOff support* → `POST /chat/support` opens/reuses `chat_threads(kind='support')` for their phone.
+2. Owner/admin opens the Admin console → *Support inbox* → the ticket shows with unread badge → tap → full history + reply box. **AI draft reply** pre-writes a suggested answer (Workers AI) — edits fine, never auto-sends; you press send. `POST /chat/support/:id/reply` stores the reply as `sender_role='ops'` and pushes the seller a notification.
+3. Seller sees the reply in *Inbox → Support thread* (`GET /chat/threads`), or via push.
+Tickets live in `chat_threads`/`chat_messages` — inspect with `wrangler d1 execute dropoff-db --remote --command "SELECT kind, count(*) FROM chat_threads GROUP BY kind"`.
+
+**Web console (legacy, still live):** `https://dropoff-api.godfreymoseskalambo.workers.dev/console?key=<ADMIN_AUTH_KEY>`.
 
 **API keys:** `API_AUTH_KEY` = ops/rider devices (`X-Api-Key`), `ADMIN_AUTH_KEY` = owner console
-(`X-Admin-Key`). Never ship these keys inside anything distributed publicly; they are compile-time
+(`X-Admin-Key`, implies superadmin). Never ship these keys inside anything distributed publicly; they are compile-time
 `--dart-define`s and the app uses them only when calling the admin API.
 
+The `partner` role (courier shop console) is minted only by `POST /admin/partners` (admin-guarded). Riders get no stored role — a phone registered in `riders` resolves as `role='rider'` automatically.
+
 ### Still yours to do
-1. **Password:** change the seeded admin password immediately.
-2. **Email sending:** wrangler v4 → `wrangler email sending enable churchonapp.com`; until then reset/verify links return `mail_error` (dev links with `AUTH_DEV_MODE=1`).
-3. **SMS OTP:** set `SMS_USERNAME` / `SMS_API_KEY` / `SMS_SENDER_ID` via `wrangler secret put`.
-4. **Lipila live:** `LIPILA_BASE_URL=https://blz.lipila.io` + live key; disbursements need IP whitelisting.
-5. **Keystore backup:** `app/android/app/upload-keystore.jks` + password backup — losing it = new app signing on Play.
+1. **Email sending:** wrangler v4 → `wrangler email sending enable churchonapp.com`; until then reset/verify links return `mail_error` (dev links with `AUTH_DEV_MODE=1`).
+2. **SMS OTP:** confirm `SMS_*` secrets are set (`wrangler secret list`); until production SMS is live, rider device-link codes can be watched with `AUTH_DEV_MODE=1` only on a local/dev deployment — never in production.
+3. **Lipila live:** `LIPILA_BASE_URL=https://blz.lipila.io` + live key; disbursements need IP whitelisting.
+4. **Keystore backup:** `app/android/app/upload-keystore.jks` + password backup — losing it = new app signing on Play.
 
 ## 9. Marketing kit (this repo)
 
@@ -317,16 +328,90 @@ Sellers get a permanent code (`/refer/code`); a seller who signs up via the code
 
 ## 12. Where the numbers live
 
-`docs/ECONOMICS.md` — paygo/packs/batch math, rider splits, COD remittance flow, per-sweep economics. `docs/PARTNERSHIP.md` — the partner program. `docs/PARTNER_INTEGRATION.md` — POS/system webhook for partner shops.
+`docs/ECONOMICS.md` — paygo/plan/batch math, rider splits, COD remittance flow, Daily Rider economics. `docs/GROWTH.md` — what makes DropOff trendy, the moat strategy, and the seller-acquisition playbook. `docs/PARTNERSHIP.md` — the partner program. `docs/PARTNER_INTEGRATION.md` — POS/system webhook for partner shops. `docs/PLAY_STORE.md` — store listing copy & release notes. `docs/OPERATIONS.md` — ops runbooks (subscriptions, support inbox, offline re-issue).
 
-## 13. Security notes (post-audit 2026-11-05)
+## 13. Security notes (post-audit 2026-11-05, hardened 2026-11-07)
 
 - **Rotate the leaked keys now.** The first app build shipped `API_AUTH_KEY` compiled-in; treat
   that key as burned: `npx wrangler secret put API_AUTH_KEY` (and rebuild rider devices with the
-  new `--dart-define=DROPOFF_API_KEY=…`). The store/custumer build ships **no** key — it authenticates with the JWT only.
+  new `--dart-define=DROPOFF_API_KEY=…`). The store/customer build ships **no** key — it authenticates with the JWT only.
 - The admin password that was once written here is also burned — reset it via Forgot password.
 - Lipila webhooks are **never trusted**: `POST /webhooks/lipila` re-verifies every reported status
   against Lipila's own check-status API before any settlement.
-- Password resets bump `token_version` — all older sessions die instantly.
+- Password resets bump `token_version` — all older sessions die instantly, OTP or password.
 - OTP codes are crypto-random, burn after 5 wrong attempts, and the verify endpoint is IP-throttled.
 - Customer app caches are keyed per-account; no cross-user cache leakage on logout.
+- **Tracking links are no longer bearer tokens.** `GET /track/:token` answers a phone-verification
+  gate (`hint_phone` last-4 only) until the viewer proves a *participant* phone — sender's or
+  recipient's — via `POST /track/:token/verify`, which mints an `X-Track-Grant`
+  (SHA-256 of `JWT_SECRET:token:phone`). Signed-in participants pass automatically via JWT; staff pass via keys.
+  Grants are per-token, checked on every `/track/*` read/chat. Verify + token-chat are throttled **per token**
+  (10 and 20 per 10 min respectively) on top of the per-IP buckets, so one leaked grant cannot flood a thread or brute-force the phone hint.
+  Newly minted tracking tokens expire after **180 days**; expired tokens 404 everywhere.
+- **Recipient identity is enforced, not hinted:** `POST /track/:token/verify` returns `403 phone_does_not_match`
+  for wrong numbers. The tracking payload reports `you_are: sender|recipient|staff` so the app can tag the parcel
+  "Addressed to you — belongs to your number". Nobody else sees parcel data, rider location or events — never prices.
+- `POST /admin/partners` previously required only *a* signed-in session — any customer could self-promote to a
+  partner shop for any courier. It now requires `isAdmin` (owner/admin/admin-key).
+- `/ai/receipt/:ref` and the rider/admin KYC routes existed in source but were registered inside a handler's
+  `catch` block (an unterminated `catch` swallowed the following routes), so they never loaded at module init.
+  Fixed 2026-11-07; a route-registration audit (depth>0 scan) now reports zero swallowed routes — re-run it after any large handler edit.
+- `POST /track/:token/chat` is grant-gated and both per-IP and per-token throttled; `POST /chat/support` is per-IP throttled and profanity-filtered.
+
+## 14. Who signs up how (and how each role sees its screen)
+
+Everyone signs in through the same Account screen; what they see afterwards is driven by the server role (`GET /me`).
+
+| Role | How they get it | What unlocks |
+|---|---|---|
+| **Customer / Sender** | App → Account → Create account (email + password + the momo phone). No approval needed. | Home, Bookings, Business tab (Seller dashboard), pay-as-you-go & subscription plans, support chat. |
+| **Recipient** | Same flow. Use the **phone the parcel was addressed to** — parcels auto-claim by phone match. | Bookings shows **"Parcels for you"** with live tracking; tracking page tags the parcel "Addressed to you". |
+| **Rider** | Ops creates the rider (`POST /admin/riders`) with their phone, OR the rider completes the in-app KYC card (NRC/licence/plate/photos) and an admin approves (`POST /admin/riders/:id/verify`). Sign-in: Account → phone OTP with that phone. | Team tab → personal rider view (jobs, route, COD, targets, verification status). |
+| **Courier partner** | Ops promotes an email account to partner for a depot (`POST /admin/partners {email, courier_id}`, admin-guarded). | Team tab → partner console (counter prices, ride confirms) at `/partner/*`. |
+| **Admin** | Owner promotes the email (`Account → Admin console → Users & roles`, or `POST /admin/users/role`). Owner is always admin+superadmin via `OWNER_PHONE`. | Everything above plus stats, security, fraud, support inbox, branches, SMS. |
+| **Ops** | Devices/builds configured with `API_AUTH_KEY` (`X-Api-Key`). | Ops console APIs (device service account), not superadmin powers. |
+
+**Tracking for recipients (the full path):**
+1. Sender books → Worker mints a tracking token (180-day expiry) → SMS to the recipient: *"Your parcel is on the move — track: APP_URL/track/<token>"*.
+2. Recipient taps the link. The page is gated: last-4 phone hint only. They either **sign in / create a DropOff account with the recipient phone**, or enter the number manually (no account; mints a short-lived `X-Track-Grant`).
+3. Wrong number → `403 phone_does_not_match`. Right number → status, depot branch, courier, rider (name/vehicle/last fix), public event timeline, and a **Predictive ETA** ("Predicted: around tomorrow 10:30 · high confidence", learned from that courier's measured pickup→depot / depot→door history).
+4. Parcels also appear under **Bookings → "Parcels for you"** (`GET /track/incoming`) the moment they're booked — no link-pasting needed. Recipients sign up once with their number and every future parcel sent to it appears automatically, tagged "Addressed to you".
+5. Recipients can chat about the parcel (grant-gated, per-token throttled) — the sender/rider/depot/ops see the same thread.
+
+**How a seller sees the Seller dashboard:** sign in → bottom tab **Business** (only shown when `linked && !rider`):
+plan usage meter, parcels-in-flight, referral link, and **DropOff Predict** (see below).
+**How an owner sees Admin:** Account tab → Admin console → everything above; Users & roles is owner-only.
+**How a rider sees their queue:** sign in with the rider phone → bottom tab **Team** → personal queue/route/targets.
+**How a courier partner sees theirs:** sign in → Team tab → partner list of rides + quote confirms.
+
+## 15. DropOff Predict — the intelligence layer
+
+Explainable heuristics over real job data (no opaque ML, no fake certainty; every number ships with its basis + sample size):
+
+| Surface | Endpoint | What it does |
+|---|---|---|
+| Predictive ETA (tracking page) | `GET /track/:token` → `predicted` | Where the parcel is vs this courier's measured p50 legs → `eta_minutes`, `arrival_by`, `confidence` (high ≥30 samples, medium ≥8, else low), 180-day lookback. Shown on every verified tracking view. |
+| Seller forecast | `GET /predict/seller` | Next-30-day parcel count (least-squares over 6 CAT months blended 50/50 with trailing 3-month average), trend, peak window/weekday, and the cheapest subscription plan that covers the forecast (+ est. savings vs PAYG) and a Daily-Rider-vs-monthly comparison. Shown in Business → DropOff Predict with one-tap plan switch. |
+| Delivery IQ (existing) | `GET /iq/eta` | p50/p90/avg minutes pickup→depot for a courier/window — feeds the booking screen card. |
+| Ops demand heatmap | `GET /admin/demand-forecast` | Next 7 days per depot branch × pickup window (same weekday+window average of trailing 8 weeks, CAT) — staff planning for sweeps; shown in Admin console → DropOff Predict card. |
+
+All four surfaces are gated exactly like their siblings: predictive ETA rides the tracking grant; `/predict/seller` requires any signed-in identity; `/admin/demand-forecast` requires admin/ops.
+`predict` / `forecast` / `IQ` all appear in `workers/src` and docs — grep them to verify coverage.
+
+## 16. Subscription plans & Daily Rider (not "packs")
+
+The subscription product is **subscription plans** — Weekly Sprint K399 (20/7d), Silver K250, Gold K500, Platinum K750 (30-day cycles), and **Daily Rider K49** (1-day cycle, 2 parcels/day included, overage 45% off, on-demand windows including `now`). See `docs/ECONOMICS.md` §2/§5b for economics and `docs/GROWTH.md` for positioning.
+Internal identifiers (`_packs`, `redeemPackCode`, `/admin/pack-codes`) keep the old codename; everything user-facing says **plan**.
+
+## 17. 2026-11-07 release (v0.4.0+7) — what changed
+- Recipient accounts + auto-claimed "Parcels for you" + tracking "Addressed to you" tag + Claim CTA.
+- Tracking hardened: 180-day token expiry, per-token verify/chat throttles, JWT-participant grants, `/admin/partners` admin-guard.
+- DropOff Predict: seller forecast, predictive ETA, ops demand heatmap, one-tap plan switch from Business.
+- Plans: Daily Rider K49 launched; plan allowance now covers pickups, depot collections→door and last-mile legs (one slot per parcel, per-day meter for daily plans).
+- Support: AI draft replies (never auto-send), ticket copy-phone, unread badges; confirmed end-to-end.
+- Fixed: `/ai/receipt/:ref` (AI depot POD) and six co-swallowed routes registered again; `/rider/profile` KYC flow reachable.
+- Home: tagline under the wordmark renders full-width (no more cut-off).
+- "pack" → "subscription plan" across all user-facing copy (app, store listing, legal docs).
+
+## 18. Growth, trendiness & the moat
+See **`docs/GROWTH.md`** — seller-acquisition playbook, retention flywheel, what makes DropOff share-worthy, and the four moats (density, data, trust, plan lock-in) with the 90-day action list.

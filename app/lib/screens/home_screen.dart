@@ -61,13 +61,7 @@ class HomeScreen extends StatelessWidget {
             const DropOffLogo(size: 46),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('DropOff', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: scaleText(context, 25), fontWeight: FontWeight.w900, letterSpacing: -0.7)),
-                Text('WE CARRY IT TO THE COURIER',
-                    maxLines: 2,
-                    softWrap: true,
-                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.25, height: 1.3, color: AppColors.muted)),
-              ]),
+              child: Text('DropOff', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: scaleText(context, 25), fontWeight: FontWeight.w900, letterSpacing: -0.7)),
             ),
             IconButton(
               tooltip: 'Account',
@@ -85,6 +79,21 @@ class HomeScreen extends StatelessWidget {
               child: const Text('🇿🇲  Zambia', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
             ),
           ]),
+          // Tagline lives on its OWN full-width line under the row — it used to
+          // share the header row with the icons and rendered truncated ("WE CAR…").
+          // FittedBox scales it down instead of cutting it off at any width.
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.only(left: 58),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text('WE CARRY IT TO THE COURIER',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: AppColors.muted)),
+            ),
+          ),
           const SizedBox(height: 24),
           Container(
             decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(28)),
@@ -107,7 +116,17 @@ class HomeScreen extends StatelessWidget {
                         style: FilledButton.styleFrom(backgroundColor: AppColors.amber, foregroundColor: AppColors.ink, minimumSize: const Size(0, 52)),
                         onPressed: () => _book(context),
                         icon: const Icon(Icons.add_box_outlined, size: 19),
-                        label: const Text('Book a pickup', softWrap: true),
+                        // FittedBox keeps the label on ONE line at any device
+                        // width / system font size — it shrinks instead of
+                        // wrapping into the icon (the old "Book a collection
+                        // text overlap" bug).
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('Book a pickup', maxLines: 1, softWrap: false, style: TextStyle(
+                            fontSize: scaleText(context, 15),
+                            fontWeight: FontWeight.w800,
+                          )),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -120,7 +139,13 @@ class HomeScreen extends StatelessWidget {
                         ),
                         onPressed: () => _collect(context),
                         icon: const Icon(Icons.inventory_2_outlined, size: 19),
-                        label: const Text('Book a collection', softWrap: true),
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('Book a collection', maxLines: 1, softWrap: false, style: TextStyle(
+                            fontSize: scaleText(context, 15),
+                            fontWeight: FontWeight.w800,
+                          )),
+                        ),
                       ),
                     ),
                   ]),

@@ -150,7 +150,7 @@ class _BookingScreenState extends State<BookingScreen> {
     super.dispose();
   }
 
-  /// Redeem a bulk-paid pack code (sold offline) onto the signed-in number.
+  /// Redeem a bulk-paid plan code (sold offline) onto the signed-in number.
   Future<void> _applyPack() async {
     final code = _pack.text.trim().toUpperCase();
     if (code.isEmpty) return;
@@ -158,15 +158,15 @@ class _BookingScreenState extends State<BookingScreen> {
     if (!mounted) return;
     if (res.ok) {
       setState(() => _packActive = true);
-      final tier = '${res.body['tier'] ?? 'pack'}';
+      final tier = '${res.body['tier'] ?? 'plan'}';
       final end = '${res.body['period_end'] ?? ''}'.split(' ').first;
-      _message('$tier pack activated${end.isEmpty ? '' : ' until $end'} — rider fee covered on this booking.');
+      _message('$tier plan activated${end.isEmpty ? '' : ' until $end'} — rider fee covered on this booking.');
     } else {
       _message(res.error == 'code_not_found'
-          ? 'That pack code was not recognised.'
+          ? 'That plan code was not recognised.'
           : res.error == 'code_used'
-              ? 'That pack code has already been used.'
-              : 'Could not redeem the pack code (${res.error}).');
+              ? 'That plan code has already been used.'
+              : 'Could not redeem the plan code (${res.error}).');
     }
   }
 
@@ -280,7 +280,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
     // Live Lipila collect for mobile-money jobs; the Worker responds with the
     // payment id and the client polls GET /payments/:id/status every 2s.
-    // Pack-covered trips skip payment entirely — the subscription already paid
+    // Plan-covered trips skip payment entirely — the subscription already paid
     // for the rider leg, and the parcels were deducted server-side.
     final inclusion = store.lastBookingPlanInclusion;
     final due = store.lastBookingDueZmw;
@@ -292,15 +292,15 @@ class _BookingScreenState extends State<BookingScreen> {
         final remaining = (used != null && cap != null) ? cap - used : null;
         _message(
           remaining != null && remaining >= 0
-              ? 'Covered by your pack — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted ($remaining left on your plan). No payment due.'
-              : 'Covered by your pack — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted. No payment due.',
+              ? 'Covered by your plan — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted ($remaining left on your plan). No payment due.'
+              : 'Covered by your plan — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted. No payment due.',
         );
       }
     } else if (booking.dispatched && inclusion == 'payg' && used != null && cap != null && used >= cap) {
-      // Pack cap reached: tier overage applied server-side — still collect.
+      // Plan cap reached: tier overage applied server-side — still collect.
       if (_payment == 'Mobile money' && DropOffApi.enabled && store.linked && due != null && due > 0) {
         if (mounted) {
-          _message('Your pack cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.');
+          _message('Your plan cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.');
         }
         final res = await DropOffApi.pay(
           jobRef: booking.serverRef!,
@@ -326,8 +326,8 @@ class _BookingScreenState extends State<BookingScreen> {
         }
       } else if (mounted) {
         _message(due != null && due > 0
-            ? 'Pack cap reached — tier discount applied. K${due.toStringAsFixed(2)} due on this DropOff leg.'
-            : 'Pack cap reached — tier discount applied to this DropOff leg.');
+            ? 'Plan cap reached — tier discount applied. K${due.toStringAsFixed(2)} due on this DropOff leg.'
+            : 'Plan cap reached — tier discount applied to this DropOff leg.');
       }
     } else if (booking.dispatched && DropOffApi.enabled && _payment == 'Mobile money' && store.linked) {
       _message('Sending a Lipila prompt${due != null ? ' for K${due.toStringAsFixed(2)}' : ''} to ${_senderPhone.text}…\nYou pay DropOff only — the courier counter fare stays with the depot.');
@@ -381,7 +381,7 @@ class _BookingScreenState extends State<BookingScreen> {
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
     if (!store.linked) {
-      // Booking requires an identity (pricing, pack deduction and payment all
+      // Booking requires an identity (pricing, plan deduction and payment all
       // hang off the account) — show the sign-up door instead of the form.
       return Scaffold(
         appBar: AppBar(title: const Text('Book a pickup', style: TextStyle(fontWeight: FontWeight.w900))),
@@ -634,13 +634,13 @@ class _BookingScreenState extends State<BookingScreen> {
           enabled: !_packActive,
           textCapitalization: TextCapitalization.characters,
           decoration: InputDecoration(
-            labelText: 'Pack code (paid in bulk)',
+            labelText: 'Plan code (paid in bulk)',
             hintText: 'e.g. DROPW-8F2K',
             prefixIcon: const Icon(Icons.card_membership_outlined),
             suffixIcon: TextButton(onPressed: _packActive ? null : _applyPack, child: const Text('Apply')),
             helperText: _packActive
-                ? 'Pack active — this booking needs no rider-payment prompt.'
-                : 'Bought a pack offline? Enter its code to activate it on your number.',
+                ? 'Plan active — this booking needs no rider-payment prompt.'
+                : 'Bought a plan offline? Enter its code to activate it on your number.',
           ),
         ),
         const SizedBox(height: 14),
@@ -831,7 +831,7 @@ class BookingSuccessScreen extends StatelessWidget {
 
 
 
-/// Shows the signed-in seller which pack is active and how this trip deducts
+/// Shows the signed-in seller which plan is active and how this trip deducts
 /// from it — no more guessing between plan parcels and pay-as-you-go.
 class _PlanBanner extends StatefulWidget {
   final int parcels;
@@ -858,7 +858,7 @@ class _PlanBannerState extends State<_PlanBanner> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
             child: const Text(
-              'Pay-as-you-go — rider fee per trip. Packs from K69 cover the rider fee inside your plan parcels.',
+              'Pay-as-you-go — rider fee per trip. Plans from K69 cover the rider fee inside your plan parcels.',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
             ),
           );
@@ -877,13 +877,13 @@ class _PlanBannerState extends State<_PlanBanner> {
             Row(children: [
               const Icon(Icons.card_membership, size: 17, color: AppColors.forest),
               const SizedBox(width: 8),
-              Expanded(child: Text('$tier pack active — $used of $cap parcels used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest))),
+              Expanded(child: Text('$tier plan active — $used of $cap parcels used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest))),
             ]),
             const SizedBox(height: 5),
             Text(
               covered
                   ? 'This trip deducts ${widget.parcels} parcel${widget.parcels == 1 ? '' : 's'} — $remaining left. Renews $renews.'
-                  : 'Only $remaining left on your $tier pack — this trip pays your tier discount ($pct% off pay-as-you-go). Renews $renews.',
+                  : 'Only $remaining left on your $tier plan — this trip pays your tier discount ($pct% off pay-as-you-go). Renews $renews.',
               style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
             ),
           ]),

@@ -10,7 +10,7 @@ import 'account_screen.dart';
 import 'booking_screen.dart';
 import 'track_screen.dart';
 
-/// The seller's business dashboard: pack usage, parcels in flight, delivered
+/// The seller's business dashboard: plan usage, parcels in flight, delivered
 /// count, referral income — one glance, all server-backed. Shown as a bottom
 /// tab for signed-in sellers (riders keep their Team view; admin keeps theirs).
 class BusinessScreen extends StatefulWidget {
@@ -25,6 +25,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
   Map<String, dynamic>? _packs;
   List<Map<String, dynamic>> _jobs = const [];
   Map<String, dynamic>? _refer;
+  Map<String, dynamic>? _predict;
   bool _loading = true;
 
   /// Plan ladder for upgrade suggestions (matches the worker's TIER_RANK).
@@ -49,6 +50,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       DropOffApi.get('/jobs', store.linkedPhone != null ? {'phone': store.linkedPhone!} : null),
       DropOffApi.referralCode(),
       DropOffApi.plans(),
+      DropOffApi.predictSeller(),
     ]);
     if (!mounted) return;
     setState(() {
@@ -57,6 +59,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
           .cast<Map<String, dynamic>>();
       _refer = results[2] as Map<String, dynamic>?;
       _packs = results[3] as Map<String, dynamic>?;
+      _predict = results[4] as Map<String, dynamic>?;
       _loading = false;
     });
   }
@@ -148,7 +151,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
   }
 
   /// Retention card: the maths that keeps sellers subscribed — pay-for-itself
-  /// (no pack but regular shipping), overage savings (cap exhausted), and
+  /// (no plan but regular shipping), overage savings (cap exhausted), and
   /// renewal-in-window with one tap.
   Widget? _retentionCard() {
     final sub = _sub2;
@@ -158,9 +161,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
       if (s.parcels < 3) return null; // not a regular yet — don't be pushy
       return _banner(
         icon: Icons.trending_up_rounded,
-        title: '3+ parcels a month pays off with a pack',
+        title: '3+ parcels a month pays off with a plan',
         body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying per trip. A Weekly Sprint (K399, 20/cycle) or monthly Silver / Gold / Platinum removes the per-parcel rider cost — most regulars save K${(s.k).toStringAsFixed(0)}+.',
-        cta: 'Browse packs',
+        cta: 'Browse plans',
         onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
       );
     }
@@ -176,9 +179,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
       final label = expired ? 'Renew now' : 'Renew early';
       return _banner(
         icon: Icons.schedule_rounded,
-        title: expired ? 'Your $tier pack has run out' : '$tier pack ends ${'${sub['period_end'] ?? ''}'.split(' ').first}',
+        title: expired ? 'Your $tier plan has run out' : '$tier plan ends ${'${sub['period_end'] ?? ''}'.split(' ').first}',
         body: expired
-            ? (fee > 0 ? 'Renew for K${fee.toStringAsFixed(0)} to keep your pack rate — trips right now bill ad hoc.' : 'Renew to keep your pack rate — trips right now bill ad hoc.')
+            ? (fee > 0 ? 'Renew for K${fee.toStringAsFixed(0)} to keep your plan rate — trips right now bill ad hoc.' : 'Renew to keep your plan rate — trips right now bill ad hoc.')
             : 'Renew now and the cycle starts over — your free-rider parcels stay topped up. We auto-bill 3 days before with a momo prompt.',
         cta: label,
         onCta: _renew,
@@ -191,7 +194,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       final next = nextTier == null ? null : _planOf(nextTier);
       return _banner(
         icon: Icons.savings_outlined,
-        title: 'You outgrew the $tier pack this cycle',
+        title: 'You outgrew the $tier plan this cycle',
         body: next == null
             ? 'Extra parcels keep your ${pct > 0 ? '$pct% overage discount' : 'tier discount'} — you never pay full PAYG price.'
             : '${next['tag'] ?? nextTier!.toUpperCase()} adds ${(next['parcels_per_month'] as num?)?.toInt() ?? 0} parcels for K${(next['fee_zmw'] as num?)?.toStringAsFixed(0) ?? ''} —${pct > 0 ? ' and overages stay $pct% off' : ' pro-rated to the day'}. One tap in Manage.',
@@ -250,7 +253,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
               const Spacer(),
               IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh)),
             ]),
-            const Text('Your pack, your parcels, your referrals — at a glance.', style: TextStyle(color: AppColors.muted, height: 1.4)),
+            const Text('Your plan, your parcels, your referrals — at a glance.', style: TextStyle(color: AppColors.muted, height: 1.4)),
             const SizedBox(height: 16),
             if (_loading)
               const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
@@ -261,6 +264,10 @@ class _BusinessScreenState extends State<BusinessScreen> {
                 retention,
                 const SizedBox(height: 14),
               ],
+              if (_predictCard() != null) ...[
+                _predictCard()!,
+                const SizedBox(height: 14),
+              ],
               _statsRow(),
               const SizedBox(height: 14),
               _inFlightCard(),
@@ -269,6 +276,125 @@ class _BusinessScreenState extends State<BusinessScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// One-tap switch to the recommended plan — same momo-prompt activation
+  /// path as renewing (webhook flips the plan live on payment).
+  Future<void> _switchToPlan(String tier, String label) async {
+    FocusScope.of(context).unfocus();
+    final sub = _sub2;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Momo prompt on its way — approve it to activate $label.')));
+    final res = await DropOffApi.subscribe(
+      tier: tier,
+      pickupWindow: '${sub?['pickup_window'] ?? '10:00'}',
+      city: '${sub?['city'] ?? 'Lusaka'}',
+    );
+    if (!mounted) return;
+    final err = res.error ?? (res.ok ? null : 'Something went wrong.');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(err == null || err.isEmpty ? 'Prompt sent — approve on your phone to activate.' : err),
+    ));
+    if (err == null || err.isEmpty) _load();
+  }
+
+  /// DropOff Predict card: what the seller will likely ship next 30 days,
+  /// and the cheapest plan that covers it. Hidden when the worker has no data.
+  Widget? _predictCard() {
+    final p = _predict;
+    if (p == null) return null;
+    final forecast = (p['forecast_next_30d'] as num?)?.toInt() ?? 0;
+    final trend = (p['trend_parcels_per_month'] as num?)?.toDouble() ?? 0;
+    final confidence = '${p['confidence'] ?? 'low'}';
+    const weekdays = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
+    final wd = (p['peak_weekday'] as num?)?.toInt();
+    final peakDay = wd != null && wd >= 0 && wd <= 6 ? weekdays[wd] : null;
+    final peakWindow = p['peak_window'] as String?;
+    final rec = p['recommended_plan'] as Map<String, dynamic>?;
+    final daily = p['daily_option'] as Map<String, dynamic>?;
+    final basis = '${p['basis'] ?? ''}';
+    final trendUp = trend > 0;
+    final trendFlat = trend == 0;
+    final headline = forecast <= 0
+        ? 'Not enough shipments yet to predict'
+        : '≈ $forecast parcels in the next 30 days';
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: AppColors.forest.withValues(alpha: 0.28), width: 1.3),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.auto_awesome, color: AppColors.forest, size: 20),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('DropOff Predict', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 0.2))),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(8)),
+              child: Text('${confidence.toUpperCase()} CONFIDENCE', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.muted)),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Text(headline, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17, height: 1.25)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 10, runSpacing: 4, children: [
+            if (!trendFlat)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(trendUp ? Icons.trending_up : Icons.trending_down, size: 15, color: trendUp ? AppColors.forest : AppColors.amber),
+                const SizedBox(width: 4),
+                Text('${trendUp ? '+' : ''}${trend.toStringAsFixed(1)} per month', style: const TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w700)),
+              ]),
+            if (peakDay != null)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.calendar_today, size: 13, color: AppColors.muted),
+                const SizedBox(width: 4),
+                Text('Busiest on $peakDay', style: const TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w700)),
+              ]),
+            if (peakWindow != null)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.schedule, size: 13, color: AppColors.muted),
+                const SizedBox(width: 4),
+                Text('$peakWindow window', style: const TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w700)),
+              ]),
+          ]),
+          if (rec != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Best fit: ${(rec['tag'] as String?) ?? '${rec['tier']}'.toUpperCase()} · K${(rec['fee_zmw'] as num?)?.toStringAsFixed(0)}',
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
+                    const SizedBox(height: 2),
+                    Text('Covers ~${rec['parcels_per_month']} parcels — est. save K${(rec['est_savings_zmw'] as num?)?.toStringAsFixed(0) ?? '0'} vs pay-as-you-go',
+                        style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                  ]),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonal(
+                  style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                  onPressed: () => _switchToPlan('${rec['tier']}', '${rec['tag'] ?? rec['tier']}'),
+                  child: const Text('Switch'),
+                ),
+              ]),
+            ),
+          ] else if (daily != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Shipping in bursts? The Daily Rider pass (K49/day, 2 parcels included) likely beats a monthly plan — ${daily['days_needed']} day(s) ≈ K${daily['cost_zmw']}.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+            ),
+          ],
+          const SizedBox(height: 8),
+          if (basis.isNotEmpty)
+            Text(basis, style: const TextStyle(color: AppColors.muted, fontSize: 9.5, height: 1.3)),
+        ]),
       ),
     );
   }
@@ -284,9 +410,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
             const Icon(Icons.card_giftcard_outlined, color: AppColors.forest),
             const SizedBox(width: 12),
             const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('No pack yet', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+              Text('No plan yet', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
               SizedBox(height: 3),
-              Text('Packs bundle the rider — Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+              Text('Subscription plans bundle the rider — Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
             ])),
             FilledButton.tonal(
               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
@@ -309,7 +435,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
           Row(children: [
             const Icon(Icons.workspace_premium_outlined, color: AppColors.forest),
             const SizedBox(width: 10),
-            Expanded(child: Text('$tier pack', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            Expanded(child: Text('$tier plan', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             FilledButton.tonal(
               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
@@ -317,11 +443,23 @@ class _BusinessScreenState extends State<BusinessScreen> {
             ),
           ]),
           const SizedBox(height: 10),
-          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('$used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 30, color: AppColors.forest)),
-            Text(' / $cap parcels used', style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700, height: 2.6)),
-            const Spacer(),
-            Text(used >= cap ? 'Cap reached' : '$remaining left', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.amber)),
+          Row(children: [
+            // alphabetic baseline (instead of the old height:2.6 hack) keeps the
+            // big counter and its caption aligned on every font scale — the
+            // caption used to misalign / render letter-per-line on some sizes.
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text('$used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 30, color: AppColors.forest)),
+                  const SizedBox(width: 5),
+                  Text(' / $cap parcels used', style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+            Text(used >= cap ? 'Cap reached' : '$remaining left', maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.amber)),
           ]),
           const SizedBox(height: 8),
           ClipRRect(
@@ -371,7 +509,19 @@ class _BusinessScreenState extends State<BusinessScreen> {
           Row(children: [
             const Icon(Icons.route_rounded, color: AppColors.forest),
             const SizedBox(width: 8),
-            const Expanded(child: Text('Parcels in flight', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            // maxLines:1 — when both action buttons squeeze the row (small
+            // phones / large system font) an unconstrained title used to wrap
+            // letter-by-letter down the card ("Parcels in flight" vertical
+            // text bug).
+            const Expanded(
+              child: Text(
+                'Parcels in flight',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+              ),
+            ),
             if (_jobs.isNotEmpty)
               TextButton(
                 style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: Size.zero),

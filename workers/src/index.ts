@@ -4,7 +4,8 @@ import {
   Env, Provider, lipilaCollect, lipilaDisburse, lipilaStatus, normalizeZmPhone, providerFromPhone,
 } from './lipila';
 import {
-  generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, signJwt, verifyJwtClaims, verifyPassword,
+  generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
+  verifyJwtClaims, verifyPassword,
 } from './auth';
 import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2 } from './fees';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VEHICLE_MAX_PARCELS, VehicleClass } from './pricing';
@@ -36,16 +37,21 @@ const app = new Hono<{ Bindings: Env; Variables: { phone?: string; role?: 'custo
 //     see baseRiderFee() in pricing.ts.
 //   • Daily Dash removed: not offered for new purchase; existing subscribers
 //     run out their cycle.
-// PlanTier excludes 'daily'.
-type PlanTier = 'weekly' | 'silver' | 'gold' | 'platinum';
+// PlanTier includes 'rider_daily' (the on-demand daily pass).
+// 'daily' is reserved for the long-removed Daily Dash product and is never
+// surfaced even if a stale row lingers in D1.
+type PlanTier = 'rider_daily' | 'weekly' | 'silver' | 'gold' | 'platinum';
 interface PlanDef { fee_zmw: number; windows: string[]; parcels_per_day: number; parcels_per_month: number; rider_fee_zmw: number; overage_discount_pct: number; cycle_days: number; tag?: string | null }
 // Editable live in D1 via /admin/tiers. These are the fallback/seed values.
 // One trip (booking) consumes ONE plan slot no matter how many parcels are in it.
 // Cycle = cycle_days from activation (daily pass = 1 day, weekly = 7, monthly
 // packs = 30); overage keeps the tier discount off PAYG.
 const PLANS: Record<PlanTier, PlanDef> = {
-  // Daily Dash removed per product decision - Pay-as-you-go is the default
-  // (high Yango-competitive rate), Weekly Sprint + monthly packs remain.
+  // Daily Rider: on-demand, Yango-style casual use. Activates instantly on
+  // payment, lasts 24h, includes 2 parcels, overage stays discounted.
+  // (The old Daily Dash was removed per product decision; this is a different,
+  // leaner product re-introduced at the owner's request.)
+  rider_daily: { fee_zmw: 49, windows: ['now', '06:00', '10:00', '14:00'], parcels_per_day: 2, parcels_per_month: 0, rider_fee_zmw: 0, overage_discount_pct: 45, cycle_days: 1, tag: 'Daily Rider' },
   weekly:  { fee_zmw: 399, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 20, rider_fee_zmw: 0, overage_discount_pct: 10, cycle_days: 7, tag: 'Weekly Sprint' },
   silver: { fee_zmw: 250, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 10, rider_fee_zmw: 0, overage_discount_pct: 15, cycle_days: 30 },
   gold:   { fee_zmw: 500, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 25, rider_fee_zmw: 0, overage_discount_pct: 25, cycle_days: 30 },
@@ -55,6 +61,7 @@ const PLANS: Record<PlanTier, PlanDef> = {
 /** DB-backed catalogue (price, per-day cap, tag) â€” constants only as fallback. */
 async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
   const merged: Record<PlanTier, PlanDef> = {
+    rider_daily: { ...PLANS.rider_daily, tag: null },
     weekly: { ...PLANS.weekly, tag: null },
     silver: { ...PLANS.silver, tag: null },
     gold: { ...PLANS.gold, tag: null },
@@ -277,7 +284,9 @@ const PUBLIC_GETS = new Set(['/health', '/couriers', '/cities', '/plans', '/cons
 app.use('*', async (c, next) => {
   const p = c.req.path;
   if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks')) return next();
-  if (p.startsWith('/track/')) return next(); // token IS the credential (GET page + token chat)
+  // '/track/incoming' is the signed-in recipient's parcel list - it needs the
+  // JWT identity, so it does NOT get the public token-credential bypass.
+  if (p.startsWith('/track/') && p !== '/track/incoming') return next(); // token IS the credential (GET page + token chat)
   const isPublicGet = c.req.method === 'GET' && (PUBLIC_GETS.has(p) || /^\/couriers\/\d+\/profile$/.test(p));
   if (isPublicGet) return next();
 
@@ -319,10 +328,11 @@ app.use('*', async (c, next) => {
     c.set('role', 'ops');
     return next();
   }
-  // admin key authorizes /admin/* directly (owner console): the route-level
-  // /admin/* guard still re-checks it below.
-  if (/^\/admin\//.test(p) && c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY) {
-    c.set('role', 'ops');
+  // ADMIN_AUTH_KEY is the superadmin key: it authorizes /admin/* AND every
+  // staff surface (/security/*, /me, …). Minted as role='admin' so route-level
+  // isAdmin()/isSuperAdmin() checks all agree with it.
+  if (c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY) {
+    c.set('role', 'admin');
     return next();
   }
   return c.json({ error: 'unauthorized' }, 401);
@@ -414,8 +424,11 @@ function secureToken(bytes = 18): string {
 
 async function issueTrackingToken(env: Env, jobId: number, jobRef: string, phone: string | null): Promise<string> {
   const token = secureToken(18);
+  // 180-day ceiling on every newly minted link: parcels deliver in days to a
+  // few weeks, so a long-lived shareable URL is pure risk with no upside.
   await env.DB.prepare(
-    'INSERT INTO tracking_tokens (token, job_id, job_ref, phone) VALUES (?1, ?2, ?3, ?4)',
+    `INSERT INTO tracking_tokens (token, job_id, job_ref, phone, expires_at)
+     VALUES (?1, ?2, ?3, ?4, datetime('now', '+180 days'))`,
   ).bind(token, jobId, jobRef, phone).run();
   return token;
 }
@@ -444,6 +457,7 @@ type TrackAccess = {
   senderPhone: string | null;
   recipientPhone: string | null;
   recipientName: string | null;
+  whoAmI?: 'sender' | 'recipient' | 'staff' | null;
 };
 
 async function trackAccess(c: any, token: string): Promise<TrackAccess> {
@@ -462,21 +476,23 @@ async function trackAccess(c: any, token: string): Promise<TrackAccess> {
   if (!job) return { granted: false, ...base };
   // Staff keys (ops console / admin console / rider devices).
   if (c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY || c.req.header('X-Api-Key') === c.env.API_AUTH_KEY) {
-    return { granted: true, ...base };
+    return { granted: true, ...base, whoAmI: 'staff' };
   }
   // Signed-in participant: the app always attaches its JWT when present.
   const bearer = (c.req.header('Authorization') ?? '').replace(/^Bearer\s+/, '');
   if (bearer) {
     const claims = await verifyJwtClaims(bearer, c.env.JWT_SECRET);
     if (claims && (claims.phone === job.sender_phone || claims.phone === job.recipient_phone)) {
-      return { granted: true, ...base };
+      return { granted: true, ...base, whoAmI: claims.phone === job.recipient_phone ? 'recipient' : 'sender' };
     }
   }
   // Phone-verified grant minted by POST /track/:token/verify.
   const grant = c.req.header('X-Track-Grant') ?? '';
   if (grant && grant.length === 64) {
     for (const p of [job.sender_phone, job.recipient_phone]) {
-      if (p && grant === (await trackGrantFor(c.env, token, p))) return { granted: true, ...base };
+      if (p && grant === (await trackGrantFor(c.env, token, p))) {
+        return { granted: true, ...base, whoAmI: p === job.recipient_phone ? 'recipient' : 'sender' };
+      }
     }
   }
   return { granted: false, ...base }; // token valid, viewer unproven
@@ -639,8 +655,13 @@ app.post('/auth/verify', async (c) => {
     return c.json({ error: 'wrong_code' }, 401);
   }
   await c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id).run();
-  // JWT carries token_version 0 (a password reset on auth_users bumps it later)
-  const token = await signJwt(phone, c.env.JWT_SECRET);
+  // JWT carries the account's current token_version — a password reset bumps it
+  // and forces a fresh OTP sign-in; minting ver=0 here used to leave every
+  // OTP session instantly revoked (session_revoked on the first request).
+  const acct = await c.env.DB.prepare(
+    'SELECT COALESCE(token_version, 0) AS ver FROM auth_users WHERE phone = ?1',
+  ).bind(phone).first<{ ver: number }>();
+  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 7, Number(acct?.ver ?? 0));
   return c.json({ ok: true, token, phone });
 });
 
@@ -856,6 +877,14 @@ app.post('/auth/login', async (c) => {
         { ip, device: devId, userAgent: ua, email });
     }
     return c.json({ error: 'invalid_credentials' }, 401);
+  }
+
+  // transparent hash upgrade: legacy (lower-iteration) hashes re-mint to the
+  // current policy on login, so old accounts self-heal over time
+  if (passwordNeedsRehash(user.password_hash)) {
+    const upgraded = await hashPassword(password);
+    await c.env.DB.prepare('UPDATE auth_users SET password_hash = ?2 WHERE email = ?1')
+      .bind(email, upgraded).run();
   }
 
   // successful login — fingerprint the device and alert the owner on a new device
@@ -1109,7 +1138,8 @@ app.post('/jobs', async (c) => {
         ).bind(senderPhone, activeSub.period_start, activeSub.period_end).first<any>();
         planUsed = used?.n ?? 0;
         // No rollover: unused parcels expire with the cycle.
-        planCap = plan.parcels_per_month;
+        // Daily passes (parcels_per_day > 0) cap per day; monthly plans cap per cycle.
+        planCap = plan.parcels_per_day > 0 ? plan.parcels_per_day : plan.parcels_per_month;
         if (planUsed + parcels <= planCap) {
           riderFee = plan.rider_fee_zmw;
           packInclusion = 'pack';
@@ -1382,7 +1412,38 @@ app.post('/collections', async (c) => {
   const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, VEHICLE_MAX_PARCELS[vehicleClass]));
   const payMethod = b.pay_method === 'cash' ? 'cash' : 'mobile_money';
 
-  const riderFee = baseRiderFee('Lusaka', 0, 0, vehicleClass);
+  // Plan inclusion: every parcel counts as one plan slot (two parcels in one
+  // trip = two slots). A trip rides free (rider fee K0) while it fits the cap.
+  // Cycle = the plan's cycle (rider_daily = 1 day, weekly = 7, monthly = 30).
+  // Any normal in-app delivery - door pickup, courier-depot collection, the
+  // optional last mile - draws from the same allowance.
+  const activeSub = await c.env.DB.prepare(
+    `SELECT tier, period_start, period_end FROM subscriptions WHERE phone = ?1 AND status = 'active'
+       AND period_end IS NOT NULL AND period_end > datetime('now')`,
+  ).bind(phone).first<any>();
+  let riderFee = baseRiderFee('Lusaka', 0, 0, vehicleClass);
+  let planInclusion: 'pack' | 'payg' | 'none' = 'none';
+  let planUsed = 0;
+  let planCap = 0;
+  if (activeSub) {
+    const planCatalogue = await plans(c.env.DB);
+    const plan = planCatalogue[activeSub.tier as PlanTier];
+    if (plan && activeSub.period_start && activeSub.period_end) {
+      const used = await c.env.DB.prepare(
+        `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs WHERE sender_phone = ?1
+           AND created_at >= ?2 AND created_at < ?3`,
+      ).bind(phone, activeSub.period_start, activeSub.period_end).first<any>();
+      planUsed = used?.n ?? 0;
+      planCap = plan.parcels_per_day > 0 ? plan.parcels_per_day : plan.parcels_per_month;
+      if (planUsed + parcels <= planCap) {
+        riderFee = plan.rider_fee_zmw;
+        planInclusion = 'pack';
+      } else {
+        planInclusion = 'payg';
+        riderFee = tierOverageFee(activeSub.tier, baseRiderFee('Lusaka', 0, 0, vehicleClass));
+      }
+    }
+  }
   const processing = round2(platformFee(riderFee));
   const total = round2(riderFee + processing);
   const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
@@ -1416,6 +1477,9 @@ app.post('/collections', async (c) => {
     parcels,
     vehicle_class: vehicleClass,
     pay_method: payMethod,
+    plan_inclusion: planInclusion,
+    plan_used: activeSub ? planUsed + (planInclusion === 'pack' ? parcels : 0) : null,
+    plan_cap: activeSub ? planCap : null,
   }, 201);
 });
 
@@ -1921,7 +1985,7 @@ app.get('/track/:token', async (c) => {
   const row = await c.env.DB.prepare(
     `SELECT t.job_id, t.job_ref,
             j.ref, j.status, j.created_at, j.pickup_address, j.dest_city, j.branch,
-            j.recipient_name, j.eta_minutes,
+            j.recipient_name, j.eta_minutes, j.courier_id,
             co.name AS courier_name, co.depot_name AS courier_depot,
             r.full_name AS rider_name, r.vehicle AS rider_vehicle,
             r.last_lat, r.last_lng, r.last_seen_at
@@ -1939,10 +2003,13 @@ app.get('/track/:token', async (c) => {
       WHERE job_id = ?1 AND status IN ('created','rider_assigned','picked_up','at_depot','departed','arrived','delivered','ready_for_collection','partner_confirmed')
       ORDER BY id`,
   ).bind(row.job_id).all();
+  // Smart ETA: p50 of this courier's recent legs applied to where the parcel is.
+  const predicted = await predictEtaForJob(c.env.DB, row, events as any[]).catch(() => null);
   return c.json({
     ref: row.ref,
     status: row.status,
     created_at: row.created_at,
+    predicted,
     pickup_city: (row.pickup_address ?? '').split(',').slice(-1)[0].trim() || null,
     dest_city: row.dest_city,
     // First mile ends at the depot branch the seller nominated — that is what
@@ -1961,6 +2028,7 @@ app.get('/track/:token', async (c) => {
     events,
     // "belongs to" proof shown by the app after a successful grant.
     verified: true,
+    you_are: access.whoAmI ?? null,
     verified_for: access.recipientName ?? null,
   });
 });
@@ -1970,6 +2038,11 @@ app.get('/track/:token', async (c) => {
 // Rate-limited so the gate cannot be brute-forced.
 app.post('/track/:token/verify', async (c) => {
   if (await rateLimited(c, 'track_verify', 15)) return c.json({ error: 'too_many_requests' }, 429);
+  // Per-token throttle too: 10 attempts / hour against ONE link, even from
+  // rotating IPs, so the 30-digit phone hint can't be brute-forced.
+  if (await rateLimited(c, `track_verify_token:${c.req.param('token')}`, 10)) {
+    return c.json({ error: 'too_many_requests' }, 429);
+  }
   const b: any = await c.req.json().catch(() => null);
   let phone = '';
   try { phone = normalizeZmPhone(String(b?.phone ?? '')); } catch { return c.json({ error: 'invalid_phone' }, 400); }
@@ -1991,6 +2064,44 @@ app.post('/track/:token/verify', async (c) => {
     verified_phone: phone,
     is_sender: phone === job.sender_phone,
   });
+});
+
+// Recipient inbox: every live parcel addressed to the signed-in caller's phone,
+// newest first - a recipient who creates a DropOff account gets their parcels
+// automatically, no link-pasting needed. Cancelled/delivered jobs are still
+// listed (the app shows the terminal status rather than hiding it).
+app.get('/track/incoming', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const limit = pageLimit(c.req.query('limit'));
+  const { results } = await c.env.DB.prepare(
+    `SELECT j.ref, j.status, j.created_at, j.dest_city, j.recipient_name,
+            co.name AS courier_name, co.depot_name AS courier_depot,
+            t.token AS tracking_token
+       FROM jobs j
+       LEFT JOIN couriers co ON co.id = j.courier_id
+       LEFT JOIN tracking_tokens t ON t.job_id = j.id
+      WHERE j.recipient_phone = ?1
+      ORDER BY j.id DESC LIMIT ?2`,
+  ).bind(phone, limit).all();
+  const APP_URL = (c.env.APP_URL ?? '').replace(/\/$/, '');
+  const parcels = [] as any[];
+  for (const row of results as any[]) {
+    let token: string | null = row.tracking_token ?? null;
+    if (!token) {
+      // Parcel predates tracking-token issuance - mint one on first read.
+      const jobRow = await c.env.DB.prepare('SELECT id, ref FROM jobs WHERE ref = ?1')
+        .bind(row.ref).first<any>();
+      if (jobRow) token = await issueTrackingToken(c.env, jobRow.id, jobRow.ref, phone);
+    }
+    parcels.push({
+      ref: row.ref, status: row.status, created_at: row.created_at,
+      dest_city: row.dest_city, recipient_name: row.recipient_name,
+      courier: row.courier_name, depot: row.courier_depot,
+      tracking_url: token ? `${APP_URL}/track/${token}` : null,
+    });
+  }
+  return c.json({ parcels });
 });
 
 // Participants/ops can fetch (or mint) their job's share link.
@@ -2064,6 +2175,286 @@ app.get('/iq/eta', async (c) => {
     minutes_p90: p(0.9),
     minutes_avg: avg,
     basis: 'actual pickup→depot times, last 90 days',
+  });
+});
+
+/* --------------------------- DropOff Predict ------------------------------- */
+// Explainable heuristics over real job data - deliberately no opaque ML and no
+// fake certainty. Every number ships with its basis and sample size so the UI
+// can show confidence honestly. Three surfaces:
+//   predictEtaForJob()  - per-parcel "when will it arrive" on the tracking page
+//   GET /predict/seller - the seller's next-30-day forecast + plan pick
+//   GET /admin/demand-forecast - ops heatmap (branch x window x weekday)
+const toMs = (s: unknown): number | null => {
+  const raw = String(s ?? '').trim();
+  if (!raw) return null;
+  const t = raw.replace(' ', 'T');
+  const naive = !/(Z|[+-]\d{2}:?\d{2})$/i.test(t);
+  const ms = Date.parse(naive ? `${t}Z` : t);
+  return Number.isNaN(ms) ? null : ms;
+};
+const CAT_MS = 2 * 3600 * 1000; // Central Africa Time (UTC+2, no DST)
+const percentile = (sorted: number[], q: number) =>
+  sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+const catToday = () => new Date(Date.now() + CAT_MS);
+
+type EtaPrediction = {
+  eta_minutes: number | null;
+  arrival_by: string | null;
+  confidence: 'high' | 'medium' | 'low';
+  sample_count: number;
+  basis: string;
+};
+
+/** Per-parcel arrival prediction from this courier's measured history. The
+ *  parcel flow is created -> picked_up -> at_depot -> (last mile) -> delivered.
+ *  We predict the remaining legs with p50s and never claim more than the data
+ *  supports (low sample -> 'low' confidence + plain-language basis). */
+async function predictEtaForJob(db: D1Database, job: any, events: any[]): Promise<EtaPrediction> {
+  const evList: any[] = Array.isArray(events) ? events : [];
+  const evTime = (s: string) => toMs(evList.find((e: any) => e.status === s)?.created_at);
+  const delivered = evTime('delivered') ?? evTime('ready_for_collection') ?? evTime('partner_confirmed');
+  if (delivered != null) {
+    return {
+      eta_minutes: 0,
+      arrival_by: new Date(delivered).toISOString(),
+      confidence: 'high',
+      sample_count: 0,
+      basis: 'parcel already delivered / ready for collection',
+    };
+  }
+  const { results: hist } = await db.prepare(
+    `SELECT MIN(CASE WHEN e.status = 'picked_up' THEN e.created_at END) AS picked_at,
+            MIN(CASE WHEN e.status = 'at_depot' THEN e.created_at END) AS depot_at,
+            MIN(CASE WHEN e.status = 'delivered' THEN e.created_at END) AS delivered_at
+       FROM jobs j JOIN job_events e ON e.job_id = j.id
+      WHERE j.courier_id = ?1 AND j.id != ?2 AND j.created_at >= datetime('now', '-180 days')
+      GROUP BY j.id LIMIT 200`,
+  ).bind(job.courier_id ?? 0, job.job_id ?? 0).all<any>();
+  const firstMile: number[] = [];
+  const lastMile: number[] = [];
+  for (const h of hist ?? []) {
+    const p = toMs(h.picked_at), d = toMs(h.depot_at), del = toMs(h.delivered_at);
+    if (p != null && d != null && d >= p && d - p < 24 * 3600 * 1000) firstMile.push(Math.round((d - p) / 60000));
+    if (d != null && del != null && del >= d && del - d < 24 * 3600 * 1000) lastMile.push(Math.round((del - d) / 60000));
+  }
+  firstMile.sort((a, b) => a - b);
+  lastMile.sort((a, b) => a - b);
+  const p50fm = firstMile.length ? percentile(firstMile, 0.5) : null;
+  const p50lm = lastMile.length ? percentile(lastMile, 0.5) : null;
+  const sample = Math.max(firstMile.length, lastMile.length);
+  const confidence = sample >= 30 ? 'high' : sample >= 8 ? 'medium' : 'low';
+  const basis = sample === 0
+    ? 'no measured history for this courier yet - shown as a rough estimate'
+    : `courier's last ${sample} parcels (180d): pickup→depot ~${p50fm ?? '?'} min` +
+      (p50lm != null ? `, depot→door ~${p50lm} min` : '');
+  const fm = p50fm ?? 45;
+  const lm = p50lm ?? 45;
+  const now = Date.now();
+  const depot = evTime('at_depot');
+  const picked = evTime('picked_up');
+  let eta: number;
+  if (depot != null) {
+    eta = Math.max(10, lm - Math.round((now - depot) / 60000));
+  } else if (picked != null) {
+    // First mile in flight: remainder of it, then the last mile.
+    eta = Math.max(10, (fm - Math.round((now - picked) / 60000)) + lm);
+  } else {
+    // Not collected yet - full estimate from now.
+    eta = fm + lm;
+  }
+  return {
+    eta_minutes: eta,
+    arrival_by: new Date(now + eta * 60000).toISOString(),
+    confidence,
+    sample_count: sample,
+    basis,
+  };
+}
+
+app.get('/predict/seller', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const db = c.env.DB;
+  const { results: monthRows } = await db.prepare(
+    `SELECT strftime('%Y-%m', datetime(created_at, '+2 hours')) AS ym,
+            COALESCE(SUM(parcels), COUNT(*)) AS n
+       FROM jobs
+      WHERE sender_phone = ?1 AND created_at >= datetime('now', '-183 days') AND status != 'cancelled'
+      GROUP BY ym`,
+  ).bind(phone).all<any>();
+  const byMonth = new Map<string, number>();
+  for (const r of monthRows ?? []) byMonth.set(String(r.ym), Number(r.n) || 0);
+  const now = catToday();
+  const slots: { ym: string; n: number }[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    slots.push({ ym: key, n: byMonth.get(key) ?? 0 });
+  }
+  // Least-squares over the six monthly totals, blended with the trailing
+  // 3-month average (6 points make the raw slope noisy on its own).
+  const ys = slots.map((s) => s.n);
+  const xs = ys.map((_, i) => i);
+  const nPts = xs.length;
+  const sx = xs.reduce((a, b) => a + b, 0);
+  const sy = ys.reduce((a, b) => a + b, 0);
+  const sxx = xs.reduce((a, x) => a + x * x, 0);
+  const sxy = xs.reduce((a, x, i) => a + x * ys[i], 0);
+  const slope = nPts * sxx - sx * sx !== 0 ? (nPts * sxy - sx * sy) / (nPts * sxx - sx * sx) : 0;
+  const intercept = (sy - slope * sx) / nPts;
+  const trendForecast = intercept + slope * 6;
+  const last3 = ys.slice(-3).reduce((a, b) => a + b, 0) / 3;
+  const blended = Math.max(0, Math.round(0.5 * trendForecast + 0.5 * last3));
+
+  const active = await db.prepare(
+    `SELECT COUNT(*) AS k, AVG(rider_fee_zmw) AS avg_fee
+       FROM jobs WHERE sender_phone = ?1 AND created_at >= datetime('now', '-90 days') AND status != 'cancelled'`,
+  ).bind(phone).first<any>();
+  const sample = Number(active?.k ?? 0);
+  const avgFee = Number(active?.avg_fee ?? 45) || 45;
+  const peakWindow = (await db.prepare(
+    `SELECT pickup_window, COUNT(*) AS n FROM jobs
+      WHERE sender_phone = ?1 AND created_at >= datetime('now', '-90 days') AND pickup_window IS NOT NULL
+      GROUP BY pickup_window ORDER BY n DESC LIMIT 1`,
+  ).bind(phone).first<any>())?.pickup_window ?? null;
+  const peakWeekday = (await db.prepare(
+    `SELECT strftime('%w', datetime(created_at, '+2 hours')) AS wd, COUNT(*) AS n FROM jobs
+      WHERE sender_phone = ?1 AND created_at >= datetime('now', '-90 days')
+      GROUP BY wd ORDER BY n DESC LIMIT 1`,
+  ).bind(phone).first<any>())?.wd ?? null;
+
+  // Plan pick: cheapest paid monthly/weekly plan fully covering the forecast.
+  const catalogue = await plans(db);
+  const paid = ['weekly', 'silver', 'gold', 'platinum'] as const;
+  let best: any = null;
+  for (const tier of paid) {
+    const p = catalogue[tier];
+    if (blended > 0 && p.parcels_per_month >= blended) {
+      best = {
+        tier, tag: p.tag ?? null, fee_zmw: p.fee_zmw, parcels_per_month: p.parcels_per_month,
+        est_savings_zmw: Math.round(Math.min(blended, p.parcels_per_month) * avgFee - p.fee_zmw),
+      };
+      break;
+    }
+  }
+  const dailyDays = Math.min(30, Math.ceil(blended / 2));
+  const dailyOption = blended > 0 && dailyDays <= 30
+    ? {
+      days_needed: dailyDays,
+      cost_zmw: dailyDays * catalogue.rider_daily.fee_zmw,
+      note: 'On-demand days - activate only the days you ship. 24h validity, 2 parcels included per day.',
+    }
+    : null;
+  const confidence = sample >= 60 ? 'high' : sample >= 15 ? 'medium' : 'low';
+  return c.json({
+    generated_at: new Date().toISOString(),
+    months: slots,
+    parcels_90d: sample,
+    peak_window: peakWindow,
+    peak_weekday: peakWeekday == null ? null : Number(peakWeekday),
+    forecast_next_30d: blended,
+    trend_parcels_per_month: Math.round(slope * 10) / 10,
+    avg_rider_fee_zmw: Math.round(avgFee * 100) / 100,
+    recommended_plan: best,
+    daily_option: dailyOption,
+    confidence,
+    basis: 'least-squares over the last 6 CAT months, blended 50/50 with the trailing 3-month average',
+  });
+});
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+app.get('/admin/demand-forecast', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const db = c.env.DB;
+  const { results: rows } = await db.prepare(
+    `SELECT COALESCE(NULLIF(TRIM(branch), ''), 'Unspecified') AS branch,
+            COALESCE(NULLIF(pickup_window, ''), 'unscheduled') AS window,
+            CAST(strftime('%w', datetime(created_at, '+2 hours')) AS INTEGER) AS weekday,
+            COUNT(*) AS trips,
+            COALESCE(SUM(parcels), COUNT(*)) AS parcels
+       FROM jobs
+      WHERE created_at >= datetime('now', '-56 days') AND status != 'cancelled'
+      GROUP BY 1, 2, 3`,
+  ).all<any>();
+  // Trailing 56 days = exactly 8 occurrences of each weekday -> divide by 8.
+  const windows = ['06:00', '10:00', '14:00', 'now', 'unscheduled'];
+  type Cell = { [w: string]: number[] }; // window -> 7 weekday means
+  const branches = new Map<string, Cell>();
+  let sampleTrips = 0;
+  let sampleParcels = 0;
+  for (const r of rows ?? []) {
+    const key = String(r.branch);
+    const w = String(r.window);
+    const wd = Number(r.weekday);
+    const parcels = Number(r.parcels) || 0;
+    sampleTrips += Number(r.trips) || 0;
+    sampleParcels += parcels;
+    if (!branches.has(key)) {
+      const cell: Cell = {};
+      for (const win of windows) cell[win] = [0, 0, 0, 0, 0, 0, 0];
+      branches.set(key, cell);
+    }
+    const cell = branches.get(key)!;
+    if (!cell[w]) cell[w] = [0, 0, 0, 0, 0, 0, 0];
+    if (wd >= 0 && wd <= 6) cell[w][wd] += parcels / 8;
+  }
+  const today = catToday();
+  const dayWindowKeys = new Set<string>();
+  for (const cell of branches.values()) for (const w of Object.keys(cell)) dayWindowKeys.add(w);
+  const orderedWindows = [...dayWindowKeys];
+  const days: any[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today.getTime() + i * 86400000);
+    const wd = d.getUTCDay();
+    const perWindow: Record<string, number> = {};
+    let total = 0;
+    for (const w of orderedWindows) {
+      let sum = 0;
+      for (const cell of branches.values()) sum += cell[w]?.[wd] ?? 0;
+      perWindow[w] = Math.round(sum * 10) / 10;
+      total += perWindow[w];
+    }
+    days.push({
+      date: d.toISOString().slice(0, 10),
+      weekday: WEEKDAYS[wd],
+      windows: perWindow,
+      total: Math.round(total * 10) / 10,
+    });
+  }
+  const branchList = [...branches.entries()]
+    .map(([branch, cell]) => {
+      const byWindow: Record<string, number> = {};
+      let sevenDay = 0;
+      for (const w of Object.keys(cell)) {
+        const windowTotal = cell[w].reduce((a, b) => a + b, 0);
+        byWindow[w] = Math.round(windowTotal * 10) / 10;
+        sevenDay += windowTotal; // every weekday occurs exactly once in 7 days
+      }
+      return { branch, predicted_7d_parcels: Math.round(sevenDay * 10) / 10, by_window: byWindow };
+    })
+    .sort((a, b) => b.predicted_7d_parcels - a.predicted_7d_parcels)
+    .slice(0, 12);
+  const sevenDayTotal = branchList.reduce((a, b) => a + b.predicted_7d_parcels, 0);
+  const busiestBranch = branchList[0]?.branch ?? null;
+  const busiestWindow = (() => {
+    const sums: Record<string, number> = {};
+    for (const b of branchList) for (const [w, v] of Object.entries(b.by_window)) sums[w] = (sums[w] ?? 0) + v;
+    const top = Object.entries(sums).sort((a, b) => b[1] - a[1])[0];
+    return top ? top[0] : null;
+  })();
+  return c.json({
+    generated_at: new Date().toISOString(),
+    basis: 'same weekday+window parcel average of the trailing 8 weeks (CAT)',
+    sample_trips_56d: sampleTrips,
+    sample_parcels_56d: sampleParcels,
+    days,
+    branches: branchList,
+    totals: {
+      predicted_7d_parcels: Math.round(sevenDayTotal * 10) / 10,
+      busiest_branch: busiestBranch,
+      busiest_window: busiestWindow,
+    },
   });
 });
 
@@ -2186,6 +2577,11 @@ app.get('/track/:token/chat', async (c) => {
 
 app.post('/track/:token/chat', async (c) => {
   if (await rateLimited(c, 'chat_send', 30, 10)) return c.json({ error: 'too_many_requests' }, 429);
+  // Per-TOKEN throttle on top of the per-IP bucket: one leaked grant must not
+  // be able to flood the thread from rotating IPs.
+  if (await rateLimited(c, `track_chat:${c.req.param('token')}`, 20, 10)) {
+    return c.json({ error: 'too_many_requests' }, 429);
+  }
   const b: any = await c.req.json().catch(() => null);
   const body = String(b?.body ?? '').trim().slice(0, 500);
   if (!body) return c.json({ error: 'body required' }, 400);
@@ -3922,7 +4318,7 @@ app.post('/subscriptions', async (c) => {
     monthly_fee_zmw: plan.fee_zmw, parcels_per_month: plan.parcels_per_month,
     period_start: sub?.period_start, period_end: sub?.period_end,
     cycle_days: plan.cycle_days,
-    note: 'Approve the Lipila prompt to activate your pack. Auto-renewal bills via Lipila 3 days before the cycle ends.',
+    note: 'Approve the Lipila prompt to activate your plan. Auto-renewal bills via Lipila 3 days before the cycle ends.',
   });
 });
 
@@ -4044,7 +4440,7 @@ app.post('/subscriptions/redeem', async (c) => {
 // Pay the difference for the remaining days; the new tier's cap applies the
 // moment the upgrade is requested. Failed/abandoned payments are reverted by
 // the reconciliation sweep using the prevTier stored on the payment row.
-const TIER_RANK: Record<string, number> = { daily: 0, weekly: 1, silver: 2, gold: 3, platinum: 4 };
+const TIER_RANK: Record<string, number> = { rider_daily: 0, daily: 0, weekly: 1, silver: 2, gold: 3, platinum: 4 };
 
 app.post('/subscriptions/upgrade', async (c) => {
   if (await rateLimited(c, 'payment_create', 30)) return c.json({ error: 'too_many_requests' }, 429);
@@ -4194,6 +4590,9 @@ app.post('/admin/jobs/:ref/assign', async (c) => {
 // Promote an email account to a partner shop tied to a courier row.
 // Partner then signs in with that email and uses /partner/* or /partner/console.
 app.post('/admin/partners', async (c) => {
+  // This endpoint mints 'partner' roles - it must never be reachable without
+  // an admin identity (previously any signed-in account could self-promote).
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
   const b: any = await c.req.json().catch(() => null);
   const email = String(b?.email ?? '').trim().toLowerCase();
   const courierId = Number(b?.courier_id ?? 0);
@@ -4908,7 +5307,9 @@ app.post('/admin/support/threads/:id/ai-draft', async (c) => {
     });
     return c.json({ draft: String(out?.response ?? '').trim().slice(0, 1200) });
   } catch (e: any) {
-
+    return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
+  }
+});
 
 // Depot drop-off receipt / POD: the driver attaches a photo to the job
 // (dropoff_photo_url), then AI reads the depot, parcel count, condition and
@@ -4958,9 +5359,6 @@ app.post('/ai/receipt/:ref', async (c) => {
     `INSERT INTO job_events (job_id, status, note) VALUES (?1,'receipt_ai_check',?2)`,
   ).bind(job.id, JSON.stringify(result)).run().catch(() => {});
   return c.json({ ok: true, ref, ...result });
-});
-    return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
-  }
 });
 
 // Rider cash float: COD still sitting with the rider (collected, not yet remitted).

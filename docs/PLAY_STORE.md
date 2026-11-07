@@ -1,6 +1,6 @@
 # Play Store release checklist
 
-App id: `zm.dropoff.dropoff` · current version `0.3.1+2` (`pubspec.yaml`).
+App id: `zm.dropoff.dropoff` - current version `0.4.0+7` (`pubspec.yaml`).
 
 ## 1. Upload keystore (one-time)
 
@@ -83,3 +83,19 @@ to customers. Only `DROPOFF_API_URL` belongs in the Play build.
 - FCM push stays disabled until the Worker secret is set.
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
+
+## 7. What's new in 0.4.0+7 (2026-11-07)
+
+- **You can now track parcels sent to you** — sign up with the phone your parcel was
+  addressed to and every incoming parcel appears automatically ("Parcels for you").
+  Tracking links now require proof that you own that number; strangers with the link see nothing.
+- **DropOff Predict** — the app learns each courier's real speed and shows a predicted
+  arrival on the tracking page, and the Business tab forecasts your next 30 days
+  (with the plan that fits best).
+- **Plans, not packs** — introduce the Daily Rider (K49/day) next to Weekly Sprint and
+  monthly plans; subscription plan benefits now cover every delivery you book.
+- Reliability fixes: chat/support tickets now reliably reachable, and the AI depot
+  proof-of-delivery check is back.
+
+Data safety reminder: the app requests no background location; rider location is
+collected only during active deliveries shown on the map.

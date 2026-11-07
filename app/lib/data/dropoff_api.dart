@@ -619,6 +619,22 @@ class DropOffApi {
 
   static Future<Map<String, dynamic>?> chatThreads() => get('/chat/threads');
 
+  /// Recipient's auto-claimed parcels: every live parcel addressed to the
+  /// signed-in caller's phone, newest first, each with a ready tracking URL.
+  static Future<Map<String, dynamic>?> trackIncoming() =>
+      enabled ? get('/track/incoming') : Future<Map<String, dynamic>?>.value(null);
+
+  // ---- DropOff Predict -------------------------------------------------------
+
+  /// The seller's next-30-day forecast: expected parcels, peak window/weekday,
+  /// trend, and the cheapest plan that covers the forecast (with est. savings).
+  static Future<Map<String, dynamic>?> predictSeller() =>
+      enabled ? get('/predict/seller') : Future<Map<String, dynamic>?>.value(null);
+
+  /// Ops heatmap: predicted parcels for the next 7 days per depot branch and
+  /// pickup window (same weekday+window average of the trailing 8 weeks).
+  static Future<Map<String, dynamic>?> adminDemandForecast() => getAdmin('/admin/demand-forecast');
+
   // ---- staff console: support inbox + user roles ----
 
   /// Admin/ops view of every support ticket ({threads: [{id, phone, last_message, unread, ...}]}).
@@ -707,8 +723,8 @@ class DropOffApi {
   static Future<String?> paymentStatus(String paymentId) async =>
       (await get('/payments/$paymentId/status'))?['status'] as String?;
 
-  /// Seller subscription packs (live prices come from /plans; seeded at Silver
-  /// K250 / Gold K500 / Platinum K750, plus Daily K69 and Weekly K399).
+  /// Seller subscription plans (live prices come from /plans; seeded at Silver
+  /// K250 / Gold K500 / Platinum K750, Weekly K399 and Daily Rider K49).
   /// Cycle length comes from the plan (1 / 7 / 30 days); every parcel counts
   /// as one — even several in the same trip.
   static Future<Map<String, dynamic>?> plans() => get('/plans');
@@ -729,8 +745,8 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> subscription([String? phone]) =>
       phone != null ? get('/subscriptions/$phone') : get('/subscriptions');
 
-  /// Redeem a bulk/offline pack code onto the signed-in seller's number.
-  /// No payment prompt — the pack was already paid for in bulk.
+  /// Redeem a bulk/offline plan code onto the signed-in seller's number.
+  /// No payment prompt — the plan was already paid for in bulk.
   static Future<ApiResponse> redeemPackCode(String code) =>
       post('/subscriptions/redeem', {'code': code});
 
@@ -739,7 +755,7 @@ class DropOffApi {
   static Future<ApiResponse> upgradeSubscription(String tier) =>
       post('/subscriptions/upgrade', {'tier': tier});
 
-  /// Admin: mint pack codes for offline/agent sale.
+  /// Admin: mint plan codes for offline/agent sale.
   static Future<ApiResponse> generatePackCodes({required String tier, int count = 1, String? note}) =>
       post('/admin/pack-codes', {'tier': tier, 'count': count, if (note != null && note.isNotEmpty) 'note': note}, admin: true);
   static Future<Map<String, dynamic>?> packCodes() => getAdmin('/admin/pack-codes');
@@ -774,7 +790,7 @@ class DropOffApi {
         'pay_method': payMethod,
       });
 
-  /// Pay the signed-in seller's pack activation/renewal via Lipila. Poll with
+  /// Pay the signed-in seller's plan activation/renewal via Lipila. Poll with
   /// [paymentStatus]; success flips the subscription to active server-side.
   static Future<ApiResponse> paySubscription({String channel = 'merchant'}) =>
       post('/payments', {

@@ -45,10 +45,17 @@ class _AppShellState extends State<AppShell> {
     final safeIndex = _index < screens.length ? _index : 0;
     return Scaffold(
       body: IndexedStack(index: safeIndex, children: screens),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: safeIndex,
-        onDestinationSelected: goTo,
-        destinations: destinations,
+      // Text scaling is clamped on the bar itself: NavigationBar wraps its
+      // labels vertically (one letter per line) when the system font is large
+      // and 4-5 destinations squeeze the width — the "Business tab text
+      // reading down" misalignment.
+      bottomNavigationBar: MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.35,
+        child: NavigationBar(
+          selectedIndex: safeIndex,
+          onDestinationSelected: goTo,
+          destinations: destinations,
+        ),
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
+import '../screens/account_screen.dart';
 
 /// Recipient parcel tracking — the same view the SMS link opens, reachable
 /// in-app. Paste the tracking link or the token. The SERVER decides who sees
@@ -116,6 +117,10 @@ class _TrackScreenState extends State<TrackScreen> {
           if (_data != null && !gated) ...[
             _statusHeader(_data!),
             const SizedBox(height: 14),
+            if (_claimCard(_data!) != null) ...[
+              _claimCard(_data!)!,
+              const SizedBox(height: 14),
+            ],
             FilledButton.tonalIcon(
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
                 builder: (_) => ChatScreen.token(_resolvedToken!),
@@ -199,9 +204,87 @@ class _TrackScreenState extends State<TrackScreen> {
               label: Text(_verifying ? 'Checking…' : 'Verify & track'),
             ),
           ),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          const Text(
+            'Parcels are tagged to the number they were sent to. Create your own DropOff account with that number and every parcel addressed to you appears here automatically.',
+            style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+                child: const Text('Create account'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextButton(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+                child: const Text('Sign in'),
+              ),
+            ),
+          ]),
         ]),
       ),
     );
+  }
+
+  /// Recipient-only nudge: claim this parcel (and every future one sent to the
+  /// same number) by creating a DropOff account. Hidden when the viewer is the
+  /// signed-in parcel owner (the phone match already tags it to them).
+  Widget? _claimCard(Map<String, dynamic> d) {
+    if (d['you_are'] != 'recipient') return null;
+    final store = AppScope.of(context);
+    if (store.linked) return null;
+    return Card(
+      color: AppColors.amber.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: AppColors.amber.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          const Icon(Icons.inbox_rounded, color: AppColors.amber, size: 26),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('This parcel is addressed to you', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+              const SizedBox(height: 3),
+              const Text('Create your account and it stays here forever — along with everything sent to your number.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          FilledButton(
+            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+            child: const Text('Claim'),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  String? _formatArrival(String? iso) {
+    if (iso == null) return null;
+    final t = DateTime.tryParse(iso);
+    if (t == null) return null;
+    final local = t.toLocal();
+    final now = DateTime.now();
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final sameDay = local.year == now.year && local.month == now.month && local.day == now.day;
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    if (sameDay) return 'today $hh:$mm';
+    final tomorrow = now.add(const Duration(days: 1));
+    if (local.year == tomorrow.year && local.month == tomorrow.month && local.day == tomorrow.day) {
+      return 'tomorrow $hh:$mm';
+    }
+    return '${local.day} ${months[local.month - 1]} $hh:$mm';
   }
 
   Widget _statusHeader(Map<String, dynamic> d) {
@@ -219,14 +302,23 @@ class _TrackScreenState extends State<TrackScreen> {
           Text('${d['pickup_city'] ?? 'Pickup'} → $dropoffPoint',
               style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
           const SizedBox(height: 8),
-          if (d['verified_for'] != null)
+          if (d['you_are'] != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(children: [
-                const Icon(Icons.verified_user, size: 14, color: AppColors.amber),
+                Icon(d['you_are'] == 'recipient' ? Icons.card_giftcard : Icons.verified_user,
+                    size: 14, color: AppColors.amber),
                 const SizedBox(width: 6),
-                Text('Verified ${d['verified_for']} — this is their parcel',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
+                Expanded(
+                  child: Text(
+                    d['you_are'] == 'recipient'
+                        ? 'Addressed to you${d['verified_for'] != null ? ' — ${d['verified_for']}' : ''} · this parcel belongs to your number'
+                        : d['you_are'] == 'sender'
+                            ? 'You sent this parcel'
+                            : 'Tracking as DropOff team',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12),
+                  ),
+                ),
               ]),
             ),
           Text(
@@ -238,6 +330,43 @@ class _TrackScreenState extends State<TrackScreen> {
           if (d['eta_minutes'] != null) ...[
             const SizedBox(height: 6),
             Text('ETA ~${d['eta_minutes']} min', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+          ],
+          if (d['predicted'] is Map<String, dynamic>) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.auto_awesome, size: 15, color: AppColors.amber),
+                const SizedBox(width: 8),
+                Expanded(child: Builder(builder: (context) {
+                  final p = d['predicted'] as Map<String, dynamic>;
+                  final eta = (p['eta_minutes'] as num?)?.toInt();
+                  final arrival = _formatArrival(p['arrival_by'] as String?);
+                  final confidence = '${p['confidence'] ?? ''}';
+                  if (eta == 0) {
+                    return const Text('Delivered — nothing left to wait for',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12.5));
+                  }
+                  return Text(
+                    'Predicted: ${arrival == null ? 'in ~$eta min' : 'around $arrival'} · $confidence confidence',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12.5),
+                  );
+                })),
+              ]),
+            ),
+            if ('${(d['predicted'] as Map)['basis'] ?? ''}'.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Text('${(d['predicted'] as Map)['basis']}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 10, height: 1.3)),
+              ),
+            ],
           ],
         ]),
       );

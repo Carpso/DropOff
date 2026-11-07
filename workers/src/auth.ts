@@ -99,12 +99,12 @@ function fromHex(hex: string): Uint8Array {
   return out;
 }
 
-async function pbkdf2(password: string, salt: Uint8Array): Promise<Uint8Array> {
+async function pbkdf2(password: string, salt: Uint8Array, iterations = PBKDF2_ITERATIONS): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, [
     'deriveBits',
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PBKDF2_ITERATIONS },
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
     key,
     256,
   );
@@ -125,15 +125,29 @@ function constantEq(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** Verifies a password against a stored hash. The iteration count is read from
+ *  the hash itself (format pbkdf2$<iter>$<salt>$<hash>) so hashes minted with an
+ *  older parameter set keep working after PBKDF2_ITERATIONS is raised — a strict
+ *  equality check here silently invalidated every existing account login. */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parts = stored.split('$');
-  if (parts.length !== 4 || Number(parts[1]) !== PBKDF2_ITERATIONS) return false;
+  if (parts.length !== 4) return false;
+  const iterations = Number(parts[1]);
+  if (!Number.isFinite(iterations) || iterations < 1_000 || iterations > 100_000_000) return false;
   try {
-    const hash = await pbkdf2(password, fromHex(parts[2]));
+    const hash = await pbkdf2(password, fromHex(parts[2]), iterations);
     return constantEq(toHex(hash), parts[3]);
   } catch {
     return false;
   }
+}
+
+/** True when a stored hash uses fewer iterations than the current policy —
+ *  re-hash it opportunistically on the next successful login (transparent
+ *  upgrade, the password never touches the DB in clear). */
+export function passwordNeedsRehash(stored: string): boolean {
+  const parts = stored.split('$');
+  return parts.length !== 4 || Number(parts[1]) !== PBKDF2_ITERATIONS;
 }
 
 export function isValidEmail(email: string): boolean {

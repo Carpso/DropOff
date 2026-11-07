@@ -152,6 +152,8 @@ class _AdminScreenState extends State<AdminScreen> {
             const SizedBox(height: 18),
             const _AnalyticsKpiCard(),
             const SizedBox(height: 18),
+            const _DemandForecastCard(),
+            const SizedBox(height: 18),
             _alertsCard(),
             const SizedBox(height: 18),
             _fraudCard(),
@@ -206,7 +208,7 @@ class _AdminScreenState extends State<AdminScreen> {
           ]),
           if (tiers.isNotEmpty) ...[
             const SizedBox(height: 12),
-            const Text('Active packs', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+            const Text('Active plans', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
             const SizedBox(height: 6),
             Wrap(spacing: 8, runSpacing: 6, children: [
               for (final t in tiers)
@@ -328,7 +330,7 @@ class _AdminScreenState extends State<AdminScreen> {
               items: const [
                 DropdownMenuItem(value: 'accounts', child: Text('Registered accounts')),
                 DropdownMenuItem(value: 'sellers', child: Text('All sellers (booked before)')),
-                DropdownMenuItem(value: 'subscribers', child: Text('Active pack subscribers')),
+                DropdownMenuItem(value: 'subscribers', child: Text('Active plan subscribers')),
                 DropdownMenuItem(value: 'all', child: Text('Everyone')),
               ],
               onChanged: (v) => setState(() => _audience = v ?? 'accounts'),
@@ -465,6 +467,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
   List<Map<String, dynamic>> _messages = const [];
   bool _loading = true;
   bool _sending = false;
+  bool _drafting = false;
   final _reply = TextEditingController();
   final _scroll = ScrollController();
 
@@ -505,6 +508,29 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
       return;
     }
     await _load();
+  }
+
+  /// Workers AI draft (never auto-sends) — the reply box fills in, the human presses send.
+  Future<void> _aiDraft() async {
+    if (_drafting) return;
+    setState(() => _drafting = true);
+    final res = await DropOffApi.supportAiDraft(widget.threadId);
+    if (!mounted) return;
+    setState(() => _drafting = false);
+    final draft = '${res.body['draft'] ?? ''}'.trim();
+    if (!res.ok || draft.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(res.ok ? 'AI returned an empty draft — write the reply yourself.' : 'AI draft unavailable: ${res.error ?? 'try again'}'),
+      ));
+      return;
+    }
+    setState(() { _reply.text = draft; });
+    _reply.selection = TextSelection.collapsed(offset: draft.length);
+  }
+
+  void _copyPhone() {
+    Clipboard.setData(ClipboardData(text: widget.phone));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Copied ${widget.phone}')));
   }
 
   @override
@@ -562,9 +588,28 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
           ),
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
-              child: Row(children: [
+            child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
+                child: Row(children: [
+                  TextButton.icon(
+                    onPressed: _drafting ? null : _aiDraft,
+                    icon: _drafting
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.auto_awesome, size: 16),
+                    label: const Text('AI draft reply'),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: _copyPhone,
+                    icon: const Icon(Icons.copy, size: 15),
+                    label: Text(widget.phone, style: const TextStyle(fontSize: 11)),
+                  ),
+                ]),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 2, 14, 12),
+                child: Row(children: [
                 Expanded(
                   child: TextField(
                     controller: _reply,
@@ -580,9 +625,10 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
                   icon: _sending
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.send_rounded),
-                ),
-              ]),
-            ),
+                  ),
+                ]),
+              ),
+            ]),
           ),
         ]),
       ),
@@ -816,7 +862,7 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
   }
 }
 
-/// Mint bulk pack codes for offline/agent sale. Codes activate a pack with no
+/// Mint bulk plan codes for offline/agent sale. Codes activate a plan with no
 /// payment prompt when a seller redeems one on their own number.
 class _PackCodesCard extends StatefulWidget {
   const _PackCodesCard();
@@ -881,12 +927,12 @@ class _PackCodesCardState extends State<_PackCodesCard> {
           Row(children: [
             const Icon(Icons.card_membership_outlined, color: AppColors.forest),
             const SizedBox(width: 10),
-            const Expanded(child: Text('Pack codes (offline sales)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            const Expanded(child: Text('Plan codes (offline sales)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             if (_codes.isNotEmpty)
               TextButton(onPressed: _copyAll, child: const Text('Copy all')),
           ]),
           const SizedBox(height: 4),
-          const Text('Sell packs at the counter or to agents. The seller redeems the code in the app � no payment prompt, the pack goes live instantly.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          const Text('Sell plans at the counter or to agents. The seller redeems the code in the app � no payment prompt, the plan goes live instantly.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
@@ -1314,6 +1360,147 @@ class _KpiMetric extends StatelessWidget {
         const SizedBox(height: 6),
         Text(value, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
       ]),
+    );
+  }
+}
+
+/// DropOff Predict (ops view): predicted parcels for the next 7 days per
+/// depot branch and pickup window (same weekday+window average of the
+/// trailing 8 weeks, CAT). Staffing/bonus planner for the week.
+class _DemandForecastCard extends StatefulWidget {
+  const _DemandForecastCard();
+
+  @override
+  State<_DemandForecastCard> createState() => _DemandForecastCardState();
+}
+
+class _DemandForecastCardState extends State<_DemandForecastCard> {
+  static const _windowOrder = ['06:00', '10:00', '14:00', 'now', 'unscheduled'];
+
+  Map<String, dynamic>? _data;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final data = await DropOffApi.adminDemandForecast();
+    if (!mounted) return;
+    setState(() {
+      _data = data;
+      _loading = false;
+    });
+  }
+
+  List<String> _orderedWindowKeys(List<Map<String, dynamic>> days) {
+    final keys = <String>{};
+    for (final d in days) {
+      keys.addAll(((d['windows'] as Map?) ?? const {}).keys.cast<String>());
+    }
+    final ordered = _windowOrder.where(keys.contains).toList();
+    final rest = keys.where((k) => !ordered.contains(k)).toList()..sort();
+    return [...ordered, ...rest];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final days = (((_data?['days'] as List?) ?? const [])).cast<Map<String, dynamic>>();
+    final branches = (((_data?['branches'] as List?) ?? const [])).cast<Map<String, dynamic>>();
+    final totals = (_data?['totals'] as Map?) ?? const {};
+    final windows = _orderedWindowKeys(days);
+    var maxCell = 0.0;
+    for (final d in days) {
+      final w = (d['windows'] as Map?) ?? const {};
+      for (final v in w.values) {
+        final n = (v as num?)?.toDouble() ?? 0;
+        if (n > maxCell) maxCell = n;
+      }
+    }
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.query_stats, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('DropOff Predict — next 7 days', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 4),
+          Text(
+            _loading
+                ? 'Learning from the last 8 weeks…'
+                : '≈ ${totals['predicted_7d_parcels'] ?? 0} parcels predicted'
+                  '${totals['busiest_branch'] != null ? ' · busiest: ${totals['busiest_branch']}' : ''}'
+                  '${totals['busiest_window'] != null ? ' · window ${totals['busiest_window']}' : ''}',
+            style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+          else if (days.isEmpty)
+            const Text('No bookings in the last 8 weeks to learn from yet.', style: TextStyle(color: AppColors.muted, fontSize: 12.5))
+          else ...[
+            // branch x window heat grid for the busiest branches (top 12)
+            if (branches.isNotEmpty) ...[
+              const Text('By depot branch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              const SizedBox(height: 6),
+              for (final b in branches.take(8))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(children: [
+                    Expanded(
+                      child: Text('${b['branch']}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('${b['predicted_7d_parcels']} parcels', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.forest)),
+                  ]),
+                ),
+            ],
+            const SizedBox(height: 12),
+            const Text('Per day (all branches)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+            const SizedBox(height: 6),
+            Table(
+              defaultColumnWidth: const IntrinsicColumnWidth(),
+              border: TableBorder.all(color: AppColors.line.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(8)),
+              children: [
+                TableRow(children: [
+                  _heatCell('Day', header: true),
+                  for (final w in windows) _heatCell(w, header: true),
+                  _heatCell('Σ', header: true),
+                ]),
+                for (final d in days)
+                  TableRow(children: [
+                    _heatCell('${d['weekday']} ${('${d['date'] ?? ''}'.split('-').length == 3 ? ('${d['date']}').substring(8, 10) : d['date'])}'),
+                    for (final w in windows) _heatCell('${((d['windows'] as Map?) ?? const {})[w] ?? 0}', intensity: maxCell),
+                    _heatCell('${d['total'] ?? 0}', header: true),
+                  ]),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text('${_data?['basis'] ?? ''}', style: const TextStyle(color: AppColors.muted, fontSize: 9.5, height: 1.3)),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _heatCell(String text, {bool header = false, double intensity = 0}) {
+    final v = double.tryParse(text) ?? 0;
+    final alpha = header || intensity <= 0 ? 0.0 : (0.06 + 0.45 * (v / intensity)).clamp(0.06, 0.55);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 44),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      color: header ? AppColors.line.withValues(alpha: 0.35) : AppColors.forest.withValues(alpha: alpha),
+      child: Center(
+        child: Text(text,
+            style: TextStyle(fontSize: header ? 10 : 11, fontWeight: header ? FontWeight.w800 : FontWeight.w700,
+                color: header ? AppColors.ink : AppColors.forest)),
+      ),
     );
   }
 }

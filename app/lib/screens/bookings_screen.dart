@@ -13,6 +13,7 @@ import 'booking_screen.dart';
 import 'chat_screen.dart';
 import 'inbox_screen.dart';
 import 'rider_map_screen.dart';
+import 'track_screen.dart';
 
 class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
@@ -21,20 +22,50 @@ class BookingsScreen extends StatefulWidget {
 }
 
 class _BookingsScreenState extends State<BookingsScreen> {
+  List<Map<String, dynamic>> _incoming = const [];
+
   @override
   void initState() {
     super.initState();
     AnalyticsService.instance.trackScreenView('bookings');
     _refresh();
+    _loadIncoming();
   }
 
   Future<void> _refresh() async {
+    await _loadIncoming();
     if (!mounted) return;
     // Bookings live in the local store; pull-to-refresh re-reads the latest
     // state (outbox retries and server-synced jobs land here automatically).
     await Future<void>.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     setState(() {});
+  }
+
+  /// Parcels addressed to the signed-in caller's phone — claimed automatically,
+  /// no link pasting needed. Auto-tagged because the account phone matches the
+  /// recipient phone on the job.
+  Future<void> _loadIncoming() async {
+    final data = await DropOffApi.trackIncoming();
+    if (!mounted) return;
+    final parcels = (((data?['parcels'] as List?) ?? const []))
+        .cast<Map<String, dynamic>>()
+        .where((p) => '${p['status'] ?? ''}' != 'cancelled')
+        .take(10)
+        .toList();
+    setState(() => _incoming = parcels);
+  }
+
+  Future<void> _openIncoming(Map<String, dynamic> parcel) async {
+    final url = '${parcel['tracking_url'] ?? ''}';
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tracking link not available for this parcel yet.')));
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => TrackScreen(initialToken: url),
+    ));
+    if (mounted) _loadIncoming();
   }
 
   @override
@@ -81,26 +112,36 @@ class _BookingsScreenState extends State<BookingsScreen> {
           child: RefreshIndicator(
             onRefresh: _refresh,
             color: AppColors.forest,
-            child: bookings.isEmpty
-                ? EmptyState(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 26),
+              children: [
+                if (_incoming.isNotEmpty) ...[
+                  _ParcelsForYou(parcels: _incoming, onOpen: _openIncoming),
+                  const SizedBox(height: 14),
+                ],
+                if (bookings.isEmpty)
+                  EmptyState(
                     icon: Icons.inventory_2_outlined,
-                    title: 'No parcels yet',
-                    message: 'Book your first home-to-depot pickup. Your tracking timeline will appear here.',
+                    title: _incoming.isEmpty ? 'No parcels yet' : 'No parcels you sent yet',
+                    message: _incoming.isEmpty
+                        ? 'Book your first home-to-depot pickup. Your tracking timeline will appear here.'
+                        : 'Everything below is addressed to you. When you send a parcel yourself it will appear here too.',
                     action: FilledButton.icon(
                       onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen())),
                       icon: const Icon(Icons.add),
                       label: const Text('Book a pickup'),
                     ),
                   )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 26),
-                    itemCount: bookings.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final booking = bookings[index];
-                      return BookingCard(booking: booking, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: booking.id))));
-                    },
-                  ),
+                else
+                  for (final booking in bookings) ...[
+                    BookingCard(
+                      booking: booking,
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: booking.id))),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+              ],
+            ),
           ),
         ),
       ]),
@@ -647,6 +688,86 @@ class _RatingCardState extends State<_RatingCard> {
         ),
       ),
     ]);
+  }
+}
+
+/// "Parcels for you" — parcels addressed to the signed-in caller's phone,
+/// auto-claimed by phone match. Tap any row to open its live tracking page.
+class _ParcelsForYou extends StatelessWidget {
+  final List<Map<String, dynamic>> parcels;
+  final Future<void> Function(Map<String, dynamic>) onOpen;
+  const _ParcelsForYou({required this.parcels, required this.onOpen});
+
+  static String _statusLabel(String raw) => raw.replaceAll('_', ' ').toUpperCase();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: AppColors.forest.withValues(alpha: 0.35), width: 1.4),
+      ),
+      color: AppColors.forest.withValues(alpha: 0.04),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.mark_email_unread_outlined, color: AppColors.forest, size: 20),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Parcels for you', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                Text('Addressed to your number — tap to track', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
+              ]),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(10)),
+              child: Text('${parcels.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12)),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          for (final p in parcels)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onOpen(p),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                  child: Row(children: [
+                    const Icon(Icons.inventory_2_outlined, size: 17, color: AppColors.forest),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${p['ref'] ?? 'Parcel'} · ${p['courier'] ?? ''}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                        Text('To ${p['dest_city'] ?? 'destination'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                      ]),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.line)),
+                      child: Text(_statusLabel('${p['status'] ?? ''}'),
+                          maxLines: 1,
+                          style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.6, color: AppColors.forest)),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right, size: 18, color: AppColors.muted),
+                  ]),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
   }
 }
 
