@@ -1090,7 +1090,12 @@ class _TiersCardState extends State<_TiersCard> {
     if (!mounted) return;
     if (!pay.ok) {
       setState(() => _busyTier = null);
-      messenger.showSnackBar(SnackBar(content: Text('Plan saved — pay anytime from this screen. (${pay.error})')));
+      // The Lipila prompt never reached the phone (no pending payment is
+      // created on a failed init), so there's nothing to "pay from this
+      // screen" — let the seller resubscribe to retry the prompt.
+      messenger.showSnackBar(SnackBar(content: Text(pay.error == 'lipila_init_failed'
+          ? 'Mobile-money prompt failed to start — check your phone/network and tap the plan again.'
+          : 'Could not start the mobile-money prompt (${pay.error ?? 'network'}). Tap the plan again.')));
       return;
     }
     final paymentId = '${pay.body['payment_id']}';

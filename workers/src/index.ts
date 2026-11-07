@@ -3201,7 +3201,7 @@ app.post('/payments', async (c) => {
     kind === 'job' ? `DropOff ${lipilaRef}`
       : kind === 'subscription' ? 'DropOff pack activation/renewal'
       : 'DropOff wallet top-up');
-  if (!init.ok) return c.json({ error: 'lipila init failed', detail: init.raw }, 502);
+  if (!init.ok) return c.json({ error: 'lipila_init_failed', detail: init.raw }, 502);
 
   const provider: Provider = b.provider ?? providerFromPhone(phone);
   const { meta } = await c.env.DB.prepare(
@@ -4715,7 +4715,7 @@ app.post('/subscriptions/upgrade', async (c) => {
   if (!init.ok) {
     // revert the bump so a failed collect never leaves a free upgrade
     await c.env.DB.prepare('UPDATE subscriptions SET tier = ?2 WHERE id = ?1').bind(sub.id, sub.tier).run();
-    return c.json({ error: 'lipila init failed', detail: init.raw }, 502);
+    return c.json({ error: 'lipila_init_failed', detail: init.raw }, 502);
   }
   const provider: Provider = providerFromPhone(phone);
   await c.env.DB.prepare(
@@ -6015,6 +6015,11 @@ app.get('/admin/stats', async (c) => {
       `SELECT COALESCE(SUM(amount_zmw), 0) AS n FROM platform_disbursements WHERE status = 'success'`,
     ),
     lipila_undistributed: 0, // filled below (earned − swept)
+    // Zambia compliance taxes (ZRA). Turnover = ALL successful payments.
+    // Turnover Tax: 0% to K30,000 annual; 5% above K30,000 (2026 Act).
+    turnover_total: await one(
+      `SELECT COALESCE(SUM(amount_zmw), 0) AS n FROM payments WHERE status = 'success'`,
+    ),
     cod_last_30d: await one(
       `SELECT COALESCE(SUM(cod_collected_zmw), 0) AS n FROM jobs
         WHERE cod_collected_zmw > 0 AND datetime(created_at, '${CAT_OFFSET}') > datetime('now', '-30 days')`,
@@ -6026,6 +6031,25 @@ app.get('/admin/stats', async (c) => {
     referrals_pending: await one(`SELECT COUNT(*) AS n FROM referrals WHERE status = 'pending'`),
     referrals_rewarded: await one(`SELECT COUNT(*) AS n FROM referrals WHERE status = 'rewarded'`),
   };
+  // Compliance taxes (Zambia). Turnover = ALL successful payments (gross).
+  // Turnover Tax (ZRA, 2026 Act): 0% up to K30,000 annual; 5% above K30,000
+  // up to the K5,000,000 turnover-tax ceiling. Above that the business falls
+  // under corporate income tax instead — flagged so you re-register in time.
+  const turnover = Number((stats as any).turnover_total ?? 0);
+  const over = Math.max(0, turnover - 30_000);
+  const turnoverTax = round2(over * 0.05);
+  (stats as any).compliance = {
+    turnover_total_zmw: round2(turnover),
+    turnover_tax_zmw: turnoverTax,
+    turnover_tax_rate: turnover <= 30_000 ? 0 : 0.05,
+    turnover_tax_headroom_zmw: Math.max(0, 5_000_000 - turnover),
+    over_turnover_tax_ceiling: turnover > 5_000_000,
+    note: 'Turnover tax applies to gross sales (all successful payments). ' +
+      'Crossing K5,000,000 moves you to corporate income tax (30%) — re-register with ZRA.',
+  };
+  (stats as any).lipila_undistributed = round2(
+    Number((stats as any).lipila_earned_total ?? 0) - Number((stats as any).business_swept_total ?? 0),
+  );
   return c.json(stats);
 });
 

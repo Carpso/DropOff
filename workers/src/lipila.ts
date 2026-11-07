@@ -114,7 +114,13 @@ export async function lipilaCollect(
   return { ok: res.ok, status: res.status, lipilaReference: ref ? String(ref) : undefined, raw: text };
 }
 
-/** Rider/partner payout. Lipila REQUIRES the server IP whitelisted before this works. */
+/** Rider/partner payout. Lipila's disbursements endpoint does NOT require
+ *  server-IP whitelisting; the whitelist the docs refer to is the payout
+ *  rail's DESTINATION-ACCOUNT whitelist (which momo numbers you may pay
+ *  to), configured in the Lipila merchant dashboard. ChurchOnApp disburses
+ *  via Supabase edge functions with the same pattern and no IP whitelist
+ *  code at all — the account whitelist is the only gate, so add
+ *  BUSINESS_PHONE there. */
 export async function lipilaDisburse(
   env: Env,
   phoneZm: string,
