@@ -6,6 +6,7 @@ export interface Env {
   DB: D1Database;
   LIPILA_BASE_URL: string;        // sandbox https://api.lipila.dev · production https://blz.lipila.io
   LIPILA_API_KEY: string;
+  HUGGINGFACE_TOKEN?: string;
   LIPILA_CALLBACK_URL?: string;   // posted as the callbackUrl header on collect/disburse
   APP_URL?: string;               // links used inside transactional emails
   MAIL_FROM?: string;             // e.g. no-reply@dropoffzm.com (domain must be on Email Sending)

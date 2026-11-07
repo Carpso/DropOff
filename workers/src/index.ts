@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import {
   Env, Provider, lipilaCollect, lipilaDisburse, lipilaStatus, normalizeZmPhone, providerFromPhone,
 } from './lipila';
+import { hfInfer } from './hf';
 import {
   generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
   verifyJwtClaims, verifyPassword,
@@ -5708,7 +5709,15 @@ app.post('/ai/address', async (c) => {
     const parts = text.split(',').map((p) => p.trim()).filter(Boolean);
     return { street: parts[0] ?? text, area: parts[1] ?? '', landmark: parts.slice(2).join(', '), phone: '', notes: '' };
   };
-  if (!c.env.AI) return c.json({ fallback: true, parsed: fallback() });
+  if (!c.env.AI) {
+    const hf = await hfInfer(c.env, 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.', `Address: ${text}`);
+    if (hf) {
+      const start = hf.indexOf('{'), end = hf.lastIndexOf('}');
+      const parsed = start >= 0 && end > start ? JSON.parse(hf.slice(start, end + 1)) : fallback();
+      return c.json({ fallback: false, parsed, raw: hf.slice(0, 400), provider: 'huggingface' });
+    }
+    return c.json({ fallback: true, parsed: fallback() });
+  }
   try {
     const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
       messages: [
@@ -5728,6 +5737,12 @@ app.post('/ai/address', async (c) => {
     const parsed = start >= 0 && end > start ? JSON.parse(raw.slice(start, end + 1)) : fallback();
     return c.json({ fallback: false, parsed, raw: raw.slice(0, 400) });
   } catch {
+    const hf = await hfInfer(c.env, 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.', `Address: ${text}`);
+    if (hf) {
+      const start = hf.indexOf('{'), end = hf.lastIndexOf('}');
+      const parsed = start >= 0 && end > start ? JSON.parse(hf.slice(start, end + 1)) : fallback();
+      return c.json({ fallback: false, parsed, raw: hf.slice(0, 400), provider: 'huggingface' });
+    }
     return c.json({ fallback: true, parsed: fallback() });
   }
 });
@@ -5747,15 +5762,27 @@ app.post('/admin/support/threads/:id/ai-draft', async (c) => {
   const history = ((results ?? []) as any[]).reverse()
     .map((m) => `${m.sender_role === 'ops' ? 'DropOff' : 'Customer'}: ${String(m.body).slice(0, 400)}`).join('\n');
   try {
-    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
-      messages: [
-        { role: 'system', content: 'You are DropOff support in Lusaka, Zambia. Write a short, warm, concrete reply (max 90 words). Never promise refunds or payments you cannot verify; ask for the parcel reference when needed. Output the reply text only.' },
-        { role: 'user', content: `Support ticket history:\n${history}\n\nWrite the next reply from DropOff.` },
-      ],
-      max_tokens: 260,
-    });
-    return c.json({ draft: (typeof out?.response === 'string' ? out.response
-      : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim().slice(0, 1200) });
+    let draft: string | null = null;
+    if (c.env.AI) {
+      try {
+        const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
+          messages: [
+            { role: 'system', content: 'You are DropOff support in Lusaka, Zambia. Write a short, warm, concrete reply (max 90 words). Never promise refunds or payments you cannot verify; ask for the parcel reference when needed. Output the reply text only.' },
+            { role: 'user', content: `Support ticket history:\n${history}\n\nWrite the next reply from DropOff.` },
+          ],
+          max_tokens: 260,
+        });
+        draft = (typeof out?.response === 'string' ? out.response
+          : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim();
+      } catch { draft = null; }
+    }
+    if (!draft) {
+      draft = await hfInfer(c.env,
+        'You are DropOff support in Lusaka, Zambia. Write a short, warm, concrete reply (max 90 words). Never promise refunds or payments you cannot verify; ask for the parcel reference when needed. Output the reply text only.',
+        `Support ticket history:\n${history}\n\nWrite the next reply from DropOff.`);
+    }
+    if (!draft) return c.json({ error: 'ai_unavailable' }, 503);
+    return c.json({ draft: draft.slice(0, 1200) });
   } catch (e: any) {
     return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
   }

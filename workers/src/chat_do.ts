@@ -38,14 +38,15 @@ export class ChatRoom extends DurableObject {
 
     const pair = new WebSocketPair();
     this.ctx.acceptWebSocket(pair[1]);
-    (pair[1] as any).serializeAttachment(client);
+    (pair[1] as any).serializeAttachment({ ...client, threadId });
 
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (typeof message !== 'string') return;
-    let parsed: any;
+    try {
+      if (typeof message !== 'string') return;
+      let parsed: any;
     try { parsed = JSON.parse(message); } catch { return; }
     if (parsed?.type !== 'send') return;
     const body = String(parsed.body ?? '').trim().slice(0, MAX_BODY);
@@ -53,10 +54,9 @@ export class ChatRoom extends DurableObject {
       ws.send(JSON.stringify({ type: 'error', error: 'message_blocked' }));
       return;
     }
-    const client = (ws as any).serializeAttachment() as ClientInfo | undefined;
+    const client = (ws as any).deserializeAttachment() as (ClientInfo & { threadId: number }) | undefined;
     if (!client) { ws.close(1011, 'no identity'); return; }
-
-    const threadId = Number((this.ctx as any).id.name.replace('thread-', ''));
+    const threadId = Number(client.threadId);
     const thread = await this.db.prepare('SELECT id, kind, job_id, phone FROM chat_threads WHERE id = ?1')
       .bind(threadId).first<any>();
     if (!thread) { ws.close(1011, 'thread gone'); return; }
@@ -77,7 +77,10 @@ export class ChatRoom extends DurableObject {
       try { socket.send(outgoing); } catch { /* stale socket — hibernation cleans up */ }
     }
     await this.notifyOthers(thread, client, body).catch(() => {});
+  } catch (e) {
+    console.error('ws webSocketMessage error:', String(e));
   }
+}
 
   private async notifyOthers(thread: any, from: ClientInfo, body: string): Promise<void> {
     const env = this.envAny;

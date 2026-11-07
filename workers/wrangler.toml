@@ -87,3 +87,4 @@ migrations_dir = "migrations"
 #        are shared; prefer dashboard-initiated payouts until Lipila whitelists them
 #      - npx wrangler email sending enable <domain verified in this account>
 #      - AUTH_DEV_MODE stays "0" once SMS secrets are in
+# HUGGINGFACE_TOKEN - optional free HF inference fallback (mistralai/Mistral-7B-Instruct-v0.3); set with: npx wrangler secret put HUGGINGFACE_TOKEN
