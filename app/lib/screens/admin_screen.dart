@@ -1165,14 +1165,18 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     final plateMatch = res.body['plate_match'] == true;
     final nrcMatch = res.body['nrc_match'] == true;
     final face = (res.body['face'] as Map?)?.cast<String, dynamic>();
+    final faceMatch = (res.body['face_match'] as Map?)?.cast<String, dynamic>();
     final faceVerdict = '${face?['verdict'] ?? ''}';
     final faceNote = '${face?['note'] ?? ''}';
     final faceColor = faceVerdict == 'pass' ? AppColors.forest : const Color(0xFFB3261E);
+    final matchSame = '${faceMatch?['same_person'] ?? ''}';
+    final matchLabel = matchSame == 'yes' ? 'SAME PERSON' : matchSame == 'no' ? 'DIFFERENT' : 'UNCERTAIN';
+    final matchColor = matchSame == 'yes' ? AppColors.forest : matchSame == 'no' ? const Color(0xFFB3261E) : const Color(0xFF8A5A00);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('AI document check'),
+        title: const Text('AI KYC identity check'),
         content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Plate match: ${plateMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: plateMatch ? AppColors.forest : const Color(0xFFB3261E))),
           const SizedBox(height: 4),
@@ -1183,6 +1187,16 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
           if (faceNote.isNotEmpty) ...[
             const SizedBox(height: 2),
             Text('AI note: $faceNote', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3)),
+          ],
+          if (faceMatch != null) ...[
+            const SizedBox(height: 4),
+            Text('Selfie vs ID portrait: $matchLabel  (${faceMatch['confidence'] ?? 'low'} confidence)',
+                style: TextStyle(fontWeight: FontWeight.w800, color: matchColor)),
+            if ('${faceMatch['note'] ?? ''}'.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('AI note: ${faceMatch['note']}', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3)),
+              ),
           ],
           const SizedBox(height: 10),
           const Text('Text read from the photo:', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),

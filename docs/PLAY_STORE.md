@@ -1,6 +1,6 @@
 # Play Store release checklist
 
-App id: `zm.dropoff.dropoff` - current version `0.4.3+10` (`pubspec.yaml`).
+App id: `zm.dropoff.dropoff` - current version `0.5.0+11` (`pubspec.yaml`).
 
 ## 1. Upload keystore (one-time)
 
@@ -84,7 +84,14 @@ to customers. Only `DROPOFF_API_URL` belongs in the Play build.
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 7. What is new in 0.4.3+10
+## 7. What is new in 0.5.0+11
+
+- **Sessions that actually stay signed in** - rolling refresh (JWT 30d + grace) and a resilient token
+  mirror. No more random "sign in again every time I leave".
+- **Biometric unlock** (Account -> Privacy & sign-in) - use your fingerprint/face to open the app.
+- **Bug fix: booking a collection** no longer fails silently - it now books or shows a precise error.
+- **iOS prep** (Podfile, Face ID permission) and a **web build** ready for hosting.
+
 
 - **Every account can now have a photo** — riders, sellers, recipients, courier partners, admins.
   Your avatar shows on your account, in chat bubbles, and to support agents. Rider selfies now AI-

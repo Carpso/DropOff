@@ -1,0 +1,45 @@
+# DropOff iOS — Podfile. Run `flutter pub get` then `pod install` from this
+# folder on a Mac, or open ios/Runner.xcworkspace in Xcode. iOS builds require
+# macOS; Windows can only prepare this project, not compile it.
+platform :ios, '13.0'
+
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+def flutter_root
+  generated_config = File.expand_path(File.join('..', 'Flutter', 'generated_config.xcconfig'), __FILE__)
+  unless File.exist?(generated_config)
+    generated_config = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  end
+  unless File.exist?(generated_config)
+    raise "#{generated_config} must exist. If you have not run \"flutter pub get\" in the ../ directory, run it now."
+  end
+  File.foreach(generated_config) do |line|
+    matches = line.match(/FLUTTER_ROOT=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_config}"
+end
+
+require File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper.rb')
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+      # FCM/remote pods may need non-modular headers disabled on newer Xcode.
+      config.build_settings['DEFINES_MODULE'] = 'YES'
+    end
+  end
+end

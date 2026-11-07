@@ -253,7 +253,7 @@ DropOff/
 
 ---
 
-## 6. Deployed (2026-11-08, v0.4.3+10)
+## 6. Deployed (2026-11-08, v0.5.0+11)
 
 - **API:** https://dropoff-api.godfreymoseskalambo.workers.dev — health `GET /health` → `{"ok":true}`
 - **Auth:** email + password accounts (`POST /auth/register`, `POST /auth/login`, PBKDF2-210k, migration `0007_email_auth.sql`) — the JWT still carries the momo **phone** as identity; phone-OTP stays for the ops/rider device-link. Login UI: `AccountScreen` from the Home avatar. PBKDF2 verify is iteration-aware (hashes minted at older iteration counts self-upgrade transparently on next login); OTP sessions carry the account `token_version` so a password reset revokes them too.
@@ -339,6 +339,13 @@ Sellers get a permanent code (`/refer/code`); a seller who signs up via the code
 - Lipila webhooks are **never trusted**: `POST /webhooks/lipila` re-verifies every reported status
   against Lipila's own check-status API before any settlement.
 - Password resets bump `token_version` — all older sessions die instantly, OTP or password.
+- **Sessions roll, they don't linger.** JWT TTL is 30 days; `POST /auth/refresh` re-issues a fresh 30-day
+  JWT for live-or-recent sessions (30-day grace), subject to the same `token_version` revocation. Idle or
+  revoked sessions are dead honestly — the app shows the sign-in door, never a broken shell.
+- **The JWT mirror lives in SharedPreferences** (plaintext) by design and for reliability: Android keystore
+  entries vanish on lock-screen/fingerprint changes. The hardware-backed layer was removed because it silently
+  kicked users out every time they re-enrolled a fingerprint. If a hard requirement to encrypt the token at
+  rest returns, gate it behind biometrics (the "Fingerprint / face unlock" toggle already does this).
 - OTP codes are crypto-random, burn after 5 wrong attempts, and the verify endpoint is IP-throttled.
 - Customer app caches are keyed per-account; no cross-user cache leakage on logout.
 - **Tracking links are no longer bearer tokens.** `GET /track/:token` answers a phone-verification
@@ -406,7 +413,16 @@ All four surfaces are gated exactly like their siblings: predictive ETA rides th
 The subscription product is **subscription plans** — Weekly Sprint K399 (20/7d), Silver K250, Gold K500, Platinum K750 (30-day cycles), and **Daily Rider K49** (1-day cycle, 2 parcels/day included, overage 45% off, on-demand windows including `now`). See `docs/ECONOMICS.md` §2/§5b for economics and `docs/GROWTH.md` for positioning.
 Internal identifiers (`_packs`, `redeemPackCode`, `/admin/pack-codes`) keep the old codename; everything user-facing says **plan**.
 
-## 17. 2026-11-08 release (v0.4.3+10) — what changed
+## 17. 2026-11-08 release (v0.5.0+11) — what changed
+- **Collecting parcels works again** (was 500): jobs always need a non-null `sender_name` (NOT NULL column) — both job paths now fall back to the caller's profile name instead of crashing. Hand-rolled API calls get a clear `400 missing_required_fields` instead of a 500.
+- **"Remember me" actually works now.** The JWT was dying silently on keystore misses; the token now lives in a resilient SharedPreferences mirror (iOS keychain-equivalent fallback), plus a rolling **`POST /auth/refresh`** (renewable session while alive; 30-day JWT + 30-day grace). A revoked/idle-dead token shows the honest sign-in door instead of a broken shell. Trade-off (intentional): sessions are NOT hardware-encrypted at rest anymore (documented in §13); biometric lock is the sanctioned gate.
+- **Biometric app unlock** (Account → Privacy & sign-in → Fingerprint / face unlock): cold start shows a fingerprint/face padlock screen; unlock restores the session instantly — no password re-typing. Biometric success uses the device credential (face / fingerprint / PIN) — `biometricOnly:false` so a failed sensor falls back to PIN, never locks you out. Also extends token TTL from 7 → 30 days.
+- **AI KYC identity assist**: the admin AI check now compares the selfie against the ID portrait (licence, or NRC when it carries one) — `{same_person, confidence, note}` via two vision passes + a text-model compare. Header in the dialog: 'AI KYC identity check'. Advisory only — the admin still approves.
+- **Web build ships**: `flutter build web` works (plugin graph no longer includes the wasm-breaking `flutter_secure_storage_web`); branded manifest/icons/theme, OG/Twitter share cards. Static host it anywhere (Workers Static Assets, R2/Pages, Cloudflare Pages).
+- **iOS prep**: bundle id `zm.dropoff.dropoff` (already), `NSFaceIDUsageDescription`, and a standard CocoaPods Podfile — macOS + Xcode still required to compile; not built on this Windows host.
+- **`tools/build_release.ps1`**: every release build starts with `flutter clean` — no more stale artifacts.
+
+## 18. 2026-11-08 release (v0.4.3+10) — what changed
 - **Universal profile photos**: every account (customer, sender, recipient, seller, rider, partner, admin)
   can upload one avatar — Account → tap the circle (or Add photo). It syncs from `auth_users.photo_url`
   (0044) via `GET /me` → shown on Account, in every chat bubble (signed in users), and on support tickets
@@ -417,7 +433,7 @@ Internal identifiers (`_packs`, `redeemPackCode`, `/admin/pack-codes`) keep the 
 - Rider "Add photo" nudge on Team tab when no selfie on file (0.4.1).
 - Support: ticket list/detail shows customer avatar + AI draft reply (0.4.1 support).
 
-## 18. 2026-11-07 release (v0.4.0+7) — what changed
+## 19. 2026-11-07 release (v0.4.0+7) — what changed
 - Recipient accounts + auto-claimed "Parcels for you" + tracking "Addressed to you" tag + Claim CTA.
 - Tracking hardened: 180-day token expiry, per-token verify/chat throttles, JWT-participant grants, `/admin/partners` admin-guard.
 - DropOff Predict: seller forecast, predictive ETA, ops demand heatmap, one-tap plan switch from Business.
@@ -427,5 +443,5 @@ Internal identifiers (`_packs`, `redeemPackCode`, `/admin/pack-codes`) keep the 
 - Home: tagline under the wordmark renders full-width (no more cut-off).
 - "pack" → "subscription plan" across all user-facing copy (app, store listing, legal docs).
 
-## 19. Growth, trendiness & the moat
+## 20. Growth, trendiness & the moat
 See **`docs/GROWTH.md`** — seller-acquisition playbook, retention flywheel, what makes DropOff share-worthy, and the four moats (density, data, trust, plan lock-in) with the 90-day action list.

@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 
 import 'screens/app_shell.dart';
 import 'screens/bookings_screen.dart';
+import 'screens/lock_screen.dart';
 import 'state/app_store.dart';
 import 'data/dropoff_api.dart';
 import 'data/analytics_service.dart';
 import 'ui/app_theme.dart';
 import 'data/push_service.dart';
+import 'services/device_lock.dart';
 import 'widgets/common.dart';
 
 /// Root navigator so push-notification taps can open Bookings from anywhere.
@@ -68,6 +70,10 @@ class _SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<_SplashScreen> {
+  bool _unlocked = false;
+  bool _authing = false;
+  String? _lockError;
+
   @override
   void initState() {
     super.initState();
@@ -80,9 +86,31 @@ class _SplashScreenState extends State<_SplashScreen> {
     });
   }
 
+  Future<void> _tryUnlock() async {
+    if (_authing) return;
+    setState(() { _authing = true; _lockError = null; });
+    final ok = await DeviceLock.authenticate('Unlock DropOff');
+    if (!mounted) return;
+    setState(() { _authing = false; if (ok) { _unlocked = true; } else { _lockError = 'Not recognized — try again.'; } });
+  }
+
+  /// Password door: drop the session and fall through to the sign-in screen.
+  Future<void> _usePassword() async {
+    await widget.store.unlink();
+    if (!mounted) return;
+    // Unlink wipes credentials; _unlocked stays false so we still show the
+    // gate momentarily — but linked==false now, so we drop straight into the
+    // app with the sign-in door visible.
+    setState(() => _unlocked = true);
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (widget.store.ready) {
+    final store = widget.store;
+    if (store.ready) {
+      if (store.biometricEnabled && store.linked && !_unlocked) {
+        return BiometricLockScreen(onUnlock: _tryUnlock, onUsePassword: _usePassword, busy: _authing, error: _lockError);
+      }
       return const AppShell();
     }
     return Scaffold(

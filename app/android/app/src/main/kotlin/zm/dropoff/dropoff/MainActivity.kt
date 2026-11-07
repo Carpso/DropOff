@@ -1,5 +1,7 @@
 package zm.dropoff.dropoff
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : FlutterActivity()
+// FlutterFragmentActivity (instead of FlutterActivity) is required by
+// biometric prompts (local_auth) - the prompt renders as a Fragment.
+class MainActivity : FlutterFragmentActivity()

@@ -67,7 +67,7 @@ export function baseRiderFee(city: string, lat: number, lng: number,
 
 /** Per-trip rider fee after the plan cap, keeping the tier discount off PAYG. */
 export function tierOverageFee(tier: string, walkUpFeeZmw: number): number {
-  const discount: Record<string, number> = { weekly: 10, silver: 15, gold: 25, platinum: 35 };
+  const discount: Record<string, number> = { weekly: 10, rider_daily: 45, silver: 15, gold: 25, platinum: 35 };
   const pct = discount[tier] ?? 0;
   return round2(Math.max(0, walkUpFeeZmw * (1 - pct / 100)));
 }

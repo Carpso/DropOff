@@ -1,13 +1,14 @@
 {
-    "name": "dropoff",
-    "short_name": "dropoff",
+    "name": "DropOff — We carry it to the courier",
+    "short_name": "DropOff",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#123C32",
-    "theme_color": "#F6B73C",
-    "description": "A new Flutter project.",
+    "theme_color": "#123C32",
+    "description": "Send parcels in Zambia without going anywhere — a rider collects from home, takes your parcel to the courier depot you choose, and tracks it door-to-door.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "lang": "en",
     "icons": [
         {
             "src": "icons/Icon-192.png",

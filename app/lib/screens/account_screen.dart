@@ -16,6 +16,7 @@ import '../screens/chat_screen.dart';
 import '../screens/legal_screen.dart';
 import '../state/app_store.dart';
 import '../ui/app_theme.dart';
+import '../services/device_lock.dart';
 
 /// Email + password sign in / create account (the JWT + phone persist locally;
 /// the ops device-link stays separate under Team).
@@ -231,6 +232,24 @@ class _AccountScreenState extends State<AccountScreen> {
     if (mounted) setState(() {});
   }
 
+  String get _biomeDescription =>
+      'On: opening DropOff asks for your fingerprint or face — your parcels and bookings are nobody else\'s business. Off: the app opens straight away.';
+
+  Future<void> _setBiometric(bool on, AppStore store) async {
+    if (on) {
+      final ok = await DeviceLock.isAvailable;
+      if (!ok) {
+        if (!mounted) return;
+        _snackPhoto('No fingerprint or face enrolled on this device - add one in your phone settings first.');
+        return;
+      }
+    }
+    await store.setBiometricEnabled(on);
+    if (!mounted) return;
+    setState(() {});
+    _snackPhoto(on ? 'Fingerprint/face unlock is on for this phone.' : 'Fingerprint/face unlock is off.');
+  }
+
   // ---- profile photo (every account type) -----------------------------------
 
   Future<void> _editPhoto() async {
@@ -420,6 +439,26 @@ class _AccountScreenState extends State<AccountScreen> {
                 label: const Text('Sign out'),
               ),
             ]))),
+            if (signedIn) ...[
+              const SizedBox(height: 16),
+              Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Row(children: [
+                  Icon(Icons.fingerprint, color: AppColors.forest),
+                  SizedBox(width: 8),
+                  Text('Privacy & sign-in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                ]),
+                const SizedBox(height: 2),
+                Text(_biomeDescription, style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Fingerprint / face unlock', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  subtitle: const Text('Ask for the device biometric to open DropOff on this phone.', style: TextStyle(fontSize: 11.5)),
+                  value: store.biometricEnabled,
+                  onChanged: (v) => _setBiometric(v, store),
+                ),
+              ]))),
+            ],
           ] else ...[
             const Text('Sign in to your account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
             const SizedBox(height: 6),

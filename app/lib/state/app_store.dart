@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../services/secure_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/dropoff_api.dart';
@@ -14,11 +14,15 @@ class AppStore extends ChangeNotifier {
   static const _bookingsKey = 'dropoff_bookings_v1';
   static const _ridersKey = 'dropoff_riders_v1';
   static const _tokenKey = 'dropoff_token_v1';
+  /// Plain-text mirror of the JWT. Android keystore entries die on screen-lock
+  /// changes/fingerprint enrollment — this fallback is why "remember me" works.
+  static const _fallbackTokenKey = 'dropoff_token_fallback_v1';
   static const _secureTokenKey = 'dropoff_token';
   static const _phoneKey = 'dropoff_phone_v1';
   static const _emailKey = 'dropoff_email_v1';
   static const _outboxKey = 'dropoff_outbox_v1';
   static const _rememberKey = 'dropoff_remember_v1';
+  static const _biometricKey = 'dropoff_biometric_v1';
 
   final List<Booking> _bookings = [];
   final List<Rider> _riders = [];
@@ -31,10 +35,10 @@ class AppStore extends ChangeNotifier {
   String? _photoUrl;
   String? _fullName;
   bool _superadmin = false;
+  bool _biometricEnabled = false;
 
-  /// Encrypted at rest (keystore/keychain). The JWT is the only credential that
-  /// grants API access, so it never lives in plaintext SharedPreferences.
-  final _secureStorage = const FlutterSecureStorage();
+  /// Keystore/keychain on mobile; SharedPreferences mirror on web.
+  final _secureStorage = SecureStore();
 
   List<Booking> get bookings => List.unmodifiable(_bookings);
   List<Rider> get riders => List.unmodifiable(_riders);
@@ -61,17 +65,34 @@ class AppStore extends ChangeNotifier {
   /// configured): unlocks user/role management in the admin console.
   bool get isSuperAdmin => _superadmin;
 
+  /// Fingerprint/face gate for this device (Account → Privacy & sign-in).
+  bool get biometricEnabled => _biometricEnabled;
+
+  Future<void> setBiometricEnabled(bool on) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_biometricKey, on);
+    _biometricEnabled = on;
+    notifyListeners();
+  }
+
   Future<void> initialize() async {
     final preferences = await SharedPreferences.getInstance();
     final remember = preferences.getBool(_rememberKey) ?? true;
+    _biometricEnabled = preferences.getBool(_biometricKey) ?? false;
     if (!remember) {
       // Session-only login: drop any persisted credential on cold start.
       await _secureStorage.delete(key: _secureTokenKey);
       await preferences.remove(_tokenKey);
+      await preferences.remove(_fallbackTokenKey);
       await preferences.remove(_phoneKey);
       await preferences.remove(_emailKey);
     }
     _token = await _secureStorage.read(key: _secureTokenKey);
+    _token ??= preferences.getString(_fallbackTokenKey); // keystore hiccups happen
+    if (_token != null && await _secureStorage.read(key: _secureTokenKey) == null) {
+      // Re-seal into the keystore if it's usable again.
+      unawaited(_secureStorage.write(key: _secureTokenKey, value: _token!));
+    }
     DropOffApi.token = _token;
     _linkedPhone = preferences.getString(_phoneKey);
     _email = preferences.getString(_emailKey);
@@ -110,6 +131,23 @@ class AppStore extends ChangeNotifier {
     _ready = true;
     notifyListeners();
     unawaited(flushOutbox());
+    // Rolling session: renew the JWT while the server still vouches for it.
+    // A hard-dead token (revoked password reset / idle past grace) wipes the
+    // credentials but keeps the user's data and shows the honest sign-in door.
+    if (_token != null && DropOffApi.enabled) {
+      final out = await DropOffApi.refreshSession();
+      if (out['dead'] == true) {
+        await unlink();
+      } else if (out['renewed'] == true && out['token'] is String) {
+        _token = out['token'] as String;
+        DropOffApi.token = _token;
+        if (remember) {
+          await _secureStorage.write(key: _secureTokenKey, value: _token!);
+          await preferences.setString(_fallbackTokenKey, _token!);
+        }
+        // remember == false: renew in memory only, never on disk
+      }
+    }
     if (DropOffApi.enabled) unawaited(refreshRole());
   }
 
@@ -255,12 +293,14 @@ class AppStore extends ChangeNotifier {
     if (token != null && remember) {
       await _secureStorage.write(key: _secureTokenKey, value: token);
       await preferences.setString(_tokenKey, token);
+      await preferences.setString(_fallbackTokenKey, token);
       if (_linkedPhone != null) await preferences.setString(_phoneKey, _linkedPhone!);
       if (_email != null) await preferences.setString(_emailKey, _email!);
     } else if (token != null && !remember) {
       // Keep the session in memory only — never write credentials to disk.
       await _secureStorage.delete(key: _secureTokenKey);
       await preferences.remove(_tokenKey);
+      await preferences.remove(_fallbackTokenKey);
       await preferences.remove(_phoneKey);
       await preferences.remove(_emailKey);
     }
@@ -332,6 +372,7 @@ class AppStore extends ChangeNotifier {
     await _secureStorage.delete(key: _secureTokenKey);
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_tokenKey);
+    await preferences.remove(_fallbackTokenKey);
     await preferences.remove(_phoneKey);
     await preferences.remove(_emailKey);
     notifyListeners();

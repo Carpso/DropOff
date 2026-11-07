@@ -436,6 +436,15 @@ async function issueTrackingToken(env: Env, jobId: number, jobRef: string, phone
 const trackingUrl = (env: Env, token: string) =>
   `${(env.APP_URL ?? '').replace(/\/$/, '')}/track/${token}`;
 
+/** The signed-in user's profile name (for NOT NULL job sender columns). Falls
+ *  back to null; callers always layer a final 'DropOff customer' default. */
+async function senderProfileName(db: D1Database, phone: string): Promise<string | null> {
+  const row = await db.prepare(
+    'SELECT full_name FROM auth_users WHERE phone = ?1 LIMIT 1',
+  ).bind(phone).first<{ full_name: string | null }>().catch(() => null);
+  return row?.full_name?.trim() || null;
+}
+
 /* ------------------------ tracking access control ------------------------- */
 // The link ALONE is no longer enough: every /track/:token route requires one of
 //   (a) a JWT whose phone is the sender or recipient of that job (the app's
@@ -606,6 +615,26 @@ app.get('/me', async (c) => {
   });
 });
 
+/* ------------------------------ session refresh --------------------------- */
+// Exchange any live-or-recent JWT for a fresh 30-day one. Unused sessions still
+// die on schedule (30 days + 30-day grace); used ones roll forward silently.
+// The remember-me flag on the client simply always lets the app do this. A
+// password reset still kills everything (token_version check).
+app.post('/auth/refresh', async (c) => {
+  if (await rateLimited(c, 'refresh', 30)) return c.json({ error: 'too_many_requests' }, 429);
+  const bearer = (c.req.header('Authorization') ?? '').replace(/^Bearer\s+/, '');
+  if (!bearer) return c.json({ error: 'unauthorized' }, 401);
+  const claims = await verifyJwtClaims(bearer, c.env.JWT_SECRET, { allowExpiredWithinSeconds: 30 * 24 * 3600 });
+  if (!claims) return c.json({ error: 'unauthorized' }, 401);
+  const user = await c.env.DB.prepare(
+    'SELECT COALESCE(token_version, 0) AS ver FROM auth_users WHERE phone = ?1',
+  ).bind(claims.phone).first<{ ver: number }>();
+  const ver = Number(user?.ver ?? 0);
+  if (user && Number(claims.ver ?? 0) !== ver) return c.json({ error: 'session_revoked' }, 401);
+  const token = await signJwt(claims.phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, ver);
+  return c.json({ ok: true, token, phone: claims.phone });
+});
+
 /* ------------------------------ phone OTP auth ---------------------------- */
 // POST /auth/request {phone}   -> { sent: true, dev_code? }
 // POST /auth/verify {phone, code} -> { token }  (JWT, 30 days)
@@ -670,7 +699,7 @@ app.post('/auth/verify', async (c) => {
   const acct = await c.env.DB.prepare(
     'SELECT COALESCE(token_version, 0) AS ver FROM auth_users WHERE phone = ?1',
   ).bind(phone).first<{ ver: number }>();
-  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 7, Number(acct?.ver ?? 0));
+  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(acct?.ver ?? 0));
   return c.json({ ok: true, token, phone });
 });
 
@@ -1229,11 +1258,26 @@ app.post('/jobs', async (c) => {
       pickupAt = ts;
     }
 
+    // Defensive: never 500 on a NOT NULL job column. The app enforces these,
+    // but a hand-rolled API call shouldn't either crash or get silent nulls.
+    const pickupAddress = b.pickup_address ? String(b.pickup_address).trim() : '';
+    const recName = b.recipient_name ? String(b.recipient_name).trim() : '';
+    const destCity = b.dest_city ? String(b.dest_city).trim() : '';
+    if (!pickupAddress || !recName || !destCity) {
+      return c.json({
+        error: 'missing_required_fields',
+        required: ['pickup_address', 'recipient_name', 'recipient_phone', 'dest_city'].filter((k) => !String(b[k] ?? '').trim()),
+      }, 400);
+    }
+
     const total = round2(totals.total_zmw + returnLegFee);
     const dropOffLeg = totals.dropoff_leg_zmw;
 
     // Wider entropy: date + 5 random chars (the old 2-digit suffix was guessable)
     const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
+    const senderName = String(b.sender_name ?? '').trim()
+      || await senderProfileName(c.env.DB, senderPhone)
+      || 'DropOff customer';
     const { meta } = await c.env.DB.prepare(
       `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, pickup_lat, pickup_lng,
          courier_id, recipient_name, recipient_phone, dest_city, dest_city_to_depot,
@@ -1245,7 +1289,7 @@ app.post('/jobs', async (c) => {
          parcels, vehicle_class, branch, from_city)
        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)`,
     ).bind(
-      ref, senderPhone, b.sender_name, b.pickup_address, b.pickup_lat ?? null, b.pickup_lng ?? null,
+      ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
       b.description ?? '', weightClass, counterPrice, riderFee, leg2Fee, leg2Processing, total,
       promoCode, promoDiscount,
@@ -1407,6 +1451,7 @@ app.post('/collections', async (c) => {
   if (!courierId) return c.json({ error: 'courier_id required' }, 400);
   const courier = await c.env.DB.prepare('SELECT id, name FROM couriers WHERE id = ?1').bind(courierId).first<any>();
   if (!courier) return c.json({ error: 'courier_not_found' }, 404);
+  const phoneName = await senderProfileName(c.env.DB, phone);
   const point = String(b.point ?? '').trim();
   if (point.length < 2) return c.json({ error: 'collection_point_required' }, 400);
   const recipientName = String(b.recipient_name ?? '').trim();
@@ -1456,7 +1501,7 @@ app.post('/collections', async (c) => {
   const processing = round2(platformFee(riderFee));
   const total = round2(riderFee + processing);
   const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
-
+  const senderName = String(b.sender_name ?? '').trim() || phoneName || 'DropOff customer';
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
@@ -1464,7 +1509,7 @@ app.post('/collections', async (c) => {
        pickup_time, pickup_window, pay_method, last_mile, parcels, vehicle_class, from_city)
      VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,1,?16,?17,'Lusaka')`,
   ).bind(
-    ref, phone, String(b.sender_name ?? '').trim() || null, point, courierId,
+    ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
     String(b.description ?? 'Collection').trim().slice(0, 200), String(b.weight_class ?? '0-5kg'),
     riderFee, processing, total, window, payMethod, parcels, vehicleClass,
@@ -4927,6 +4972,45 @@ async function analyzeSelfieFace(env: Env, bytes: number[]): Promise<FaceCheck> 
   };
 }
 
+/** AI assist: does the selfie depict the same person as the portrait on an ID
+ *  document (licence, or NRC/permit when it carries one)? Single-image model
+ *  calls (no multi-image input), then a text model compares the two
+ *  descriptions. British: heuristic — the admin always decides. */
+async function compareFaceToId(env: Env, selfieBytes: number[], portraitBytes: number[]): Promise<{
+  same_person: 'yes' | 'uncertain' | 'no';
+  confidence: 'high' | 'medium' | 'low';
+  note: string;
+}> {
+  const describe = async (bytes: number[], hint: string) => {
+    const out: any = await (env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+      image: bytes,
+      prompt: `This is ${hint}. Describe this person's VISIBLE face as plainly as possible (gender presentation, apparent age range, hair style/colour, glasses, facial hair, skin tone, distinguishing marks). One sentence, no identity guesses, no comparisons yet.`,
+      max_tokens: 120,
+    });
+    return String(out?.response ?? out?.description ?? '').trim().slice(0, 300);
+  };
+  const selfieDesc = await describe(selfieBytes, "a rider's selfie");
+  const idDesc = await describe(portraitBytes, 'the portrait on an ID document');
+  const out: any = await (env.AI as any).run('@cf/meta/llama-3.1-8b-instruct', {
+    messages: [
+      { role: 'system', content: 'You compare two interview-grade facial descriptions for consistency. Be conservative: if either is vague, answer uncertain. Reply with JSON ONLY.' },
+      { role: 'user', content: `Description A (selfie): ${selfieDesc}\nDescription B (ID portrait): ${idDesc}\nDecide if these likely depict the same person. Reply with JSON ONLY: {"same_person":"yes"|"uncertain"|"no","confidence":"high"|"medium"|"low","note":"<one short sentence>"}` },
+    ],
+    max_tokens: 120,
+  });
+  const raw = String(out?.response ?? '').trim();
+  const m = raw.match(/\{[\s\S]*\}/);
+  let j: any = {};
+  try { j = m ? JSON.parse(m[0]) : {}; } catch { j = {}; }
+  const sp = String(j.same_person ?? 'uncertain').toLowerCase();
+  const same_person = sp === 'yes' || sp === 'no' ? sp : 'uncertain';
+  const confidence = (['high', 'medium', 'low'] as const).includes(String(j.confidence) as 'high' | 'medium' | 'low') ? (String(j.confidence) as 'high' | 'medium' | 'low') : 'low';
+  return {
+    same_person, confidence,
+    note: String(j.note ?? `selfie: ${selfieDesc} | id: ${idDesc}`).slice(0, 220),
+  };
+}
+
 /** Merge-or-write the face check into ai_check_json on the rider row. */
 async function persistFaceCheck(db: D1Database, riderId: number, face: FaceCheck): Promise<void> {
   const row = await db.prepare('SELECT ai_check_json FROM riders WHERE id = ?1').bind(riderId).first<any>();
@@ -4942,7 +5026,7 @@ app.post('/admin/riders/:id/ai-check', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
   const id = Number(c.req.param('id'));
   const rider = await c.env.DB.prepare(
-    `SELECT id, plate_number, nrc_number, plate_photo_url, nrc_photo_url, photo_url FROM riders WHERE id = ?1`,
+    `SELECT id, plate_number, nrc_number, plate_photo_url, nrc_photo_url, license_photo_url, photo_url FROM riders WHERE id = ?1`,
   ).bind(id).first<any>();
   if (!rider) return c.json({ error: 'not found' }, 404);
   if (!c.env.AI) return c.json({ error: 'ai_unavailable' }, 503);
@@ -4969,15 +5053,28 @@ app.post('/admin/riders/:id/ai-check', async (c) => {
   const nrcMatch = !!rider.nrc_number && found.includes(norm(String(rider.nrc_number)));
   // Selfie face review rides the same button: one AI pass for the whole KYC.
   let face: FaceCheck | null = null;
+  let selfieBytesLocal: number[] | null = null;
   const selfieKey = rider.photo_url ? r2KeyFromUrl(rider.photo_url) : null;
   if (selfieKey) {
     const selfie = await c.env.BACKUPS.get(selfieKey).catch(() => null);
     if (selfie) {
-      try { face = await analyzeSelfieFace(c.env, [...new Uint8Array(await selfie.arrayBuffer())]); }
+      selfieBytesLocal = [...new Uint8Array(await selfie.arrayBuffer())];
+      try { face = await analyzeSelfieFace(c.env, selfieBytesLocal); }
       catch { face = null; }
     }
   }
-  const result = { text, plate_match: plateMatch, nrc_match: nrcMatch, face, checked_at: new Date().toISOString() };
+  // Face-vs-portrait match: selfie vs the portrait on the licence (or the NRC
+  // when it carries one). AI assist only - the admin still approves.
+  let faceMatch: { same_person: 'yes' | 'uncertain' | 'no'; confidence: 'high' | 'medium' | 'low'; note: string } | null = null;
+  const portraitKey = r2KeyFromUrl(rider.license_photo_url) ?? r2KeyFromUrl(rider.nrc_photo_url);
+  if (portraitKey && selfieBytesLocal) {
+    const portrait = await c.env.BACKUPS.get(portraitKey).catch(() => null);
+    if (portrait) {
+      try { faceMatch = await compareFaceToId(c.env, selfieBytesLocal, [...new Uint8Array(await portrait.arrayBuffer())]); }
+      catch { faceMatch = null; }
+    }
+  }
+  const result = { text, plate_match: plateMatch, nrc_match: nrcMatch, face, face_match: faceMatch, checked_at: new Date().toISOString() };
   await c.env.DB.prepare('UPDATE riders SET ai_check_json = ?2 WHERE id = ?1')
     .bind(id, JSON.stringify(result)).run().catch(() => {});
   return c.json({ ok: true, ...result, submitted_plate: rider.plate_number, submitted_nrc: rider.nrc_number });
@@ -6018,7 +6115,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
              counter_price_zmw, rider_fee_zmw, total_zmw, pay_method)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'mobile_money')`,
         ).bind(
-          ref, plan.phone, null, plan.pickup_address ?? null, plan.courier_id,
+          ref, plan.phone, plan.sender_name || 'DropOff customer', plan.pickup_address ?? 'Address on file', plan.courier_id,
           plan.recipient_name ?? null, plan.recipient_phone ?? null, plan.dest_city,
           plan.description ?? (freqLabel(plan.frequency) + ' standing order'),
           plan.weight_class ?? '0-5kg',

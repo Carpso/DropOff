@@ -50,7 +50,7 @@ export function generateEmailToken(): string {
 interface JwtPayload { phone: string; exp: number; ver?: number } // ver = token_version (session revocation)
 
 export async function signJwt(
-  phone: string, secret: string, ttlSeconds = 60 * 60 * 24 * 7, ver = 0,
+  phone: string, secret: string, ttlSeconds = 60 * 60 * 24 * 30, ver = 0,
 ): Promise<string> {
   const header = b64urlJson({ alg: 'HS256', typ: 'JWT' });
   const payload = b64urlJson({ phone, exp: Math.floor(Date.now() / 1000) + ttlSeconds, ver } satisfies JwtPayload);
@@ -64,8 +64,10 @@ export async function verifyJwt(token: string, secret: string): Promise<string |
   return claims?.phone ?? null;
 }
 
-/** Returns phone + token_version when the JWT is valid and unexpired, else null. */
-export async function verifyJwtClaims(token: string, secret: string): Promise<JwtPayload | null> {
+/** Returns phone + token_version when the JWT is valid and within its expiry
+ *  (or within [opts.allowExpiredWithinSeconds] past expiry - used by the refresh
+ *  session flow), else null. */
+export async function verifyJwtClaims(token: string, secret: string, opts?: { allowExpiredWithinSeconds?: number }): Promise<JwtPayload | null> {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   const [header, payload, sig] = parts;
@@ -75,7 +77,8 @@ export async function verifyJwtClaims(token: string, secret: string): Promise<Jw
     const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
     const json = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
     const data = JSON.parse(json) as JwtPayload;
-    if (!data.phone || data.exp * 1000 < Date.now()) return null;
+    const graceMs = (opts?.allowExpiredWithinSeconds ?? 0) * 1000;
+    if (!data.phone || data.exp * 1000 < Date.now() - graceMs) return null;
     return data;
   } catch {
     return null;

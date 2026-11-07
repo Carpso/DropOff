@@ -541,6 +541,31 @@ class DropOffApi {
     return res.ok ? res.body : null;
   }
 
+  /// POST /auth/refresh — renew the stored JWT while the server still vouches
+  /// for it (grace window). Result: {renewed, token} when renewed;
+  /// {dead: true} when the token is permanently rejected; { } otherwise
+  /// (transient failure - the caller keeps the session).
+  static Future<Map<String, dynamic>> refreshSession() async {
+    if (!enabled || token == null) return const {'renewed': false, 'dead': false};
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/refresh'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+      ).timeout(_timeout);
+      if (res.statusCode == 200) {
+        final j = jsonDecode(res.body) as Map<String, dynamic>?;
+        final t = j?['token'] as String?;
+        return {'renewed': t != null, 'token': t, 'dead': false};
+      }
+      if (res.statusCode == 401 || res.statusCode == 403) {
+        return const {'renewed': false, 'dead': true};
+      }
+      return const {'renewed': false, 'dead': false};
+    } catch (_) {
+      return const {'renewed': false, 'dead': false};
+    }
+  }
+
   // ---- recipient tracking (verification-gated) ----
   // The shared link alone never opens the parcel: the Worker answers with
   // requires_verification + a last-4 phone hint until the viewer proves a
