@@ -91,10 +91,10 @@ export async function verifyJwtClaims(token: string, secret: string, opts?: { al
 }
 
 /* ------------------------------ password auth ----------------------------- */
-// PBKDF2-SHA256, 210k iterations, 32-byte hash, random 16-byte salt.
+// PBKDF2-SHA256, 100k iterations (Workers runtime caps at 100k), 32-byte hash, random 16-byte salt.
 // Stored as: pbkdf2$100000$<saltHex>$<hashHex>
 
-const PBKDF2_ITERATIONS = 210_000;
+const PBKDF2_ITERATIONS = 100_000;
 
 function toHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');

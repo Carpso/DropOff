@@ -1,4 +1,4 @@
-﻿import { Hono } from 'hono';
+import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import {
   Env, Provider, lipilaCollect, lipilaDisburse, lipilaStatus, normalizeZmPhone, providerFromPhone,
@@ -24,18 +24,18 @@ const app = new Hono<{ Bindings: Env; Variables: { phone?: string; role?: 'custo
 
 /* ------------------------- seller subscription packs ----------------------- */
 // MODEL (post-reprice, Daily Dash removed):
-//   • Plans are monthly: Silver K250 / 10 trips, Gold K500 / 25 trips,
+//   � Plans are monthly: Silver K250 / 10 trips, Gold K500 / 25 trips,
 //     Platinum K750 / 50 trips. Plus Weekly Sprint K399 / 20 trips / 7 days.
-//   • Each trip (booking) consumes ONE plan slot no matter how many parcels
+//   � Each trip (booking) consumes ONE plan slot no matter how many parcels
 //     are inside it. Cycle = 30 days from activation (weekly = 7 days).
-//   • Inside the cap the sender pays no per-trip rider fee (bundled).
-//   • After the cap, the seller keeps the plan's discount off pay-as-you-go:
+//   � Inside the cap the sender pays no per-trip rider fee (bundled).
+//   � After the cap, the seller keeps the plan's discount off pay-as-you-go:
 //     Silver 15%, Gold 25%, Platinum 35% off the normal rider fee.
-//   • Truck runs cost more (big cargo: fridges, sofas). Multipliers apply to
+//   � Truck runs cost more (big cargo: fridges, sofas). Multipliers apply to
 //     the normal rider fee; trucks have a K100 minimum.
-//   • Pay-as-you-go (no plan) is the default at a Yango-competitive rate —
+//   � Pay-as-you-go (no plan) is the default at a Yango-competitive rate �
 //     see baseRiderFee() in pricing.ts.
-//   • Daily Dash removed: not offered for new purchase; existing subscribers
+//   � Daily Dash removed: not offered for new purchase; existing subscribers
 //     run out their cycle.
 // PlanTier includes 'rider_daily' (the on-demand daily pass).
 // 'daily' is reserved for the long-removed Daily Dash product and is never
@@ -58,7 +58,7 @@ const PLANS: Record<PlanTier, PlanDef> = {
   platinum: { fee_zmw: 750, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 50, rider_fee_zmw: 0, overage_discount_pct: 35, cycle_days: 30 },
 };
 
-/** DB-backed catalogue (price, per-day cap, tag) â€” constants only as fallback. */
+/** DB-backed catalogue (price, per-day cap, tag) — constants only as fallback. */
 async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
   const merged: Record<PlanTier, PlanDef> = {
     rider_daily: { ...PLANS.rider_daily, tag: null },
@@ -87,7 +87,7 @@ async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
       };
     }
   }
-  } catch { /* tiers table not migrated yet â€” constants rule */ }
+  } catch { /* tiers table not migrated yet — constants rule */ }
   return merged;
 }
 const PLATFORM_TAKE = 0.10;           // of the rider fee, on pay-as-you-go
@@ -106,7 +106,7 @@ const WALLET_TOPUP_CAP_ZMW = 5000;
 // Payment fees: the customer pays the DropOff leg + platform fee + Lipila legs.
 // The courier's counter fare is paid at the depot and is NEVER collected by DropOff.
 
-// Pay-as-you-go rider fee bands (raised to K45 base â€” always cheaper than the
+// Pay-as-you-go rider fee bands (raised to K45 base — always cheaper than the
 // courier's own counter fare, which starts at K50 on most Platinum routes).
 // Waiting / queue time: rider logs minutes; first 10 free, K2/min, K50 cap.
 const WAIT_FREE_MINUTES = 10;
@@ -217,7 +217,7 @@ const IMAGE_MAGIC: [string, Uint8Array][] = [
   ['webp', new Uint8Array([0x52, 0x49, 0x46, 0x46])], // RIFF; WEBP check below
 ];
 function looksLikeImage(bytes: Uint8Array, ext: string): boolean {
-  if (ext === 'heic' || ext === 'heif') return true; // iOS HEIC — complex ftyp box, allow by ext
+  if (ext === 'heic' || ext === 'heif') return true; // iOS HEIC � complex ftyp box, allow by ext
   if (ext === 'webp') {
     if (bytes.length < 12) return false;
     const riff = new TextDecoder().decode(bytes.slice(0, 4)) === 'RIFF';
@@ -294,7 +294,7 @@ app.use('*', async (c, next) => {
   if (bearer) {
     const claims = await verifyJwtClaims(bearer, c.env.JWT_SECRET);
     if (claims) {
-      // role and token_version live on the account row â€” a password reset bumps
+      // role and token_version live on the account row — a password reset bumps
       // token_version, instantly invalidating every outstanding session
       const user = await c.env.DB.prepare(
         'SELECT role, courier_id, token_version FROM auth_users WHERE phone = ?1',
@@ -316,13 +316,13 @@ app.use('*', async (c, next) => {
           try { await noteDevice(c.env.DB, claims.phone, claims.did, clientIp(c), userAgent(c)); } catch { /* best-effort */ }
         }
       }
-      // The app owner's phone is always admin (OWNER_PHONE secret) — covers
+      // The app owner's phone is always admin (OWNER_PHONE secret) � covers
       // OTP-only sign-ins that have no auth_users row.
       let role = user?.role === 'partner' || user?.role === 'admin' ? user.role
         : claims.phone === ownerPhone(c.env) ? 'admin' : null;
       if (!role) {
         // Rider sign-in: a phone that ops registered on a rider resolves to
-        // role='rider' — the same app then shows the Team/Rider tab with ONLY
+        // role='rider' � the same app then shows the Team/Rider tab with ONLY
         // that rider's jobs, route and COD (all keyed off callers' phone).
         const rider = await c.env.DB.prepare(
           'SELECT id FROM riders WHERE phone = ?1 AND active = 1',
@@ -342,7 +342,7 @@ app.use('*', async (c, next) => {
     return next();
   }
   // ADMIN_AUTH_KEY is the superadmin key: it authorizes /admin/* AND every
-  // staff surface (/security/*, /me, …). Minted as role='admin' so route-level
+  // staff surface (/security/*, /me, �). Minted as role='admin' so route-level
   // isAdmin()/isSuperAdmin() checks all agree with it.
   if (c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY) {
     c.set('role', 'admin');
@@ -461,12 +461,12 @@ async function senderProfileName(db: D1Database, phone: string): Promise<string 
 /* ------------------------ tracking access control ------------------------- */
 // The link ALONE is no longer enough: every /track/:token route requires one of
 //   (a) a JWT whose phone is the sender or recipient of that job (the app's
-//       signed-in participant — recipients verify by signing up),
+//       signed-in participant � recipients verify by signing up),
 //   (b) a valid X-Track-Grant minted by POST /track/:token/verify for a
 //       participant phone (phone number = proof the link belongs to you), or
 //   (c) staff keys (X-Admin-Key / X-Api-Key).
 // Anyone else with the link only learns the last 4 digits of the phone to
-// verify with — never parcel data, rider location or events.
+// verify with � never parcel data, rider location or events.
 async function trackGrantFor(env: Env, token: string, phone: string): Promise<string> {
   const data = new TextEncoder().encode(`${env.JWT_SECRET}:track:${token}:${phone}`);
   const digest = await crypto.subtle.digest('SHA-256', data);
@@ -520,7 +520,7 @@ async function trackAccess(c: any, token: string): Promise<TrackAccess> {
   return { granted: false, ...base }; // token valid, viewer unproven
 }
 
-const maskPhone = (p: string | null) => (p && p.length >= 4 ? `••••${p.slice(-4)}` : null);
+const maskPhone = (p: string | null) => (p && p.length >= 4 ? `����${p.slice(-4)}` : null);
 
 /* ------------------------------ idempotency ------------------------------- */
 // Clients retry on flaky networks; the same Idempotency-Key must replay the
@@ -554,7 +554,7 @@ async function saveIdempotent(
 
 /* --------------------------------- cors ----------------------------------- */
 // Narrow CORS: only origins listed in the CORS_ORIGINS var (comma-separated) may
-// call the API cross-origin â€” lets the Flutter-web admin build work without
+// call the API cross-origin — lets the Flutter-web admin build work without
 // opening the API to every website. Same-origin calls (the HTML consoles) need
 // no CORS at all. Set CORS_ORIGINS="" (default) to disable cross-origin entirely.
 const corsOrigins = (raw: string | undefined): string[] =>
@@ -580,8 +580,8 @@ const cacheFor = (seconds: number) => async (c: any, next: any) => {
   c.header('Vary', 'Accept-Encoding');
 };
 
-// Only genuinely shared, non-personal data is cacheable. Everything else —
-// jobs, wallet, partner keys, referrals, ratings, rider routes — is private and
+// Only genuinely shared, non-personal data is cacheable. Everything else �
+// jobs, wallet, partner keys, referrals, ratings, rider routes � is private and
 // must never be stored by a browser or proxy (stale + privacy risk).
 const PUBLIC_CACHEABLE = /^\/(health|cities|couriers(\/[^/]+(\/profile)?)?|quotes|plans)$/;
 app.use('*', async (c, next) => {
@@ -600,7 +600,7 @@ app.use('GET /plans', cacheFor(30));
 /* --------------------------------- health --------------------------------- */
 app.get('/health', (c) => c.json({ ok: true, ts: Date.now() }));
 
-// Identity for the signed-in caller — the app uses this to reveal admin/ops
+// Identity for the signed-in caller � the app uses this to reveal admin/ops
 // surfaces (the owner's phone is admin via OWNER_PHONE middleware grant) and
 // the superadmin flag to unlock role management (promote admins).
 app.get('/me', async (c) => {
@@ -732,7 +732,7 @@ app.post('/auth/request', async (c) => {
   // deliver via Africa's Talking (Carpso account) when AT_* secrets are set;
   // dev mode returns the code in the response
   const sms = await sendSms(c.env, phone,
-    `DropOff: your one-time code is ${code}. It expires in 10 minutes. For your security, never share this code with anyone — DropOff staff will never ask for it.`);
+    `DropOff: your one-time code is ${code}. It expires in 10 minutes. For your security, never share this code with anyone � DropOff staff will never ask for it.`);
   const devMode = devModeOn(c.env);
   return c.json({
     sent: sms.sent, ...(sms.error ? { sms_error: sms.error } : {}),
@@ -763,7 +763,7 @@ app.post('/auth/verify', async (c) => {
     return c.json({ error: 'wrong_code' }, 401);
   }
   await c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id).run();
-  // JWT carries the account's current token_version — a password reset bumps it
+  // JWT carries the account's current token_version � a password reset bumps it
   // and forces a fresh OTP sign-in; minting ver=0 here used to leave every
   // OTP session instantly revoked (session_revoked on the first request).
   try { await noteDevice(c.env.DB, phone, deviceId(c), clientIp(c), userAgent(c)); } catch { /* best-effort */ }
@@ -842,7 +842,7 @@ async function createEmailLink(
       `INSERT INTO email_tokens (email, token_hash, kind, expires_at) VALUES (?1, ?2, ?3, datetime('now', ?4))`,
     ).bind(email, hash, kind, ttl),
   ]);
-  // Hono exposes `c.req.url` as a property (Request.url), NOT a function â€”
+  // Hono exposes `c.req.url` as a property (Request.url), NOT a function —
   // calling it threw TypeError and 500'd register/forgot/resend.
   const origin = new URL(c.req.url).origin;
   const base = String(c.env.APP_URL ?? '').replace(/\/$/, '') || origin;
@@ -868,12 +868,12 @@ app.get('/auth/link', async (c) => {
       c.env.DB.prepare('UPDATE auth_users SET email_verified = 1 WHERE email = ?1').bind(row.email),
     ]);
     return c.html(`<div style="font-family:sans-serif;max-width:420px;margin:80px auto;text-align:center">
-      <h2>âœ… Email confirmed</h2><p>${row.email} is now verified. You can close this page.</p></div>`);
+      <h2>✅ Email confirmed</h2><p>${row.email} is now verified. You can close this page.</p></div>`);
   }
 
   // reset_password: serve the choose-new-password form
   return c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>DropOff â€” new password</title>
+    <title>DropOff — new password</title>
     <style>body{font-family:sans-serif;max-width:420px;margin:60px auto;padding:0 16px}
     input,button{display:block;width:100%;padding:12px;margin:8px 0;border-radius:10px;border:1px solid #cfd8d4;font-size:15px}
     button{background:#17855f;color:#fff;border:0;font-weight:700}</style></head><body>
@@ -887,7 +887,7 @@ app.get('/auth/link', async (c) => {
         headers: { 'Content-Type': 'application/json', 'X-Api-Key': 'webform' },
         body: JSON.stringify({ token: t, password: document.getElementById('p').value }) });
       const m = document.getElementById('msg');
-      m.textContent = r.ok ? 'Password saved â€” you can sign in in the app now.' : 'Link expired. Request a new one in the app.';
+      m.textContent = r.ok ? 'Password saved — you can sign in in the app now.' : 'Link expired. Request a new one in the app.';
       m.style.color = r.ok ? '#17855f' : '#b3261e';
     };</script></body></html>`);
 });
@@ -1008,7 +1008,7 @@ app.post('/auth/login', async (c) => {
       .bind(email, upgraded).run();
   }
 
-  // successful login — fingerprint the device and alert the owner on a new device
+  // successful login � fingerprint the device and alert the owner on a new device
   await recordAttempt(c.env.DB, email, true, ip, ua, devId);
   const phone = user.phone;
   const dev = await noteDevice(c.env.DB, phone, deviceId(c), ip, userAgent(c));
@@ -1135,10 +1135,10 @@ app.get('/quotes', async (c) => {
       weight_class: r.weight_class,
       counter_price_zmw: r.counter_price_zmw,
       rider_fee_zmw: riderFee,
-      // rider payout stays between DropOff and the driver — never quoted to sellers
+      // rider payout stays between DropOff and the driver � never quoted to sellers
       leg2_fee_zmw: leg2Fee,
       leg2_processing_fee_zmw: leg2Processing,
-      // DropOff NEVER holds partner money â€” split the fare explicitly.
+      // DropOff NEVER holds partner money — split the fare explicitly.
       counter_fare_zmw: r.counter_price_zmw,       // partner's; paid at the depot
       dropoff_leg_zmw: round2(riderFee + leg2Fee + leg2Processing), // ours
       dropoff_due_zmw: collectionFees(
@@ -1167,7 +1167,7 @@ app.get('/cities', async (c) => {
 });
 
 /* ---------------------------------- jobs ---------------------------------- */
-// Identity: a customer JWT ALWAYS books as its own phone â€” the client cannot
+// Identity: a customer JWT ALWAYS books as its own phone — the client cannot
 // spoof a sender number. Ops key may specify any phone (rider device/ops console).
 app.post('/jobs', async (c) => {
   if (await rateLimited(c, 'job_create', 60)) return c.json({ error: 'too_many_requests' }, 429);
@@ -1189,12 +1189,12 @@ app.post('/jobs', async (c) => {
         `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND created_at > datetime('now', '-1 day')`,
       ).bind(senderPhone).first<any>())?.n ?? 0;
       if (n24h >= 40) {
-        return c.json({ error: 'daily_limit', message: 'Daily booking limit reached — contact support.' }, 429);
+        return c.json({ error: 'daily_limit', message: 'Daily booking limit reached � contact support.' }, 429);
       }
     }
     if (!b.courier_id || !b.dest_city) return c.json({ error: 'courier_id and dest_city required' }, 400);
 
-    // customer wallets are disabled â€” riders keep float, sellers pay momo/cash
+    // customer wallets are disabled — riders keep float, sellers pay momo/cash
     const payMethod: string = ['mobile_money', 'cash'].includes(b.pay_method)
       ? b.pay_method : 'mobile_money';
     let pickupWindow: string = b.pickup_window ?? 'now';
@@ -1202,13 +1202,13 @@ app.post('/jobs', async (c) => {
       return c.json({ error: `pickup_window must be one of ${PICKUP_WINDOWS.join(', ')}` }, 400);
     }
     // Explicit next-day booking: "tomorrow:06:00" books the FIRST sweep of
-    // tomorrow (6:00 – 7:30 AM CAT) even when today's slots are already past.
+    // tomorrow (6:00 � 7:30 AM CAT) even when today's slots are already past.
     // We normalize to the 06:00 sweep for rider bucketing and stamp pickup_at
     // to tomorrow 06:00 CAT so the scheduler and the queue agree.
     const pickupTomorrow = pickupWindow === 'tomorrow:06:00';
     if (pickupTomorrow) pickupWindow = '06:00';
-    // Sweep windows have booking cutoffs (06:00→05:30, 10:00→09:30, 14:00→13:30
-    // CAT). A late booking never dies — it rolls forward to the next open
+    // Sweep windows have booking cutoffs (06:00?05:30, 10:00?09:30, 14:00?13:30
+    // CAT). A late booking never dies � it rolls forward to the next open
     // window (or instant) and the sender is told exactly what happened.
     let windowRolledFrom: string | null = null;
     if (pickupWindow !== 'now') {
@@ -1235,12 +1235,12 @@ app.post('/jobs', async (c) => {
     if (!quote) {
       return c.json({
         error: 'quote_needed',
-        detail: 'No verified counter price for this route/weight yet â€” capture it at the counter first.',
+        detail: 'No verified counter price for this route/weight yet — capture it at the counter first.',
       }, 422);
     }
     const counterPrice = Number(quote.counter_price_zmw);
 
-    // Pack inclusion: EVERY PARCEL counts as one plan slot — two parcels in
+    // Pack inclusion: EVERY PARCEL counts as one plan slot � two parcels in
     // one trip to the same receiver = two parcels. Cycle = 30 days from
     // activation. A trip is bundled (K0 rider fee) only if all of its parcels
     // still fit under the cap; otherwise the whole trip pays the tier overage.
@@ -1278,14 +1278,14 @@ app.post('/jobs', async (c) => {
       }
     }
 
-    // Last-mile door delivery: same PAYG location pricing as the first mile —
-    // recipient-city distance bands × vehicle multiplier (coords when supplied).
+    // Last-mile door delivery: same PAYG location pricing as the first mile �
+    // recipient-city distance bands � vehicle multiplier (coords when supplied).
     const leg2Fee = b.dest_leg2
       ? baseRiderFee(String(b.dest_city ?? ''), Number(b.dest_lat ?? 0), Number(b.dest_lng ?? 0), vehicleClass)
       : 0;
     const leg2Processing = b.dest_leg2 ? platformFee(leg2Fee) : 0;
 
-    // Optional seller promo â€” applies only to the DropOff leg, never the
+    // Optional seller promo — applies only to the DropOff leg, never the
     // partner's counter fare. Pack members already pay nothing per parcel.
     let promoDiscount = 0;
     if (b.promo_code && packInclusion !== 'pack') {
@@ -1301,7 +1301,7 @@ app.post('/jobs', async (c) => {
         return c.json({ error: `promo_only_for_${promo.applies_tier}` }, 400);
       }
       // Atomically consume a use FIRST (guard on remaining uses) so concurrent
-      // bookings with uses_left = 1 cannot both burn it â€” then book the job.
+      // bookings with uses_left = 1 cannot both burn it — then book the job.
       const consume = await c.env.DB.prepare(
         `UPDATE promo_codes SET uses_left = uses_left - 1
           WHERE code = ?1 AND active = 1 AND (uses_left IS NULL OR uses_left > 0)`,
@@ -1411,14 +1411,14 @@ app.post('/jobs', async (c) => {
       await c.env.DB.prepare(
         'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
       ).bind(meta.last_row_id, 'window_rolled',
-        `The ${fromLabel} window had closed — moved to the ${toLabel} slot automatically`).run();
+        `The ${fromLabel} window had closed � moved to the ${toLabel} slot automatically`).run();
     }
 
     if (pickupTomorrow) {
       await c.env.DB.prepare(
         'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
       ).bind(meta.last_row_id, 'pickup_tomorrow',
-        'Slot booked for tomorrow 6:00 – 7:30 AM sweep (after today\'s last window)').run();
+        'Slot booked for tomorrow 6:00 � 7:30 AM sweep (after today\'s last window)').run();
     }
 
     c.executionCtx.waitUntil(
@@ -1431,7 +1431,7 @@ app.post('/jobs', async (c) => {
     const trackUrl = trackingUrl(c.env, trackingToken);
     c.executionCtx.waitUntil(
       sendSms(c.env, recipientPhone,
-      `DropOff: your parcel ${ref} is on the move. Follow it live — status, rider location and arrival time: ${trackUrl}`).catch(() => {}),
+      `DropOff: your parcel ${ref} is on the move. Follow it live � status, rider location and arrival time: ${trackUrl}`).catch(() => {}),
     );
 
     if (pickupAt) {
@@ -1441,9 +1441,9 @@ app.post('/jobs', async (c) => {
       ).bind(ref, senderPhone, recipientPhone, pickupAt).run();
     }
 
-    // referral reward: the REFERRED party just booked â€” create the referrer's
+    // referral reward: the REFERRED party just booked — create the referrer's
     // single-use promo. Claim is a guarded UPDATE so two concurrent bookings
-    // can never mint two rewards (second UPDATE matches 0 rows â†’ bail).
+    // can never mint two rewards (second UPDATE matches 0 rows → bail).
     try {
       const payoutRefId = meta.last_row_id;
       const claimed = await c.env.DB.prepare(
@@ -1460,7 +1460,7 @@ app.post('/jobs', async (c) => {
           c.env.DB.prepare(
             `INSERT INTO promo_codes (code, discount_pct, note, uses_left, active)
              VALUES (?1, ?2, ?3, 1, 1)`,
-          ).bind(rewardCode, pct, `Referral reward â€” ${senderPhone} joined via your code`),
+          ).bind(rewardCode, pct, `Referral reward — ${senderPhone} joined via your code`),
           c.env.DB.prepare(
             `UPDATE referrals SET reward_code = ?2 WHERE id = ?1`,
           ).bind(refRow.id, rewardCode),
@@ -1473,8 +1473,8 @@ app.post('/jobs', async (c) => {
     // Fees ride on the payer leg only: pack parcels carry no per-parcel fees
     // (the pack renewal prompt charges the processing fee on the pack price),
     // wallet top-ups carry them once per deposit. The customer NEVER pays for
-    // the rider's payout â€” that lives inside the rider's 10% take. Pack and
-    // promo math happens on the DropOff leg ONLY â€” the partner fare is theirs.
+    // the rider's payout — that lives inside the rider's 10% take. Pack and
+    // promo math happens on the DropOff leg ONLY — the partner fare is theirs.
     const feeBase = collectionFees(dropOffLeg, packInclusion === 'pack' ? null : riderFee);
 
     // Smart auto-assign: bookings get a rider immediately unless the caller opts out.
@@ -1495,18 +1495,18 @@ app.post('/jobs', async (c) => {
           autoAssigned = { rider_id: pick.rider.id, rider: pick.rider.full_name, photo_url: pick.rider.photo_url ?? null, eta_minutes: etaMin, km: pick.km };
           await sendToPhone(c.env, senderPhone, {
             title: 'Rider assigned',
-            body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup â€” track them live in Bookings.`,
+            body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup — track them live in Bookings.`,
             data: { job_ref: ref, kind: 'rider_assigned' },
           });
         }
-      } catch { /* auto-assign is best-effort â€” the batch sweep picks it up next */ }
+      } catch { /* auto-assign is best-effort — the batch sweep picks it up next */ }
     }
 
     const payload = {
       ok: true, ref, job_id: meta.last_row_id, total_zmw: total,
       dropoff_leg_zmw: dropOffLeg,
       promo_code: promoCode, promo_discount_zmw: promoDiscount,
-      // Strip rider payout — driver earnings are never shown to sellers.
+      // Strip rider payout � driver earnings are never shown to sellers.
       fees: (() => {
         const { rider_payout_zmw: _omit, ...customerFees } = feeBase as any;
         return customerFees;
@@ -1538,9 +1538,9 @@ app.post('/jobs', async (c) => {
   }
 });
 
-// Collection from a courier point → recipient's door (Lusaka only).
+// Collection from a courier point ? recipient's door (Lusaka only).
 // The parcel already arrived at the courier depot; a rider picks it up there
-// and runs the last mile. No counter fare and no branch choice — the rider
+// and runs the last mile. No counter fare and no branch choice � the rider
 // collects from the nominated point. Pricing = last-mile zone fare + its
 // processing fee (same model as the door-delivery add-on).
 app.post('/collections', async (c) => {
@@ -1565,7 +1565,7 @@ app.post('/collections', async (c) => {
   if (destAddress.length < 4) return c.json({ error: 'dest_address_required' }, 400);
   const windowReq = String(b.pickup_window ?? '10:00');
   // "tomorrow:06:00" books the first sweep of the NEXT day even though today's
-  // windows are already past — normalized to the 06:00 sweep + tomorrow 06:00 CAT pickup_at.
+  // windows are already past � normalized to the 06:00 sweep + tomorrow 06:00 CAT pickup_at.
   const pickupTomorrow = windowReq === 'tomorrow:06:00';
   const window = pickupTomorrow ? '06:00' : windowReq;
   if (!['06:00', '10:00', '14:00'].includes(window)) return c.json({ error: 'pickup_window must be 06:00, 10:00 or 14:00' }, 400);
@@ -1634,7 +1634,7 @@ app.post('/collections', async (c) => {
   if (pickupTomorrow) {
     await c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'pickup_tomorrow', ?2)`,
-    ).bind(meta.last_row_id, 'Slot booked for tomorrow 6:00 – 7:30 AM sweep (after today\'s last window)').run();
+    ).bind(meta.last_row_id, 'Slot booked for tomorrow 6:00 � 7:30 AM sweep (after today\'s last window)').run();
   }
 
   return c.json({
@@ -1670,7 +1670,7 @@ app.get('/jobs', async (c) => {
   const role = c.get('role');
   let phone: string | null = null;
   if (role === 'customer' || role === 'partner') {
-    // Partners list only their own jobs — never another seller's.
+    // Partners list only their own jobs � never another seller's.
     phone = c.get('phone') ?? '';
   } else {
     // ops/admin: must specify whose jobs
@@ -1718,7 +1718,7 @@ app.get('/jobs/:ref', async (c) => {
     // internal fields no seller or recipient should ever read
     for (const k of ['fraud_score', 'review_required']) delete payload[k];
     if (phone === job.recipient_phone && phone !== job.sender_phone) {
-      // recipient sees delivery status only — never the sender's money side
+      // recipient sees delivery status only � never the sender's money side
       for (const k of ['counter_price_zmw', 'rider_fee_zmw', 'leg2_fee_zmw',
         'leg2_processing_fee_zmw', 'total_zmw', 'promo_code', 'promo_discount_zmw',
         'paid', 'pay_method', 'sender_name', 'sender_phone', 'pickup_address']) {
@@ -1790,7 +1790,7 @@ app.post('/jobs/:ref/events', async (c) => {
   if (!job) return c.json({ error: 'not found' }, 404);
 
   // authorization: ops/admin keys, or the assigned rider's own JWT.
-  // Applies to every authenticated role — not just 'customer' — so a rider,
+  // Applies to every authenticated role � not just 'customer' � so a rider,
   // partner or ops-key device cannot tamper with another rider's job.
   const phone = c.get('phone') ?? null;
   const isAdminKey = isAdmin(c);
@@ -1802,7 +1802,7 @@ app.post('/jobs/:ref/events', async (c) => {
 
   const dbStatements: D1PreparedStatement[] = [];
 
-  // waiting-time billing (event kept as dispute evidence). Canonical recompute â€”
+  // waiting-time billing (event kept as dispute evidence). Canonical recompute —
   // promo discount is honoured here too so totals never drift from /payments.
   if (b.wait_minutes !== undefined) {
     const minutes = Math.max(0, Math.min(240, Math.round(Number(b.wait_minutes) || 0)));
@@ -1820,7 +1820,7 @@ app.post('/jobs/:ref/events', async (c) => {
     ).bind(job.id, minutes, waitFee, totals.total_zmw));
     dbStatements.push(c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note, lat, lng) VALUES (?1,'waiting',?2,?3,?4)`,
-    ).bind(job.id, b.note ?? `Waited ${minutes} min (first ${WAIT_FREE_MINUTES} free = K${waitFee} — paid to the driver)`, b.lat ?? null, b.lng ?? null));
+    ).bind(job.id, b.note ?? `Waited ${minutes} min (first ${WAIT_FREE_MINUTES} free = K${waitFee} � paid to the driver)`, b.lat ?? null, b.lng ?? null));
     // The waiting bill belongs to the DRIVER, not the platform: credit the
     // increase over what was already recorded as driver earnings.
     const delta = round2(Math.max(0, waitFee - Number(job.wait_fee_zmw ?? 0)));
@@ -1835,7 +1835,7 @@ app.post('/jobs/:ref/events', async (c) => {
   }
 
   // COD collection at the door (leg-2 / partner COD): the cash FLOATS with the
-  // rider/driver â€” the sender's wallet is credited only after remittance.
+  // rider/driver — the sender's wallet is credited only after remittance.
   if (b.cod_collected_zmw !== undefined) {
     const cod = Math.max(0, Number(b.cod_collected_zmw) || 0);
     if (cod > 0) {
@@ -1844,17 +1844,17 @@ app.post('/jobs/:ref/events', async (c) => {
       ).bind(job.id, cod));
       dbStatements.push(c.env.DB.prepare(
         `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_collected', ?2)`,
-      ).bind(job.id, b.note ?? `K${cod} collected at the door â€” cash floats with rider/driver until remittance (platform keeps ${Math.round(COD_FEE * 100)}%)`));
+      ).bind(job.id, b.note ?? `K${cod} collected at the door — cash floats with rider/driver until remittance (platform keeps ${Math.round(COD_FEE * 100)}%)`));
     }
   }
 
   // DropOff NEVER holds partner money: the customer pays us only the DropOff
-  // leg â€” rider fee + last-mile door leg (+ its processing), minus any promo.
+  // leg — rider fee + last-mile door leg (+ its processing), minus any promo.
   const dropoffLegZmw = round2(
     Math.max(0, job.rider_fee_zmw + (job.leg2_fee_zmw || 0) + (job.leg2_processing_fee_zmw || 0) - (job.promo_discount_zmw || 0)),
   );
 
-  // Wallet jobs settle the same DropOff leg, minus the Lipila momo leg â€”
+  // Wallet jobs settle the same DropOff leg, minus the Lipila momo leg —
   // the platform processing fee still applies (no free rides on the fee).
   const walletProcessing = platformFee(dropoffLegZmw);
   const walletDue = round2(dropoffLegZmw + walletProcessing);
@@ -1895,22 +1895,22 @@ app.post('/jobs/:ref/events', async (c) => {
     `SELECT ref, status, paid, counter_price_zmw, rider_fee_zmw, leg2_fee_zmw,
             wait_minutes, wait_fee_zmw, cod_collected_zmw, total_zmw FROM jobs WHERE id = ?1`,
   ).bind(job.id).first();
-  // FCM push to the sender â€” status transitions are the parcel's whole story.
+  // FCM push to the sender — status transitions are the parcel's whole story.
   if (status && updated) {
     const stagePush: Record<string, { title: string; body: string }> = {
-      rider_assigned: { title: 'Rider assigned', body: 'Your DropOff rider is on it â€” track them live in Bookings.' },
-      picked_up: { title: 'Parcel picked up', body: 'Collected from the sender â€” heading to the depot.' },
+      rider_assigned: { title: 'Rider assigned', body: 'Your DropOff rider is on it — track them live in Bookings.' },
+      picked_up: { title: 'Parcel picked up', body: 'Collected from the sender — heading to the depot.' },
       at_depot: { title: 'At the depot', body: 'Your parcel reached the depot. You can follow the journey live.' },
       departed: { title: 'On the way', body: 'Left the depot on the DropOff leg.' },
       arrived: { title: 'Arrived', body: 'Your parcel arrived at the destination city.' },
       ready_for_collection: { title: 'Ready for collection', body: 'The parcel is waiting at your depot for pickup.' },
-      delivered: { title: 'Delivered', body: 'Success â€” the parcel is signed in at the depot. Kigoda.' },
+      delivered: { title: 'Delivered', body: 'Success — the parcel is signed in at the depot. Kigoda.' },
     };
     const push = stagePush[status];
     if (push) {
       await sendToPhone(c.env, job.sender_phone, { ...push, data: { job_ref: String(updated.ref), kind: 'status' } });
     }
-    // SMS milestones to both parties — proactive updates are the #1 trust signal
+    // SMS milestones to both parties � proactive updates are the #1 trust signal
     // in first-mile delivery. Best-effort: never fails the job if SMS is off.
     const smsMilestones = new Set(['picked_up', 'at_depot', 'delivered', 'ready_for_collection']);
     if (status && smsMilestones.has(status) && job.sender_phone && job.recipient_phone) {
@@ -1932,14 +1932,14 @@ app.post('/jobs/:ref/events', async (c) => {
 });
 
 /* --------------------------------- ratings -------------------------------- */
-// Rate the three sides of a delivery â€” the seller, the driver (rider) and the
+// Rate the three sides of a delivery — the seller, the driver (rider) and the
 // courier. Only the job's participants (sender / recipient) or ops can rate;
 // sellers can't rate themselves; ratings open once the parcel is delivered or
-// ready for collection. One score per reviewer per target â€” resubmits update.
+// ready for collection. One score per reviewer per target — resubmits update.
 const RATING_TARGETS = new Set(['seller', 'driver', 'courier']);
 const RATING_OPEN = new Set(['delivered', 'ready_for_collection']);
 
-// Lightweight comment guard — enough to keep abuse out of a public feed without
+// Lightweight comment guard � enough to keep abuse out of a public feed without
 // pretending to be a full moderation system. Hidden-by-admin is the real lever.
 const BLOCKED_WORDS = ['fuck', 'shit', 'bitch', 'asshole', 'dick', 'cunt', 'nigger', 'faggot'];
 function containsProfanity(text: string): boolean {
@@ -2017,7 +2017,7 @@ app.get('/jobs/:ref/ratings', async (c) => {
   const masked = (results as any[]).map((r) => {
     const isMine = viewer != null && r.reviewer_phone === viewer;
     if (isMine) mine[r.target_type] = r.stars;
-    // reviewers stay anonymous — only the viewer recognises their own entry
+    // reviewers stay anonymous � only the viewer recognises their own entry
     return { ...r, reviewer_phone: isMine ? r.reviewer_phone : '***' };
   });
   const summary: Record<string, { count: number; average: number | null }> = {};
@@ -2054,7 +2054,7 @@ app.get('/ratings/summary', async (c) => {
 
 /* --------------------------- rating reports ------------------------------- */
 // Flagging a comment is limited to parties of the rated job (sender,
-// recipient, assigned rider) or staff — arbitrary signed-in users cannot
+// recipient, assigned rider) or staff � arbitrary signed-in users cannot
 // mass-report ratings they have nothing to do with.
 app.post('/ratings/:id/report', async (c) => {
   const id = Number(c.req.param('id'));
@@ -2138,7 +2138,7 @@ app.post('/admin/fraud/:id/review', async (c) => {
 });
 
 /* --------------------------- public tracking page ------------------------- */
-// GET /track/:token — the token alone no longer opens the parcel: an
+// GET /track/:token � the token alone no longer opens the parcel: an
 // unverified viewer gets a phone-verification gate (last-4 hint only). See
 // trackAccess() for the three grant paths (JWT participant, X-Track-Grant,
 // staff keys). Verified viewers get status + live rider location; never
@@ -2169,7 +2169,7 @@ app.get('/track/:token', async (c) => {
       WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
   ).bind(c.req.param('token')).first<any>();
   if (!row) return c.json({ error: 'not found' }, 404);
-  // Public page: timeline statuses only — NEVER internal notes (referral,
+  // Public page: timeline statuses only � NEVER internal notes (referral,
   // fraud, payment) and never prices or sender details.
   const { results: events } = await c.env.DB.prepare(
     `SELECT status, created_at FROM job_events
@@ -2185,7 +2185,7 @@ app.get('/track/:token', async (c) => {
     predicted,
     pickup_city: (row.pickup_address ?? '').split(',').slice(-1)[0].trim() || null,
     dest_city: row.dest_city,
-    // First mile ends at the depot branch the seller nominated — that is what
+    // First mile ends at the depot branch the seller nominated � that is what
     // DropOff is paid for; the final city is only the optional last mile.
     dropoff: {
       branch: row.branch ?? row.courier_depot ?? null,
@@ -2208,7 +2208,7 @@ app.get('/track/:token', async (c) => {
   });
 });
 
-// POST /track/:token/verify {phone} — proves the caller owns a participant
+// POST /track/:token/verify {phone} � proves the caller owns a participant
 // phone (the recipient's or the sender's) and mints an X-Track-Grant.
 // Rate-limited so the gate cannot be brute-forced.
 app.post('/track/:token/verify', async (c) => {
@@ -2296,8 +2296,8 @@ app.post('/jobs/:ref/tracking-link', async (c) => {
 });
 
 /* ------------------------------- Delivery IQ ------------------------------ */
-// GET /iq/eta?courier_id=&window= — how fast does this courier actually reach
-// the depot? Computed from real job_events (picked_up → at_depot) over the
+// GET /iq/eta?courier_id=&window= � how fast does this courier actually reach
+// the depot? Computed from real job_events (picked_up ? at_depot) over the
 // last 90 days (max 300 jobs), optionally filtered to one pickup window.
 // Signed-in callers only (booking screen shows it next to the window picker).
 app.get('/iq/eta', async (c) => {
@@ -2349,7 +2349,7 @@ app.get('/iq/eta', async (c) => {
     minutes_p50: p(0.5),
     minutes_p90: p(0.9),
     minutes_avg: avg,
-    basis: 'actual pickup→depot times, last 90 days',
+    basis: 'actual pickup?depot times, last 90 days',
   });
 });
 
@@ -2421,8 +2421,8 @@ async function predictEtaForJob(db: D1Database, job: any, events: any[]): Promis
   const confidence = sample >= 30 ? 'high' : sample >= 8 ? 'medium' : 'low';
   const basis = sample === 0
     ? 'no measured history for this courier yet - shown as a rough estimate'
-    : `courier's last ${sample} parcels (180d): pickup→depot ~${p50fm ?? '?'} min` +
-      (p50lm != null ? `, depot→door ~${p50lm} min` : '');
+    : `courier's last ${sample} parcels (180d): pickup?depot ~${p50fm ?? '?'} min` +
+      (p50lm != null ? `, depot?door ~${p50lm} min` : '');
   const fm = p50fm ?? 45;
   const lm = p50lm ?? 45;
   const now = Date.now();
@@ -2705,7 +2705,7 @@ async function notifyChatParticipants(env: Env, thread: any, job: any, fromPhone
   }
 }
 
-// Job thread — sellers/riders/partners/ops (JWT or key)
+// Job thread � sellers/riders/partners/ops (JWT or key)
 app.get('/jobs/:ref/chat', async (c) => {
   const job = await c.env.DB.prepare(
     'SELECT id, ref, sender_phone, recipient_phone, courier_id, rider_id FROM jobs WHERE ref = ?1',
@@ -2742,7 +2742,7 @@ app.post('/jobs/:ref/chat', async (c) => {
   return c.json({ ok: true, id: meta.last_row_id });
 });
 
-// Recipient chat via the tracking token — same grant gate as GET /track/:token.
+// Recipient chat via the tracking token � same grant gate as GET /track/:token.
 app.get('/track/:token/chat', async (c) => {
   const access = await trackAccess(c, c.req.param('token'));
   if (!access.jobId) return c.json({ error: 'not found' }, 404);
@@ -2887,7 +2887,7 @@ app.get('/admin/support/threads/:id', async (c) => {
 
 /* ------------------------------ users & roles ----------------------------- */
 // GET: any staff can review accounts. Role writes: SUPERADMIN only (owner or
-// admin key) — the owner can promote an assistant to admin; admins cannot
+// admin key) � the owner can promote an assistant to admin; admins cannot
 // mint more admins, and the owner row can never be demoted (no self-lockout).
 app.get('/admin/users', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
@@ -2910,7 +2910,7 @@ app.post('/admin/users/role', async (c) => {
     'SELECT email, phone, role FROM auth_users WHERE email = ?1',
   ).bind(email).first<any>();
   if (!user) return c.json({ error: 'not found' }, 404);
-  // The owner account can never be demoted — you cannot lock yourself out.
+  // The owner account can never be demoted � you cannot lock yourself out.
   if (role !== 'admin' && user.phone && user.phone === ownerPhone(c.env)) {
     return c.json({ error: 'owner_cannot_be_demoted' }, 400);
   }
@@ -3038,7 +3038,7 @@ app.delete('/admin/branches/:id', async (c) => {
 });
 
 /* ------------------------------ FCM push reg ------------------------------ */
-// POST /push/register {token, platform} â€” upserts this device under the JWT's
+// POST /push/register {token, platform} — upserts this device under the JWT's
 // phone so the Worker can reach it on job/payment events. DELETE removes it.
 app.post('/push/register', async (c) => {
   const phone = c.get('phone');
@@ -3089,7 +3089,7 @@ async function walletCreditStatements(
 
 app.get('/wallet', async (c) => {
   if (!['ops', 'admin'].includes(c.get('role') as string)) {
-    return c.json({ error: 'customer wallets are disabled â€” riders check float via ops' }, 403);
+    return c.json({ error: 'customer wallets are disabled — riders check float via ops' }, 403);
   }
   const phone = c.get('phone');
   if (!phone) return c.json({ error: 'identity_required' }, 401);
@@ -3138,7 +3138,7 @@ app.post('/payments', async (c) => {
     // DropOff NEVER holds partner money: charge ONLY the DropOff leg
     // (rider fee + door leg + its processing) and platform processing fees.
     // The courier counter fare is paid directly at the depot. Counter fare is
-    // irrelevant to the dropoff leg â€” pass 0 so jobTotals doesn't weight it.
+    // irrelevant to the dropoff leg — pass 0 so jobTotals doesn't weight it.
     const dropoffLeg = computeJobTotals({
       counterPriceZmw: 0,
       riderFeeZmw: job.rider_fee_zmw,
@@ -3146,7 +3146,7 @@ app.post('/payments', async (c) => {
       leg2ProcessingFeeZmw: job.leg2_processing_fee_zmw,
       promoDiscountZmw: job.promo_discount_zmw,
     }).dropoff_leg_zmw;
-    // server-computed fees â€” the client never sets an amount. Recorded on the
+    // server-computed fees — the client never sets an amount. Recorded on the
     // payment row = the CUSTOMER leg only (processing fee). Rider payout costs
     // are absorbed at payout time out of the rider's 10%.
     const fees = collectionFees(dropoffLeg, job.rider_fee_zmw);
@@ -3179,9 +3179,9 @@ app.post('/payments', async (c) => {
     subscriptionId = sub.id;
     lipilaRef = `sub-${sub.id}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
   } else {
-    // Top-ups exist ONLY for rider/ops float (COD handling) â€” customers/sellers have no wallet.
+    // Top-ups exist ONLY for rider/ops float (COD handling) — customers/sellers have no wallet.
     if (!['ops', 'admin'].includes(c.get('role') as string)) {
-      return c.json({ error: 'customer wallets are disabled â€” riders top up float only' }, 403);
+      return c.json({ error: 'customer wallets are disabled — riders top up float only' }, 403);
     }
     phone = c.get('role') === 'ops' && b.phone ? normalizeZmPhone(b.phone) : c.get('phone')!;
     if (!phone) return c.json({ error: 'missing phone' }, 400);
@@ -3235,7 +3235,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
 
   if (pay.kind === 'topup') {
     const db = env.DB;
-    // credit the base amount only â€” the customer already covered the prompt fee
+    // credit the base amount only — the customer already covered the prompt fee
     const base = pay.credit_zmw && pay.credit_zmw > 0 ? pay.credit_zmw : pay.amount_zmw;
     const stmts: D1PreparedStatement[] = [
       db.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(pay.phone),
@@ -3247,7 +3247,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     await env.DB.batch(stmts);
   } else if (pay.kind === 'subscription' && pay.subscription_id) {
     // Activate/renew the pack for its own cycle (daily = 1 day, weekly = 7,
-    // monthly packs = 30). Unused parcels do NOT roll over — they expire.
+    // monthly packs = 30). Unused parcels do NOT roll over � they expire.
     const sub = await env.DB.prepare('SELECT phone, tier, period_start, period_end FROM subscriptions WHERE id = ?1')
       .bind(pay.subscription_id).first<any>();
     const packs = await plans(env.DB);
@@ -3271,8 +3271,8 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     await sendToPhone(env, pay.phone, {
       title: sub?.tier ? `${sub.tier} plan renewed` : 'Plan renewed',
       body: cycleDays === 1
-        ? 'Your daily pass is live for today. Book away — unused parcels expire tonight.'
-        : `Renewed for another ${cycleDays} days. Unused parcels do not carry over — book away!`,
+        ? 'Your daily pass is live for today. Book away � unused parcels expire tonight.'
+        : `Renewed for another ${cycleDays} days. Unused parcels do not carry over � book away!`,
       data: { kind: 'subscription_active' },
     });
   } else if (pay.kind === 'upgrade' && pay.subscription_id) {
@@ -3281,18 +3281,18 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     const sub = await env.DB.prepare('SELECT tier FROM subscriptions WHERE id = ?1').bind(pay.subscription_id).first<any>();
     await sendToPhone(env, pay.phone, {
       title: 'Plan upgraded',
-      body: sub?.tier ? `You are now on ${sub.tier} — bigger cap, live immediately.` : 'Upgrade complete.',
+      body: sub?.tier ? `You are now on ${sub.tier} � bigger cap, live immediately.` : 'Upgrade complete.',
       data: { kind: 'subscription_active' },
     });
   } else if (pay.kind === 'job' && pay.job_id) {
-    // direct mobile-money job payment: mark paid (no wallet rows â€” customers have no wallet)
+    // direct mobile-money job payment: mark paid (no wallet rows — customers have no wallet)
     await env.DB.batch([
       env.DB.prepare(`UPDATE jobs SET paid = 1 WHERE id = ?1 AND paid = 0`).bind(pay.job_id),
     ]);
     const job = await env.DB.prepare('SELECT ref FROM jobs WHERE id = ?1').bind(pay.job_id).first<{ ref: string }>();
     await sendToPhone(env, pay.phone, {
       title: 'Payment received',
-      body: 'Confirmed! Your parcel is booked â€” follow every step in Bookings.',
+      body: 'Confirmed! Your parcel is booked — follow every step in Bookings.',
       data: { job_ref: job?.ref ?? '', kind: 'payment' },
     });
   } else if (pay.kind === 'topup') {
@@ -3339,7 +3339,7 @@ async function reconcilePayments(env: Env): Promise<void> {
             await env.DB.prepare('UPDATE subscriptions SET tier = ?2 WHERE id = ?1')
               .bind(row.subscription_id, info.prevTier).run();
           }
-        } catch { /* bad meta — skip revert */ }
+        } catch { /* bad meta � skip revert */ }
       }
     }
     await env.DB.prepare(
@@ -3407,12 +3407,12 @@ app.get('/payments/:id/receipt', async (c) => {
 });
 
 /* ---------------------------- Lipila webhook ------------------------------ */
-// NEVER trust the webhook body: anyone can POST {"reference": â€¦, "status":
-// "success"} and get free rides. The reported status is ignored â€” we look the
+// NEVER trust the webhook body: anyone can POST {"reference": …, "status":
+// "success"} and get free rides. The reported status is ignored — we look the
 // payment up and re-verify the true status with Lipila's API before settling.
 // (cod_remit rows are disbursements we initiated ourselves; we only log them.)
 app.post('/webhooks/lipila', async (c) => {
-  // Optional shared-secret gate (defence in depth — the body is never trusted).
+  // Optional shared-secret gate (defence in depth � the body is never trusted).
   if (c.env.LIPILA_WEBHOOK_SECRET) {
     const got = c.req.header('X-Lipila-Signature') ?? c.req.header('X-Webhook-Secret') ?? '';
     const want = c.env.LIPILA_WEBHOOK_SECRET;
@@ -3429,13 +3429,13 @@ app.post('/webhooks/lipila', async (c) => {
   if (!pay) return c.json({ ok: true });
 
   if (pay.kind === 'cod_remit') {
-    // our own disbursement â€” only mark the audit event, settle flag not needed
+    // our own disbursement — only mark the audit event, settle flag not needed
     if (pay.status !== 'success') await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, 'success').run();
     return c.json({ ok: true });
   }
 
   if (pay.status === 'pending' && pay.lipila_reference) {
-    // authoritative check straight from Lipila â€” body status is advisory only
+    // authoritative check straight from Lipila — body status is advisory only
     const status = await lipilaStatus(c.env, pay.lipila_reference);
     if (status !== 'pending') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
@@ -3448,7 +3448,7 @@ app.post('/webhooks/lipila', async (c) => {
 
 /* ------------------------- seller subscription packs ----------------------- */
 app.get('/plans', async (c) => {
-  // Driver economics are for drivers and admins only — sellers/customers get
+  // Driver economics are for drivers and admins only � sellers/customers get
   // the tier catalogue alone.
   const privileged = c.get('role') === 'ops' || isAdmin(c);
   return c.json({
@@ -3460,10 +3460,10 @@ app.get('/plans', async (c) => {
 /* ---------------------------- partner shop portal -------------------------- */
 // Partner accounts are normal auth_users with role='partner' + courier_id, set
 // by the superadmin (POST /admin/partners). They log in like any customer, then:
-//   GET  /partner/quotes            â†’ the courier's published counter prices
-//   POST /partner/quotes            â†’ upsert/confirm a counter price
-//   GET  /partner/rides             â†’ parcels handed to this courier
-//   POST /partner/rides/:ref/confirm â†’ acknowledge hand-off at the depot
+//   GET  /partner/quotes            → the courier's published counter prices
+//   POST /partner/quotes            → upsert/confirm a counter price
+//   GET  /partner/rides             → parcels handed to this courier
+//   POST /partner/rides/:ref/confirm → acknowledge hand-off at the depot
 function partnerCourierId(c: { get: (k: string) => unknown }): number | null {
   if (c.get('role') === 'partner') return c.get('courierId') as number ?? null;
   return null;
@@ -3486,7 +3486,7 @@ app.get('/partner/me', async (c) => {
 
 app.get('/partner/quotes', async (c) => {
   const courierId = partnerCourierId(c);
-  // Partner JWTs are pinned to their own courier — no `?courier_id=` browsing.
+  // Partner JWTs are pinned to their own courier � no `?courier_id=` browsing.
   // Ops/admin keys may inspect any courier explicitly.
   const target = c.get('role') === 'partner'
     ? courierId
@@ -3551,7 +3551,7 @@ app.post('/partner/rides/:ref/confirm', async (c) => {
     'SELECT id, courier_id FROM jobs WHERE ref = ?1',
   ).bind(c.req.param('ref')).first<any>();
   if (!job) return c.json({ error: 'job not found' }, 404);
-  // A partner JWT can only confirm hand-offs at ITS OWN depot — an unlinked
+  // A partner JWT can only confirm hand-offs at ITS OWN depot � an unlinked
   // partner account confirms nothing.
   if (c.get('role') === 'partner' && (!courierId || job.courier_id !== courierId)) {
     return c.json({ error: 'not_your_courier_job' }, 403);
@@ -3563,7 +3563,7 @@ app.post('/partner/rides/:ref/confirm', async (c) => {
   await c.env.DB.prepare(
     'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
   ).bind(job.id, 'partner_confirmed',
-    b?.note ?? `Depot confirmed hand-off${b?.waybill ? ` â€” waybill ${b.waybill}` : ''}`).run();
+    b?.note ?? `Depot confirmed hand-off${b?.waybill ? ` — waybill ${b.waybill}` : ''}`).run();
   if (b?.waybill) {
     await c.env.DB.prepare('UPDATE jobs SET courier_waybill = ?2 WHERE id = ?1').bind(job.id, b.waybill).run();
   }
@@ -3625,7 +3625,7 @@ app.post('/admin/partner-keys', async (c) => {
   });
 });
 
-/* -------- tiers (seller packs â€” live editable) + promo codes ------------- */
+/* -------- tiers (seller packs — live editable) + promo codes ------------- */
 app.get('/admin/tiers', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const packs = await plans(c.env.DB);
@@ -3677,7 +3677,7 @@ app.post('/admin/promos', async (c) => {
   return c.json({ ok: true, code, discount_pct: pct });
 });
 
-/* -------- partner collection rails (THEIR POS â€” never DropOff money) ------- */
+/* -------- partner collection rails (THEIR POS — never DropOff money) ------- */
 // Sellers pay the courier directly at the counter/depot using the partner's
 // own merchant till (momo / bank / POS terminal / WhatsApp order). DropOff
 // bridges the context, not the custody: the money is the partner's, always.
@@ -3800,7 +3800,7 @@ app.get('/route/pickup', async (c) => {
   const hub = { lat: -15.4255, lng: 28.2805 }; // Platinum Chibolya depot anchor
   const rows = (results as any[]);
   // Timed pickups first (earliest slot first), then the ASAP run optimized by
-  // nearest-neighbor â€” so a rider never misses a booked window.
+  // nearest-neighbor — so a rider never misses a booked window.
   const timed = rows.filter((r) => r.pickup_at).sort((a, b) => String(a.pickup_at).localeCompare(String(b.pickup_at)));
   const asap = rows.filter((r) => !r.pickup_at);
   return c.json({
@@ -3813,7 +3813,7 @@ app.get('/route/pickup', async (c) => {
 
 /* -------- batch pickup scheduling (no zigzag) ----------------------------- */
 // Sweep algorithm: bucket scattered stops by latitude bands and walk each band
-// east-west / west-east alternately ("snake" rasterisation) â€” provably minimal
+// east-west / west-east alternately ("snake" rasterisation) — provably minimal
 // crossings, the classic non-crossing courier path for a city-wide route.
 // Band = ~1.3 km; stop cap 25 per rider.
 app.get('/batch/pickup', async (c) => {
@@ -3822,7 +3822,7 @@ app.get('/batch/pickup', async (c) => {
   }
   const dateParam = c.req.query('date') ?? new Date().toISOString().slice(0, 10);
   const maxStops = Math.max(1, Math.min(60, Number(c.req.query('max_stops') ?? '25') || 25));
-  const bandDeg = Number(c.req.query('band_km') ?? '1.3') / 111; // ~1Â° â‰ˆ 111km
+  const bandDeg = Number(c.req.query('band_km') ?? '1.3') / 111; // ~1° ≈ 111km
   const { results } = await c.env.DB.prepare(
     `SELECT ref, pickup_address, pickup_lat, pickup_lng, weight_class, description
        FROM jobs
@@ -3857,7 +3857,7 @@ app.get('/batch/pickup', async (c) => {
     hub: 'Platinum Chibolya',
     stop_count: stops.length,
     routes,
-    algorithm: `snake-latbands band=${bandDeg.toFixed(4)}Â° cap=${maxStops}`,
+    algorithm: `snake-latbands band=${bandDeg.toFixed(4)}° cap=${maxStops}`,
   });
 });
 
@@ -3928,13 +3928,13 @@ app.post('/jobs/:ref/auto-assign', async (c) => {
   // notify the rider + sender that a rider was assigned
   await sendToPhone(c.env, job.sender_phone, {
     title: 'Rider assigned',
-    body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup â€” track them live in Bookings.`,
+    body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup — track them live in Bookings.`,
     data: { job_ref: ref, kind: 'rider_assigned' },
   });
   if (pick.rider.phone !== job.sender_phone) {
     await sendToPhone(c.env, pick.rider.phone, {
       title: 'New pickup assigned',
-      body: `Job ${ref} â€” ${job.pickup_address}, ETA ~${etaMin} min.`,
+      body: `Job ${ref} — ${job.pickup_address}, ETA ~${etaMin} min.`,
       data: { job_ref: ref, kind: 'job_assigned' },
     });
   }
@@ -4011,9 +4011,9 @@ app.get('/rider/route', async (c) => {
 // The rider's day, grouped into sweep windows like a task queue: stop order,
 // ETA chain, parcel totals, majority destination branch, target drop-off time.
 const SWEEP_SLOTS: Record<string, { label: string; cutoff: string; start: string; target: string; range: string }> = {
-  '06:00': { label: '06:00–07:30 slot', cutoff: '05:30', start: '06:00', target: '08:30', range: '6:00–7:30 AM' },
-  '10:00': { label: '10:00–11:30 slot', cutoff: '09:30', start: '10:00', target: '12:30', range: '10:00–11:30 AM' },
-  '14:00': { label: '14:00–15:30 slot', cutoff: '13:30', start: '14:00', target: '16:30', range: '2:00–3:30 PM' },
+  '06:00': { label: '06:00�07:30 slot', cutoff: '05:30', start: '06:00', target: '08:30', range: '6:00�7:30 AM' },
+  '10:00': { label: '10:00�11:30 slot', cutoff: '09:30', start: '10:00', target: '12:30', range: '10:00�11:30 AM' },
+  '14:00': { label: '14:00�15:30 slot', cutoff: '13:30', start: '14:00', target: '16:30', range: '2:00�3:30 PM' },
 };
 
 function catHM(offsetMinutes = 0): string {
@@ -4168,7 +4168,7 @@ app.get('/refer/code', async (c) => {
   ).bind(phone).first<any>();
   return c.json({
     code,
-    share_text: `Join me on DropOff â€” sellers get home pickup to their courier. Use my code ${code}: https://dropoff-api.godfreymoseskalambo.workers.dev`,
+    share_text: `Join me on DropOff — sellers get home pickup to their courier. Use my code ${code}: https://dropoff-api.godfreymoseskalambo.workers.dev`,
     stats: { pending: stats?.pending ?? 0, rewarded: stats?.rewarded ?? 0, total: stats?.total ?? 0 },
   });
 });
@@ -4277,7 +4277,7 @@ app.post('/recurring/:id/delete', deleteRecurringPlan); // client-friendly alias
 // pickup route is available to ops/admin JWT roles too; no new role needed.
 
 /* ---------------------------- web console pages ---------------------------- */
-// GET /console?key=â€¦ (superadmin HTML dashboard) + GET /partner/console (partner
+// GET /console?key=… (superadmin HTML dashboard) + GET /partner/console (partner
 // panel; the page speaks JSON to /partner/* with the login token it asks for).
 const CONSOLE_CSS = `body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:860px;margin:24px auto;padding:0 16px;color:#10312a}
 h1{font-size:20px} table{border-collapse:collapse;width:100%;margin:12px 0} td,th{padding:6px 10px;border-bottom:1px solid #dde6e2;text-align:left;font-size:14px}
@@ -4285,32 +4285,32 @@ th{background:#eef4f1} .kpi{display:inline-block;background:#eef4f1;border-radiu
 .kpi b{display:block;font-size:20px} input,button,select{padding:8px;border-radius:8px;border:1px solid #cfd8d4;font-size:14px}
 button{background:#17855f;color:#fff;border:0;font-weight:700}`;
 
-/** Superadmin console — open as https://<worker>/console#key=<ADMIN_AUTH_KEY>
+/** Superadmin console � open as https://<worker>/console#key=<ADMIN_AUTH_KEY>
  *  The FRAGMENT form is preferred: fragments never reach the server, so the
  *  key stays out of access logs, Referer headers and browser history.
- *  A legacy ?key= is validated server-side — wrong key 403s, right key is
+ *  A legacy ?key= is validated server-side � wrong key 403s, right key is
  *  bounced to the #key= form so it never lingers in a query string. */
 app.get('/console', (c) => {
   const qKey = c.req.query('key');
   if (qKey !== undefined) {
     if (qKey !== c.env.ADMIN_AUTH_KEY) {
       return c.html(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Denied</title>
-<body style="font-family:sans-serif;color:#10312a;padding:40px"><h1>403 — wrong admin key</h1>
+<body style="font-family:sans-serif;color:#10312a;padding:40px"><h1>403 � wrong admin key</h1>
 <p>Open <code>/console#key=YOUR_KEY</code> instead (the fragment never leaves your browser).</p></body>`, 403);
     }
     return c.redirect(`/console#key=${encodeURIComponent(qKey)}`);
   }
   return c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">
-<title>DropOff â€” Admin</title><style>${CONSOLE_CSS}</style></head><body>
-<h1>DropOff â€” superadmin console</h1>
-<div id="kpis">Loadingâ€¦</div>
+<title>DropOff — Admin</title><style>${CONSOLE_CSS}</style></head><body>
+<h1>DropOff — superadmin console</h1>
+<div id="kpis">Loading…</div>
 <table id="tbl"><thead><tr><th>KPI</th><th>Last 30 days</th></tr></thead><tbody></tbody></table>
 <h2>Partner shops</h2>
-<p>Add email + courier id â†’ the partner logs in with that email and confirms prices/rides.</p>
+<p>Add email + courier id → the partner logs in with that email and confirms prices/rides.</p>
 <input id="pEmail" placeholder="partner@shop.co.zm"><input id="pCourier" type="number" placeholder="courier id">
 <button onclick="makePartner()">Promote to partner</button><span id="pMsg"></span>
 
-<h2>Tiers (pack prices â€” editable live)</h2>
+<h2>Tiers (pack prices — editable live)</h2>
 <table id="tiersTbl"><thead><tr><th>tier</th><th>fee K/mo</th><th>parcels/day</th><th>rider fee K</th><th>tag</th><th></th></tr></thead><tbody></tbody></table>
 <div>
 <select id="tTier"><option>daily</option><option>weekly</option><option>silver</option><option>gold</option><option>platinum</option></select>
@@ -4333,18 +4333,18 @@ app.get('/console', (c) => {
 <button onclick="savePromo()">Save promo</button><span id="prMsg"></span>
 </div>
 
-<h2>Partner collection rails (their POS â€” never our money)</h2>
+<h2>Partner collection rails (their POS — never our money)</h2>
 <p>Set how the customer pays the courier directly at the counter/depot. Shown on the courier page.</p>
 <table id="posTbl"><thead><tr><th>courier id</th><th>rail</th><th>merchant</th><th>instructions</th></tr></thead><tbody></tbody></table>
 <div>
 <input id="posCourier" type="number" placeholder="courier id">
 <select id="posRail"><option>momo</option><option>bank</option><option>pos_terminal</option><option>whatsapp</option><option>cash</option></select>
 <input id="posMerchant" placeholder="merchant/till/momo number">
-<input id="posInstructions" placeholder="e.g. Send K110 to 096â€¦ ref=waybill" size="46">
+<input id="posInstructions" placeholder="e.g. Send K110 to 096… ref=waybill" size="46">
 <button onclick="savePos()">Save POS</button><span id="posMsg"></span>
 </div>
 <script>
-// Key comes from the URL fragment (#key=…, never sent to the server) with a
+// Key comes from the URL fragment (#key=�, never sent to the server) with a
 // one-shot ?key= fallback; scrubbed from history either way.
 const key = new URLSearchParams(location.hash.slice(1)).get('key')
   || new URLSearchParams(location.search).get('key') || '';
@@ -4367,12 +4367,12 @@ fetch('/admin/stats', { headers: H }).then(r => r.json()).then(s => {
   }
   const tiers = s.subs_by_tier ?? [];
   for (const t of tiers) tb.insertAdjacentHTML('beforeend', '<tr><td>pack: ' + esc(t.tier) + '</td><td>' + esc(t.n) + ' active</td></tr>');
-}).catch(() => document.getElementById('kpis').textContent = 'Admin key wrong — open /console#key=YOUR_KEY');
-// note: esc() is defined further down â€” hoisted function, safe here
+}).catch(() => document.getElementById('kpis').textContent = 'Admin key wrong � open /console#key=YOUR_KEY');
+// note: esc() is defined further down — hoisted function, safe here
 async function makePartner() {
   const r = await fetch('/admin/partners', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: document.getElementById('pEmail').value.trim(), courier_id: Number(document.getElementById('pCourier').value) }) });
-  const j = await r.json(); document.getElementById('pMsg').textContent = r.ok ? 'âœ” ' + esc(j.email) + ' â†’ ' + esc(j.role) : 'âœ– ' + esc(j.error || 'failed');
+  const j = await r.json(); document.getElementById('pMsg').textContent = r.ok ? '✔ ' + esc(j.email) + ' → ' + esc(j.role) : '✖ ' + esc(j.error || 'failed');
 }
 function esc(v) { return (v ?? '').toString().replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m])); }
 async function loadTiers() {
@@ -4383,16 +4383,16 @@ function editTier(tier, fee, ppd, rider, tag) { tTier.value = tier; tFee.value =
 async function saveTier() {
   const r = await fetch('/admin/tiers', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
     body: JSON.stringify({ tier: tTier.value, fee_zmw: Number(tFee.value), parcels_per_day: Number(tPpd.value), rider_fee_zmw: Number(tRider.value), tag: tTag.value.trim() || null }) });
-  const j = await r.json(); tMsg.textContent = r.ok ? ' âœ” saved' : ' âœ– ' + esc(j.error || 'failed'); loadTiers();
+  const j = await r.json(); tMsg.textContent = r.ok ? ' ✔ saved' : ' ✖ ' + esc(j.error || 'failed'); loadTiers();
 }
 async function loadPromos() {
   const r = await fetch('/admin/promos', { headers: H }); const j = await r.json(); const tb = document.querySelector('#promosTbl tbody'); tb.innerHTML = '';
-  for (const p of j.promos ?? []) tb.insertAdjacentHTML('beforeend', '<tr><td>' + esc(p.code) + '</td><td>' + p.discount_pct + '</td><td>' + (p.uses_left ?? 'âˆž') + '</td><td>' + esc(p.expires_at ?? '') + '</td><td>' + esc(p.applies_tier ?? 'any') + '</td><td>' + esc(p.note ?? '') + '</td></tr>');
+  for (const p of j.promos ?? []) tb.insertAdjacentHTML('beforeend', '<tr><td>' + esc(p.code) + '</td><td>' + p.discount_pct + '</td><td>' + (p.uses_left ?? '∞') + '</td><td>' + esc(p.expires_at ?? '') + '</td><td>' + esc(p.applies_tier ?? 'any') + '</td><td>' + esc(p.note ?? '') + '</td></tr>');
 }
 async function savePromo() {
   const r = await fetch('/admin/promos', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
     body: JSON.stringify({ code: prCode.value.trim().toUpperCase(), discount_pct: Number(prPct.value), uses_left: prUses.value ? Number(prUses.value) : null, expires_at: prExp.value || null, applies_tier: prTier.value.trim().toLowerCase() || null, note: prNote.value.trim() || null }) });
-  const j = await r.json(); prMsg.textContent = r.ok ? ' âœ” saved' : ' âœ– ' + esc(j.error || 'failed'); loadPromos();
+  const j = await r.json(); prMsg.textContent = r.ok ? ' ✔ saved' : ' ✖ ' + esc(j.error || 'failed'); loadPromos();
 }
 async function loadPos() {
   const r = await fetch('/admin/pos', { headers: H }); const j = await r.json(); const tb = document.querySelector('#posTbl tbody'); tb.innerHTML = '';
@@ -4401,16 +4401,16 @@ async function loadPos() {
 async function savePos() {
   const r = await fetch('/admin/pos', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
     body: JSON.stringify({ courier_id: Number(posCourier.value), rail: posRail.value, merchant_id: posMerchant.value.trim(), instructions: posInstructions.value.trim() }) });
-  const j = await r.json(); posMsg.textContent = r.ok ? ' âœ” saved' : ' âœ– ' + esc(j.error || 'failed'); loadPos();
+  const j = await r.json(); posMsg.textContent = r.ok ? ' ✔ saved' : ' ✖ ' + esc(j.error || 'failed'); loadPos();
 }
 loadTiers(); loadPromos(); loadPos();
 </script></body></html>`);
 });
 
-/** Partner console â€” the partner logs in (email) and pastes the token. */
+/** Partner console — the partner logs in (email) and pastes the token. */
 app.get('/partner/console', (c) => c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DropOff â€” Partner</title><style>${CONSOLE_CSS}</style></head><body>
-<h1>DropOff â€” courier partner console</h1>
+<title>DropOff — Partner</title><style>${CONSOLE_CSS}</style></head><body>
+<h1>DropOff — courier partner console</h1>
 <p>Paste your login token from the app or one issued to you. In-browser logins keep the token local.</p>
 <input id="token" placeholder="login token" style="width:100%">
 <button onclick="load()">Open</button>
@@ -4438,20 +4438,20 @@ async function load() {
   const me = await (await fetch('/partner/me', { headers: H() })).json();
   if (!me.courier) { document.getElementById('me').textContent = 'Not a partner account yet.'; return; }
   CID = me.courier.id;
-  document.getElementById('me').innerHTML = '<b>' + esc(me.email) + '</b> â€” ' + esc(me.courier.name) + ' (' + esc(me.courier.city) + ', ' + esc(me.courier.depot_name) + ')';
+  document.getElementById('me').innerHTML = '<b>' + esc(me.email) + '</b> — ' + esc(me.courier.name) + ' (' + esc(me.courier.city) + ', ' + esc(me.courier.depot_name) + ')';
   const q = await (await fetch('/partner/quotes', { headers: H() })).json();
   document.querySelector('#q tbody').innerHTML =
     (q.quotes || []).map(z => '<tr><td>' + esc(z.from_city) + '</td><td>' + esc(z.to_city) + '</td><td>' + esc(z.weight_class) + '</td><td>' + esc(z.service) + '</td><td>K' + esc(z.counter_price_zmw) + '</td><td>' + esc(z.updated_at) + '</td></tr>').join('');
   const r = await (await fetch('/partner/rides', { headers: H() })).json();
   document.querySelector('#r tbody').innerHTML =
-    (r.jobs || []).map(z => '<tr><td>' + esc(z.ref) + '</td><td>' + esc(z.dest_city) + '</td><td>' + esc(z.weight_class) + '</td><td>' + esc(z.last_event) + '</td><td>' + (z.paid ? 'paid' : 'â€”') + '</td><td><button onclick="confirmRide(\\'' + z.ref + '\\')">confirm</button></td></tr>').join('');
+    (r.jobs || []).map(z => '<tr><td>' + esc(z.ref) + '</td><td>' + esc(z.dest_city) + '</td><td>' + esc(z.weight_class) + '</td><td>' + esc(z.last_event) + '</td><td>' + (z.paid ? 'paid' : '—') + '</td><td><button onclick="confirmRide(\\'' + z.ref + '\\')">confirm</button></td></tr>').join('');
 }
 async function save() {
   const r = await fetch('/partner/quotes', { method: 'POST', headers: H(), body: JSON.stringify({
     courier_id: CID, from_city: document.getElementById('fCity').value, to_city: document.getElementById('tCity').value,
     weight_class: document.getElementById('w').value, service: document.getElementById('sv').value,
     counter_price_zmw: Number(document.getElementById('p').value) }) });
-  const j = await r.json(); document.getElementById('msg').textContent = r.ok ? 'âœ” price confirmed' : 'âœ– ' + esc(j.error || '');
+  const j = await r.json(); document.getElementById('msg').textContent = r.ok ? '✔ price confirmed' : '✖ ' + esc(j.error || '');
   if (r.ok) load();
 }
 async function confirmRide(ref) {
@@ -4507,7 +4507,7 @@ app.get('/subscriptions/:phone?', async (c) => {
   const role = c.get('role');
   const staff = role === 'ops' || isAdmin(c);
   if (role === 'customer' || role === 'partner' || !phone || !staff) {
-    // Anyone non-staff reads only their own subscription — no IDOR.
+    // Anyone non-staff reads only their own subscription � no IDOR.
     phone = c.get('phone') ?? (staff ? normalizeZmPhone(phone) : '');
   } else {
     phone = normalizeZmPhone(phone);
@@ -4528,7 +4528,7 @@ app.get('/subscriptions/:phone?', async (c) => {
       `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs WHERE sender_phone = ?1
         AND created_at >= ?2 AND created_at < ?3`,
     ).bind(phone, sub.period_start, sub.period_end).first<any>())?.n ?? 0;
-    rollover = 0; // no rollover — unused parcels expire with the cycle
+    rollover = 0; // no rollover � unused parcels expire with the cycle
     effectiveCap = (plan?.parcels_per_month ?? 0);
   }
   return c.json({
@@ -4599,7 +4599,7 @@ app.post('/subscriptions/redeem', async (c) => {
   const plan = packs[row.tier as PlanTier];
   if (!plan) return c.json({ error: 'pack_tier_unavailable' }, 409);
   const days = Math.max(1, Number(row.cycle_days) || plan.cycle_days || 30);
-  // Consume atomically — two devices racing the same code: exactly one wins.
+  // Consume atomically � two devices racing the same code: exactly one wins.
   const upd = await c.env.DB.prepare(
     `UPDATE pack_codes SET used_by = ?1, used_at = datetime('now') WHERE code = ?2 AND used_by IS NULL`,
   ).bind(phone, code).run();
@@ -4661,11 +4661,11 @@ app.post('/subscriptions/upgrade', async (c) => {
   const remainingDays = Math.max(1, Math.ceil(remainingMs / 86_400_000));
   const prorated = round2(Math.max(0, ((newPlan.fee_zmw - (oldPlan?.fee_zmw ?? 0)) * remainingDays) / cycleDays));
 
-  // Bump the tier NOW — the bigger cap is live immediately.
+  // Bump the tier NOW � the bigger cap is live immediately.
   await c.env.DB.prepare('UPDATE subscriptions SET tier = ?2 WHERE id = ?1').bind(sub.id, tier).run();
 
   if (prorated <= 0) {
-    return c.json({ ok: true, tier, prorated_zmw: 0, detail: 'Upgraded — nothing extra to pay for the rest of this cycle.' });
+    return c.json({ ok: true, tier, prorated_zmw: 0, detail: 'Upgraded � nothing extra to pay for the rest of this cycle.' });
   }
 
   const platformFeeZmw = platformFee(prorated);
@@ -4718,7 +4718,7 @@ app.post('/admin/couriers', async (c) => {
   return c.json({ ok: true, id: meta.last_row_id });
 });
 
-// Price-list entry (chargebook) â€” superadmin captures depot tariffs here
+// Price-list entry (chargebook) — superadmin captures depot tariffs here
 app.post('/admin/quotes', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const required = ['courier_id', 'from_city', 'to_city', 'weight_class', 'service', 'counter_price_zmw'];
@@ -4789,7 +4789,7 @@ app.post('/admin/partners', async (c) => {
   const courier = await c.env.DB.prepare('SELECT id FROM couriers WHERE id = ?1').bind(courierId).first<any>();
   if (!courier) return c.json({ error: 'courier not found' }, 404);
   const user = await c.env.DB.prepare('SELECT email FROM auth_users WHERE email = ?1').bind(email).first<any>();
-  if (!user) return c.json({ error: 'that email has no account yet â€” ask them to register in the app first' }, 404);
+  if (!user) return c.json({ error: 'that email has no account yet — ask them to register in the app first' }, 404);
   await c.env.DB.prepare(
     `UPDATE auth_users SET role = 'partner', courier_id = ?2 WHERE email = ?1`,
   ).bind(email, courierId).run();
@@ -4809,7 +4809,7 @@ async function remitJobCod(c: any, job_ref: string): Promise<Response> {
   if (!job.cod_collected_zmw) return c.json({ error: 'no cash collected on this job' }, 409);
   const cod = Number(job.cod_collected_zmw);
   const net = Math.round(cod * (1 - COD_FEE) * 100) / 100;
-  // Customers/sellers have NO wallet — settle COD straight to their momo.
+  // Customers/sellers have NO wallet � settle COD straight to their momo.
   const ref = `cod-${job.ref}-${Date.now().toString(36)}`;
   const disb = await lipilaDisburse(c.env, job.sender_phone, net, ref, `DropOff COD remit ${job.ref}`);
   if (!disb.ok) return c.json({ error: 'lipila disbursement failed', detail: disb.raw ?? null }, 502);
@@ -4819,7 +4819,7 @@ async function remitJobCod(c: any, job_ref: string): Promise<Response> {
        VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, 'pending', 'merchant', 'cod_remit')`,
     ).bind(job.id, job.sender_phone, providerFromPhone(job.sender_phone), net, disb.lipilaReference ?? ref),
     c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_remit_initiated', ?2)`)
-      .bind(job.id, `COD K${cod} remitted via momo — sender gets K${net} (platform keeps K${(cod - net).toFixed(2)}). Ref ${disb.lipilaReference ?? ref}`),
+      .bind(job.id, `COD K${cod} remitted via momo � sender gets K${net} (platform keeps K${(cod - net).toFixed(2)}). Ref ${disb.lipilaReference ?? ref}`),
   ]);
   return c.json({ ok: true, job_ref: job.ref, credited_zmw: net, platform_kept_zmw: round2(cod - net), lipila_reference: disb.lipilaReference ?? ref, settlement: 'momo_disbursement' });
 }
@@ -4839,7 +4839,7 @@ app.post('/admin/payouts', async (c) => {
 
 // Rider self-remittance: a signed-in rider settles the COD float on a job THE
 // PLATFORM ASSIGNED TO THEM. One prompt per job (idempotent-ish: re-run with
-// no cash double-pays? no — the payment row is per attempt; keep admin key +
+// no cash double-pays? no � the payment row is per attempt; keep admin key +
 // job match as the guard). Ops/admin use /admin/payouts instead.
 app.post('/rider/cod/remit', async (c) => {
   const role = c.get('role');
@@ -5102,7 +5102,7 @@ async function analyzeSelfieFace(env: Env, bytes: number[]): Promise<FaceCheck> 
 /** AI assist: does the selfie depict the same person as the portrait on an ID
  *  document (licence, or NRC/permit when it carries one)? Single-image model
  *  calls (no multi-image input), then a text model compares the two
- *  descriptions. British: heuristic — the admin always decides. */
+ *  descriptions. British: heuristic � the admin always decides. */
 async function compareFaceToId(env: Env, selfieBytes: number[], portraitBytes: number[]): Promise<{
   same_person: 'yes' | 'uncertain' | 'no';
   confidence: 'high' | 'medium' | 'low';
@@ -5118,14 +5118,15 @@ async function compareFaceToId(env: Env, selfieBytes: number[], portraitBytes: n
   };
   const selfieDesc = await describe(selfieBytes, "a rider's selfie");
   const idDesc = await describe(portraitBytes, 'the portrait on an ID document');
-  const out: any = await (env.AI as any).run('@cf/meta/llama-3.1-8b-instruct', {
+  const out: any = await (env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
     messages: [
       { role: 'system', content: 'You compare two interview-grade facial descriptions for consistency. Be conservative: if either is vague, answer uncertain. Reply with JSON ONLY.' },
       { role: 'user', content: `Description A (selfie): ${selfieDesc}\nDescription B (ID portrait): ${idDesc}\nDecide if these likely depict the same person. Reply with JSON ONLY: {"same_person":"yes"|"uncertain"|"no","confidence":"high"|"medium"|"low","note":"<one short sentence>"}` },
     ],
     max_tokens: 120,
   });
-  const raw = String(out?.response ?? '').trim();
+  const raw = (typeof out?.response === 'string' ? out.response
+    : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim();
   const m = raw.match(/\{[\s\S]*\}/);
   let j: any = {};
   try { j = m ? JSON.parse(m[0]) : {}; } catch { j = {}; }
@@ -5327,12 +5328,12 @@ app.post('/rider/profile/ai-face-check', async (c) => {
 // Server-rendered admin dashboard (no separate build / hosting needed).
 // Superadmin (owner) sees everything; admins see riders/jobs/fraud/alerts but
 // cannot mint/demote admins. Sellers & partners use the mobile app (app-first)
-// — they get read-only job/tracking surfaces via the existing API.
+// � they get read-only job/tracking surfaces via the existing API.
 function h(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function layout(title: string, user: string, body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${h(title)} — DropOff</title><style>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${h(title)} � DropOff</title><style>
 * { box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f4f7f5; color: #17221e; }
 .top { background: #123c32; color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 50; }
@@ -5372,9 +5373,9 @@ input, select { padding: 6px 10px; border: 1px solid #e2e6e1; border-radius: 8px
 .foot { margin-top: 24px; color: #65736d; font-size: 11px; border-top: 1px solid #e2e6e1; padding-top: 12px; }
 @media (max-width: 700px) { .wrap { padding: 10px; } .metrics { grid-template-columns: 1fr; } table { font-size: 11px; } th, td { padding: 6px 4px; } }
 </style></head><body>
-<div class="top"><strong style="font-size:18px;letter-spacing:-0.6px;">DropOff</strong> <span style="opacity:.8">first-mile · Zambia</span> <a href="/dashboard">Dashboard</a> <span style="opacity:.6">·</span> <a href="/admin/riders">Riders</a> <span style="opacity:.6">·</span> <a href="/dashboard/analytics">Analytics</a> <span style="opacity:.6">·</span> <a href="/admin/fraud">Fraud</a> <span style="opacity:.6">·</span> <a href="/security/alerts">Alerts</a> <span style="opacity:.6">·</span> <strong>${h(user)}</strong> <a href="/auth/logout" style="margin-left:10px;">Sign out</a></div>
+<div class="top"><strong style="font-size:18px;letter-spacing:-0.6px;">DropOff</strong> <span style="opacity:.8">first-mile � Zambia</span> <a href="/dashboard">Dashboard</a> <span style="opacity:.6">�</span> <a href="/admin/riders">Riders</a> <span style="opacity:.6">�</span> <a href="/dashboard/analytics">Analytics</a> <span style="opacity:.6">�</span> <a href="/admin/fraud">Fraud</a> <span style="opacity:.6">�</span> <a href="/security/alerts">Alerts</a> <span style="opacity:.6">�</span> <strong>${h(user)}</strong> <a href="/auth/logout" style="margin-left:10px;">Sign out</a></div>
 <div class="wrap">${body}</div>
-<div class="foot">DropOff — home or shop pickup to your courier depot. Internal admin surface. Not for sellers or recipients.</div>
+<div class="foot">DropOff � home or shop pickup to your courier depot. Internal admin surface. Not for sellers or recipients.</div>
 </body></html>`;
 }
 function statusBadge(s: string): string {
@@ -5505,7 +5506,7 @@ app.get('/dashboard/jobs', async (c) => {
 /* ------------------------------ app analytics ----------------------------- */
 // Feature usage / click KPI for superadmin & admin (app-first).
 // The Flutter app batches events locally (offline-first outbox) and POSTs them
-// here; the worker only stores them — aggregation happens on read via KPI.
+// here; the worker only stores them � aggregation happens on read via KPI.
 // Auth: any signed-in caller (phone JWT) or admin key. Rate-limited per IP.
 app.post('/analytics/ingest', async (c) => {
   if (await rateLimited(c, 'analytics_ingest', 120)) return c.json({ error: 'too_many_requests' }, 429);
@@ -5590,7 +5591,7 @@ app.get('/admin/analytics/kpi', async (c) => {
   });
 });
 
-/* Analytics KPI page (HTML) — server-rendered view of the same aggregation. */
+/* Analytics KPI page (HTML) � server-rendered view of the same aggregation. */
 app.get('/dashboard/analytics', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
   const phone = c.get('phone') ?? 'admin';
@@ -5665,14 +5666,14 @@ app.get('/dashboard/analytics', async (c) => {
     <h2>Top actions</h2>
     <table>
       <thead><tr><th>Feature</th><th>Action</th><th>Count</th></tr></thead>
-      <tbody>${actionRows || '<tr><td colspan="3" class="empty">—</td></tr>'}</tbody>
+      <tbody>${actionRows || '<tr><td colspan="3" class="empty">�</td></tr>'}</tbody>
     </table>
   </div>
   <div class="card">
     <h2>Conversion funnel (unique users)</h2>
     <table>
       <thead><tr><th>Milestone</th><th>Users</th></tr></thead>
-      <tbody>${funnelRows || '<tr><td colspan="2" class="empty">—</td></tr>'}</tbody>
+      <tbody>${funnelRows || '<tr><td colspan="2" class="empty">�</td></tr>'}</tbody>
     </table>
   </div>
   <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -5680,14 +5681,14 @@ app.get('/dashboard/analytics', async (c) => {
       <h2>Daily active users</h2>
       <table style="font-size:12px">
         <thead><tr><th>Day</th><th>Users</th></tr></thead>
-        <tbody>${dauRows || '<tr><td colspan="2" class="empty">—</td></tr>'}</tbody>
+        <tbody>${dauRows || '<tr><td colspan="2" class="empty">�</td></tr>'}</tbody>
       </table>
     </div>
     <div class="card" style="flex:1;min-width:260px">
       <h2>Usage by role</h2>
       <table style="font-size:12px">
         <thead><tr><th>Role</th><th>Events</th><th>Users</th></tr></thead>
-        <tbody>${roleRows || '<tr><td colspan="3" class="empty">—</td></tr>'}</tbody>
+        <tbody>${roleRows || '<tr><td colspan="3" class="empty">�</td></tr>'}</tbody>
       </table>
     </div>
   </div>
@@ -5709,14 +5710,19 @@ app.post('/ai/address', async (c) => {
   };
   if (!c.env.AI) return c.json({ fallback: true, parsed: fallback() });
   try {
-    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct', {
+    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
       messages: [
         { role: 'system', content: 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.' },
         { role: 'user', content: `Address: ${text}` },
       ],
       max_tokens: 220,
     });
-    const raw = String(out?.response ?? '');
+    let raw = '';
+    if (typeof out?.response === 'string') raw = out.response;
+    else if (typeof out?.choices?.[0]?.message?.content === 'string') raw = out.choices[0].message.content;
+    else if (typeof out?.result === 'string') raw = out.result;
+    else if (typeof out?.text === 'string') raw = out.text;
+    else raw = JSON.stringify(out ?? '');
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     const parsed = start >= 0 && end > start ? JSON.parse(raw.slice(start, end + 1)) : fallback();
@@ -5741,14 +5747,15 @@ app.post('/admin/support/threads/:id/ai-draft', async (c) => {
   const history = ((results ?? []) as any[]).reverse()
     .map((m) => `${m.sender_role === 'ops' ? 'DropOff' : 'Customer'}: ${String(m.body).slice(0, 400)}`).join('\n');
   try {
-    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct', {
+    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
       messages: [
         { role: 'system', content: 'You are DropOff support in Lusaka, Zambia. Write a short, warm, concrete reply (max 90 words). Never promise refunds or payments you cannot verify; ask for the parcel reference when needed. Output the reply text only.' },
         { role: 'user', content: `Support ticket history:\n${history}\n\nWrite the next reply from DropOff.` },
       ],
       max_tokens: 260,
     });
-    return c.json({ draft: String(out?.response ?? '').trim().slice(0, 1200) });
+    return c.json({ draft: (typeof out?.response === 'string' ? out.response
+      : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim().slice(0, 1200) });
   } catch (e: any) {
     return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
   }
@@ -6017,7 +6024,7 @@ async function notifyExpiryNudges(env: Env): Promise<void> {
       await env.DB.prepare('UPDATE subscriptions SET expiry_nudge_period = ?2 WHERE id = ?1')
         .bind(row.id, want).run().catch(() => {});
     }
-  } catch { /* nudges are best-effort — never break the cron */ }
+  } catch { /* nudges are best-effort � never break the cron */ }
 }
 
 /* --------------------- cron: 19:00 driver target nudge --------------------- */
@@ -6075,7 +6082,7 @@ async function notifyCapNudges(env: Env): Promise<void> {
       await env.DB.prepare('UPDATE subscriptions SET cap_nudge_period = ?2 WHERE id = ?1')
         .bind(row.id, row.period_start).run().catch(() => {});
     }
-  } catch { /* nudges are best-effort — never break the cron */ }
+  } catch { /* nudges are best-effort � never break the cron */ }
 }
 
 /* ----------------------- cron: purge stale auth rows ----------------------- */
@@ -6093,7 +6100,7 @@ async function purgeStaleRows(env: Env): Promise<void> {
       env.DB.prepare(`DELETE FROM job_events WHERE created_at IS NULL`), // data hygiene no-op guard
       env.DB.prepare(`DELETE FROM idempotency_keys WHERE created_at < datetime('now', '-7 days')`),
     ]);
-  } catch { /* purge is best-effort â€” never break billing */ }
+  } catch { /* purge is best-effort — never break billing */ }
 }
 
 /* ----------------------- cron: daily app-data backup ----------------------- */
@@ -6170,13 +6177,13 @@ async function checkTimedPickups(env: Env): Promise<void> {
       const when = mins <= 0 ? 'now' : `in ${mins} min`;
       await sendToPhone(env, r.phone, {
         title: 'Timed pickup due',
-        body: `Job ${r.job_ref} â€” ${r.pickup_address ?? ''} â†’ ${r.dest_city ?? ''}, pickup ${when}.`,
+        body: `Job ${r.job_ref} — ${r.pickup_address ?? ''} → ${r.dest_city ?? ''}, pickup ${when}.`,
         data: { job_ref: r.job_ref, kind: 'pickup_reminder' },
       });
       if (r.rider_phone && r.rider_phone !== r.phone) {
         await sendToPhone(env, r.rider_phone, {
           title: 'Rider: timed pickup due',
-          body: `Job ${r.job_ref} â€” ${r.pickup_address ?? ''} â†’ ${r.dest_city ?? ''}, pickup ${when}.`,
+          body: `Job ${r.job_ref} — ${r.pickup_address ?? ''} → ${r.dest_city ?? ''}, pickup ${when}.`,
           data: { job_ref: r.job_ref, kind: 'pickup_reminder' },
         });
       }
@@ -6197,14 +6204,14 @@ async function checkTimedPickups(env: Env): Promise<void> {
         WHERE status IN ('pending','notified')
           AND job_ref IN (SELECT ref FROM jobs WHERE status IN ('delivered','ready_for_collection'))`,
     ).run();
-  } catch { /* timed pickups are best-effort â€” never block the cron */ }
+  } catch { /* timed pickups are best-effort — never block the cron */ }
 }
 
 /* ------------- cron: materialise recurring plans into jobs ----------------- */
 // Standing orders become real jobs on their due day (CAT). Rules: weekly =
 // the plan's weekday; biweekly = every other ISO week (parity by plan id);
 // monthly = the weekday recurring every 4th week. A job is only created when a
-// verified chargebook price exists â€” else the plan is skipped this run (never
+// verified chargebook price exists — else the plan is skipped this run (never
 // invent a fare). Jobs are pre-booked and need rider assignment as usual.
 async function materializeRecurringJobs(env: Env): Promise<{ created: number; skipped: number }> {
   let created = 0, skipped = 0;
@@ -6215,9 +6222,9 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
          AND (last_created_at IS NULL OR last_created_at <> ?1)`,
     ).bind(todayIso).all();
     const catDate = new Date(todayIso + 'T12:00:00Z'); // mid-day so date math is stable
-    const dow = catDate.getUTCDay() === 0 ? 7 : catDate.getUTCDay();          // 1=Mon â€¦ 7=Sun
+    const dow = catDate.getUTCDay() === 0 ? 7 : catDate.getUTCDay();          // 1=Mon … 7=Sun
     const isoWeek = Number(await env.DB.prepare("SELECT strftime('%W', ?1) AS w")
-      .bind(todayIso).first<any>().then((r: any) => r?.w ?? '0'));            // 00â€“53
+      .bind(todayIso).first<any>().then((r: any) => r?.w ?? '0'));            // 00–53
     for (const plan of results as any[]) {
       const due =
         plan.frequency === 'weekly' ? Number(plan.weekday) === dow :
@@ -6255,7 +6262,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
         skipped++;
       }
     }
-  } catch { /* recurring is best-effort â€” do not fail the cron */ }
+  } catch { /* recurring is best-effort — do not fail the cron */ }
   return { created, skipped };
 }
 
@@ -6265,7 +6272,7 @@ function freqLabel(f: string): string {
 
 /* --------------------------- error reporting ------------------------------ */
 // Minimal Sentry "store" client (no SDK): one POST per uncaught error. Safe to
-// leave unset — telemetry must never break a delivery.
+// leave unset � telemetry must never break a delivery.
 async function captureError(env: Env, err: unknown, req: { method: string; url: string }): Promise<void> {
   const dsn = env.SENTRY_DSN;
   if (!dsn) return;
