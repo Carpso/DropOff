@@ -281,6 +281,7 @@ class OperationsScreen extends StatelessWidget {
       );
     }
     final activeRiders = store.riders.where((item) => item.active).length;
+    final canAddRiders = store.isSuperAdmin || store.isAdminRole;
     return SafeArea(
       child: ListView(padding: const EdgeInsets.fromLTRB(20, 22, 20, 28), children: [
         const Text('Your operation', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.6)),
@@ -319,17 +320,22 @@ class OperationsScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 26),
-        SectionTitle('Riders & drivers', actionLabel: '+ Add', onAction: () => _addRider(context)),
+        SectionTitle('Riders & drivers', actionLabel: canAddRiders ? '+ Add' : null, onAction: canAddRiders ? () => _addRider(context) : null),
         const SizedBox(height: 8),
         if (store.riders.isEmpty) ...[
-          EmptyState(            icon: Icons.directions_bike,
+          EmptyState(
+            icon: Icons.directions_bike,
             title: 'No riders yet',
-            message: 'Tap + Add to register your first rider or driver. They’ll appear here once verified.',
-            action: FilledButton.icon(
-              onPressed: () => _addRider(context),
-              icon: const Icon(Icons.add),
-              label: const Text('Add rider'),
-            ),
+            message: canAddRiders
+                ? 'Tap + Add to register your first rider or driver. They’ll appear in the shared team once saved.'
+                : 'Only the owner and admins can add riders. They’ll appear here once added.',
+            action: canAddRiders
+                ? FilledButton.icon(
+                    onPressed: () => _addRider(context),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add rider'),
+                  )
+                : null,
           ),
         ] else ...[
           for (final rider in store.riders)
@@ -348,10 +354,11 @@ class OperationsScreen extends StatelessWidget {
                 ])),
                 if (rider.isOwner)
                   const InfoPill(icon: Icons.verified, label: 'OWNER')
-                else ...[
+                else if (canAddRiders) ...[
                   Switch(value: rider.active, onChanged: (value) => store.toggleRider(rider.id, value)),
                   IconButton(icon: const Icon(Icons.delete_outline, color: AppColors.muted), onPressed: () => store.removeRider(rider.id)),
-                ],
+                ] else
+                  const InfoPill(icon: Icons.verified, label: 'VIEW ONLY'),
               ]))),
             ),
         ],

@@ -557,17 +557,20 @@ class _BusinessScreenState extends State<BusinessScreen> {
           ]),
           const SizedBox(height: 4),
           if (flying.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Row(children: [
-                const Expanded(child: Text('Nothing on the road right now.', style: TextStyle(color: AppColors.muted, fontSize: 12.5))),
-                FilledButton(
-                  style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen())),
-                  child: const Text('Book a pickup'),
-                ),
-              ]),
-            )
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Text(
+                'Nothing on the road right now.',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+              ),
+              const SizedBox(height: 10),
+              FilledButton(
+                style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen())),
+                child: const Text('Book a pickup', maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ])
           else
             ...flying.map((job) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
@@ -578,7 +581,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
                       child: Row(children: [
                         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('${job['ref'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                          Text('${job['ref'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
                           const SizedBox(height: 2),
                           Text(
                             '${_jobDestination(job)} · for ${job['recipient_name'] ?? 'recipient'}',
@@ -587,12 +590,14 @@ class _BusinessScreenState extends State<BusinessScreen> {
                             style: const TextStyle(color: AppColors.muted, fontSize: 11),
                           ),
                         ])),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                           decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
                           child: Text('${job['status'] ?? 'created'}'.replaceAll('_', ' '),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
+                              softWrap: false,
                               style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.forest)),
                         ),
                       ]),

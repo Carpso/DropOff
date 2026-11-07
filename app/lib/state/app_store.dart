@@ -68,6 +68,10 @@ class AppStore extends ChangeNotifier {
   bool get isRider => _role == 'rider';
   bool get isTeam => isStaff || isRider;
 
+  /// True only for role=admin (superadmin included — the owner is always
+  /// minted as admin by the worker). Only these accounts may create riders.
+  bool get isAdminRole => _role == 'admin';
+
   /// True when the signed-in phone is the app owner's (or the admin key is
   /// configured): unlocks user/role management in the admin console.
   bool get isSuperAdmin => _superadmin;
@@ -140,6 +144,9 @@ class AppStore extends ChangeNotifier {
     _linkedPhone = preferences.getString(_phoneKey);
     _email = preferences.getString(_emailKey);
     await _reloadAccountCache();
+    // Team roster is the server's list (shared across admins/devices) —
+    // sync it on every cold start so it never resets to empty on this device.
+    if (DropOffApi.enabled) unawaited(syncRidersFromServer());
     _ready = true;
     notifyListeners();
     unawaited(flushOutbox());
@@ -595,21 +602,43 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Adds a rider to the local roster and mirrors it server-side.
-  /// Returns null on full success (or offline demo mode), or an error message
-  /// when the server rejected the write (e.g. 403 — caller is not staff), so
-  /// the UI can say the rider exists on THIS device only.
-  Future<String?> addRider({required String name, required String phone, required String vehicle, String vehicleClass = 'motorcycle'}) async {
-    _riders.add(Rider(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      name: name.trim(),
-      phone: phone.trim(),
-      vehicle: vehicle,
-    ));
+  /// Every staff account sees the SAME roster: created once server-side, it
+  /// shows up for every admin on every device. This syncs the local cache
+  /// from GET /admin/riders (offline-tolerant: keeps cache on failure).
+  Future<void> syncRidersFromServer() async {
+    if (!DropOffApi.enabled) return;
+    final data = await DropOffApi.get('/admin/riders');
+    final list = ((data?['riders'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    if (list.isEmpty) return; // keep local cache rather than wiping on an empty read
+    _riders
+      ..clear()
+      ..add(const Rider(
+        id: 'owner',
+        name: 'Owner',
+        phone: 'Add your phone in team settings',
+        vehicle: 'Motorcycle / vehicle',
+        isOwner: true,
+      ));
+    for (final r in list) {
+      _riders.add(Rider(
+        id: '${r['id'] ?? ''}',
+        name: '${r['full_name'] ?? ''}',
+        phone: '${r['phone'] ?? ''}',
+        vehicle: '${r['vehicle'] ?? ''}',
+        active: (r['active'] as num?)?.toInt() == 1,
+      ));
+    }
     await _saveRiders();
     notifyListeners();
-    // Server mirror (pricing class matters for truck/van runs). Plain post
-    // carries the ops key (rider device) or the owner JWT.
+  }
+
+  /// Adds a rider/team member SERVER-side first (only admin/superadmin may
+  /// create riders): the roster is shared, so this never resets. Returns null
+  /// on full success, or an error message when the server rejected the write.
+  Future<String?> addRider({required String name, required String phone, required String vehicle, String vehicleClass = 'motorcycle'}) async {
+    if (!(isSuperAdmin || isAdminRole)) {
+      return 'Only the owner and admins can add riders.';
+    }
     if (DropOffApi.enabled) {
       final res = await DropOffApi.post('/admin/riders', {
         'phone': phone.trim(),
@@ -618,11 +647,13 @@ class AppStore extends ChangeNotifier {
         'vehicle_class': vehicleClass,
       });
       if (!res.ok) {
-        return res.error == 'admin_key_required' || res.error == 'forbidden'
-            ? 'Saved on this device only — the server requires a staff account to sync riders.'
-            : 'Saved on this device only — server sync failed (${res.error ?? 'network'}).';
+        if (res.status == 403 || res.error == 'admin_key_required' || res.error == 'forbidden') {
+          return 'Only the owner and admins can add riders.';
+        }
+        return 'Could not add the rider (${res.error ?? 'network'}).';
       }
     }
+    await syncRidersFromServer();
     return null;
   }
 
