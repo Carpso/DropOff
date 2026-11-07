@@ -8,7 +8,7 @@ import {
   generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
   verifyJwtClaims, verifyPassword,
 } from './auth';
-import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2 } from './fees';
+import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VEHICLE_MAX_PARCELS, VehicleClass } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { sendSms } from './sms';
@@ -3308,12 +3308,51 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
   }
 }
 
+/* -------- platform revenue sweep (fees → business momo) ----------------- */
+// All platform income sits in the Lipila wallet as we collect it. When the
+// undistributed balance reaches PLATFORM_SWEEP_MIN_ZMW, sweep it to the
+// business number in one disbursement. Idempotent: the ledger row is written
+// BEFORE the disburse call, so a crash-then-rerun can never double-pay
+// (the pending row blocks the next sweep until it is marked success/failed).
+async function sweepPlatformIncome(env: Env): Promise<void> {
+  const businessPhone = env.BUSINESS_PHONE;
+  if (!businessPhone) return;
+  const earnedRow = await env.DB.prepare(
+    `SELECT COALESCE(SUM(platform_fee_zmw), 0) AS total FROM payments WHERE status = 'success'`,
+  ).first<any>();
+  const sweptRow = await env.DB.prepare(
+    `SELECT COALESCE(SUM(amount_zmw), 0) AS total FROM platform_disbursements WHERE status = 'success'`,
+  ).first<any>();
+  const pending = round2((earnedRow?.total ?? 0) - (sweptRow?.total ?? 0));
+  if (pending < PLATFORM_SWEEP_MIN_ZMW) return;
+  const open = await env.DB.prepare(
+    `SELECT id FROM platform_disbursements WHERE status = 'pending' AND created_at > datetime('now', '-1 hour') LIMIT 1`,
+  ).first<any>();
+  if (open) return; // a sweep is still in flight — never disburse twice
+  const ref = `sweep-${Date.now().toString(36)}`;
+  const { meta } = await env.DB.prepare(
+    `INSERT INTO platform_disbursements (amount_zmw, business_phone, lipila_reference, status)
+       VALUES (?1, ?2, ?3, 'pending')`,
+  ).bind(pending, businessPhone, ref).run();
+  const disb = await lipilaDisburse(env, businessPhone, pending, ref, 'DropOff platform income sweep');
+  if (disb.ok) {
+    // pending sweep → success; any other still-'+90d' row resolves through status poll
+    await env.DB.prepare(
+      `UPDATE platform_disbursements SET status = 'success', lipila_reference = ?2, paid_at = datetime('now')
+         WHERE id = ?1`,
+    ).bind(meta.last_row_id, disb.lipilaReference ?? ref).run();
+  } else {
+    await env.DB.prepare(
+      `UPDATE platform_disbursements SET status = 'failed' WHERE id = ?1`,
+    ).bind(meta.last_row_id).run();
+  }
+}
+
 /* ---------------------- cron: reconcile stuck payments -------------------- */
 // Pending collects can miss their webhook (network, phone off). Sweep every
 // pending payment older than 2 minutes, re-check with Lipila and settle what
 // actually succeeded. Rows stuck >7 days are closed as failed.
-async function reconcilePayments(env: Env): Promise<void> {
-  try {
+async function reconcilePayments(env: Env): Promise<void> {  try {
     const { results } = await env.DB.prepare(
       `SELECT id, lipila_reference FROM payments
         WHERE status = 'pending' AND lipila_reference IS NOT NULL
@@ -4691,9 +4730,8 @@ app.post('/subscriptions/upgrade', async (c) => {
 
 /* ------------------ admin (superadmin pricebook + ops) -------------------- */
 app.use('/admin/*', async (c, next) => {
-  // Team management stays ops-accessible (rider devices register their crew);
-  // every other /admin/* surface is admin/owner only.
-  if (c.req.path === '/admin/riders' && c.req.method === 'POST' && c.get('role') === 'ops') return next();
+  // Rider creation is superadmin/admin only (per team policy) — no rider or
+  // ops role may create riders/drivers. Every other /admin/* surface likewise.
   if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   return next();
 });
@@ -4743,9 +4781,10 @@ app.post('/admin/quotes', async (c) => {
 });
 
 // Rider roster (rider identity lives here; rider apps log in by phone OTP)
+// Team creation policy: superadmin (owner) and admins ONLY. No ops/rider may
+// create riders or drivers.
 app.post('/admin/riders', async (c) => {
-  // Team management is ops-domain: ops key (rider device) or admin key/owner.
-  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const b: any = await c.req.json().catch(() => null);
   if (!b?.full_name || !b.vehicle) return c.json({ error: 'full_name and vehicle required' }, 400);
   const phone = normalizeZmPhone(b.phone ?? '');
@@ -5012,6 +5051,8 @@ app.get('/rider/targets', async (c) => {
 
 /* ------------------ admin/owner: verify riders + fleet targets ------------ */
 app.get('/admin/riders', async (c) => {
+  // admin/ops can read the roster — it's the app's server-side source of
+  // truth for the Team tab (written only via the admin-only POST above).
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const limit = pageLimit(c.req.query('limit'));
   const { results } = await c.env.DB.prepare(
@@ -5965,6 +6006,15 @@ app.get('/admin/stats', async (c) => {
         AND datetime(ifnull(paid_at, created_at), '${CAT_OFFSET}') > datetime('now', '-30 days')`,
     ),
     wallet_float_total: await one(`SELECT COALESCE(SUM(balance_zmw), 0) AS n FROM wallets`),
+    // Platform revenue pipeline: total earned as fees sitting in the Lipila
+    // wallet vs how much has been swept to the business momo.
+    lipila_earned_total: await one(
+      `SELECT COALESCE(SUM(platform_fee_zmw), 0) AS n FROM payments WHERE status = 'success'`,
+    ),
+    business_swept_total: await one(
+      `SELECT COALESCE(SUM(amount_zmw), 0) AS n FROM platform_disbursements WHERE status = 'success'`,
+    ),
+    lipila_undistributed: 0, // filled below (earned − swept)
     cod_last_30d: await one(
       `SELECT COALESCE(SUM(cod_collected_zmw), 0) AS n FROM jobs
         WHERE cod_collected_zmw > 0 AND datetime(created_at, '${CAT_OFFSET}') > datetime('now', '-30 days')`,
@@ -6369,6 +6419,7 @@ export default {
         await materializeRecurringJobs(env);
         await backupAppData(env);
         await reconcilePayments(env);
+        await sweepPlatformIncome(env);
       } catch (e) {
         await captureError(env, e, { method: 'CRON', url: `https://cron/${event.cron}` });
       }

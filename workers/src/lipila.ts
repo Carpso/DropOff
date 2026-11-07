@@ -35,6 +35,9 @@ export interface Env {
   OWNER_PHONE?: string;
   /** Email copy of owner alerts (SMS/push used if absent). */
   OWNER_EMAIL?: string;
+  /** Business momo that receives ALL platform income (fees + processing).
+   *  Scheduled sweeps disburse accumulated fees to this number via Lipila. */
+  BUSINESS_PHONE?: string;
 }
 
 // Lipila integration — VERIFIED against https://docs.lipila.dev:

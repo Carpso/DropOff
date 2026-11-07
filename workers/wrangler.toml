@@ -21,6 +21,10 @@ crons = ["0 2 * * *", "* * * * *", "0 19 * * *"]
 # sandbox https://api.lipila.dev — only for test deploys
 LIPILA_BASE_URL = "https://blz.lipila.io"
 LIPILA_CALLBACK_URL = "https://dropoff-api.godfreymoseskalambo.workers.dev/webhooks/lipila"
+# Business momo for ALL platform income (platform fees + processing fees).
+# Scheduled sweeps disburse accumulated income to this number. NEVER commit a
+# different number here — this is the payout account for the whole platform.
+BUSINESS_PHONE = "260976847775"
 # Sender for transactional emails — MUST be on a domain onboarded for Email
 # Sending in THIS Cloudflare account (the account's only zone is
 # carpsosolutions.store; churchonapp.com is not in this account and was

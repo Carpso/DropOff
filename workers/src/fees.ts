@@ -13,6 +13,10 @@ export const PLATFORM_FIXED_FEE = 0.48;  // + K0.48 per collection
 export const PLATFORM_MIN_FEE = 3.0;     // minimum platform portion (K3.00)
 export const MOMO_COLLECTION_FEE = 2.5;  // Lipila collect leg (passed to customer)
 export const MOMO_DISBURSEMENT_FEE = 1.5; // Lipila payout leg (rider-side)
+/** Platform revenue sweep: minimum undistributed balance before the cron
+ *  disburses to the business momo. Keeps the Lipila wallet healthy without
+ *  paying a disbursement fee on dust. */
+export const PLATFORM_SWEEP_MIN_ZMW = 50;
 export const RIDER_TAKE_PCT = 10.0;      // platform take of the rider fee
 
 export const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
