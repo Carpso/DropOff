@@ -1324,7 +1324,7 @@ app.post('/jobs', async (c) => {
     const feeBase = collectionFees(dropOffLeg, packInclusion === 'pack' ? null : riderFee);
 
     // Smart auto-assign: bookings get a rider immediately unless the caller opts out.
-    let autoAssigned: { rider_id: number; rider: string; eta_minutes: number; km: number } | null = null;
+    let autoAssigned: { rider_id: number; rider: string; photo_url: string | null; eta_minutes: number; km: number } | null = null;
     if (b.auto_assign !== false && Number.isFinite(b.pickup_lat ?? 0) && Number.isFinite(b.pickup_lng ?? 0)) {
       try {
         const pick = await nearestAvailableRider(c.env, b.pickup_lat, b.pickup_lng);
@@ -1338,7 +1338,7 @@ app.post('/jobs', async (c) => {
               `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
             ).bind(pick.rider.id),
           ]);
-          autoAssigned = { rider_id: pick.rider.id, rider: pick.rider.full_name, eta_minutes: etaMin, km: pick.km };
+          autoAssigned = { rider_id: pick.rider.id, rider: pick.rider.full_name, photo_url: pick.rider.photo_url ?? null, eta_minutes: etaMin, km: pick.km };
           await sendToPhone(c.env, senderPhone, {
             title: 'Rider assigned',
             body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup â€” track them live in Bookings.`,
@@ -1988,7 +1988,8 @@ app.get('/track/:token', async (c) => {
             j.recipient_name, j.eta_minutes, j.courier_id,
             co.name AS courier_name, co.depot_name AS courier_depot,
             r.full_name AS rider_name, r.vehicle AS rider_vehicle,
-            r.last_lat, r.last_lng, r.last_seen_at
+            r.last_lat, r.last_lng, r.last_seen_at,
+            r.photo_url AS rider_photo_url, r.verification_status AS rider_verification,
        FROM tracking_tokens t
        JOIN jobs j ON j.id = t.job_id
        LEFT JOIN couriers co ON co.id = j.courier_id
@@ -2021,7 +2022,9 @@ app.get('/track/:token', async (c) => {
     recipient_name: row.recipient_name,
     courier: row.courier_name,
     eta_minutes: row.eta_minutes ?? null,
-    rider: row.rider_name ? { name: row.rider_name, vehicle: row.rider_vehicle } : null,
+    rider: row.rider_name
+      ? { name: row.rider_name, vehicle: row.rider_vehicle, photo_url: row.rider_photo_url ?? null, verified: row.rider_verification === 'verified' }
+      : null,
     location: row.last_lat != null
       ? { lat: row.last_lat, lng: row.last_lng, seen_at: row.last_seen_at }
       : null,
@@ -3089,7 +3092,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
        WHERE id = ?1`,
     ).bind(pay.subscription_id, newStart, cycleMod).run();
     await sendToPhone(env, pay.phone, {
-      title: sub?.tier ? `${sub.tier} pack renewed` : 'Pack renewed',
+      title: sub?.tier ? `${sub.tier} plan renewed` : 'Plan renewed',
       body: cycleDays === 1
         ? 'Your daily pass is live for today. Book away — unused parcels expire tonight.'
         : `Renewed for another ${cycleDays} days. Unused parcels do not carry over — book away!`,
@@ -3100,7 +3103,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     // confirms the prorated payment and celebrates.
     const sub = await env.DB.prepare('SELECT tier FROM subscriptions WHERE id = ?1').bind(pay.subscription_id).first<any>();
     await sendToPhone(env, pay.phone, {
-      title: 'Pack upgraded',
+      title: 'Plan upgraded',
       body: sub?.tier ? `You are now on ${sub.tier} — bigger cap, live immediately.` : 'Upgrade complete.',
       data: { kind: 'subscription_active' },
     });
@@ -3707,7 +3710,7 @@ function buildRoute(stops: { ref: string; address: string; lat: number; lng: num
 // current load (emptiest rider first) so work spreads evenly.
 async function nearestAvailableRider(env: Env, lat: number, lng: number): Promise<{ rider: any; km: number } | null> {
   const riders = await env.DB.prepare(
-    `SELECT id, phone, full_name, vehicle, last_lat, last_lng, status, active, capacity, current_load
+    `SELECT id, phone, full_name, vehicle, last_lat, last_lng, status, active, capacity, current_load, photo_url
        FROM riders WHERE active = 1 AND status IN ('available', 'on_route')
         AND verification_status = 'verified'`
   ).all<any>();
@@ -3758,7 +3761,7 @@ app.post('/jobs/:ref/auto-assign', async (c) => {
       data: { job_ref: ref, kind: 'job_assigned' },
     });
   }
-  return c.json({ ok: true, ref, rider_id: pick.rider.id, rider: pick.rider.full_name, eta_minutes: etaMin, km: round2(pick.km) });
+  return c.json({ ok: true, ref, rider_id: pick.rider.id, rider: pick.rider.full_name, photo_url: pick.rider.photo_url ?? null, eta_minutes: etaMin, km: round2(pick.km) });
 });
 
 // Re-optimize ONE rider's route from their live location, optionally inserting
@@ -4172,7 +4175,7 @@ if (key) history.replaceState(null, '', location.pathname);
 const H = { 'X-Admin-Key': key };
 fetch('/admin/stats', { headers: H }).then(r => r.json()).then(s => {
   document.getElementById('kpis').innerHTML = [
-    ['active pack sellers', s.paying_sellers_active],
+    ['active plan sellers', s.paying_sellers_active],
     ['paygo regulars (3+/mo)', s.paygo_regulars],
     ['parcels (30d)', s.parcels_last_30d],
     ['platform fees (30d)', 'K' + (s.platform_fees_last_30d ?? 0).toFixed(2)],
@@ -4844,12 +4847,63 @@ app.post('/admin/riders/:id/verify', async (c) => {
 });
 
 // AI assist (never the decision): read the plate photo and compare the text it
+type FaceCheck = {
+  face: boolean;
+  single_person: boolean;
+  real_photo: boolean;
+  document_or_id: boolean;
+  illustration_or_avatar: boolean;
+  verdict: 'pass' | 'review' | 'fail';
+  note: string;
+  checked_at: string;
+};
+
+/** Workers AI vision review of a rider's selfie: is this a genuine, single
+ *  real person (the rider) - not a document, screen photo, illustration,
+ *  avatar or group shot? Strictly informational: admins still make the call. */
+async function analyzeSelfieFace(env: Env, bytes: number[]): Promise<FaceCheck> {
+  const out: any = await (env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+    image: bytes,
+    prompt: 'You review rider profile photos for a delivery app. Decide whether this is a genuine photograph of one real person (the rider themself). Answer with JSON ONLY: {"has_face":true|false,"single_person":true|false,"real_photo":true|false,"document_or_id":true|false,"illustration_or_avatar":true|false,"note":"<one short sentence>"}. Rules: a document/NRC/plate/licence photo, a photo of a screen or paper, a drawing/avatar/cartoon/logo/meme/no face at all, or a group photo => set the matching flag true and real_photo false. If unsure, say so honestly. No extra text.',
+    max_tokens: 200,
+  });
+  const raw = String(out?.response ?? out?.description ?? '').trim();
+  const match = raw.match(/\{[\s\S]*\}/);
+  let j: any = {};
+  try { j = match ? JSON.parse(match[0]) : {}; } catch { j = {}; }
+  const bool = (v: any) => v === true || String(v).toLowerCase() === 'true';
+  const face = bool(j.has_face);
+  const single = bool(j.single_person);
+  const real = bool(j.real_photo);
+  const doc = bool(j.document_or_id);
+  const illus = bool(j.illustration_or_avatar);
+  const ok = face && single && real && !doc && !illus;
+  const verdict: FaceCheck['verdict'] = ok ? 'pass' : (face ? 'review' : 'fail');
+  return {
+    face, single_person: single, real_photo: real,
+    document_or_id: doc, illustration_or_avatar: illus,
+    verdict,
+    note: String(j.note ?? raw).slice(0, 200),
+    checked_at: new Date().toISOString(),
+  };
+}
+
+/** Merge-or-write the face check into ai_check_json on the rider row. */
+async function persistFaceCheck(db: D1Database, riderId: number, face: FaceCheck): Promise<void> {
+  const row = await db.prepare('SELECT ai_check_json FROM riders WHERE id = ?1').bind(riderId).first<any>();
+  let blob: any = {};
+  try { blob = row?.ai_check_json ? JSON.parse(String(row.ai_check_json)) : {}; } catch { blob = {}; }
+  blob.face = face;
+  await db.prepare('UPDATE riders SET ai_check_json = ?2 WHERE id = ?1')
+    .bind(riderId, JSON.stringify(blob)).run().catch(() => {});
+}
+
 // finds with the rider's submitted plate/NRC. Admins still approve manually.
 app.post('/admin/riders/:id/ai-check', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
   const id = Number(c.req.param('id'));
   const rider = await c.env.DB.prepare(
-    `SELECT id, plate_number, nrc_number, plate_photo_url, nrc_photo_url FROM riders WHERE id = ?1`,
+    `SELECT id, plate_number, nrc_number, plate_photo_url, nrc_photo_url, photo_url FROM riders WHERE id = ?1`,
   ).bind(id).first<any>();
   if (!rider) return c.json({ error: 'not found' }, 404);
   if (!c.env.AI) return c.json({ error: 'ai_unavailable' }, 503);
@@ -4874,10 +4928,45 @@ app.post('/admin/riders/:id/ai-check', async (c) => {
   const found = norm(text);
   const plateMatch = !!rider.plate_number && found.includes(norm(String(rider.plate_number)));
   const nrcMatch = !!rider.nrc_number && found.includes(norm(String(rider.nrc_number)));
-  const result = { text, plate_match: plateMatch, nrc_match: nrcMatch, checked_at: new Date().toISOString() };
+  // Selfie face review rides the same button: one AI pass for the whole KYC.
+  let face: FaceCheck | null = null;
+  const selfieKey = rider.photo_url ? r2KeyFromUrl(rider.photo_url) : null;
+  if (selfieKey) {
+    const selfie = await c.env.BACKUPS.get(selfieKey).catch(() => null);
+    if (selfie) {
+      try { face = await analyzeSelfieFace(c.env, [...new Uint8Array(await selfie.arrayBuffer())]); }
+      catch { face = null; }
+    }
+  }
+  const result = { text, plate_match: plateMatch, nrc_match: nrcMatch, face, checked_at: new Date().toISOString() };
   await c.env.DB.prepare('UPDATE riders SET ai_check_json = ?2 WHERE id = ?1')
     .bind(id, JSON.stringify(result)).run().catch(() => {});
   return c.json({ ok: true, ...result, submitted_plate: rider.plate_number, submitted_nrc: rider.nrc_number });
+});
+
+// Rider self-check: run the AI face review on their OWN current selfie
+// (KYC card calls this right after upload). Returns the verdict; merging it
+// into ai_check_json lets the admin review screen read it later.
+app.post('/rider/profile/ai-face-check', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  if (c.get('role') !== 'rider') return c.json({ error: 'rider_only' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT id, photo_url FROM riders WHERE phone = ?1 AND active = 1',
+  ).bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  if (!rider.photo_url) return c.json({ error: 'no_selfie', detail: 'Upload a selfie first (KYC card).' }, 400);
+  if (!c.env.AI) return c.json({ error: 'ai_unavailable' }, 503);
+  if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
+  const key = r2KeyFromUrl(rider.photo_url);
+  if (!key) return c.json({ error: 'bad_photo_url' }, 400);
+  const object = await c.env.BACKUPS.get(key);
+  if (!object) return c.json({ error: 'photo_missing' }, 404);
+  let face: FaceCheck;
+  try { face = await analyzeSelfieFace(c.env, [...new Uint8Array(await object.arrayBuffer())]); }
+  catch (e: any) { return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502); }
+  await persistFaceCheck(c.env.DB, rider.id, face);
+  return c.json({ ok: true, face });
 });
 
 /* ------------------------------ web dashboard ----------------------------- */

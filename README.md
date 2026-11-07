@@ -366,7 +366,7 @@ Everyone signs in through the same Account screen; what they see afterwards is d
 |---|---|---|
 | **Customer / Sender** | App → Account → Create account (email + password + the momo phone). No approval needed. | Home, Bookings, Business tab (Seller dashboard), pay-as-you-go & subscription plans, support chat. |
 | **Recipient** | Same flow. Use the **phone the parcel was addressed to** — parcels auto-claim by phone match. | Bookings shows **"Parcels for you"** with live tracking; tracking page tags the parcel "Addressed to you". |
-| **Rider** | Ops creates the rider (`POST /admin/riders`) with their phone, OR the rider completes the in-app KYC card (NRC/licence/plate/photos) and an admin approves (`POST /admin/riders/:id/verify`). Sign-in: Account → phone OTP with that phone. | Team tab → personal rider view (jobs, route, COD, targets, verification status). |
+| **Rider** | Ops creates the rider (`POST /admin/riders`) with their phone, OR the rider completes the in-app KYC card (NRC, licence, plate, vehicle details and a **selfie**) and an admin approves (`POST /admin/riders/:id/verify`). The selfie is AI-checked for "one real person's face" before/at review. Sign-in: Account → phone OTP with that phone. | Team tab → personal rider view (jobs, route, COD, targets, verification status). |
 | **Courier partner** | Ops promotes an email account to partner for a depot (`POST /admin/partners {email, courier_id}`, admin-guarded). | Team tab → partner console (counter prices, ride confirms) at `/partner/*`. |
 | **Admin** | Owner promotes the email (`Account → Admin console → Users & roles`, or `POST /admin/users/role`). Owner is always admin+superadmin via `OWNER_PHONE`. | Everything above plus stats, security, fraud, support inbox, branches, SMS. |
 | **Ops** | Devices/builds configured with `API_AUTH_KEY` (`X-Api-Key`). | Ops console APIs (device service account), not superadmin powers. |
@@ -374,7 +374,7 @@ Everyone signs in through the same Account screen; what they see afterwards is d
 **Tracking for recipients (the full path):**
 1. Sender books → Worker mints a tracking token (180-day expiry) → SMS to the recipient: *"Your parcel is on the move — track: APP_URL/track/<token>"*.
 2. Recipient taps the link. The page is gated: last-4 phone hint only. They either **sign in / create a DropOff account with the recipient phone**, or enter the number manually (no account; mints a short-lived `X-Track-Grant`).
-3. Wrong number → `403 phone_does_not_match`. Right number → status, depot branch, courier, rider (name/vehicle/last fix), public event timeline, and a **Predictive ETA** ("Predicted: around tomorrow 10:30 · high confidence", learned from that courier's measured pickup→depot / depot→door history).
+3. Wrong number → `403 phone_does_not_match`. Right number → status, depot branch, courier, **rider (name, vehicle, selfie photo and a "Verified rider" badge — sellers see the person collecting their parcel)**, last location fix, public event timeline, and a **Predictive ETA** ("Predicted: around tomorrow 10:30 · high confidence", learned from that courier's measured pickup→depot / depot→door history).
 4. Parcels also appear under **Bookings → "Parcels for you"** (`GET /track/incoming`) the moment they're booked — no link-pasting needed. Recipients sign up once with their number and every future parcel sent to it appears automatically, tagged "Addressed to you".
 5. Recipients can chat about the parcel (grant-gated, per-token throttled) — the sender/rider/depot/ops see the same thread.
 

@@ -1074,11 +1074,16 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     }
     AnalyticsService.instance.track(
       feature: 'rider_verification', action: 'ai_check', context: 'admin_verification_queue',
-      meta: {'rider_id': id, 'plate_match': res.body['plate_match'], 'nrc_match': res.body['nrc_match']},
+      meta: {'rider_id': id, 'plate_match': res.body['plate_match'], 'nrc_match': res.body['nrc_match'],
+             'face_verdict': (res.body['face'] as Map?)?['verdict']},
     );
     final text = '${res.body['text'] ?? ''}'.trim();
     final plateMatch = res.body['plate_match'] == true;
     final nrcMatch = res.body['nrc_match'] == true;
+    final face = (res.body['face'] as Map?)?.cast<String, dynamic>();
+    final faceVerdict = '${face?['verdict'] ?? ''}';
+    final faceNote = '${face?['note'] ?? ''}';
+    final faceColor = faceVerdict == 'pass' ? AppColors.forest : const Color(0xFFB3261E);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -1088,6 +1093,13 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
           Text('Plate match: ${plateMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: plateMatch ? AppColors.forest : const Color(0xFFB3261E))),
           const SizedBox(height: 4),
           Text('NRC match: ${nrcMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: nrcMatch ? AppColors.forest : const Color(0xFFB3261E))),
+          const SizedBox(height: 4),
+          Text('Selfie face: ${faceVerdict.isEmpty ? 'not checked' : faceVerdict.toUpperCase()}',
+              style: TextStyle(fontWeight: FontWeight.w800, color: faceVerdict.isEmpty ? AppColors.muted : faceColor)),
+          if (faceNote.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text('AI note: $faceNote', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3)),
+          ],
           const SizedBox(height: 10),
           const Text('Text read from the photo:', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
           const SizedBox(height: 4),

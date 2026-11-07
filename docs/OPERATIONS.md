@@ -331,10 +331,24 @@ Four explainable surfaces — no opaque model, every number carries basis + samp
 - **Driver verification** (owner/admins only): ops registers riders via
   `POST /admin/riders` (NRC, licence, plate, vehicle make/colour live on the
   rider row). A driver submits their own documents via the app (`POST
-  /rider/profile` + `POST /uploads` ? R2 bucket, served through `/media/*`
+  /rider/profile` + `POST /uploads` → R2 bucket, served through `/media/*`
   behind auth) landing in status `pending`. `POST /admin/riders/:id/verify`
   flips to `verified`/`rejected` (note stored); unverified drivers are excluded
   from auto-assign and manual job assignment (`409 rider_not_verified`).
+- **Selfie + seller-visible photo**: the KYC card *requires* a selfie (`photo_url`).
+  Sellers see that selfie (with name, vehicle and a "VERIFIED rider" badge when the
+  rider is approved) on the tracking page — `GET /track/:token` includes
+  `rider.photo_url` and `rider.verified` only on the verified (granted) view, never
+  to anonymous link-holders. Unverified riders show "Verification pending" instead.
+  Auto-assign also returns the rider's `photo_url` on the booking payload.
+- **AI face review**: the rider self-checks their own selfie via
+  `POST /rider/profile/ai-face-check` (or automatically right after submit) — Workers
+  AI vision answers `{has_face, single_person, real_photo, document_or_id,
+  illustration_or_avatar, verdict: pass|review|fail, note}`. The same review is folded
+  into `POST /admin/riders/:id/ai-check` (printed next to the plate/NRC verdicts in the
+  AI dialog and merged into `ai_check_json.face`). Admins always click Approve/Reject
+  themselves; AI only catches the obvious (documents, screenshots, avatars, group
+  photos, no face at all) before it reaches the queue.
 - **Daily/monthly targets**: sweep target is 30 parcels/day. `GET /rider/targets`
   and `GET /admin/riders` return today vs target and month vs pace (pace =
   30 x day-of-month, hard month = 30 x days-in-month), computed from

@@ -872,6 +872,12 @@ class DropOffApi {
   static Future<ApiResponse> riderProfileSubmit(Map<String, dynamic> body) =>
       post('/rider/profile', body);
 
+  /// rider runs the AI face review on their OWN selfie (KYC). Returns
+  /// `{face: {face, single_person, real_photo, document_or_id,
+  /// illustration_or_avatar, verdict: pass|review|fail, note}}`.
+  static Future<ApiResponse> riderFaceCheck() =>
+      post('/rider/profile/ai-face-check', const {});
+
   static Future<Map<String, dynamic>?> riderTargets() => get('/rider/targets');
 
   /* --------------------- admin rider verification -------------------- */

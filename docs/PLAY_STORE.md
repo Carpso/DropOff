@@ -1,6 +1,6 @@
 # Play Store release checklist
 
-App id: `zm.dropoff.dropoff` - current version `0.4.0+7` (`pubspec.yaml`).
+App id: `zm.dropoff.dropoff` - current version `0.4.1+8` (`pubspec.yaml`).
 
 ## 1. Upload keystore (one-time)
 
@@ -84,7 +84,7 @@ to customers. Only `DROPOFF_API_URL` belongs in the Play build.
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 7. What's new in 0.4.0+7 (2026-11-07)
+## 7. What is new in 0.4.1+8
 
 - **You can now track parcels sent to you** — sign up with the phone your parcel was
   addressed to and every incoming parcel appears automatically ("Parcels for you").

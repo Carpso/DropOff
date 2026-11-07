@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import '../data/analytics_service.dart';
@@ -935,8 +937,10 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
   final Map<String, String> _local = {};
   String? _selfieUrl, _nrcUrl, _plateUrl, _licenseUrl;
   Map<String, dynamic>? _rider;
+  Map<String, dynamic>? _faceCheck;
   bool _loading = true;
   bool _saving = false;
+  bool _faceBusy = false;
   String? _busyField;
 
   @override
@@ -951,6 +955,17 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Map<String, dynamic>? _parseFace(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      final face = (decoded is Map ? decoded['face'] : null);
+      return face is Map ? face.cast<String, dynamic>() : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _load() async {
@@ -970,8 +985,24 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
         _nrcUrl = rider['nrc_photo_url'] as String?;
         _plateUrl = rider['plate_photo_url'] as String?;
         _licenseUrl = rider['license_photo_url'] as String?;
+        _faceCheck = _parseFace(rider['ai_check_json'] as String?);
       }
     });
+  }
+
+  /// Riders run the AI face review on their own selfie before submitting —
+  /// catches wrong-document uploads and "not a person" photos up front.
+  Future<void> _checkFace() async {
+    if (_faceBusy) return;
+    setState(() => _faceBusy = true);
+    final res = await DropOffApi.riderFaceCheck();
+    if (!mounted) return;
+    setState(() => _faceBusy = false);
+    if (!res.ok) {
+      _snack(res.error == 'no_selfie' ? 'Upload a selfie first, then check it.' : 'AI check unavailable (${res.error}).');
+      return;
+    }
+    setState(() => _faceCheck = (res.body['face'] as Map?)?.cast<String, dynamic>());
   }
 
   Future<void> _pick(String field) async {
@@ -1024,7 +1055,10 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
     _snack(res.ok
         ? 'Submitted - the owner/admin will verify your documents.'
         : 'Could not submit (${res.error}).');
-    if (res.ok) _load();
+    if (res.ok) {
+      unawaited(_checkFace()); // auto-review the selfie right after submit
+      _load();
+    }
   }
 
   void _snack(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -1064,6 +1098,40 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
         ),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.muted)),
+      ]),
+    );
+  }
+
+  /// AI face verdict chip for the selfie: pass / review / fail. Informational
+  /// only — the owner/admin still clicks Approve or Reject.
+  Widget _faceChip() {
+    final f = _faceCheck;
+    if (_faceBusy) {
+      return const Row(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.6)),
+        SizedBox(width: 6),
+        Text('AI is looking…', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+      ]);
+    }
+    if (f == null) return const SizedBox.shrink();
+    final verdict = '${f['verdict'] ?? 'review'}';
+    final (color, label) = switch (verdict) {
+      'pass' => (AppColors.forest, 'One real photo of you'),
+      'fail' => (const Color(0xFFB3261E), 'Not one person - retake?'),
+      _ => (const Color(0xFF8A5A00), 'AI unsure - admin will decide'),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(verdict == 'pass' ? Icons.face : verdict == 'fail' ? Icons.no_photography_outlined : Icons.help_outline,
+            size: 14, color: color),
+        const SizedBox(width: 5),
+        Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: color)),
       ]),
     );
   }
@@ -1131,6 +1199,17 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
               _photoTile('nrc', 'NRC', _nrcUrl),
               _photoTile('plate', 'Plate', _plateUrl),
               _photoTile('license', 'Licence', _licenseUrl),
+            ]),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              TextButton.icon(
+                onPressed: _faceBusy || _selfieUrl == null ? null : _checkFace,
+                icon: _faceBusy
+                    ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.auto_awesome, size: 17),
+                label: Text(_faceCheck == null ? 'AI check my selfie' : 'Re-check my selfie'),
+              ),
+              _faceChip(),
             ]),
             const SizedBox(height: 14),
             SizedBox(

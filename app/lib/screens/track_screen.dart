@@ -372,19 +372,59 @@ class _TrackScreenState extends State<TrackScreen> {
       );
   }
 
+  /// Circular rider avatar: the rider's selfie when uploaded (auth-gated media),
+  /// initials otherwise. Verified badge appears only when an admin approved KYC.
+  Widget _riderAvatar(String? url, String name) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final initials = parts.isEmpty ? '?' : parts.take(2).map((w) => w[0].toUpperCase()).join();
+    return CircleAvatar(
+      radius: 26,
+      backgroundColor: AppColors.forest.withValues(alpha: 0.12),
+      child: url == null || url.isEmpty
+          ? Text(initials, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forest))
+          : ClipOval(
+              child: Image.network(
+                '${DropOffApi.baseUrl}$url',
+                headers: DropOffApi.authHeaders,
+                width: 52,
+                height: 52,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Text(initials,
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forest)),
+              ),
+            ),
+    );
+  }
+
   Widget _riderStrip(Map<String, dynamic> d) {
     final rider = d['rider'] as Map<String, dynamic>?;
     final loc = d['location'] as Map<String, dynamic>?;
     if (rider == null && loc == null) return const SizedBox.shrink();
+    final photo = rider?['photo_url'] as String?;
+    final verified = rider?['verified'] == true;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(children: [
-          const Icon(Icons.two_wheeler, color: AppColors.forest),
+          if (rider != null)
+            _riderAvatar(photo, '${rider['name'] ?? ''}')
+          else
+            const Icon(Icons.two_wheeler, color: AppColors.forest),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             if (rider != null)
               Text('${rider['name']} • ${rider['vehicle']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            if (rider != null) ...[
+              const SizedBox(height: 3),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(verified ? Icons.verified : Icons.hourglass_empty,
+                    size: 13, color: verified ? AppColors.forest : AppColors.muted),
+                const SizedBox(width: 4),
+                Text(verified ? 'Verified rider' : 'Verification pending',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.4,
+                        color: verified ? AppColors.forest : AppColors.muted)),
+              ]),
+            ],
             if (loc != null)
               Text('Last fix ${loc['seen_at'] ?? ''}', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
             if (rider == null)
