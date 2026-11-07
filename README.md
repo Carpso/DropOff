@@ -421,6 +421,7 @@ Internal identifiers (`_packs`, `redeemPackCode`, `/admin/pack-codes`) keep the 
 - **Web build ships**: `flutter build web` works (plugin graph no longer includes the wasm-breaking `flutter_secure_storage_web`); branded manifest/icons/theme, OG/Twitter share cards. Static host it anywhere (Workers Static Assets, R2/Pages, Cloudflare Pages).
 - **iOS prep**: bundle id `zm.dropoff.dropoff` (already), `NSFaceIDUsageDescription`, and a standard CocoaPods Podfile — macOS + Xcode still required to compile; not built on this Windows host.
 - **`tools/build_release.ps1`**: every release build starts with `flutter clean` — no more stale artifacts.
+- **Devices signed in**: Account → Privacy & sign-in → **Devices signed in** shows every device tied to this account (last seen, IP best-effort) and lets you revoke any of them. Newly bound `device_id` survives app restarts; verified phones register it via `/me/devices`; the app sends `X-Device-Id` on every request so revoke takes effect immediately. Sign-out on other devices is one tap.
 
 ## 18. 2026-11-08 release (v0.4.3+10) — what changed
 - **Universal profile photos**: every account (customer, sender, recipient, seller, rider, partner, admin)
