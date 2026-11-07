@@ -433,8 +433,8 @@ class _Metric extends StatelessWidget {
   Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(17), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Icon(icon, color: AppColors.forest),
     const SizedBox(height: 14),
-    Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
-    Text(label, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+    Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+    Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
   ])));
 }
 

@@ -1545,10 +1545,10 @@ class _KpiMetric extends StatelessWidget {
         Row(children: [
           Icon(icon, size: 16, color: AppColors.forest),
           const SizedBox(width: 6),
-          Text(label, style: const TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w700)),
+          Expanded(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w700))),
         ]),
         const SizedBox(height: 6),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
+        Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
       ]),
     );
   }

@@ -99,7 +99,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                 Expanded(
                   child: FilledButton.tonalIcon(
                     icon: const Icon(Icons.navigation_rounded),
-                    label: const Text('Navigate to route'),
+                    label: const Text('Navigate to route', maxLines: 1, overflow: TextOverflow.ellipsis),
                     onPressed: _rider == null
                         ? null
                         : () => launchUrl(
@@ -112,7 +112,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                 Expanded(
                   child: FilledButton.icon(
                     icon: const Icon(Icons.map_outlined),
-                    label: const Text('Google Maps'),
+                    label: const Text('Google Maps', maxLines: 1, overflow: TextOverflow.ellipsis),
                     onPressed: _rider == null
                         ? null
                         : () => launchUrl(

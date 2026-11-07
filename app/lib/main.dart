@@ -53,6 +53,19 @@ class DropOffApp extends StatelessWidget {
           title: 'DropOff Zambia',
           debugShowCheckedModeBanner: false,
           theme: buildAppTheme(),
+          // Universal text-scale clamp: wrap EVERY screen so a large system
+          // font can never crush a row/card into a vertical letter-per-line
+          // ribbon (Business "No plan yet", Parcels in flight, stats, …).
+          // Never shrink below the system size; never grow past 1.30x.
+          builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaler: MediaQuery.textScalerOf(context).clamp(
+                    minScaleFactor: 1.0,
+                    maxScaleFactor: 1.30,
+                  ),
+                ),
+                child: child!,
+              ),
           home: _SplashScreen(store: store, initFuture: initFuture),
         ),
       );

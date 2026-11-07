@@ -100,8 +100,20 @@ ThemeData buildAppTheme() {
   );
 }
 
-/// Respect the system text-size setting on the biggest headings so they never
-/// crush into a vertical ribbon on large-font phones. Clamp so they can't grow
-/// past ~1.3x.
+/// Universal text-scale clamp for cards, buttons and rows.
+///
+/// Flutter's default text scaler lets the system font grow unbounded; on
+/// large-scale phones that crushed rows into a vertical ribbon (the
+/// "Business tab text reading down" bug, and the same in "Parcels in
+/// flight", KPI tiles, plan cards, etc.). We clamp it everywhere:
+///  * min 1.0x — never shrink below the system size (accessibility).
+///  * max 1.30x — never grow past 1.3x so a 14sp body can't become a
+///    26sp ribbon in a 60%-width slot.
+double clampTextScale(BuildContext context, double value) {
+  final tsf = MediaQuery.textScalerOf(context).scale(1);
+  return value.clamp(1.0, 1.3 * tsf);
+}
+
+/// Backwards-compat: base heading size scaled by the clamped system factor.
 double scaleText(BuildContext context, double baseSize) =>
-    baseSize * MediaQuery.textScaleFactorOf(context).clamp(1.0, 1.3);
+    baseSize * clampTextScale(context, 1);

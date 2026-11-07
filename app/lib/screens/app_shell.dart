@@ -45,16 +45,17 @@ class _AppShellState extends State<AppShell> {
     final safeIndex = _index < screens.length ? _index : 0;
     return Scaffold(
       body: IndexedStack(index: safeIndex, children: screens),
-      // Text scaling is clamped on the bar itself: NavigationBar wraps its
-      // labels vertically (one letter per line) when the system font is large
-      // and 4-5 destinations squeeze the width — the "Business tab text
-      // reading down" misalignment.
+      // Universal text-scale clamp: EVERY screen in the app lives below this
+      // clamp (MaterialApp.builder), so rows can't crush into a vertical
+      // ribbon on large-font phones (the "Business tab text reading down",
+      // "Parcels in flight", KPI tiles, plan cards, …). max 1.30x.
       bottomNavigationBar: MediaQuery.withClampedTextScaling(
-        maxScaleFactor: 1.35,
+        maxScaleFactor: 1.30,
         child: NavigationBar(
           labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
           selectedIndex: safeIndex,
           onDestinationSelected: goTo,
+          height: 64,
           destinations: destinations,
         ),
       ),

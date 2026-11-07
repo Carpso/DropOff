@@ -410,10 +410,11 @@ class _BusinessScreenState extends State<BusinessScreen> {
             const Icon(Icons.card_giftcard_outlined, color: AppColors.forest),
             const SizedBox(width: 12),
             const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('No plan yet', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+              Text('No plan yet', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
               SizedBox(height: 3),
               Text('Subscription plans bundle the rider — Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
             ])),
+            const SizedBox(width: 10),
             FilledButton.tonal(
               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
@@ -590,6 +591,8 @@ class _BusinessScreenState extends State<BusinessScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                           decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
                           child: Text('${job['status'] ?? 'created'}'.replaceAll('_', ' '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.forest)),
                         ),
                       ]),

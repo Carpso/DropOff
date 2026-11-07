@@ -216,14 +216,14 @@ class _TrackScreenState extends State<TrackScreen> {
             Expanded(
               child: OutlinedButton(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
-                child: const Text('Create account'),
+                child: const Text('Create account', maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: TextButton(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
-                child: const Text('Sign in'),
+                child: const Text('Sign in', maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ),
           ]),

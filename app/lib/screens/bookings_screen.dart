@@ -339,7 +339,7 @@ class BookingDetailScreen extends StatelessWidget {
   Widget _detailRow(String label, String value) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(width: 95, child: Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 12))),
+          SizedBox(width: 95, child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 12))),
           const SizedBox(width: 10),
           Expanded(child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.35))),
         ]),

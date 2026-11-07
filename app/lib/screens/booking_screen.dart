@@ -810,9 +810,10 @@ class _BookingScreenState extends State<BookingScreen> {
         child: Row(children: [
           const Icon(Icons.receipt_long, size: 18, color: AppColors.forest),
           const SizedBox(width: 8),
-          Expanded(child: Text('Estimated total you pay', style: TextStyle(fontSize: 12, color: AppColors.muted))),
-          Text(kwacha(_courierFare != null ? _dropOffDue + _courierFare! : _dropOffLeg), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
-          if (_courierFare == null) const Text(' + depot counter fare', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          Expanded(child: Text('Estimated total you pay', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.muted))),
+          const SizedBox(width: 8),
+          Text(kwacha(_courierFare != null ? _dropOffDue + _courierFare! : _dropOffLeg), maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
+          if (_courierFare == null) const Text(' + depot counter fare', maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: TextStyle(fontSize: 12, color: AppColors.muted)),
         ]),
       );
 
