@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import '../services/secure_store.dart';
@@ -23,6 +24,7 @@ class AppStore extends ChangeNotifier {
   static const _outboxKey = 'dropoff_outbox_v1';
   static const _rememberKey = 'dropoff_remember_v1';
   static const _biometricKey = 'dropoff_biometric_v1';
+  static const _deviceKey = 'dropoff_device_id_v1';
 
   final List<Booking> _bookings = [];
   final List<Rider> _riders = [];
@@ -36,6 +38,7 @@ class AppStore extends ChangeNotifier {
   String? _fullName;
   bool _superadmin = false;
   bool _biometricEnabled = false;
+  String _deviceId = 'unknown';
 
   /// Keystore/keychain on mobile; SharedPreferences mirror on web.
   final _secureStorage = SecureStore();
@@ -68,6 +71,10 @@ class AppStore extends ChangeNotifier {
   /// Fingerprint/face gate for this device (Account → Privacy & sign-in).
   bool get biometricEnabled => _biometricEnabled;
 
+  /// This device's stable ID — sent to the Worker with X-Device-Id so every
+  /// sign-in session can be listed and revoked individually.
+  String get deviceId => _deviceId;
+
   Future<void> setBiometricEnabled(bool on) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setBool(_biometricKey, on);
@@ -79,6 +86,15 @@ class AppStore extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
     final remember = preferences.getBool(_rememberKey) ?? true;
     _biometricEnabled = preferences.getBool(_biometricKey) ?? false;
+    // Device ID — stays stable across cold starts so "untrust this device"
+    // survives. Generated once per install from cryptographic randomness.
+    var dev = preferences.getString(_deviceKey);
+    if (dev == null) {
+      dev = _newDeviceId();
+      await preferences.setString(_deviceKey, dev);
+    }
+    _deviceId = dev;
+    DropOffApi.installDeviceId(dev);
     if (!remember) {
       // Session-only login: drop any persisted credential on cold start.
       await _secureStorage.delete(key: _secureTokenKey);
@@ -357,6 +373,14 @@ class AppStore extends ChangeNotifier {
       default:
         return 'Something went wrong. Check your details and retry.';
     }
+  }
+
+  static String _newDeviceId() {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    final rng = Random.secure();
+    final hex = List.generate(8, (_) => rng.nextInt(256)).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final ts = now.toRadixString(16);
+    return 'dev-$ts-$hex';
   }
 
   Future<void> unlink() async {

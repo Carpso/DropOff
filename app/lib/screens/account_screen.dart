@@ -232,6 +232,104 @@ class _AccountScreenState extends State<AccountScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _openDevices() async {
+    final data = await DropOffApi.get('/me/devices');
+    if (!mounted) return;
+    final list = (((data?['devices'] as List?) ?? const [])).cast<Map<String, dynamic>>();
+    AnalyticsService.instance.track(feature: 'devices', action: 'open', context: 'account_devices');
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final rows = List<Map<String, dynamic>>.of(list);
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Row(children: [
+                  Icon(Icons.devices, color: AppColors.forest),
+                  SizedBox(width: 8),
+                  Text('Devices signed in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+                ]),
+                const SizedBox(height: 6),
+                const Text('Every phone/tablet this account has opened DropOff from. Tap revoke to sign that device out — it cannot be used again until re-authenticated.',
+                    style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+                const SizedBox(height: 10),
+                if (rows.isEmpty)
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('No devices on record yet — once you sign in on something, it shows here.', style: TextStyle(color: AppColors.muted, fontSize: 12)))
+                else
+                  ...rows.map((d) {
+                    final isCurrent = d['is_current_session'] == true;
+                    final trusted = d['trusted'] == true;
+                    final tz = '${d['last_seen'] ?? ''}';
+                    final parts = tz.split(' ');
+                    final day = parts.length >= 1 ? parts.first : tz;
+                    final time = parts.length >= 2 ? parts[1] : '';
+                    final ua = '${d['user_agent'] ?? d['device_id'] ?? 'unknown'}';
+                    final ip = '${d['ip'] ?? 'unknown'}';
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+                        child: Row(children: [
+                          Icon(Icons.phone_iphone, size: 22, color: AppColors.muted),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Row(children: [
+                                Expanded(child: Text(ua, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5))),
+                                if (isCurrent)
+                                  const Padding(padding: EdgeInsets.only(left: 6), child: Chip(visualDensity: VisualDensity.compact, label: Text('This device', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800)))),
+                              ]),
+                              const SizedBox(height: 2),
+                              Text('$day $time · IP $ip${trusted ? '' : ' (revoked)'}', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                            ]),
+                          ),
+                          TextButton(
+                            onPressed: isCurrent
+                                ? null
+                                : () async {
+                                    final ok = await DropOffApi.post('/me/devices/${d['id']}/revoke', const {});
+                                    if (ok.ok && mounted) {
+                                      setSheetState(() {
+                                        d['trusted'] = false;
+                                      });
+                                      _snackPhoto('Device revoked.');
+                                    } else if (mounted) {
+                                      _snackPhoto('Could not revoke this device.');
+                                    }
+                                  },
+                            child: Text(isCurrent ? 'current' : 'Revoke'),
+                          ),
+                        ]),
+                      ),
+                    );
+                  }),
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final ok = await DropOffApi.post('/me/devices/revoke-others', const {});
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(sheetContext).showSnackBar(SnackBar(content: Text(ok.ok ? 'Signed out on all other devices.' : 'Could not sign out everywhere.')));
+                      if (ok.ok) Navigator.of(sheetContext).pop();
+                    },
+                    icon: const Icon(Icons.logout, size: 18),
+                    label: const Text('Sign out on all other devices'),
+                  ),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   String get _biomeDescription =>
       'On: opening DropOff asks for your fingerprint or face — your parcels and bookings are nobody else\'s business. Off: the app opens straight away.';
 
@@ -456,6 +554,15 @@ class _AccountScreenState extends State<AccountScreen> {
                   subtitle: const Text('Ask for the device biometric to open DropOff on this phone.', style: TextStyle(fontSize: 11.5)),
                   value: store.biometricEnabled,
                   onChanged: (v) => _setBiometric(v, store),
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _openDevices,
+                    icon: const Icon(Icons.devices, size: 18),
+                    label: const Text('Devices signed in'),
+                  ),
                 ),
               ]))),
             ],

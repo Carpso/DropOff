@@ -84,22 +84,20 @@ export async function recordAttempt(
 /** On a successful login: fingerprint the device. Returns true if this is a brand-new device
  *  for this phone (caller should then raise a new_device alert). */
 export async function noteDevice(
-  db: D1Database, phone: string, devId: string, ip: string,
+  db: D1Database, phone: string, devId: string, ip: string, ua?: string | null,
 ): Promise<{ isNew: boolean }> {
   const existing = await db.prepare(
-    `SELECT id FROM device_sessions WHERE phone = ?1 AND device_id = ?2`,
+    'SELECT id FROM device_sessions WHERE phone = ?1 AND device_id = ?2',
   ).bind(phone, devId).first<{ id: number }>();
   if (existing) {
     await db.prepare(
-      `UPDATE device_sessions SET last_seen = datetime('now'), ip = COALESCE(?2, ip)
-        WHERE id = ?1`,
-    ).bind(existing.id, ip).run();
+      'UPDATE device_sessions SET last_seen = datetime("now"), ip = COALESCE(?2, ip), ua = COALESCE(?3, ua) WHERE id = ?1',
+    ).bind(existing.id, ip, ua ?? null).run();
     return { isNew: false };
   }
   await db.prepare(
-    `INSERT INTO device_sessions (phone, device_id, ip, first_seen, last_seen, trusted)
-      VALUES (?1, ?2, ?3, datetime('now'), datetime('now'), 0)`,
-  ).bind(phone, devId, ip).run();
+    'INSERT INTO device_sessions (phone, device_id, ip, ua, first_seen, last_seen, trusted) VALUES (?1, ?2, ?3, ?4, datetime("now"), datetime("now"), 1)',
+  ).bind(phone, devId, ip, ua ?? null).run();
   return { isNew: true };
 }
 

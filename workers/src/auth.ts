@@ -47,13 +47,18 @@ export function generateEmailToken(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-interface JwtPayload { phone: string; exp: number; ver?: number } // ver = token_version (session revocation)
+interface JwtPayload { phone: string; exp: number; ver?: number; did?: string } // ver = token_version; did = device id
 
 export async function signJwt(
-  phone: string, secret: string, ttlSeconds = 60 * 60 * 24 * 30, ver = 0,
+  phone: string, secret: string, ttlSeconds = 60 * 60 * 24 * 30, ver = 0, deviceId?: string,
 ): Promise<string> {
   const header = b64urlJson({ alg: 'HS256', typ: 'JWT' });
-  const payload = b64urlJson({ phone, exp: Math.floor(Date.now() / 1000) + ttlSeconds, ver } satisfies JwtPayload);
+  const payload = b64urlJson({
+    phone,
+    exp: Math.floor(Date.now() / 1000) + ttlSeconds,
+    ver,
+    ...(deviceId ? { did: deviceId } : {}),
+  } satisfies JwtPayload);
   const sig = b64url(await hmac(`${header}.${payload}`, secret));
   return `${header}.${payload}.${sig}`;
 }

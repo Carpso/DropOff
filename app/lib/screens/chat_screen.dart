@@ -85,11 +85,16 @@ class _ChatScreenState extends State<ChatScreen> {
     return Uri(scheme: 'wss', host: base.host, path: '/ws/chat/$threadId', queryParameters: query);
   }
 
-  Map<String, String> get _wsHeaders => _isRecipient
-      ? {}
-      : DropOffApi.apiKey.isNotEmpty
-          ? {'X-Api-Key': DropOffApi.apiKey}
-          : {'Authorization': 'Bearer ${DropOffApi.token ?? ''}'};
+  Map<String, String> get _wsHeaders {
+    final base = _isRecipient
+        ? <String, String>{}
+        : (DropOffApi.apiKey.isNotEmpty
+            ? {'X-Api-Key': DropOffApi.apiKey}
+            : {'Authorization': 'Bearer ${DropOffApi.token ?? ''}'});
+    final d = DropOffApi.deviceId;
+    if (d.isNotEmpty) base['X-Device-Id'] = d;
+    return base;
+  }
 
   void _connectWs(int threadId) {
     if (_ws != null) return;

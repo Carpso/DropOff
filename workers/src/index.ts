@@ -303,6 +303,19 @@ app.use('*', async (c, next) => {
         return c.json({ error: 'session_revoked' }, 401);
       }
       c.set('phone', claims.phone);
+      if (claims.did) {
+        const dev = await c.env.DB.prepare(
+          'SELECT trusted FROM device_sessions WHERE phone = ?1 AND device_id = ?2',
+        ).bind(claims.phone, claims.did).first<{ trusted: number }>();
+        if (dev && Number(dev.trusted ?? 1) === 0) {
+          return c.json({ error: 'device_revoked' }, 401);
+        }
+        if (!dev) {
+          try { await noteDevice(c.env.DB, claims.phone, claims.did, clientIp(c), userAgent(c)); } catch { /* best-effort */ }
+        } else {
+          try { await noteDevice(c.env.DB, claims.phone, claims.did, clientIp(c), userAgent(c)); } catch { /* best-effort */ }
+        }
+      }
       // The app owner's phone is always admin (OWNER_PHONE secret) — covers
       // OTP-only sign-ins that have no auth_users row.
       let role = user?.role === 'partner' || user?.role === 'admin' ? user.role
@@ -615,6 +628,60 @@ app.get('/me', async (c) => {
   });
 });
 
+/* ---------------------------------- devices -------------------------------- */
+// Every signed-in device this account knows about: identity of the session,
+// last seen, and the ability to revoke an individual device. JWT validation
+// in middleware re-checks the row on every request, so a revoke here kills
+// that device's sessions immediately (other devices unaffected).
+app.get('/me/devices', async (c) => {
+  const phone = c.get('phone') as string | null | undefined;
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const selfDev = deviceId(c);
+  const { results } = await c.env.DB.prepare(
+    `SELECT ds.id, ds.device_id, ds.ip, ds.ua, ds.first_seen, ds.last_seen, ds.trusted
+       FROM device_sessions ds
+      WHERE ds.phone = ?1
+      ORDER BY ds.last_seen DESC
+      LIMIT 100`,
+  ).bind(phone).all<any>();
+  const list = (results ?? []).map((r) => ({
+    id: r.id,
+    device_id: r.device_id,
+    ip: r.ip,
+    first_seen: r.first_seen,
+    last_seen: r.last_seen,
+    trusted: Number(r.trusted ?? 1) === 1,
+    user_agent: r.ua ?? null,
+    is_current_session: selfDev && r.device_id === selfDev,
+  }));
+  return c.json({ devices: list, current_device_id: selfDev || null });
+});
+
+app.post('/me/devices/revoke-others', async (c) => {
+  const phone = c.get('phone') as string | null | undefined;
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const selfDev = deviceId(c);
+  if (!selfDev) return c.json({ error: 'device_id_required' }, 400);
+  await c.env.DB.prepare('UPDATE device_sessions SET trusted = 0 WHERE phone = ?1 AND device_id <> ?2')
+    .bind(phone, selfDev).run();
+  return c.json({ ok: true });
+});
+
+app.post('/me/devices/:id/revoke', async (c) => {
+  const phone = c.get('phone') as string | null | undefined;
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id)) return c.json({ error: 'invalid id' }, 400);
+  const dev = await c.env.DB.prepare(
+    'SELECT id, device_id FROM device_sessions WHERE id = ?1 AND phone = ?2',
+  ).bind(id, phone).first<{ id: number; device_id: string }>();
+  if (!dev) return c.json({ error: 'not found' }, 404);
+  // Revoking is deliberate: mark as untrusted so future requests carrying
+  // this device_id are rejected. Re-signing with a fresh code creates a new row.
+  await c.env.DB.prepare('UPDATE device_sessions SET trusted = 0 WHERE id = ?1').bind(id).run();
+  return c.json({ ok: true, revoked_device_id: dev.device_id });
+});
+
 /* ------------------------------ session refresh --------------------------- */
 // Exchange any live-or-recent JWT for a fresh 30-day one. Unused sessions still
 // die on schedule (30 days + 30-day grace); used ones roll forward silently.
@@ -631,7 +698,7 @@ app.post('/auth/refresh', async (c) => {
   ).bind(claims.phone).first<{ ver: number }>();
   const ver = Number(user?.ver ?? 0);
   if (user && Number(claims.ver ?? 0) !== ver) return c.json({ error: 'session_revoked' }, 401);
-  const token = await signJwt(claims.phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, ver);
+  const token = await signJwt(claims.phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, ver, claims.did);
   return c.json({ ok: true, token, phone: claims.phone });
 });
 
@@ -696,10 +763,11 @@ app.post('/auth/verify', async (c) => {
   // JWT carries the account's current token_version — a password reset bumps it
   // and forces a fresh OTP sign-in; minting ver=0 here used to leave every
   // OTP session instantly revoked (session_revoked on the first request).
+  try { await noteDevice(c.env.DB, phone, deviceId(c), clientIp(c), userAgent(c)); } catch { /* best-effort */ }
   const acct = await c.env.DB.prepare(
     'SELECT COALESCE(token_version, 0) AS ver FROM auth_users WHERE phone = ?1',
   ).bind(phone).first<{ ver: number }>();
-  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(acct?.ver ?? 0));
+  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(acct?.ver ?? 0), deviceId(c));
   return c.json({ ok: true, token, phone });
 });
 
@@ -738,6 +806,8 @@ app.post('/auth/register', async (c) => {
     ).bind(phone),
   ]);
 
+  try { await noteDevice(c.env.DB, phone, deviceId(c), clientIp(c), userAgent(c)); } catch { /* best-effort */ }
+
   // verification email (non-blocking: the account works immediately)
   const verifyLink = await createEmailLink(c, email, 'verify_email');
   const mail = verifyLink ? await sendMail(c.env, {
@@ -745,7 +815,7 @@ app.post('/auth/register', async (c) => {
     html: verifyEmailHtml(verifyLink), text: `Confirm your DropOff email: ${verifyLink}`,
   }) : { sent: false, error: 'no_link' };
 
-  const token = await signJwt(phone, c.env.JWT_SECRET);
+  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, 0, deviceId(c));
   const devMode = devModeOn(c.env);
   return c.json({
     ok: true, token, email, phone, full_name: fullName,
@@ -928,14 +998,14 @@ app.post('/auth/login', async (c) => {
   // successful login — fingerprint the device and alert the owner on a new device
   await recordAttempt(c.env.DB, email, true, ip, ua, devId);
   const phone = user.phone;
-  const dev = await noteDevice(c.env.DB, phone, devId, ip);
+  const dev = await noteDevice(c.env.DB, phone, deviceId(c), ip, userAgent(c));
   if (dev.isNew) {
     await alertOwner(c.env, phone, 'new_device', 'medium',
       `New device signed in to ${email}.`,
-      { ip, device: devId, userAgent: ua, email });
+      { ip, device: deviceId(c), userAgent: ua, email });
   }
 
-  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 7, Number(user.token_version ?? 0));
+  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(user.token_version ?? 0), deviceId(c));
   return c.json({ ok: true, token, email, phone, full_name: user.full_name });
 });
 

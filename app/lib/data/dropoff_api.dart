@@ -155,11 +155,21 @@ class DropOffApi {
   static Uri _uri(String path, [Map<String, String>? query]) =>
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
+  static String? _deviceId;
+
+  /// The app device id (mirrors AppStore.deviceId). Used in WS handshakes and
+  /// when the API client builds non-standard headers.
+  static String get deviceId => _deviceId ?? '';
+
+  /// Called by AppStore on init once the stable device id is known.
+  static void installDeviceId(String id) => _deviceId = id;
+
   static Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        if (apiKey.isNotEmpty) 'X-Api-Key': apiKey,
-        if (token != null) 'Authorization': 'Bearer $token',
-      };
+      'Content-Type': 'application/json',
+      if (apiKey.isNotEmpty) 'X-Api-Key': apiKey,
+      if (token != null) 'Authorization': 'Bearer $token',
+      if (_deviceId != null && _deviceId!.isNotEmpty) 'X-Device-Id': _deviceId!,
+    };
 
   static Map<String, String> get _adminHeaders => {
         ..._headers,
