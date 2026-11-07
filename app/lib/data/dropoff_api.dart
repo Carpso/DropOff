@@ -332,7 +332,7 @@ class DropOffApi {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
       final res = await http
-          .post(Uri.parse('$baseUrl/rider/ping'), headers: _opsHeaders, body: jsonEncode({'phone': phone, 'lat': lat, 'lng': lng}))
+          .post(Uri.parse('$baseUrl/rider/ping'), headers: _headers, body: jsonEncode({'phone': phone, 'lat': lat, 'lng': lng}))
           .timeout(_timeout);
       return ApiResponse(status: res.statusCode, ok: res.statusCode < 300, body: const {});
     } catch (e) {

@@ -95,7 +95,7 @@ const PLATFORM_TAKE = 0.10;           // of the rider fee, on pay-as-you-go
 // sweep expectation used for ops monitoring.
 const DRIVER_MONTHLY_PAY_ZMW = 3000;  // flat pay per driver / month
 const DRIVER_DAILY_TARGET = 30;       // parcels/day each driver is expected to sweep
-const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00'];
+const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
 // Business day = Central Africa Time (UTC+2). D1's 'localtime' is UTC, so every
 // daily-cap / sweep query must use this explicit offset or the day rolls over
 // at 02:00 CAT instead of midnight.
@@ -608,15 +608,17 @@ app.get('/me', async (c) => {
   let rider: { id: number; name: string } | null = null;
   let photoUrl: string | null = null;
   let fullName: string | null = null;
+  let email: string | null = null;
   if (phone) {
     const r = await c.env.DB.prepare('SELECT id, full_name, photo_url FROM riders WHERE phone = ?1 AND active = 1')
       .bind(phone).first<{ id: number; full_name: string; photo_url: string | null }>();
     if (r) { rider = { id: r.id, name: r.full_name }; photoUrl = r.photo_url; fullName = r.full_name; }
-    const u = await c.env.DB.prepare('SELECT full_name, photo_url FROM auth_users WHERE phone = ?1')
-      .bind(phone).first<{ full_name: string | null; photo_url: string | null }>();
+    const u = await c.env.DB.prepare('SELECT email, full_name, photo_url FROM auth_users WHERE phone = ?1')
+      .bind(phone).first<{ email: string | null; full_name: string | null; photo_url: string | null }>();
     if (u?.full_name) fullName = u.full_name;
     // Account photo (incl. seller uploads) wins for display; rider photo is the tracking identity.
     if (u?.photo_url) photoUrl = u.photo_url;
+    email = u?.email ?? null;
   }
   return c.json({
     phone: phone ?? null,
@@ -625,6 +627,7 @@ app.get('/me', async (c) => {
     rider,
     photo_url: photoUrl,
     full_name: fullName,
+    ...(email ? { email } : {}),
   });
 });
 
@@ -944,6 +947,16 @@ app.post('/auth/resend-verification', async (c) => {
   ).bind(email).first<any>();
   if (!user) return c.json({ ok: true, sent: true });
   if (user.email_verified) return c.json({ ok: true, sent: true, already_verified: true });
+  const recent = await c.env.DB.prepare(
+    `SELECT created_at FROM email_tokens WHERE email = ?1 AND kind = 'verify_email' ORDER BY id DESC LIMIT 1`,
+  ).bind(email).first<{ created_at: string }>();
+  if (recent) {
+    const t = Date.parse(String(recent.created_at).replace(' ', 'T') + 'Z');
+    if (!Number.isNaN(t) && Date.now() - t < 60 * 60 * 1000) {
+      return c.json({ ok: true, sent: true, already_sent: true,
+        resend_allowed_after_minutes: Math.max(1, Math.ceil((60 * 60 * 1000 - (Date.now() - t)) / 60000)) });
+    }
+  }
   const link = await createEmailLink(c, email, 'verify_email');
   if (!link) return c.json({ ok: true, sent: true });
   const mail = await sendMail(c.env, {
@@ -1188,6 +1201,12 @@ app.post('/jobs', async (c) => {
     if (!PICKUP_WINDOWS.includes(pickupWindow)) {
       return c.json({ error: `pickup_window must be one of ${PICKUP_WINDOWS.join(', ')}` }, 400);
     }
+    // Explicit next-day booking: "tomorrow:06:00" books the FIRST sweep of
+    // tomorrow (6:00 – 7:30 AM CAT) even when today's slots are already past.
+    // We normalize to the 06:00 sweep for rider bucketing and stamp pickup_at
+    // to tomorrow 06:00 CAT so the scheduler and the queue agree.
+    const pickupTomorrow = pickupWindow === 'tomorrow:06:00';
+    if (pickupTomorrow) pickupWindow = '06:00';
     // Sweep windows have booking cutoffs (06:00→05:30, 10:00→09:30, 14:00→13:30
     // CAT). A late booking never dies — it rolls forward to the next open
     // window (or instant) and the sender is told exactly what happened.
@@ -1327,6 +1346,11 @@ app.post('/jobs', async (c) => {
       }
       pickupAt = ts;
     }
+    if (!pickupAt && pickupTomorrow) {
+      // Tomorrow 06:00 CAT (CAT = UTC+2, so tomorrow's date at 04:00 UTC).
+      const n = new Date();
+      pickupAt = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1, 4, 0)).toISOString();
+    }
 
     // Defensive: never 500 on a NOT NULL job column. The app enforces these,
     // but a hand-rolled API call shouldn't either crash or get silent nulls.
@@ -1388,6 +1412,13 @@ app.post('/jobs', async (c) => {
         'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
       ).bind(meta.last_row_id, 'window_rolled',
         `The ${fromLabel} window had closed — moved to the ${toLabel} slot automatically`).run();
+    }
+
+    if (pickupTomorrow) {
+      await c.env.DB.prepare(
+        'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
+      ).bind(meta.last_row_id, 'pickup_tomorrow',
+        'Slot booked for tomorrow 6:00 – 7:30 AM sweep (after today\'s last window)').run();
     }
 
     c.executionCtx.waitUntil(
@@ -1490,6 +1521,8 @@ app.post('/jobs', async (c) => {
       plan_inclusion: packInclusion,
       pickup_window: pickupWindow,
       window_rolled_from: windowRolledFrom,
+      pickup_tomorrow: pickupTomorrow,
+      pickup_at: pickupAt,
       branch: b.branch ? String(b.branch).trim().slice(0, 80) : null,
     };
     await saveIdempotent(c.env, idemKey, 'job', senderPhone, 201, payload);
@@ -1530,8 +1563,17 @@ app.post('/collections', async (c) => {
   if (!recipientPhone) return c.json({ error: 'invalid_recipient_phone' }, 400);
   const destAddress = String(b.dest_address ?? '').trim();
   if (destAddress.length < 4) return c.json({ error: 'dest_address_required' }, 400);
-  const window = String(b.pickup_window ?? '10:00');
+  const windowReq = String(b.pickup_window ?? '10:00');
+  // "tomorrow:06:00" books the first sweep of the NEXT day even though today's
+  // windows are already past — normalized to the 06:00 sweep + tomorrow 06:00 CAT pickup_at.
+  const pickupTomorrow = windowReq === 'tomorrow:06:00';
+  const window = pickupTomorrow ? '06:00' : windowReq;
   if (!['06:00', '10:00', '14:00'].includes(window)) return c.json({ error: 'pickup_window must be 06:00, 10:00 or 14:00' }, 400);
+  let pickupAt: string | null = null;
+  if (pickupTomorrow) {
+    const n = new Date();
+    pickupAt = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1, 4, 0)).toISOString();
+  }
   const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class) ? b.vehicle_class : 'motorcycle';
   const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, VEHICLE_MAX_PARCELS[vehicleClass]));
   const payMethod = b.pay_method === 'cash' ? 'cash' : 'mobile_money';
@@ -1576,18 +1618,24 @@ app.post('/collections', async (c) => {
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
        counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
-       pickup_time, pickup_window, pay_method, last_mile, parcels, vehicle_class, from_city)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,1,?16,?17,'Lusaka')`,
+       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka')`,
   ).bind(
     ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
     String(b.description ?? 'Collection').trim().slice(0, 200), String(b.weight_class ?? '0-5kg'),
-    riderFee, processing, total, window, payMethod, parcels, vehicleClass,
+    riderFee, processing, total, window, pickupAt, payMethod, parcels, vehicleClass,
   ).run();
 
   await c.env.DB.prepare(
     `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'created', ?2)`,
-  ).bind(meta.last_row_id, `Collection booked from ${courier.name} (${point}) — rider delivers to ${recipientName}'s door`).run();
+  ).bind(meta.last_row_id, `Collection booked from ${courier.name} (${point}) - rider delivers to ${recipientName}'s door`).run();
+
+  if (pickupTomorrow) {
+    await c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'pickup_tomorrow', ?2)`,
+    ).bind(meta.last_row_id, 'Slot booked for tomorrow 6:00 – 7:30 AM sweep (after today\'s last window)').run();
+  }
 
   return c.json({
     ok: true,
@@ -4520,9 +4568,18 @@ app.post('/admin/pack-codes', async (c) => {
 });
 
 app.get('/admin/pack-codes', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const { results } = await c.env.DB.prepare(
-    `SELECT code, tier, cycle_days, note, created_at, used_by, used_at
-       FROM pack_codes ORDER BY id DESC LIMIT 100`,
+    `SELECT pc.code, pc.tier, pc.cycle_days, pc.note, pc.created_at, pc.used_by, pc.used_at,
+            u.full_name AS redeemed_name, u.email AS redeemed_email,
+            (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) AS period_end,
+            CASE WHEN pc.used_by IS NULL THEN 'unused'
+                 WHEN (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) IS NULL THEN 'used'
+                 WHEN (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) <= datetime('now') THEN 'expired'
+                 ELSE 'active' END AS status
+       FROM pack_codes pc
+       LEFT JOIN auth_users u ON u.phone = pc.used_by
+       ORDER BY pc.id DESC LIMIT 200`,
   ).all();
   return c.json({ codes: results ?? [] });
 });

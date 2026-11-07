@@ -943,6 +943,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
   bool _saving = false;
   bool _faceBusy = false;
   String? _busyField;
+  bool _submitted = false;
 
   @override
   void initState() {
@@ -1007,7 +1008,17 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
   }
 
   Future<void> _pick(String field) async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 82);
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take photo with camera'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+          ListTile(leading: const Icon(Icons.photo_library), title: const Text('Pick from gallery'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+        ]),
+      ),
+    );
+    if (source == null) return;
+    final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return;
     setState(() => _busyField = field);
     final bytes = await picked.readAsBytes();
@@ -1031,6 +1042,14 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
       }
     });
   }
+
+  bool get _canSubmit =>
+      _nrc.text.trim().length >= 6 &&
+      _plate.text.trim().length >= 3 &&
+      _make.text.trim().isNotEmpty &&
+      _selfieUrl != null &&
+      _nrcUrl != null &&
+      _plateUrl != null;
 
   Future<void> _submit() async {
     if (_nrc.text.trim().length < 6) return _snack('Enter your NRC number.');
@@ -1059,6 +1078,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
     if (res.ok) {
       unawaited(_checkFace()); // auto-review the selfie right after submit
       _load();
+      setState(() => _submitted = true);
     }
   }
 
@@ -1179,14 +1199,34 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
               padding: EdgeInsets.symmetric(vertical: 14),
               child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
             )
+          else if (_submitted)
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.forest.withValues(alpha: 0.3))),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Row(children: [
+                    Icon(Icons.check_circle, color: AppColors.forest),
+                    SizedBox(width: 8),
+                    Text('Verification submitted', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: AppColors.forest)),
+                  ]),
+                  const SizedBox(height: 6),
+                  const Text('Your documents are in the owner/admin review queue. You will be notified once verified.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+                ]),
+              ),
+              const SizedBox(height: 10),
+              TextButton(onPressed: () => setState(() => _submitted = false), child: const Text('Edit details and resubmit')),
+            ])
           else ...[
             const SizedBox(height: 12),
-            TextField(controller: _nrc, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'NRC number', hintText: '123456/11/1', prefixIcon: Icon(Icons.badge_outlined))),
+            TextField(controller: _nrc, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'NRC number', hintText: '123456/11/1', prefixIcon: Icon(Icons.badge_outlined)), onChanged: (_) => setState(() {})),
             const SizedBox(height: 10),
-            TextField(controller: _plate, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Number plate', hintText: 'ABC 1234', prefixIcon: Icon(Icons.pin_outlined))),
+            TextField(controller: _plate, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Number plate', hintText: 'ABC 1234', prefixIcon: Icon(Icons.pin_outlined)), onChanged: (_) => setState(() {})),
             const SizedBox(height: 10),
             Row(children: [
-              Expanded(child: TextField(controller: _make, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Vehicle make/model'))),
+              Expanded(child: TextField(controller: _make, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Vehicle make/model'), onChanged: (_) => setState(() {}))),
               const SizedBox(width: 10),
               Expanded(child: TextField(controller: _color, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Colour'))),
             ]),
@@ -1216,7 +1256,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: _saving ? null : _submit,
+                onPressed: _saving || !_canSubmit ? null : _submit,
                 icon: _saving
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : const Icon(Icons.send_outlined, size: 18),
@@ -1268,7 +1308,17 @@ class _SelfieBannerState extends State<_SelfieBanner> {
   }
 
   Future<void> _addPhoto() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 82);
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take photo with camera'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+          ListTile(leading: const Icon(Icons.photo_library), title: const Text('Pick from gallery'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+        ]),
+      ),
+    );
+    if (source == null) return;
+    final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return;
     setState(() => _busy = true);
     final bytes = await picked.readAsBytes();

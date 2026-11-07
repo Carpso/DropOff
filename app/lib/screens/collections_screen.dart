@@ -27,6 +27,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   final _address = TextEditingController();
   final _description = TextEditingController();
   final _senderName = TextEditingController();
+  final _promoCode = TextEditingController();
   String _window = '10:00';
   String _payment = 'Mobile money';
   String _vehicleClass = 'motorcycle';
@@ -63,7 +64,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
   @override
   void dispose() {
-    for (final c in [_point, _recipientName, _recipientPhone, _address, _description, _senderName]) {
+    for (final c in [_point, _recipientName, _recipientPhone, _address, _description, _senderName, _promoCode]) {
       c.dispose();
     }
     super.dispose();
@@ -93,6 +94,17 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return _message('Use a valid Zambian recipient number, e.g. 0961234567.');
     }
     if (_address.text.trim().length < 4) return _message('Enter the door address for delivery.');
+    // Plan code entry: pre-redeem before the collection so the plan covers the
+    // rider fee for this booking without a separate step.
+    final promo = _promoCode.text.trim().toUpperCase();
+    if (promo.isNotEmpty) {
+      try {
+        final red = await DropOffApi.redeemPackCode(promo);
+        if (!red.ok) {
+          _message('Plan code not recognised — continuing as pay-as-you-go.');
+        }
+      } catch (_) { /* best-effort */ }
+    }
     setState(() => _saving = true);
     final res = await DropOffApi.createCollection(
       courierId: courierServerIdOf(_courierId),
@@ -282,9 +294,42 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               ),
             ),
           ),
+        // Next-day sweep: always open, for when every today window has closed.
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(13),
+            onTap: () => setState(() => _window = 'tomorrow:06:00'),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+              decoration: BoxDecoration(
+                color: _window == 'tomorrow:06:00' ? const Color(0xFFE9F0EB) : Colors.white,
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: _window == 'tomorrow:06:00' ? AppColors.forest : AppColors.line, width: _window == 'tomorrow:06:00' ? 1.5 : 1),
+              ),
+              child: Row(children: [
+                const Icon(Icons.event_repeat_rounded, size: 18, color: AppColors.muted),
+                const SizedBox(width: 10),
+                Expanded(child: Text('Tomorrow 6:00 – 7:30 AM', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _window == 'tomorrow:06:00' ? AppColors.forest : AppColors.ink))),
+                if (_window == 'tomorrow:06:00') const Icon(Icons.check_circle, size: 18, color: AppColors.forest),
+              ]),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Text('Subscription code', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _promoCode,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+            labelText: 'Plan / promo code (optional)',
+            hintText: 'e.g. DROP-XXXX-XXXX (activates your pack on this number before you pay the rider)',
+            prefixIcon: Icon(Icons.redeem_rounded),
+          ),
+        ),
         const SizedBox(height: 10),
         const Text('Payment', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 6),
         RadioGroup<String>(
           groupValue: _payment,
           onChanged: (v) { if (v != null) setState(() => _payment = v); },

@@ -42,6 +42,7 @@ class _BookingScreenState extends State<BookingScreen> {
     '10:00': (title: '10:00 – 11:30 AM window', benefit: 'Catches midday courier express', cutoff: '09:30'),
     '14:00': (title: '2:00 – 3:30 PM window', benefit: 'Catches final evening transit', cutoff: '13:30'),
   };
+  bool _tomorrowMorning = false;
 
   bool _slotClosed(String key) {
     final parts = slotCopy[key]!.cutoff.split(':');
@@ -264,7 +265,7 @@ class _BookingScreenState extends State<BookingScreen> {
       riderFee: riderFee,
       courierFare: _courierFare,
       lastMileFee: _lastMile ? lastMilePrice : 0,
-      pickupWindow: _pickupWindow,
+      pickupWindow: _tomorrowMorning ? 'tomorrow:06:00' : _pickupWindow,
       promoCode: _promo.text.trim(),
       roundTrip: _roundTrip,
       returnCity: _roundTrip ? _returnCity : null,
@@ -276,6 +277,8 @@ class _BookingScreenState extends State<BookingScreen> {
     );
     if (store.lastBookingWindowRolled != null) {
       _message('The ${store.lastBookingWindowRolled} window had closed — your booking moved to the next open slot automatically.');
+    } else if (_tomorrowMorning) {
+      _message('You booked the TOMORROW 6:00 – 7:30 AM early sweep — the rider collects in the morning.');
     }
 
     // Live Lipila collect for mobile-money jobs; the Worker responds with the
@@ -644,10 +647,32 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
         ),
         const SizedBox(height: 14),
-        const Text('Select pickup slot for today', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 10),
-        for (final entry in pickupWindows.entries)
-          Padding(
+        const Text('Select pickup slot', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          ChoiceChip(
+            selected: !_tomorrowMorning,
+            label: const Text('Today'),
+            onSelected: (v) => setState(() => _tomorrowMorning = !v),
+          ),
+          ChoiceChip(
+            selected: _tomorrowMorning,
+            label: const Text('Tomorrow morning (06:00)'),
+            onSelected: (v) => setState(() => _tomorrowMorning = v),
+          ),
+        ]),
+        if (_tomorrowMorning) ...[
+          const SizedBox(height: 10),
+          ListTile(
+            tileColor: const Color(0xFFE9F0EB),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: AppColors.forest)),
+            title: const Text('Tomorrow 6:00 – 7:30 AM', style: TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: const Text('Picked up tomorrow morning — after today’s late afternoon window has closed.'),
+            trailing: const Icon(Icons.event, color: AppColors.forest),
+          ),
+        ] else
+        ...pickupWindows.entries.map((entry) {
+          return Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: InkWell(
               borderRadius: BorderRadius.circular(14),
@@ -694,7 +719,8 @@ class _BookingScreenState extends State<BookingScreen> {
                 ]),
               ),
             ),
-          ),
+          );
+        }),
         const SizedBox(height: 4),
         const Align(
           alignment: Alignment.centerLeft,

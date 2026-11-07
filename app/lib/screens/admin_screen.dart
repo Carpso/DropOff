@@ -162,9 +162,9 @@ class _AdminScreenState extends State<AdminScreen> {
             if (_superadmin) ...[
               const SizedBox(height: 18),
               const _UsersCard(),
-              const SizedBox(height: 18),
-              const _PackCodesCard(),
             ],
+            const SizedBox(height: 18),
+            const _PackCodesCard(),
             const SizedBox(height: 18),
             const _RiderVerificationAdminCard(),
             const SizedBox(height: 18),
@@ -961,6 +961,9 @@ class _PackCodesCardState extends State<_PackCodesCard> {
   final _note = TextEditingController();
   List<String> _codes = const [];
   bool _busy = false;
+  List<Map<String, dynamic>> _history = const [];
+  bool _loadingHistory = false;
+  String _filter = 'all';
 
   static const Map<String, String> _labels = {
     'weekly': 'Weekly Sprint',
@@ -970,9 +973,30 @@ class _PackCodesCardState extends State<_PackCodesCard> {
   };
 
   @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+  }
+
+  @override
   void dispose() {
     _note.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadHistory() async {
+    setState(() => _loadingHistory = true);
+    final res = await DropOffApi.packCodes();
+    if (!mounted) return;
+    setState(() {
+      _loadingHistory = false;
+      _history = (res?['codes'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    });
+  }
+
+  void _copy(String code) {
+    Clipboard.setData(ClipboardData(text: code));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$code copied.')));
   }
 
   Future<void> _generate() async {
@@ -991,8 +1015,11 @@ class _PackCodesCardState extends State<_PackCodesCard> {
       meta: {'tier': _tier, 'count': codes.length},
     );
     if (codes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No codes generated � try again.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No codes generated - try again.')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${codes.length} code${codes.length == 1 ? '' : 's'} generated.')));
     }
+    await _loadHistory();
   }
 
   void _copyAll() {
@@ -1063,6 +1090,59 @@ class _PackCodesCardState extends State<_PackCodesCard> {
               ]),
             ),
           ],
+          const SizedBox(height: 14),
+          Row(children: [
+            const Expanded(child: Text('Code history', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13))),
+            TextButton(onPressed: _loadingHistory ? null : _loadHistory, child: const Text('Refresh')),
+          ]),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final f in const ['all', 'unused', 'active', 'expired'])
+              ChoiceChip(
+                selected: _filter == f,
+                label: Text(f[0].toUpperCase() + f.substring(1)),
+                onSelected: (v) => setState(() => _filter = f),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          if (_loadingHistory)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
+          else
+            ..._history
+                .where((c) => _filter == 'all' || (c['status'] as String? ?? '') == _filter)
+                .map((c) {
+              final code = '${c['code'] ?? ''}';
+              final status = '${c['status'] ?? ''}';
+              final usedBy = '${c['redeemed_name'] ?? c['used_by'] ?? ''}';
+              final color = status == 'active'
+                  ? AppColors.success
+                  : status == 'expired'
+                      ? AppColors.danger
+                      : status == 'used'
+                          ? AppColors.warning
+                          : AppColors.muted;
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
+                child: Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 1.0)),
+                    const SizedBox(height: 2),
+                    Text('${c['tier']} • ${c['cycle_days']}d${c['note'] != null && '${c['note']}'.isNotEmpty ? ' • ${c['note']}' : ''}', style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                    if (usedBy.isNotEmpty)
+                      Text('Redeemed by $usedBy ${c['redeemed_email'] != null ? '(${c['redeemed_email']})' : ''} • ${c['used_at']}', style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                  ])),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+                    child: Text(status.toUpperCase(), style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900)),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(icon: const Icon(Icons.copy, size: 16), onPressed: () => _copy(code), tooltip: 'Copy'),
+                ]),
+              );
+            }).toList(),
         ]),
       ),
     );

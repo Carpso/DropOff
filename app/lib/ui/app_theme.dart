@@ -8,6 +8,17 @@ abstract final class AppColors {
   static const ink = Color(0xFF17221E);
   static const muted = Color(0xFF65736D);
   static const line = Color(0xFFE2E6E1);
+
+  // Extended small-business palette (target look, deeper accents)
+  static const terracotta = Color(0xFFB85C38);
+  static const sky = Color(0xFF2E6F95);
+  static const sage = Color(0xFF7FA650);
+  static const plum = Color(0xFF6B4F7A);
+  static const slate = Color(0xFF4A5568);
+  static const success = Color(0xFF2E7D32);
+  static const warning = Color(0xFFB26A00);
+  static const danger = Color(0xFFB3261E);
+  static const info = Color(0xFF1565C0);
 }
 
 ThemeData buildAppTheme() {
@@ -15,6 +26,11 @@ ThemeData buildAppTheme() {
     seedColor: AppColors.forest,
     brightness: Brightness.light,
     surface: Colors.white,
+  ).copyWith(
+    secondary: AppColors.amber,
+    onSecondary: AppColors.ink,
+    tertiary: AppColors.terracotta,
+    error: AppColors.danger,
   );
   return ThemeData(
     useMaterial3: true,

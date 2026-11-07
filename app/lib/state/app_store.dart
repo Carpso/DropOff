@@ -12,19 +12,23 @@ import '../data/push_service.dart';
 import '../models/booking.dart';
 
 class AppStore extends ChangeNotifier {
-  static const _bookingsKey = 'dropoff_bookings_v1';
-  static const _ridersKey = 'dropoff_riders_v1';
-  static const _tokenKey = 'dropoff_token_v1';
-  /// Plain-text mirror of the JWT. Android keystore entries die on screen-lock
-  /// changes/fingerprint enrollment — this fallback is why "remember me" works.
-  static const _fallbackTokenKey = 'dropoff_token_fallback_v1';
-  static const _secureTokenKey = 'dropoff_token';
-  static const _phoneKey = 'dropoff_phone_v1';
-  static const _emailKey = 'dropoff_email_v1';
-  static const _outboxKey = 'dropoff_outbox_v1';
   static const _rememberKey = 'dropoff_remember_v1';
   static const _biometricKey = 'dropoff_biometric_v1';
   static const _deviceKey = 'dropoff_device_id_v1';
+  static const _accountKey = 'dropoff_acct_v1';
+
+  String _account = 'anon';
+
+  String _scoped(String name) => '${_accountKey}_${_account}_$name';
+
+  String get _bookingsKey => _scoped('bookings');
+  String get _ridersKey => _scoped('riders');
+  String get _outboxKey => _scoped('outbox');
+  String get _secureTokenKey => _scoped('jwt');
+  String get _fallbackTokenKey => _scoped('jwt_mirror');
+  String get _tokenKey => _scoped('jwt_legacy_mirror');
+  String get _phoneKey => _scoped('phone');
+  String get _emailKey => _scoped('email');
 
   final List<Booking> _bookings = [];
   final List<Rider> _riders = [];
@@ -86,6 +90,29 @@ class AppStore extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
     final remember = preferences.getBool(_rememberKey) ?? true;
     _biometricEnabled = preferences.getBool(_biometricKey) ?? false;
+    // Account-scoped keys: namespace local state by email AND phone so an
+    // old phone-only session can't leak into a newer session on the same
+    // device, even when the phone is identical.
+    final phone = preferences.getString('dropoff_phone_v1');
+    final email = preferences.getString('dropoff_email_v1');
+    _account = preferences.getString(_accountKey) ??
+        ((email != null && email.isNotEmpty) ? '$email|$phone' : (phone != null && phone.isNotEmpty ? phone : 'anon'));
+    if (preferences.getString(_accountKey) == null && _account != 'anon') {
+      for (final base in const ['bookings', 'riders', 'outbox', 'token_v1', 'fallback', 'phone', 'email']) {
+        final legacy = switch (base) {
+          'token_v1' => 'dropoff_token_v1',
+          'fallback' => 'dropoff_token_fallback_v1',
+          'phone' => 'dropoff_phone_v1',
+          'email' => 'dropoff_email_v1',
+          _ => 'dropoff_${base}_v1',
+        };
+        if (preferences.containsKey(legacy)) {
+          await preferences.setString(_scoped(base), preferences.getString(legacy)!);
+          await preferences.remove(legacy);
+        }
+      }
+      await preferences.setString(_accountKey, _account);
+    }
     // Device ID — stays stable across cold starts so "untrust this device"
     // survives. Generated once per install from cryptographic randomness.
     var dev = preferences.getString(_deviceKey);
@@ -112,38 +139,7 @@ class AppStore extends ChangeNotifier {
     DropOffApi.token = _token;
     _linkedPhone = preferences.getString(_phoneKey);
     _email = preferences.getString(_emailKey);
-    try {
-      final bookingJson = preferences.getString(_bookingsKey);
-      if (bookingJson != null) {
-        _bookings.addAll((jsonDecode(bookingJson) as List)
-            .map((item) => Booking.fromJson(item as Map<String, dynamic>)));
-      }
-      final riderJson = preferences.getString(_ridersKey);
-      if (riderJson != null) {
-        _riders.addAll((jsonDecode(riderJson) as List)
-            .map((item) => Rider.fromJson(item as Map<String, dynamic>)));
-      }
-      final outboxJson = preferences.getString(_outboxKey);
-      if (outboxJson != null) {
-        _outbox.addAll((jsonDecode(outboxJson) as List).cast<Map<String, dynamic>>());
-      }
-    } catch (_) {
-      await preferences.remove(_bookingsKey);
-      await preferences.remove(_ridersKey);
-      await preferences.remove(_outboxKey);
-      _bookings.clear();
-      _riders.clear();
-      _outbox.clear();
-    }
-    if (_riders.isEmpty) {
-      _riders.add(const Rider(
-        id: 'owner',
-        name: 'Owner',
-        phone: 'Add your phone in team settings',
-        vehicle: 'Motorcycle / vehicle',
-        isOwner: true,
-      ));
-    }
+    await _reloadAccountCache();
     _ready = true;
     notifyListeners();
     unawaited(flushOutbox());
@@ -174,16 +170,23 @@ class AppStore extends ChangeNotifier {
   Future<void> refreshRole() async {
     if (!DropOffApi.enabled) return;
     final me = await DropOffApi.me();
-    final next = '${me?['role'] ?? ''}';
+    if (me == null) return;
+    final next = '${me['role'] ?? ''}';
     final role = next.isEmpty ? null : next;
-    final sa = me?['superadmin'] == true;
-    final photo = me?['photo_url'] as String?;
-    final name = me?['full_name'] as String?;
-    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName) {
+    final sa = me['superadmin'] == true;
+    final photo = me['photo_url'] as String?;
+    final name = me['full_name'] as String?;
+    final email = me['email'] as String?;
+    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email) {
       _role = role;
       _superadmin = sa;
       _photoUrl = photo;
       _fullName = name;
+      if (email != null) {
+        _email = email;
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.setString(_emailKey, email);
+      }
       notifyListeners();
     }
   }
@@ -304,7 +307,17 @@ class AppStore extends ChangeNotifier {
     _token = token;
     _linkedPhone = phone ?? _linkedPhone;
     _email = email;
+    // Rebind the account namespace to this phone (email fallback) so the
+    // misc local caches from this account are read on startup next time.
     final preferences = await SharedPreferences.getInstance();
+    if (phone != null && phone.isNotEmpty) {
+      _account = phone;
+      await preferences.setString(_accountKey, _account);
+    } else if (email != null && email.isNotEmpty) {
+      _account = email;
+      await preferences.setString(_accountKey, _account);
+    }
+    await _reloadAccountCache();
     await preferences.setBool(_rememberKey, remember);
     if (token != null && remember) {
       await _secureStorage.write(key: _secureTokenKey, value: token);
@@ -383,22 +396,68 @@ class AppStore extends ChangeNotifier {
     return 'dev-$ts-$hex';
   }
 
+  Future<void> _reloadAccountCache() async {
+    final preferences = await SharedPreferences.getInstance();
+    _bookings.clear();
+    _riders.clear();
+    _outbox.clear();
+    try {
+      final bookingJson = preferences.getString(_bookingsKey);
+      if (bookingJson != null) {
+        _bookings.addAll((jsonDecode(bookingJson) as List)
+            .map((item) => Booking.fromJson(item as Map<String, dynamic>)));
+      }
+      final riderJson = preferences.getString(_ridersKey);
+      if (riderJson != null) {
+        _riders.addAll((jsonDecode(riderJson) as List)
+            .map((item) => Rider.fromJson(item as Map<String, dynamic>)));
+      }
+      final outboxJson = preferences.getString(_outboxKey);
+      if (outboxJson != null) {
+        _outbox.addAll((jsonDecode(outboxJson) as List).cast<Map<String, dynamic>>());
+      }
+    } catch (_) {
+      await preferences.remove(_bookingsKey);
+      await preferences.remove(_ridersKey);
+      await preferences.remove(_outboxKey);
+      _bookings.clear();
+      _riders.clear();
+      _outbox.clear();
+    }
+    if (_riders.isEmpty) {
+      _riders.add(const Rider(
+        id: 'owner',
+        name: 'Owner',
+        phone: 'Add your phone in team settings',
+        vehicle: 'Motorcycle / vehicle',
+        isOwner: true,
+      ));
+    }
+  }
+
   Future<void> unlink() async {
     await PushService.unregister();
     DropOffApi.clearCaches();
+    final prev = _account;
     _token = null;
     _linkedPhone = null;
     _role = null;
     _photoUrl = null;
     _fullName = null;
     _superadmin = false;
+    _bookings.clear();
+    _riders.clear();
+    _outbox.clear();
     DropOffApi.token = null;
     await _secureStorage.delete(key: _secureTokenKey);
     final preferences = await SharedPreferences.getInstance();
-    await preferences.remove(_tokenKey);
-    await preferences.remove(_fallbackTokenKey);
-    await preferences.remove(_phoneKey);
-    await preferences.remove(_emailKey);
+    if (prev != 'anon') {
+      for (final name in const ['bookings', 'riders', 'outbox', 'jwt', 'jwt_mirror', 'jwt_legacy_mirror', 'phone', 'email']) {
+        await preferences.remove(_scoped(name));
+      }
+      await preferences.remove(_accountKey);
+    }
+    _account = 'anon';
     notifyListeners();
   }
 

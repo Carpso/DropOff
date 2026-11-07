@@ -106,7 +106,8 @@ export async function lipilaCollect(
   const text = await res.text();
   let data: any = null;
   try { data = JSON.parse(text); } catch { /* keep raw */ }
-  return { ok: res.ok, status: res.status, lipilaReference: data?.referenceId ?? undefined, raw: text };
+  const ref = data?.referenceId ?? data?.reference ?? data?.transactionReference ?? data?.transactionId ?? data?.lipilaReference ?? null;
+  return { ok: res.ok, status: res.status, lipilaReference: ref ? String(ref) : undefined, raw: text };
 }
 
 /** Rider/partner payout. Lipila REQUIRES the server IP whitelisted before this works. */
@@ -140,7 +141,8 @@ export async function lipilaDisburse(
   const text = await res.text();
   let data: any = null;
   try { data = JSON.parse(text); } catch { /* keep raw */ }
-  return { ok: res.ok, status: res.status, lipilaReference: data?.referenceId ?? undefined, raw: text };
+  const ref = data?.referenceId ?? data?.reference ?? data?.transactionReference ?? data?.transactionId ?? data?.lipilaReference ?? null;
+  return { ok: res.ok, status: res.status, lipilaReference: ref ? String(ref) : undefined, raw: text };
 }
 
 /** Poll a collection. The app polls every ~2s for up to 40s. */
@@ -155,7 +157,8 @@ export async function lipilaStatus(env: Env, reference: string): Promise<'pendin
   }
   if (!res.ok) return 'pending';
   const data: any = await res.json().catch(() => null);
-  return mapLipilaStatus(data?.status);
+  const raw = data?.status ?? data?.paymentStatus ?? data?.state ?? data?.transactionStatus ?? data?.result;
+  return mapLipilaStatus(raw);
 }
 
 function mapLipilaStatus(raw: unknown): 'pending' | 'success' | 'failed' {

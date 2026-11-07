@@ -52,6 +52,7 @@ class _AppShellState extends State<AppShell> {
       bottomNavigationBar: MediaQuery.withClampedTextScaling(
         maxScaleFactor: 1.35,
         child: NavigationBar(
+          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
           selectedIndex: safeIndex,
           onDestinationSelected: goTo,
           destinations: destinations,
