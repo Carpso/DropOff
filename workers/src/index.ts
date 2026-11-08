@@ -5477,6 +5477,74 @@ app.get('/admin/riders', async (c) => {
   });
 });
 
+// Edit a rider's basic roster fields (admin/superadmin only). Verification/KYC
+// status changes stay on the dedicated /verify and /ai-check endpoints.
+app.patch('/admin/riders/:id', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'bad_rider_id' }, 400);
+  const existing = await c.env.DB.prepare(
+    `SELECT id, phone, full_name, vehicle, vehicle_class, active, verification_status FROM riders WHERE id = ?1`,
+  ).bind(id).first<any>();
+  if (!existing) return c.json({ error: 'not_found' }, 404);
+  const b: any = await c.req.json().catch(() => ({}));
+  const fullName = b.full_name != null ? String(b.full_name).trim().slice(0, 120) : String(existing.full_name ?? '');
+  const vehicle = b.vehicle != null ? String(b.vehicle).trim().slice(0, 80) : String(existing.vehicle ?? '');
+  const vehicleClass = b.vehicle_class != null ? String(b.vehicle_class).trim().toLowerCase().slice(0, 30) : (existing.vehicle_class ?? 'motorcycle');
+  const phone = b.phone != null ? normalizeZmPhone(String(b.phone)) : String(existing.phone ?? '');
+  if (fullName.length < 2) return c.json({ error: 'full_name_required' }, 400);
+  if (!phone) return c.json({ error: 'invalid_phone' }, 400);
+  if (vehicle.length < 2) return c.json({ error: 'vehicle_required' }, 400);
+  // active toggle is allowed here for roster management, but do not silently
+  // "verify" a rider — verification remains explicit via /verify.
+  const active = b.active != null ? (b.active ? 1 : 0) : Number(existing.active ?? 1);
+  if (phone !== existing.phone) {
+    const dup = await c.env.DB.prepare(`SELECT id FROM riders WHERE phone = ?1 AND id <> ?2`).bind(phone, id).first<any>();
+    if (dup) return c.json({ error: 'phone_already_used' }, 409);
+  }
+  await c.env.DB.prepare(
+    `UPDATE riders SET full_name = ?2, phone = ?3, vehicle = ?4, vehicle_class = ?5, active = ?6 WHERE id = ?1`,
+  ).bind(id, fullName, phone, vehicle, vehicleClass, active).run();
+  return c.json({ ok: true, id, full_name: fullName, phone, vehicle, vehicle_class: vehicleClass, active: !!active });
+});
+
+// Conditional, gated deletion (admin/superadmin only). "Not easy": requires an
+// explicit confirm flag and is blocked while the rider has open/assigned work.
+app.delete('/admin/riders/:id', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'bad_rider_id' }, 400);
+  const b: any = await c.req.json().catch(() => ({}));
+  if (b?.confirm !== true && b?.confirm !== 'DELETE') {
+    return c.json({ error: 'confirm_required', detail: 'Pass {"confirm": true} to delete a rider. This is permanent for the roster record.' }, 400);
+  }
+  const existing = await c.env.DB.prepare(`SELECT id, full_name, phone, active FROM riders WHERE id = ?1`).bind(id).first<any>();
+  if (!existing) return c.json({ error: 'not_found' }, 404);
+  // Conditional: block deletion if rider has open/active jobs. Deactivate instead.
+  const open = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM jobs
+      WHERE rider_id = ?1
+        AND COALESCE(status, '') NOT IN ('delivered','ready_for_collection','collected','cancelled','failed')`,
+  ).bind(id).first<any>();
+  const openJobs = Number(open?.n ?? 0);
+  if (openJobs > 0) {
+    return c.json({
+      error: 'rider_has_open_jobs',
+      detail: `Cannot delete: ${openJobs} open/assigned job(s) still reference this rider. Reassign or complete them, or deactivate the rider instead.`,
+      open_jobs: openJobs,
+    }, 409);
+  }
+  // Unassign any terminal-history references safely by nulling rider_id? Keep history intact:
+  // we block open jobs; delivered history may still reference rider_id (FK-like usage) — use soft delete pattern?
+  // To preserve history without FK issues, mark inactive and clear identity-like operational availability; hard delete roster row.
+  // SQLite has no FK enforcement by default in D1 here; delivered rows keep rider_id as historical value. We null it to be clean.
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE jobs SET rider_id = NULL WHERE rider_id = ?1`).bind(id),
+    c.env.DB.prepare(`DELETE FROM riders WHERE id = ?1`).bind(id),
+  ]);
+  return c.json({ ok: true, deleted: true, id, name: existing.full_name });
+});
+
 app.post('/admin/riders/:id/verify', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
   const id = Number(c.req.param('id'));

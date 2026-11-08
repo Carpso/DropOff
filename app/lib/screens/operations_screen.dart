@@ -143,6 +143,117 @@ class OperationsScreen extends StatelessWidget {
     phone.dispose();
   }
 
+  Future<void> _editRider(BuildContext context, dynamic rider) async {
+    final store = AppScope.of(context);
+    if (!(store.isSuperAdmin || store.isAdminRole)) return;
+    final name = TextEditingController(text: '${rider.name}');
+    final phone = TextEditingController(text: '${rider.phone}');
+    String vehicle = '${rider.vehicle}';
+    const options = <String>['Motorcycle', 'Car', 'Van', 'Truck', 'Bicycle', 'Three-wheeler'];
+    if (!options.contains(vehicle)) vehicle = 'Motorcycle';
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.canvas,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      builder: (sheetContext) => StatefulBuilder(builder: (context, setSheetState) => Padding(
+        padding: EdgeInsets.fromLTRB(22, 22, 22, MediaQuery.of(context).viewInsets.bottom + 24),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('Edit rider', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 6),
+          const Text('Changes apply to the shared team roster.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+          const SizedBox(height: 16),
+          TextField(controller: name, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Full name', prefixIcon: Icon(Icons.person_outline))),
+          const SizedBox(height: 12),
+          TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Mobile number', hintText: '0971234567', prefixIcon: Icon(Icons.phone_outlined))),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: vehicle,
+            decoration: InputDecoration(labelText: 'Vehicle', prefixIcon: Icon(_vehicleIcon(vehicle))),
+            items: options.map((v) => DropdownMenuItem(value: v, child: Row(children: [Icon(_vehicleIcon(v), size: 20), const SizedBox(width: 10), Text(v == 'Truck' ? 'Truck (large cargo)' : v)]))).toList(),
+            onChanged: (value) => setSheetState(() => vehicle = value ?? 'Motorcycle'),
+          ),
+          const SizedBox(height: 20),
+          FilledButton(onPressed: () {
+            if (name.text.trim().length < 2 || phone.text.trim().length < 9) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a name and valid mobile number.')));
+              return;
+            }
+            Navigator.of(sheetContext).pop(true);
+          }, child: const Text('Save changes')),
+        ]),
+      )),
+    );
+    if (saved == true && context.mounted) {
+      final numericId = int.tryParse('${rider.id}');
+      if (numericId == null) return;
+      final err = await store.updateRider(
+        numericId,
+        fullName: name.text,
+        phone: phone.text,
+        vehicle: vehicle,
+        vehicleClass: _vehicleClassOf(vehicle),
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? 'Rider updated.')));
+      }
+    }
+    name.dispose();
+    phone.dispose();
+  }
+
+  Future<void> _confirmRemoveRider(BuildContext context, dynamic rider) async {
+    final store = AppScope.of(context);
+    if (!(store.isSuperAdmin || store.isAdminRole)) return;
+    final openCount = store.bookings.where((b) => b.riderId == '${rider.id}' && b.stage < b.timeline.length - 1).length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove rider from team?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('This permanently removes ${rider.name} from the shared rider roster.', style: const TextStyle(height: 1.4)),
+          const SizedBox(height: 10),
+          if (openCount > 0)
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(10)),
+              child: Text('Blocked by condition: $openCount open booking(s) are still assigned to this rider. Reassign/complete them or deactivate the rider instead.',
+                style: const TextStyle(fontSize: 12.5, height: 1.35, color: Color(0xFF7A4A00))),
+            )
+          else
+            const Text('If this rider has historical deliveries, removal is only allowed when no open jobs are assigned (server-checked). Consider deactivating instead if unsure.',
+              style: TextStyle(fontSize: 12.5, height: 1.35, color: AppColors.muted)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('Deactivate instead'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+            onPressed: openCount > 0 ? null : () => Navigator.pop(ctx, true),
+            child: const Text('Delete permanently'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == null && context.mounted) {
+      // "Deactivate instead" convenience action
+      final err = await store.toggleRider('${rider.id}', false);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? '${rider.name} deactivated.')));
+      }
+      return;
+    }
+    if (confirmed == true && context.mounted) {
+      final err = await store.removeRider('${rider.id}', confirm: true);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? '${rider.name} removed from the team.')));
+      }
+    }
+  }
+
   Future<void> _pingMyLocation(BuildContext context) async {
     final store = AppScope.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -355,8 +466,25 @@ class OperationsScreen extends StatelessWidget {
                 if (rider.isOwner)
                   const InfoPill(icon: Icons.verified, label: 'OWNER')
                 else if (canAddRiders) ...[
-                  Switch(value: rider.active, onChanged: (value) => store.toggleRider(rider.id, value)),
-                  IconButton(icon: const Icon(Icons.delete_outline, color: AppColors.muted), onPressed: () => store.removeRider(rider.id)),
+                  IconButton(
+                    tooltip: 'Edit rider',
+                    icon: const Icon(Icons.edit_outlined, color: AppColors.muted),
+                    onPressed: () => _editRider(context, rider),
+                  ),
+                  Switch(
+                    value: rider.active,
+                    onChanged: (value) async {
+                      final err = await store.toggleRider(rider.id, value);
+                      if (err != null && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                      }
+                    },
+                  ),
+                  IconButton(
+                    tooltip: 'Remove rider',
+                    icon: const Icon(Icons.delete_outline, color: Color(0xFF9A5A5A)),
+                    onPressed: () => _confirmRemoveRider(context, rider),
+                  ),
                 ] else
                   const InfoPill(icon: Icons.verified, label: 'VIEW ONLY'),
               ]))),

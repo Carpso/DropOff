@@ -898,6 +898,12 @@ class DropOffApi {
   }) =>
       post('/admin/riders', {'phone': phone, 'full_name': fullName, 'vehicle': vehicle}, admin: true);
 
+  static Future<ApiResponse> updateRider(int id, Map<String, dynamic> body) =>
+      _patchJson('/admin/riders/$id', body);
+
+  static Future<ApiResponse> deleteRider(int id, {bool confirm = false}) =>
+      delete('/admin/riders/$id', body: {'confirm': confirm});
+
   static Future<ApiResponse> assignJob({required String jobRef, required String riderPhone}) =>
       post('/admin/jobs/$jobRef/assign', {'phone': riderPhone}, admin: true);
 

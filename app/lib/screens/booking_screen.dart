@@ -333,7 +333,20 @@ class _BookingScreenState extends State<BookingScreen> {
                       icon: const Icon(Icons.delete_outline, color: AppColors.muted),
                       onPressed: () async {
                         final id = (r['id'] as num?)?.toInt();
-                        if (id != null) await DropOffApi.deleteRecipient(id);
+                        if (id == null) return;
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (d) => AlertDialog(
+                            title: const Text('Remove saved recipient?'),
+                            content: Text('Remove $name ($phone) from your saved recipients?'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+                              FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Remove')),
+                            ],
+                          ),
+                        );
+                        if (ok != true) return;
+                        await DropOffApi.deleteRecipient(id);
                         if (ctx.mounted) Navigator.pop(ctx);
                         if (mounted) _openRecipientsPicker();
                       },

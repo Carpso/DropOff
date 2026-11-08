@@ -919,7 +919,22 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
                 Expanded(child: Text('${b['name']} — ${b['address'] ?? b['city']}', style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
                 IconButton(
                   icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.muted),
-                  onPressed: () async { await DropOffApi.delete('/admin/branches/${b['id']}', body: {}); _loadBranches(); },
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (d) => AlertDialog(
+                        title: const Text('Delete branch?'),
+                        content: Text('Remove "${b['name'] ?? 'this branch'}"? This cannot be undone.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+                          FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)), onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
+                        ],
+                      ),
+                    );
+                    if (ok != true) return;
+                    await DropOffApi.delete('/admin/branches/${b['id']}', body: {});
+                    _loadBranches();
+                  },
                 ),
               ]),
             )),

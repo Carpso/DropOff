@@ -705,17 +705,62 @@ class AppStore extends ChangeNotifier {
     return null;
   }
 
-  Future<void> toggleRider(String id, bool active) async {
+  Future<String?> updateRider(int id, {String? fullName, String? phone, String? vehicle, String? vehicleClass, bool? active}) async {
+    if (!(isSuperAdmin || isAdminRole)) return 'Only admins can edit riders.';
+    if (DropOffApi.enabled) {
+      final body = <String, dynamic>{
+        if (fullName != null) 'full_name': fullName.trim(),
+        if (phone != null) 'phone': phone.trim(),
+        if (vehicle != null) 'vehicle': vehicle.trim(),
+        if (vehicleClass != null) 'vehicle_class': vehicleClass.trim(),
+        if (active != null) 'active': active,
+      };
+      final res = await DropOffApi.updateRider(id, body);
+      if (!res.ok) {
+        return '${res.body['detail'] ?? res.body['error'] ?? 'Could not update rider.'}';
+      }
+    }
+    await syncRidersFromServer();
+    return null;
+  }
+
+  Future<String?> toggleRider(String id, bool active) async {
     final index = _riders.indexWhere((rider) => rider.id == id);
-    if (index < 0 || _riders[index].isOwner) return;
+    if (index < 0 || _riders[index].isOwner) return 'Rider not found.';
+    if (!(isSuperAdmin || isAdminRole)) return 'Only admins can change rider status.';
+    final numericId = int.tryParse(id);
+    if (DropOffApi.enabled && numericId != null) {
+      final err = await updateRider(numericId, active: active);
+      if (err != null) return err;
+      return null;
+    }
     _riders[index] = _riders[index].copyWith(active: active);
     await _saveRiders();
     notifyListeners();
+    return null;
   }
 
-  Future<void> removeRider(String id) async {
+  /// Conditional, gated deletion: admin-only, requires explicit confirmation,
+  /// and is blocked when open local bookings are still assigned to the rider.
+  /// Server enforces the final open-jobs condition.
+  Future<String?> removeRider(String id, {bool confirm = false}) async {
     final rider = _riders.where((item) => item.id == id).firstOrNull;
-    if (rider == null || rider.isOwner) return;
+    if (rider == null || rider.isOwner) return 'Rider not found.';
+    if (!(isSuperAdmin || isAdminRole)) return 'Only admins can remove riders.';
+    if (!confirm) return 'Deletion not confirmed.';
+    final hasOpen = _bookings.any((b) => b.riderId == id && b.stage < b.timeline.length - 1);
+    if (hasOpen) {
+      return 'Cannot delete ${rider.name}: they still have open bookings assigned. Reassign/complete those bookings or deactivate the rider instead.';
+    }
+    final numericId = int.tryParse(id);
+    if (DropOffApi.enabled && numericId != null) {
+      final res = await DropOffApi.deleteRider(numericId, confirm: true);
+      if (!res.ok) {
+        return '${res.body['detail'] ?? res.body['error'] ?? 'Could not delete rider.'}';
+      }
+      await syncRidersFromServer();
+      return null;
+    }
     _riders.removeWhere((item) => item.id == id);
     for (var i = 0; i < _bookings.length; i++) {
       if (_bookings[i].riderId == id) {
@@ -724,6 +769,7 @@ class AppStore extends ChangeNotifier {
     }
     await Future.wait([_saveRiders(), _saveBookings()]);
     notifyListeners();
+    return null;
   }
 
   Future<void> _saveBookings() async {

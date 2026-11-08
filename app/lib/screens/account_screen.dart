@@ -447,6 +447,18 @@ class _AccountScreenState extends State<AccountScreen> {
 
   Future<void> _removePhoto() async {
     if (_photoBusy) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Remove profile photo?'),
+        content: const Text('Your photo will be removed and initials will be shown instead.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true) return;
     setState(() => _photoBusy = true);
     final res = await DropOffApi.removeMePhoto();
     if (!mounted) return;
@@ -972,7 +984,22 @@ class _RecurringCardState extends State<_RecurringCard> {
                     style: const TextStyle(color: AppColors.muted, fontSize: 11),
                   ),
                 ])),
-                IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline, color: AppColors.muted), onPressed: () async { await DropOffApi.deleteRecurring((plan['id'] as num).toInt()); await _refresh(); }),
+                IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline, color: AppColors.muted), onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (d) => AlertDialog(
+                      title: const Text('Delete recurring plan?'),
+                      content: const Text('This will remove the recurring plan. This cannot be undone.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+                        FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)), onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
+                      ],
+                    ),
+                  );
+                  if (ok != true) return;
+                  await DropOffApi.deleteRecurring((plan['id'] as num).toInt());
+                  await _refresh();
+                }),
               ]),
             )),
         ]),
