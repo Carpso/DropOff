@@ -404,23 +404,52 @@ class _BusinessScreenState extends State<BusinessScreen> {
     final plan = _sub?['plan'] as Map<String, dynamic>?;
     if (sub == null || plan == null || sub['status'] != 'active') {
       return Card(
+        clipBehavior: Clip.antiAlias,
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(children: [
-            const Icon(Icons.card_giftcard_outlined, color: AppColors.forest),
-            const SizedBox(width: 12),
-            const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('No plan yet', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
-              SizedBox(height: 3),
-              Text('Subscription plans bundle the rider — Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
-            ])),
-            const SizedBox(width: 10),
-            FilledButton.tonal(
-              style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
-              child: const Text('Browse'),
-            ),
-          ]),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(Icons.card_giftcard_outlined, color: AppColors.forest, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'No plan yet',
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Subscription plans bundle the rider — Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.',
+                          softWrap: true,
+                          style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonal(
+                  style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+                  child: const Text('Browse plans'),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
