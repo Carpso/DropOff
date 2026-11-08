@@ -53,9 +53,17 @@ if ($doWeb) {
 # Copy fresh artifacts into dist/ (the source of truth for uploads).
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
+# Versioned artifact names straight from pubspec (0.5.1+12 -> DropOff-0.5.1-release.*)
+$pubspec = Get-Content (Join-Path $root 'app\pubspec.yaml')
+$ver = (($pubspec | Select-String '^version:\s*(\S+)\+(\d+)').Matches[0].Groups[1].Value)
+$env:APK_NAME = "DropOff-$ver-release.apk"
+Write-Host "== artifacts from version $ver =="
 if ($doApk) {
   $src = 'build/app/outputs/flutter-apk/DropOff.apk'
-  if (Test-Path $src) { Copy-Item $src (Join-Path $dist 'DropOff-release.apk') -Force; Copy-Item $src (Join-Path $dist $env:APK_NAME) -Force }
+  if (Test-Path $src) {
+    Copy-Item $src (Join-Path $dist 'DropOff-release.apk') -Force
+    Copy-Item $src (Join-Path $dist $env:APK_NAME) -Force
+  } else { Write-Host "!! APK missing: $src" }
   Write-Host "APK: $src"
 }
 if ($doAab) {

@@ -93,10 +93,20 @@ async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
   return merged;
 }
 const PLATFORM_TAKE = 0.10;           // of the rider fee, on pay-as-you-go
-// Sweep drivers are salaried, not per-parcel: flat monthly wage with a daily
-// sweep expectation used for ops monitoring.
-const DRIVER_MONTHLY_PAY_ZMW = 3000;  // flat pay per driver / month
-const DRIVER_DAILY_TARGET = 30;       // parcels/day each driver is expected to sweep
+// Sweep riders are salaried, not per-parcel: K3,200/month INCLUSIVE of a
+// weekly fuel allowance of K300/week (4 weeks = K1,200), so the base wage is
+// K2,000 and the fuel is K1,200-dispensable weekly. Payment each week requires
+// being on-pace with the sweep target (see riderTargets / month pace line):
+//   - on pace (>= target x day-of-month): full base week + full fuel
+//   - behind by more than one week's kill: fuel is pro-rated to the shortfall,
+//     and two consecutive off-pace weeks trigger an ops performance review.
+// (peer benchmark: Bolt/Yango-style fleets pay per-trip; salaried + fuel
+//  matches depot-to-depot contract courier economics — see docs/PLAY_BOOK.md)
+const DRIVER_MONTHLY_PAY_ZMW = 3200;  // inclusive of the fuel allowance below
+const DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW = 300;
+const DRIVER_FUEL_MONTHLY_ZMW = DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW * 4; // 1200
+const DRIVER_BASE_MONTHLY_ZMW = DRIVER_MONTHLY_PAY_ZMW - DRIVER_FUEL_MONTHLY_ZMW; // 2000
+const DRIVER_DAILY_TARGET = 30;       // parcels/day each rider is expected to sweep
 const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
 // Business day = Central Africa Time (UTC+2). D1's 'localtime' is UTC, so every
 // daily-cap / sweep query must use this explicit offset or the day rolls over
@@ -1222,10 +1232,34 @@ app.post('/jobs', async (c) => {
     }
     if (!b.courier_id || !b.dest_city) return c.json({ error: 'courier_id and dest_city required' }, 400);
 
+    // No no-show: senders with 3+ pickup strikes in 14 days are parked for
+    // ops — ghost bookings (false parcels) are the platform's #1 fraud pattern.
+    if (c.get('role') !== 'ops') {
+      const strikes = (await c.env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM booking_strikes
+          WHERE phone = ?1 AND created_at > datetime('now', '-14 days')`,
+      ).bind(senderPhone).first<any>())?.n ?? 0;
+      if (strikes >= 3) {
+        return c.json({
+          error: 'booking_on_hold',
+          detail: 'Recent missed pickups put booking on hold — contact DropOff support (or have ops clear the strikes).',
+        }, 403);
+      }
+    }
+
     // customer wallets are disabled — riders keep float, sellers pay momo/cash
     const payMethod: string = ['mobile_money', 'cash'].includes(b.pay_method)
       ? b.pay_method : 'mobile_money';
-    let pickupWindow: string = b.pickup_window ?? 'now';
+    // Every parcel rides on a SLOT — no untimed jobs. 'now' (instant) is a
+    // slot too; the sender must still declare which one they mean.
+    if (b.pickup_window == null || String(b.pickup_window).trim() === '') {
+      return c.json({
+        error: 'pickup_window_required',
+        required: ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'],
+        detail: 'Every DropOff parcel is booked onto a Sweep slot — take one from the chips before booking.',
+      }, 400);
+    }
+    let pickupWindow: string = String(b.pickup_window);
     if (!PICKUP_WINDOWS.includes(pickupWindow)) {
       return c.json({ error: `pickup_window must be one of ${PICKUP_WINDOWS.join(', ')}` }, 400);
     }
@@ -1397,6 +1431,14 @@ app.post('/jobs', async (c) => {
 
     // Wider entropy: date + 5 random chars (the old 2-digit suffix was guessable)
     const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
+    // Seller parcel capture: the photo the SELLER takes of the parcel at
+    // booking (uploaded via /uploads kind kyc first). The rider mirrors it at
+    // the depot drop and /jobs/:ref/parcel-check compares the two.
+    const parCell = String(b.parcel_photo_url ?? '').trim();
+    const parcelUrl = parCell ? parCell.slice(0, 300) : null;
+    if (parCell && !/^\/media\/uploads\/(kyc|selfie)\/[^/]+\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i.test(parCell)) {
+      return c.json({ error: 'bad_parcel_photo_url', detail: 'Upload the parcel photo via /uploads first, then pass its url.' }, 400);
+    }
     const senderName = String(b.sender_name ?? '').trim()
       || await senderProfileName(c.env.DB, senderPhone)
       || 'DropOff customer';
@@ -1408,8 +1450,8 @@ app.post('/jobs', async (c) => {
          promo_code, promo_discount_zmw,
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile,
-         parcels, vehicle_class, branch, from_city)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)`,
+         parcels, vehicle_class, branch, from_city, parcel_photo_url)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34)`,
     ).bind(
       ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -1421,6 +1463,7 @@ app.post('/jobs', async (c) => {
       parcels, vehicleClass,
       b.branch ? String(b.branch).trim().slice(0, 80) : null,
       fromCity,
+      parcelUrl,
     ).run();
 
     if (promoCode) {
@@ -1512,9 +1555,51 @@ app.post('/jobs', async (c) => {
     // promo math happens on the DropOff leg ONLY — the partner fare is theirs.
     const feeBase = collectionFees(dropOffLeg, packInclusion === 'pack' ? null : riderFee);
 
-    // Smart auto-assign: bookings get a rider immediately unless the caller opts out.
+    // GHOST-BOOKING GUARD (pay-as-you-go only): a seller with ZERO completed
+    // deliveries must pre-approve a small momo deposit (the processing fee)
+    // before a rider is dispatched — approvals cost the pranker real money.
+    // Subscribers already carry the plan's processing fee, so they skip this.
+    let depositRequired = false;
+    let depositAmount = 0;
+    let depositRef: string | null = null;
+    if (c.get('role') !== 'ops' && packInclusion !== 'pack') {
+      const done = (await c.env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
+      ).bind(senderPhone).first<any>())?.n ?? 0;
+      if (done === 0) {
+        depositRequired = true;
+        depositAmount = round2(platformFee(riderFee) + MOMO_COLLECTION_FEE);
+        depositRef = `dep-${ref}`;
+        const init = await lipilaCollect(c.env, senderPhone, depositAmount, depositRef,
+          `DropOff deposit ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+        if (init.ok) {
+          await c.env.DB.prepare(
+            `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
+               lipila_fee_zmw, lipila_reference, status, channel, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 'merchant', 'booking_deposit')`,
+          ).bind(meta.last_row_id, senderPhone, providerFromPhone(senderPhone), depositAmount,
+            depositAmount, round2(platformFee(riderFee)), MOMO_COLLECTION_FEE,
+            init.lipilaReference ?? depositRef).run();
+        } else {
+          depositRequired = false; // Lipila down — let the sweep assign a rider, fee still owed
+        }
+      }
+    }
+    if (depositRequired) {
+      await c.env.DB.prepare(
+        'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
+      ).bind(meta.last_row_id, 'deposit_pending',
+        'Pay-as-you-go first booking: deposit prompt sent at booking. A rider is dispatched the moment it is approved.').run();
+      c.executionCtx.waitUntil(
+        sendSms(c.env, senderPhone,
+        `DropOff: approve the K${depositAmount.toFixed(2)} booking deposit prompt for ${ref} to dispatch your rider. The money stays on your DropOff wallet.`).catch(() => {}),
+      );
+    }
+
+    // Smart auto-assign: bookings get a rider immediately unless a deposit is
+    // waiting or the caller opts out.
     let autoAssigned: { rider_id: number; rider: string; photo_url: string | null; eta_minutes: number; km: number } | null = null;
-    if (b.auto_assign !== false && Number.isFinite(b.pickup_lat ?? 0) && Number.isFinite(b.pickup_lng ?? 0)) {
+    if (!depositRequired && b.auto_assign !== false && Number.isFinite(b.pickup_lat ?? 0) && Number.isFinite(b.pickup_lng ?? 0)) {
       try {
         const pick = await nearestAvailableRider(c.env, b.pickup_lat, b.pickup_lng);
         if (pick) {
@@ -1547,6 +1632,9 @@ app.post('/jobs', async (c) => {
         return customerFees;
       })(),
       prompt_total_zmw: feeBase.prompt_total_zmw,
+      deposit_required: depositRequired,
+      deposit_amount_zmw: depositRequired ? depositAmount : 0,
+      deposit_reference: depositRef,
       pack_inclusion: packInclusion, pay_method: payMethod,
       auto_assigned: autoAssigned,
       tracking_token: trackingToken, tracking_url: trackUrl,
@@ -1651,18 +1739,31 @@ app.post('/collections', async (c) => {
   const senderName = String(b.sender_name ?? '').trim() || phoneName || 'DropOff customer';
   const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000)); // handover proof (anti-false-parcel)
   const deliveryOtpHash = await handoverOtpHash(c.env, ref, deliveryOtp);
+  // Seller parcel capture at booking (same evidence chain as /jobs bookings).
+  const parCell = String(b.parcel_photo_url ?? '').trim();
+  const parcelUrl = parCell ? parCell.slice(0, 300) : null;
+  if (parCell && !/^\/media\/uploads\/(kyc|selfie)\/[^/]+\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i.test(parCell)) {
+    return c.json({ error: 'bad_parcel_photo_url', detail: 'Upload the parcel photo via /uploads first, then pass its url.' }, 400);
+  }
+  // Ghost-booking guard for collections too (pay-as-you-go, zero deliveries done).
+  const completedEver = (await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
+  ).bind(phone).first<any>())?.n ?? 0;
+  const depositRequired = c.get('role') !== 'ops' && activeSub == null && completedEver === 0;
+  let depositAmount = round2(platformFee(riderFee) + MOMO_COLLECTION_FEE);
+  let depositRef: string | null = null;
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
        counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
-       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, delivery_otp_hash)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka',?19)`,
+       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, delivery_otp_hash, parcel_photo_url)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka',?19,?20)`,
   ).bind(
     ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
     String(b.description ?? 'Collection').trim().slice(0, 200), String(b.weight_class ?? '0-5kg'),
     riderFee, processing, total, window, pickupAt, payMethod, parcels, vehicleClass,
-    deliveryOtpHash,
+    deliveryOtpHash, parcelUrl,
   ).run();
 
   await c.env.DB.prepare(
@@ -1681,6 +1782,29 @@ app.post('/collections', async (c) => {
     `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
   );
 
+  // Ghost-booking deposit for first ride collections (same as /jobs bookings)
+  if (depositRequired) {
+    const depInit = await lipilaCollect(c.env, phone, depositAmount,
+      `dep-${ref}`, `DropOff deposit ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+    if (depInit.ok) {
+      depositRef = `dep-${ref}`;
+      await c.env.DB.prepare(
+        `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
+           lipila_fee_zmw, lipila_reference, status, channel, kind)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 'merchant', 'booking_deposit')`,
+      ).bind(meta.last_row_id, phone, providerFromPhone(phone), depositAmount, depositAmount,
+        round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, depInit.lipilaReference ?? depositRef).run();
+      await c.env.DB.prepare(
+        'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
+      ).bind(meta.last_row_id, 'deposit_pending',
+        'Pay-as-you-go first booking: deposit prompt sent. A rider is dispatched the moment it is approved.').run();
+      await sendSms(c.env, phone,
+        `DropOff: approve the K${depositAmount.toFixed(2)} booking deposit prompt to dispatch your rider for ${ref}. The money stays on your DropOff wallet.`).catch(() => {});
+    } else {
+      // deposit failed to init — same as /jobs: proceed, fee still owed on prompt
+    }
+  }
+
   return c.json({
     ok: true,
     ref,
@@ -1690,6 +1814,9 @@ app.post('/collections', async (c) => {
     rider_fee_zmw: riderFee,
     processing_fee_zmw: processing,
     total_zmw: total,
+    deposit_required: depositRequired,
+    deposit_amount_zmw: depositRequired ? depositAmount : 0,
+    deposit_reference: depositRef,
     parcels,
     vehicle_class: vehicleClass,
     pay_method: payMethod,
@@ -1858,6 +1985,7 @@ app.post('/jobs/:ref/events', async (c) => {
     // drops already carry AI-checked depot photo evidence.
     if (otpRow?.delivery_otp_hash && Number(otpRow.last_mile) === 1) {
       if ((otpRow.delivery_otp_attempts ?? 0) >= 8) {
+        await addStrike(c.env, phone ?? '', job.id, 'otp_abuse'); // the wrong-code device earns a strike
         return c.json({ error: 'otp_locked', detail: 'Too many wrong codes — contact DropOff support to unlock this delivery.' }, 429);
       }
       const otp = String(b.otp ?? '').replace(/\D/g, '');
@@ -2312,6 +2440,48 @@ app.post('/track/:token/verify', async (c) => {
   if (phone !== job.sender_phone && phone !== job.recipient_phone) {
     return c.json({ error: 'phone_does_not_match' }, 403);
   }
+  // KNOWING THE NUMBER IS NOT PROOF OF OWNERSHIP. Every grant requires an SMS
+  // code delivered to that phone: step 1 requests it, step 2 redeems it.
+  const code = String(b?.code ?? '').trim();
+  if (!code) {
+    if (await rateLimited(c, 'track_otp', 30)) return c.json({ error: 'too_many_requests' }, 429);
+    const recent = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM otp_codes WHERE phone = ?1 AND created_at > datetime('now', '-1 hour')`,
+    ).bind(phone).first<any>();
+    if ((recent?.n ?? 0) >= 5) return c.json({ error: 'too_many_codes_wait_an_hour' }, 429);
+    const otp = generateOtp();
+    const hash = await hashOtp(otp, c.env.JWT_SECRET);
+    await c.env.DB.batch([
+      c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE phone = ?1 AND used = 0').bind(phone),
+      c.env.DB.prepare(
+        `INSERT INTO otp_codes (phone, code_hash, expires_at) VALUES (?1, ?2, datetime('now', '+10 minutes'))`,
+      ).bind(phone, hash),
+    ]);
+    const sms = await sendSms(c.env, phone,
+      `DropOff: your parcel ${job.ref} tracking code is ${otp}. It expires in 10 minutes. Never share it — only the parcel's owner should have it.`).catch(() => ({ sent: false }));
+    return c.json({
+      ok: true, sent: sms.sent, ...('error' in sms && sms.error ? { sms_error: sms.error } : {}),
+      step: 'enter_the_code', ref: job.ref,
+      ...(devModeOn(c.env) ? { dev_code: otp } : {}),
+    });
+  }
+  if (await rateLimited(c, 'track_verify', 30)) return c.json({ error: 'too_many_requests' }, 429);
+  const row = await c.env.DB.prepare(
+    `SELECT id, code_hash, attempts FROM otp_codes
+      WHERE phone = ?1 AND used = 0 AND expires_at > datetime('now')
+      ORDER BY id DESC LIMIT 1`,
+  ).bind(phone).first<any>();
+  if (!row) return c.json({ error: 'code_expired_or_missing' }, 401);
+  if (Number(row.attempts ?? 0) >= 5) {
+    await c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id).run();
+    return c.json({ error: 'code_expired_or_missing' }, 401);
+  }
+  const hash = await hashOtp(code, c.env.JWT_SECRET);
+  if (hash !== row.code_hash) {
+    await c.env.DB.prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?1').bind(row.id).run();
+    return c.json({ error: 'wrong_code' }, 401);
+  }
+  await c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id).run();
   const grant = await trackGrantFor(c.env, token, phone);
   return c.json({
     ok: true, grant,
@@ -3381,6 +3551,41 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       title: 'Wallet topped up',
       body: `Your wallet balance is updated.`,
     });
+  } else if (pay.kind === 'booking_deposit' && pay.job_id) {
+    // Ghost-booking guard resolved: the deposit landed → credit the sender's
+    // wallet (it pays their next prompt) and dispatch the pending booking now.
+    const job = await env.DB.prepare(
+      'SELECT id, ref, sender_phone, pickup_lat, pickup_lng FROM jobs WHERE id = ?1',
+    ).bind(pay.job_id).first<any>();
+    await env.DB.batch([
+      env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(pay.phone),
+      env.DB.prepare(`INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'deposit', ?3)`)
+        .bind(pay.phone, pay.amount_zmw, pay.job_id),
+      env.DB.prepare('UPDATE wallets SET balance_zmw = balance_zmw + ?2 WHERE phone = ?1').bind(pay.phone, pay.amount_zmw),
+      env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'deposit_paid', ?2)`)
+        .bind(pay.job_id, 'Deposit approved — rider dispatch in flight.'),
+    ]);
+    if (job?.pickup_lat != null && job?.pickup_lng != null) {
+      try {
+        const pick = await nearestAvailableRider(env, Number(job.pickup_lat), Number(job.pickup_lng));
+        if (pick) {
+          const etaMin = Math.round((pick.km / 22) * 60 + 4);
+          await env.DB.batch([
+            env.DB.prepare(
+              `UPDATE jobs SET rider_id = ?1, status = 'rider_assigned', assigned_at = datetime('now'), eta_minutes = ?2 WHERE id = ?3`,
+            ).bind(pick.rider.id, etaMin, pay.job_id),
+            env.DB.prepare(
+              `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
+            ).bind(pick.rider.id),
+          ]);
+          await sendToPhone(env, job.sender_phone, {
+            title: 'Rider assigned',
+            body: `Deposit confirmed — rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup.`,
+            data: { job_ref: job.ref ?? '', kind: 'rider_assigned' },
+          });
+        }
+      } catch { /* sweep assigns next */ }
+    }
   } else if (pay.kind === 'cod_remit' && pay.job_id) {
     await env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_remit_paid', ?2)`,
@@ -3723,10 +3928,10 @@ app.post('/webhooks/partner-status', async (c) => {
   await c.env.DB.batch([
     c.env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1,?2,?3)')
       .bind(job.id, PARTNER_EVENT_MAP[status], `[partner] ${b.note ?? status}${b.at ? ` @ ${b.at}` : ''}`),
-    c.env.DB.prepare('UPDATE jobs SET status = ?2 WHERE id = ?1')
+    c.env.DB.prepare('UPDATE jobs SET status = ?2, partner_confirmed = 1 WHERE id = ?1')
       .bind(job.id, PARTNER_EVENT_MAP[status]),
   ]);
-  return c.json({ ok: true, ref: job.ref });
+  return c.json({ ok: true, ref: job.ref, partner_confirmed: true });
 });
 
 // Per-partner webhook key. Generate/rotate from the superadmin console.
@@ -5124,9 +5329,20 @@ app.get('/rider/targets', async (c) => {
   ).bind(phone).first<any>();
   if (!rider) return c.json({ error: 'rider_not_found' }, 404);
   const targets = await riderTargetStats(c.env.DB, rider.id);
+  const t = targets.get(rider.id) ?? shapeTargets(0, 0);
   return c.json({
     rider: { id: rider.id, name: rider.full_name },
-    targets: targets.get(rider.id) ?? shapeTargets(0, 0),
+    targets: t,
+    // Pay band (K3,200/month inclusive of fuel) + pace gate: weekly pay needs
+    // the week's sweep target met — see the pace line in targets.
+    pay: {
+      monthly_total_zmw: DRIVER_MONTHLY_PAY_ZMW,
+      base_monthly_zmw: DRIVER_BASE_MONTHLY_ZMW,
+      fuel_weekly_zmw: DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW,
+      fuel_monthly_zmw: DRIVER_FUEL_MONTHLY_ZMW,
+      daily_target: DRIVER_DAILY_TARGET,
+      adjustable: (t.month >= t.pace_target) ? null : Math.max(0, t.pace_target - t.month),
+    },
   });
 });
 
@@ -5445,6 +5661,106 @@ app.post('/rider/profile/ai-face-check', async (c) => {
   catch (e: any) { return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502); }
   await persistFaceCheck(c.env.DB, rider.id, face);
   return c.json({ ok: true, face });
+});
+
+/* --------------------- anti-fraud: AI parcel photo match ------------------- */
+// The SELLER captures the parcel at booking (parcel_photo_url); the rider
+// captures it again at the depot/courier drop-off (dropoff_photo_url /
+// pod_delivery_url). A vision model describes both and a text model decides
+// whether they plausibly show the same parcel — assistive evidence, never the
+// verdict. Same conservative shape as compareFaceToId above.
+type ParcelCheck = {
+  same_parcel: 'yes' | 'uncertain' | 'no';
+  confidence: 'high' | 'medium' | 'low';
+  note: string;
+  checked_at: string;
+};
+
+async function compareParcelPhotos(env: Env, bookingBytes: number[], dropoffBytes: number[]): Promise<ParcelCheck> {
+  const describe = async (bytes: number[], hint: string) => {
+    const out: any = await (env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+      image: bytes,
+      prompt: `This is ${hint}. Describe the PARCEL in it factually: dominant packaging material, shape (sack/box/envelope/bag/crate), colour, approximate size class, any visible tape/branding/labels/handles and how it is closed. If several parcels are visible, describe the most prominent one. One sentence, no guesses about contents.`,
+      max_tokens: 140,
+    });
+    return String(out?.response ?? out?.description ?? '').trim().slice(0, 300);
+  };
+  const bookingDesc = await describe(bookingBytes, 'the parcel photo captured by the sender at booking');
+  const dropoffDesc = await describe(dropoffBytes, 'the parcel photo captured by the rider at the depot/courier drop-off');
+  const out: any = await (env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
+    messages: [
+      { role: 'system', content: 'You compare two descriptions of parcel photos to detect parcel swaps or fabricated deliveries. Be conservative: if either description is vague or contradicts nothing but proves little, answer uncertain. Reply with JSON ONLY.' },
+      { role: 'user', content: `Description A (booking photo from the seller): ${bookingDesc}\nDescription B (drop-off photo from the rider): ${dropoffDesc}\nCould these plausibly show the SAME parcel? Reply with JSON ONLY: {"same_parcel":"yes"|"uncertain"|"no","confidence":"high"|"medium"|"low","note":"<one short sentence>"}` },
+    ],
+    max_tokens: 120,
+  });
+  const raw = (typeof out?.response === 'string' ? out.response
+    : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim();
+  const m = raw.match(/\{[\s\S]*\}/);
+  let j: any = {};
+  try { j = m ? JSON.parse(m[0]) : {}; } catch { j = {}; }
+  const sp = String(j.same_parcel ?? 'uncertain').toLowerCase();
+  const conf = String(j.confidence ?? 'low').toLowerCase();
+  return {
+    same_parcel: sp === 'yes' || sp === 'no' ? sp : 'uncertain',
+    confidence: conf === 'high' || conf === 'medium' ? conf : 'low',
+    note: String(j.note ?? '').slice(0, 200),
+    checked_at: new Date().toISOString(),
+  };
+}
+
+// POST /jobs/:ref/parcel-check — the assigned rider (or ops/admin) re-verifies
+// the depot drop against the seller's booking photo. Runs with or without AI:
+// no AI => verdict is 'uncertain' by default and the photos remain as evidence.
+app.post('/jobs/:ref/parcel-check', async (c) => {
+  const phone = c.get('phone') ?? null;
+  const isAdminKey = isAdmin(c);
+  const isOpsKey = c.get('role') === 'ops';
+  const job = await c.env.DB.prepare(
+    `SELECT j.id, j.ref, j.sender_phone, j.parcel_photo_url, j.dropoff_photo_url, j.pod_delivery_url,
+            r.phone AS rider_phone
+       FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
+      WHERE j.ref = ?1`,
+  ).bind(c.req.param('ref')).first() as any;
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (!isAdminKey && !isOpsKey && job.rider_phone !== phone) {
+    return c.json({ error: 'only the assigned rider can run the check' }, 403);
+  }
+  const bookingKey = r2KeyFromUrl(job.parcel_photo_url);
+  const dropKey = r2KeyFromUrl(job.dropoff_photo_url) ?? r2KeyFromUrl(job.pod_delivery_url);
+  if (!bookingKey) return c.json({ error: 'no_booking_photo', detail: 'The seller did not attach a parcel photo at booking.' }, 409);
+  if (!dropKey) return c.json({ error: 'no_dropoff_photo', detail: 'The rider has not filed a depot/delivery photo yet.' }, 409);
+  if (!c.env.BACKUPS) return c.json({ error: 'uploads_not_configured' }, 503);
+  const booking = await c.env.BACKUPS.get(bookingKey).catch(() => null);
+  const drop = await c.env.BACKUPS.get(dropKey).catch(() => null);
+  if (!booking || !drop) return c.json({ error: 'photo_missing' }, 404);
+  let check: ParcelCheck | null = null;
+  if (c.env.AI) {
+    try {
+      check = await compareParcelPhotos(
+        c.env,
+        [...new Uint8Array(await booking.arrayBuffer())],
+        [...new Uint8Array(await drop.arrayBuffer())],
+      );
+    } catch { check = null; }
+  }
+  const result: ParcelCheck = check ?? {
+    same_parcel: 'uncertain', confidence: 'low',
+    note: 'AI unavailable — photos filed as evidence for manual review.',
+    checked_at: new Date().toISOString(),
+  };
+  const flag = result.same_parcel === 'no' ? 1 : 0;
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE jobs SET parcel_check = ?2 WHERE id = ?1').bind(job.id, JSON.stringify(result)),
+    c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'parcel_check', ?2)`,
+    ).bind(job.id, `Parcel photo check: ${result.same_parcel} (${result.confidence}) — ${result.note}`),
+    ...(flag ? [c.env.DB.prepare(
+      `INSERT INTO fraud_flags (job_id, job_ref, phone, score, reasons, status)
+         VALUES (?1, ?2, ?3, 4, 'parcel_mismatch_ai', 'open')`,
+    ).bind(job.id, job.ref, job.sender_phone)] : []),
+  ]);
+  return c.json({ ok: true, ...result, flagged: flag === 1 });
 });
 
 /* ------------------------------ web dashboard ----------------------------- */
@@ -6347,6 +6663,67 @@ app.get('/admin/backup-now', async (c) => {
   return c.json({ ...res, ok: true, bucket: 'dropoff-backups' });
 });
 
+/* ------------------- cron: no-show auto-cancel + strikes ------------------ */
+// Ghost bookings die on their own: a pickup that sits past its window (or an
+// assignment that never moved) is auto-canceled, a strike lands on the
+// sender's phone, and 3 strikes inside 14 days park new bookings for ops.
+// Subscribers and deposit payers keep their wallet credit regardless.
+async function addStrike(env: Env, phone: string, jobId: number, reason: string): Promise<void> {
+  if (!phone) return;
+  try {
+    await env.DB.prepare('INSERT INTO booking_strikes (phone, job_id, reason) VALUES (?1, ?2, ?3)')
+      .bind(phone, jobId, reason).run();
+  } catch { /* strike bookkeeping must never break a cron */ }
+}
+
+async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
+  let canceled = 0;
+  // A) assigned rides that never entered 'picked_up' within 3 hours
+  const staleAssigned = await env.DB.prepare(
+    `SELECT j.id, j.ref, j.sender_phone, r.id AS rider_id
+       FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
+      WHERE j.status = 'rider_assigned' AND j.assigned_at < datetime('now', '-3 hours')`,
+  ).all<any>();
+  for (const job of staleAssigned.results ?? []) {
+    try {
+      await env.DB.batch([
+        env.DB.prepare(
+          `UPDATE jobs SET status = 'canceled' WHERE id = ?1 AND status = 'rider_assigned'`,
+        ).bind(job.id),
+        ...(job.rider_id ? [env.DB.prepare(
+          `UPDATE riders SET current_load = MAX(0, current_load - 1), status = 'available', route_updated_at = datetime('now') WHERE id = ?1`,
+        ).bind(job.rider_id)] : []),
+        env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'auto_canceled_no_show', ?2)`)
+          .bind(job.id, 'Sender never handed the parcel over (3h grace) — auto-canceled; a no-show strike was recorded.'),
+      ]);
+      await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
+      canceled++;
+    } catch { /* never break the minute cron */ }
+  }
+  // B) slotted (never assigned) bookings whose window is long past
+  const staleUnassigned = await env.DB.prepare(
+    `SELECT j.id, j.ref, j.sender_phone
+       FROM jobs j
+      WHERE j.status = 'created'
+        AND j.pickup_window IS NOT NULL AND j.pickup_window <> 'now'
+        AND datetime(j.created_at, '+16 hours') < datetime('now')`,
+  ).all<any>();
+  for (const job of staleUnassigned.results ?? []) {
+    try {
+      await env.DB.batch([
+        env.DB.prepare(
+          `UPDATE jobs SET status = 'canceled' WHERE id = ?1 AND status = 'created'`,
+        ).bind(job.id),
+        env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'auto_canceled_no_show', ?2)`)
+          .bind(job.id, 'Slotted booking stayed unassigned far past its window — auto-canceled; a no-show strike was recorded.'),
+      ]);
+      await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
+      canceled++;
+    } catch { /* never break the minute cron */ }
+  }
+  return { canceled };
+}
+
 /* ------------- cron: timed-pickup reminders (every minute) ----------------- */
 // Jobs with a booked pickup_at get a push at T-30 and T-10 to sender + rider,
 // and are flagged 'missed' when the window passes without a status change.
@@ -6525,6 +6902,7 @@ export default {
           return;
         }
         if (event.cron === '* * * * *') {
+          await cancelStaleOrders(env);
           await checkTimedPickups(env);
           await notifyCapNudges(env);
           await notifyExpiryNudges(env);
