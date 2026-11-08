@@ -22,7 +22,8 @@ import '../services/device_lock.dart';
 /// Email + password sign in / create account (the JWT + phone persist locally;
 /// the ops device-link stays separate under Team).
 class AccountScreen extends StatefulWidget {
-  const AccountScreen({super.key});
+  final bool focusPlans;
+  const AccountScreen({super.key, this.focusPlans = false});
 
   @override
   State<AccountScreen> createState() => _AccountScreenState();
@@ -46,6 +47,22 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _photoBusy = false;
   String? _otpMsg;
   String? _error;
+  final _listController = ScrollController();
+  final _plansAnchorKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.focusPlans) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToPlans());
+    }
+  }
+
+  void _scrollToPlans() {
+    final ctx = _plansAnchorKey.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 350), alignment: 0);
+  }
 
   // Self-contained create-account modal (kept separate from the sign-in flow so
   // the default Account screen is always sign-in first).
@@ -59,6 +76,7 @@ class _AccountScreenState extends State<AccountScreen> {
 
   @override
   void dispose() {
+    _listController.dispose();
     _email.dispose();
     _password.dispose();
     _phone.dispose();
@@ -557,6 +575,7 @@ class _AccountScreenState extends State<AccountScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Account')),
       body: ListView(
+        controller: _listController,
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
         children: [
           if (signedIn) ...[
@@ -809,7 +828,10 @@ class _AccountScreenState extends State<AccountScreen> {
             ),
             const _AdminGate(),
           ],
-          const _TiersCard(),
+          KeyedSubtree(
+            key: _plansAnchorKey,
+            child: const _TiersCard(),
+          ),
           const _PackCodeCard(),
           if (!DropOffApi.enabled && !signedIn) ...[
             const SizedBox(height: 26),

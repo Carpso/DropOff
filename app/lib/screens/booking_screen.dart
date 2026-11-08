@@ -153,7 +153,7 @@ class _BookingScreenState extends State<BookingScreen> {
     _courierSearchCtl.addListener(() => setState(() {}));
     _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
-      setState(() => _hintIdx = (_hintIdx + 1) % courierSearchSamples.length);
+      setState(() => _hintIdx = (_hintIdx + 1) % _hints.length);
     });
     // Prefer the live chargebook's coverage when the API is on.
     if (DropOffApi.enabled) {
@@ -222,7 +222,23 @@ class _BookingScreenState extends State<BookingScreen> {
 
   Timer? _hintTimer;
   int _hintIdx = 0;
-  String get _searchHint => courierSearchSamples[_hintIdx % courierSearchSamples.length];
+  List<String> get _hints => courierSearchHintsFor(_from, _to).isNotEmpty
+      ? courierSearchHintsFor(_from, _to)
+      : courierSearchSamples;
+  String get _searchHint => _hints[_hintIdx % _hints.length];
+  String? get _queryEstimate {
+    final q = _courierSearchCtl.text.trim().toLowerCase();
+    if (q.isEmpty) return null;
+    final isFareQuery = q.contains('price') || q.contains('fare') || q.contains('how much') ||
+        q.contains('cost') || q.contains('charge') || q.contains('quote');
+    if (!isFareQuery) return null;
+    final from = _from.trim();
+    final to = _to.trim();
+    if (from == to) return null;
+    final est = interTownEstimateZmw(from, to);
+    if (est == null) return 'Indicative DropOff delivery ($from → $to): quote at the depot counter.';
+    return 'Indicative DropOff delivery ($from → $to): K${est.toStringAsFixed(0)} rider leg • depot fare quoted at counter.';
+  }
   List<CourierInfo> get _filteredCouriers => smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size);
 
   /// DropOff-only leg: rider fee + door leg (+door-leg platform cut). Never partner money.
@@ -743,15 +759,31 @@ class _BookingScreenState extends State<BookingScreen> {
         TextField(
           controller: _courierSearchCtl,
           decoration: InputDecoration(
-            labelText: 'Search courier, town, or route price',
+            labelText: 'Search courier, town, or inter-town fare',
             hintText: _searchHint,
             prefixIcon: const Icon(Icons.search),
             isDense: true,
             helperText: (_from == 'Lusaka' && _to.isNotEmpty)
-                ? 'Tip: shows published depot fares for $_from → $_to when available (public rates only).'
+                ? 'Depot fare quoted at counter — search inter-town routes (e.g. Lusaka → Ndola).'
                 : 'Try: “$_searchHint”',
           ),
         ),
+        if (_queryEstimate != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.forest.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.forest.withValues(alpha: 0.18)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.local_shipping_outlined, size: 16, color: AppColors.forest),
+              const SizedBox(width: 8),
+              Expanded(child: Text(_queryEstimate!, style: const TextStyle(fontSize: 12, color: AppColors.ink, height: 1.3))),
+            ]),
+          ),
+        ],
         const SizedBox(height: 12),
         if (_from != 'Lusaka') ...[
           const SizedBox(height: 12),

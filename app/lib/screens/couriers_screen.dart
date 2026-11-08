@@ -32,7 +32,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
     super.initState();
     _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
-      setState(() => _hintIdx = (_hintIdx + 1) % courierSearchSamples.length);
+      setState(() => _hintIdx = (_hintIdx + 1) % courierSearchHintsFor('Lusaka', 'Ndola').length);
     });
   }
 

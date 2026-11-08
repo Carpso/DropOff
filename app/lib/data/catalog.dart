@@ -217,7 +217,7 @@ String? branchDistanceLabel(CourierBranch branch, String sellerCity) {
 
 const _stopWords = {
   'to', 'in', 'from', 'the', 'a', 'an', 'and', 'or', 'for', 'of', 'vs',
-  'parcel', 'parcels', 'package', 'small', 'medium', 'large', 'courier',
+  'parcel', 'parcels', 'package', 'small', 'medium', 'large', 'courier', 'delivery',
 };
 
 /// Smart courier search: matches name/strapline/status/id/branches plus route
@@ -306,12 +306,39 @@ List<CourierInfo> smartCourierSearch(
 }
 
 const courierSearchSamples = <String>[
-  'Lusaka to Ndola parcel',
-  'Courier to Kitwe',
-  'How much to Livingstone? Quote at counter',
-  'Platinum depot quote',
-  'Same-day courier Kabwe',
-  'Solwezi medium parcel',
-  'Chipata drop-off',
-  'Copperbelt delivery',
+  'Lusaka to Ndola parcel fare?',
+  'How much to Kitwe from Lusaka?',
+  'Kabwe to Livingstone delivery price',
+  'Platinum depot quote Lusaka → Ndola',
+  'Inter-town parcel delivery price',
+  'Solwezi medium parcel cost',
+  'Chipata depot parcel fare',
+  'Copperbelt to Lusaka delivery quote',
 ];
+
+/// Context-aware rotating search hints (fare/route queries) for the placeholder.
+List<String> courierSearchHintsFor(String fromCity, String toCity) {
+  final from = fromCity.trim();
+  final to = toCity.trim();
+  final route = (from.isNotEmpty && to.isNotEmpty && from != to) ? '$from → $to' : 'inter-town';
+  return <String>[
+    '$route parcel fare?',
+    'How much is $route delivery?',
+    '$route counter quote',
+    '$route parcel price',
+  ];
+}
+
+/// Indicative DropOff-leg estimate for an inter-town query (NOT the courier's
+/// depot fare and NOT the final server price). Clearly labeled + rough.
+/// Returns null when route unknown.
+double? interTownEstimateZmw(String fromCity, String toCity) {
+  final a = cityCoords[fromCity.trim()];
+  final b = cityCoords[toCity.trim()];
+  if (a == null || b == null) return null;
+  final km = _haversineKm(a, b);
+  if (km < 1) return 70;
+  // Rough VS server-confirmed: K70 non-Lusaka base + K1.8/km, rounded to K5.
+  final raw = 70 + km * 1.8;
+  return (raw / 5).round() * 5.0;
+}

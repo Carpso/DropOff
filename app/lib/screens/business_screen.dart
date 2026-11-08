@@ -164,7 +164,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
         title: '3+ parcels a month pays off with a plan',
         body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying per trip. A Weekly Sprint (K399, 20/cycle) or monthly Silver / Gold / Platinum removes the per-parcel rider cost — most regulars save K${(s.k).toStringAsFixed(0)}+.',
         cta: 'Browse plans',
-        onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+        onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
       );
     }
     if ((sub['status'] ?? '') != 'active') return null;
@@ -199,7 +199,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
             ? 'Extra parcels keep your ${pct > 0 ? '$pct% overage discount' : 'tier discount'} — you never pay full PAYG price.'
             : '${next['tag'] ?? nextTier!.toUpperCase()} adds ${(next['parcels_per_month'] as num?)?.toInt() ?? 0} parcels for K${(next['fee_zmw'] as num?)?.toStringAsFixed(0) ?? ''} —${pct > 0 ? ' and overages stay $pct% off' : ' pro-rated to the day'}. One tap in Manage.',
         cta: next == null ? 'Manage' : 'See $nextTier',
-        onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+        onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
       );
     }
     return null;
@@ -444,7 +444,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                 alignment: Alignment.centerLeft,
                 child: FilledButton.tonal(
                   style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
                   child: const Text('Browse plans'),
                 ),
               ),
@@ -468,7 +468,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
             Expanded(child: Text('$tier plan', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             FilledButton.tonal(
               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
               child: const Text('Manage'),
             ),
           ]),
