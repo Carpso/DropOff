@@ -396,6 +396,12 @@ async function rateLimited(
 const devModeOn = (env: { AUTH_DEV_MODE?: string }) =>
   ['1', 'true', 'yes'].includes(String(env.AUTH_DEV_MODE ?? '').toLowerCase());
 
+/* ---------------- local-language SMS helpers (Bemba/Tonga/Lozi/Nyanja) ----- */
+const LOCAL_SKIP_WARN = 'Cenjezo(NY): musaphonye rider — ulendo ungathetsedwe. Icicenjesho(BEM): mwilacelela rider. Cenjezyo(TOI): mutamuleki rider. Temoso(LOZ): musiye rider.';
+const LOCAL_HANDOVER_WARN = 'Musapereke code musanalandire(NY). Mwipela code mwapokelela(BEM). Mutapi code kamutana kutambula(TOI). Musife code musika amuhela(LOZ).';
+function localSkipSuffix(): string { return ` ${LOCAL_SKIP_WARN}`; }
+function localHandoverSuffix(): string { return ` ${LOCAL_HANDOVER_WARN}`; }
+
 /* -------------------------- handover OTP (anti-fraud) ---------------------- */
 // Yango-style "false parcel" protection: the RECIPIENT gets a 4-digit DropOff
 // code by SMS at booking; the assigned rider MUST enter it when marking the
@@ -1509,7 +1515,7 @@ app.post('/jobs', async (c) => {
     const trackUrl = trackingUrl(c.env, trackingToken);
     c.executionCtx.waitUntil(
       sendSms(c.env, recipientPhone,
-      `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
+      `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {}),
     );
 
     if (pickupAt) {
@@ -1779,7 +1785,7 @@ app.post('/collections', async (c) => {
   // Handover proof SMS — the recipient (never the sender) holds the code
   c.executionCtx.waitUntil(
     sendSms(c.env, recipientPhone,
-    `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
+    `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {}),
   );
 
   // Ghost-booking deposit for first ride collections (same as /jobs bookings)
@@ -6697,6 +6703,8 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
           .bind(job.id, 'Sender never handed the parcel over (3h grace) — auto-canceled; a no-show strike was recorded.'),
       ]);
       await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
+      await sendSms(env, job.sender_phone,
+        `DropOff: ${job.ref} was auto-canceled because the parcel wasn't handed over in time (no-show). Repeated missed pickups can pause new bookings.${localSkipSuffix()}`).catch(() => {});
       canceled++;
     } catch { /* never break the minute cron */ }
   }
@@ -6718,6 +6726,8 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
           .bind(job.id, 'Slotted booking stayed unassigned far past its window — auto-canceled; a no-show strike was recorded.'),
       ]);
       await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
+      await sendSms(env, job.sender_phone,
+        `DropOff: ${job.ref} was auto-canceled after its slot window (no-show). Repeated missed pickups can pause new bookings.${localSkipSuffix()}`).catch(() => {});
       canceled++;
     } catch { /* never break the minute cron */ }
   }
