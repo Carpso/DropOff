@@ -1,6 +1,6 @@
 # Play Store release checklist
 
-App id: `zm.dropoff.dropoff` - current version `0.5.0+11` (`pubspec.yaml`).
+App id: `zm.dropoff.dropoff` - current version `0.5.1+12` (`pubspec.yaml`).
 
 ## 1. Upload keystore (one-time)
 
@@ -30,79 +30,189 @@ Losing it means you can never update the app under the same listing.
 ## 2. Build the bundle
 
 ```powershell
-cd DropOff\app
-flutter clean; flutter pub get
-flutter build appbundle --release `
-  --dart-define=DROPOFF_API_URL=https://dropoff-api.godfreymoseskalambo.workers.dev
+powershell -File tools\build_release.ps1
 ```
 
-Output: `build/app/outputs/bundle/release/app-release.aab`.
+(cleans first, runs analyze/test, builds APK + AAB, copies to `dist/`)
+
+Output: `dist/DropOff-0.5.1-release.aab`.
 
 Do **not** pass `DROPOFF_API_KEY` in a store build — the ops key must never ship
 to customers. Only `DROPOFF_API_URL` belongs in the Play build.
 
-## 3. Play Console setup
+## 3. Privacy policy (live URL)
 
-1. Create the app (name **DropOff**, default language English, app/game: App,
-   free).
-2. **App content**:
-   - Privacy policy URL (host `assets/legal/privacy.md` on a public page).
-   - Data safety: collect phone number, name, approximate location (rider
-     devices), delivery addresses; data is used for app functionality; no
-     selling; deletion request contact.
-   - Ads: no. Content rating questionnaire: utility/transport.
-   - Target audience 18+ (payments and addresses).
-3. **Permissions declaration**: location is only requested on rider/ops flows;
-   explain "live rider tracking during an active delivery". Background location
-   is not used.
-4. **Store listing**: use `marketing/` assets; screenshot the booking flow,
-   tracking page, and ratings.
-5. Upload the AAB to **Internal testing** first.
+Play requires a working HTTPS privacy policy URL for every account type that
+can be created without a URL. It is served by the Worker:
 
-## 4. Verify before promoting
+> **https://dropoff-api.godfreymoseskalambo.workers.dev/legal/privacy**
+
+(`workers/src/legal.ts` — edit there if the policy changes; `app/assets/legal/privacy.md`
+mirrors its in-app copy.)
+
+## 4. Play Console — production channel, step by step
+
+1. **Create the app**: name **DropOff**, default language English (United
+   Kingdom), *App*, *Free*. Zambian package name `zm.dropoff.dropoff`.
+2. **App content -> Privacy policy**: paste the URL above.
+   - **Ads**: none. **Data safety**: fill as below.
+   - **Content rating questionnaire**: *Utility / Tools* (parcel logistics —
+     no violence, no gambling, no user-generated content that is public-facing
+     except courier reviews, which are moderated).
+   - **Target audience**: 18+ (addresses, payments, KYC).
+   - **App access**: all functionality works from the front screen; the admin
+     console is internal — use the "restricted access" declaration and provide
+     an ops demo login + office phone.
+   - **Government apps**: no. **Financial features**: none beyond payments —
+     DropOff charges for delivery, it is not a lending/wallet product.
+3. **Data safety** answers (matching the live policy):
+   - Collected: *name, email, phone number, precise location (rider devices,
+     shared live during an active job), physical address (pickup/drop),
+     photos (rider selfie / KYC / delivery proof), device or other IDs (device
+     session + FCM token).* Payment info: transaction references only — play
+     does not process it.
+   - Purpose: app functionality, fraud prevention/handover verification,
+     support. Data is encrypted in transit. Data deletion: sign-out/unlink
+     removes device data; email support@carpsosolutions.store for account
+     deletion.
+   - Not sold, not shared with third parties beyond the courier chosen and
+     Lipila.
+4. **Store listing -> Production** (copy section below).
+5. **Countries**: Zambia (plus any market the pricebook covers).
+6. **Release production**:
+   - *Promote track -> Production, countries -> Zambia, release name
+     "0.5.1 (12) — Handover codes & proof of delivery"*.
+   - Upload `dist/DropOff-0.5.1-release.aab` into a NEW production release.
+   - Choose **staged rollout 10%** first (small user base: 10% of <100 is
+     statistically silent — either pick 10% for caution or 100% given testers
+     already validated 0.5.0; for a first production release, 100% in Zambia
+     is acceptable).
+   - Add release notes (below), publish.
+7. **App signing**: first upload enrols you in Play App Signing automatically —
+   the upload key above signs, Play holds the signing key. Export it via
+   *Setup -> App signing* and keep the account email/phone verified
+   (`godfreymoseskalambo@gmail.com`).
+
+## 5. Store listing copy
+
+### Title (30 chars max)
+```
+DropOff: Parcel Pickup Zambia
+```
+
+### Short description (80 chars max)
+```
+Book trusted local riders, drop at your courier depot, track every parcel live.
+```
+
+### Full description (<= 4000 chars)
+```
+DropOff is Zambia's first-mile parcel marketplace: a rider you can see and
+trust collects your parcel at your door and drops it at YOUR nominated courier
+depot branch, with live tracking, photo proof, chat, and a handover code that
+makes false-parcel claims impossible.
+
+WHY SELLERS USE DROPOFF
+* Door pickup in Zambian cities — Lusaka's 6:00/10:00/14:00 sweeps or an
+  instant ride, tomorrow slots included.
+* One place for every courier: Mercury, and more — counter prices are
+  published in the app so you compare before you commit.
+* Handover protection: your parcel recipient gets a 4-digit DropOff code by
+  SMS; the delivery only completes when that code is entered. Photos are
+  filed at pickup and at handover.
+* Live tracking: follow your rider on the map, or share a no-account tracking
+  link with your customer by SMS/WhatsApp.
+* Direct chat with your rider and support inside every job.
+* City-to-city legs run entirely by your chosen courier — DropOff gets your
+  parcel to their counter and confirms it was handed in with photographic
+  evidence.
+
+SIMPLE, TRANSPARENT PAYMENTS
+* Pay with mobile money (Lipila) or cash. Every fee is shown before you book:
+  rider fare, processing fee, nothing hidden.
+* Wallet and in-app receipts, plus a full booking history per parcel.
+
+FOR RIDERS
+* Slot-batched task queues, a nearest-neighbour route, targets and daily
+  earnings, 90% of the door-delivery fare in your pocket, and wallet pay-outs
+  to your mobile money.
+* Fast KYC: selfie + NRC + plate photos, AI-checked, you ride while review
+  completes.
+
+FOR BUSINESSES AND COURIERS
+* Subscription packs: bundle parcels on Weekly or Monthly plans.
+* Team accounts, admin consoles, POS/partner webhooks so any storefront can
+  push parcels into the DropOff network.
+
+BUILT FOR ZAMBIA
+* Works on 3G, sized for every Android phone, English/isiNyanja-friendly
+  copy, payments in Kwacha and no foreign dependencies.
+
+Download DropOff and get your parcel moving today.
+Questions? support@carpsosolutions.store
+```
+
+### Screenshots to capture (phone, 1080x1920 minimum)
+1. Home screen with the slot chips (06:00 / 10:00 / 14:00 / Tomorrow).
+2. Booking form with a parcel + total row.
+3. Rider tracking map with the rider photo card ("Verified rider").
+4. Ratings + plan card from the Business tab.
+5. Recipient tracking page (SMS link) showing handover code hint.
+6. Task queue (rider) with proof-of-delivery dialog.
+
+### Release notes (0.5.1+12)
+```
+* Handover codes: recipients now get a 4-digit DropOff code for door
+  deliveries — the delivery only completes with the right code. Protects
+  sellers from false-parcel claims.
+* Proof-of-delivery photos on every leg from the rider queue.
+* Parcels can now carry a declared value (K1-K1,000,000) for insurance and
+  compliance.
+* Book a pickup for tomorrow morning (06:00 sweep) directly from the app.
+* Subscriptions renamed to Packs — clearer pricing, easier upgrades.
+* Camera capture fixes on profile & rider KYC; text scaling fixed on all
+  screens.
+```
+
+## 6. Verify before promoting
 
 - Fresh install from the testing track, not a local build.
-- Register → OTP arrives → book a cash job → recipient receives the tracking SMS.
+- Register → OTP arrives → book a cash job → recipient receives the tracking SMS
+  WITH the 4-digit handover code.
+- Mark a delivery as the assigned rider **without** the code → server rejects
+  (`otp_required`); with the code → delivered.
 - Rating flow only appears on completed, server-dispatched bookings.
 - Push: requires `FIREBASE_SERVICE_ACCOUNT` on the Worker; verify a real device
   receives "Rider assigned".
-- Payments: run one real 1 ZMW Lipila collect against the production Worker and
+- Payments: run one real small Lipila collect against the production Worker and
   confirm the receipt endpoint and webhook state.
 - Check `X-Request-Id` on a failing request and find it in Workers Logs.
 
-## 5. Rollout
+## 7. Rollout
 
 - Internal → Closed (10–20 riders and depots) → Production staged rollout 10% →
   50% → 100%, watching crash-free sessions and payment failures.
 - Keep the previous AAB so you can halt and roll back.
 - Bump `version` in `pubspec.yaml` for every upload (`build` number must increase).
 
-## 6. Known release blockers
+## 8. Known release blockers
 
 - Play rejects debug-signed bundles — section 1 is mandatory.
 - FCM push stays disabled until the Worker secret is set.
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 7. What is new in 0.5.0+11
+## 9. What is new in 0.5.1+12
 
-- **Sessions that actually stay signed in** - rolling refresh (JWT 30d + grace) and a resilient token
-  mirror. No more random "sign in again every time I leave".
-- **Biometric unlock** (Account -> Privacy & sign-in) - use your fingerprint/face to open the app.
-- **Bug fix: booking a collection** no longer fails silently - it now books or shows a precise error.
-- **iOS prep** (Podfile, Face ID permission) and a **web build** ready for hosting.
+- **Handover codes + proof of delivery** — recipients get a 4-digit code; door
+  deliveries require it; riders file evidence photos per leg (this run).
+- Booking a collection - precise errors instead of silent failures.
+- Declared parcel value per booking, cloned on repeat bookings.
+- Tomorrow 06:00 slots on jobs + collections.
+- Account-scoped local storage (privacy fix), email login, biometric unlock.
+- Device-security alerts name the exact device; PBKDF2 fixed for Workers.
+- Lipila narration sanitisation + production base switch (chisomo playbook).
 
-
-- **Every account can now have a photo** — riders, sellers, recipients, courier partners, admins.
-  Your avatar shows on your account, in chat bubbles, and to support agents. Rider selfies now AI-
-  checked (documents, screenshots and memes are rejected automatically).
-
-## 7a. 0.4.2+9
-- Riders can add one selfie from the Team tab without re-submitting KYC; AI reviews it inline.
-- Media access is prefix-scoped: rider selfies visible to signed-in users, KYC docs staff-only.
-
-## 7b. 0.4.1+8 (build 8)
-- Rider selfies show to sellers on the tracking page (with a 'Verified rider' badge),
-  and every upload is AI-reviewed for being one genuine person's face.
-- Everything from 0.4.0: recipient auto-claimed parcels, DropOff Predict, Daily
-  Rider plan, subscription-plan usage across all normal deliveries.
+Historical (0.4.x) notes: mail/OTP hardening, rider selfie AI review,
+media prefix-scoping, recipient auto-claimed parcels, DropOff Predict,
+Daily Rider plan, subscription-plan usage across all normal deliveries.

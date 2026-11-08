@@ -453,13 +453,18 @@ class DropOffApi {
         if (lng != null) 'lng': lng,
       });
 
-  /// Rider log: status movement or COD collected at the door.
+  /// Rider log: status movement or COD collected at the door. For door
+  /// deliveries the server REQUIRES [otp] — the recipient's 4-digit DropOff
+  /// code — so a parcel cannot be "delivered" into thin air. [stage]
+  /// ('pickup' | 'delivery') files the proof photo against the right leg.
   static Future<ApiResponse> jobEvent({
     required String jobRef,
     String? status,
     String? note,
     String? waybill,
     String? photoUrl,
+    String? stage,
+    String? otp,
     double? codCollectedZmw,
     double? lat,
     double? lng,
@@ -469,6 +474,8 @@ class DropOffApi {
         if (note != null) 'note': note,
         if (waybill != null) 'waybill': waybill,
         if (photoUrl != null) 'photo_url': photoUrl,
+        if (stage != null) 'stage': stage,
+        if (otp != null) 'otp': otp,
         if (codCollectedZmw != null) 'cod_collected_zmw': codCollectedZmw,
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,

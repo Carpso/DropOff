@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../data/dropoff_api.dart';
 import '../main.dart';
@@ -22,6 +23,7 @@ class RiderQueueScreen extends StatefulWidget {
 class _RiderQueueScreenState extends State<RiderQueueScreen> {
   Map<String, dynamic>? _data;
   bool _loading = true;
+  String? _busyRef;
 
   @override
   void initState() {
@@ -33,6 +35,170 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
     final data = await DropOffApi.riderQueue(widget.phone);
     if (!mounted) return;
     setState(() { _data = data; _loading = false; });
+  }
+
+  /* ------------------------ stop advancement (proof kit) -------------------- */
+  // Anti-false-parcel handover: door deliveries require the recipient's
+  // 4-digit DropOff code (sent in their booking SMS), and any leg can carry a
+  // proof photo filed to that job's evidence columns. Depot drops need no
+  // code — the AI-checked depot photo already covers them.
+
+  Future<String?> _pickPodPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take photo with camera'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+          ListTile(leading: const Icon(Icons.photo_library), title: const Text('Pick from gallery'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+        ]),
+      ),
+    );
+    if (source == null) return null;
+    final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 82);
+    if (picked == null) return null;
+    final bytes = await picked.readAsBytes();
+    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc');
+    if (!mounted) return null;
+    if (!res.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Proof photo upload failed (${res.error ?? 'network'}) — moving on without it.')));
+      return null;
+    }
+    return '${res.body['url'] ?? ''}';
+  }
+
+  Future<void> _snack(String msg) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _advanceStop(Map<String, dynamic> s) async {
+    final String ref = '${s['ref']}';
+    if (_busyRef != null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(padding: EdgeInsets.all(14), child: Text('How did the parcel move on?',
+            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          ListTile(
+            leading: const Icon(Icons.local_shipping_outlined),
+            title: const Text('Picked up from the seller'),
+            subtitle: const Text('File it before leaving the stop'),
+            trailing: _busyRef == ref ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
+            onTap: () async {
+              final photo = await _pickPodPhoto();
+              setState(() => _busyRef = ref);
+              final res = await DropOffApi.jobEvent(
+                jobRef: ref, status: 'picked_up', photoUrl: photo, stage: photo == null ? null : 'pickup');
+              if (!mounted) return;
+              setState(() => _busyRef = null);
+              Navigator.pop(ctx);
+              await _snack(res.ok ? '$ref — picked up ✓' : 'Could not update (${res.error})');
+              if (res.ok) _load();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.inventory_2_outlined),
+            title: const Text('Dropped at the depot branch'),
+            subtitle: const Text('First-mile drop signed in'),
+            onTap: () async {
+              final photo = await _pickPodPhoto();
+              setState(() => _busyRef = ref);
+              final res = await DropOffApi.jobEvent(
+                jobRef: ref, status: 'delivered', photoUrl: photo, stage: photo == null ? null : 'delivery');
+              if (!mounted) return;
+              setState(() => _busyRef = null);
+              Navigator.pop(ctx);
+              await _snack(res.ok ? '$ref — depot drop ✓' : 'Could not update (${res.error})');
+              if (res.ok) _load();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.home_outlined),
+            title: const Text('Handed to the recipient (door)'),
+            subtitle: const Text('Requires their 4-digit DropOff code'),
+            onTap: () => _deliverToDoor(ctx, ref),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// Door delivery: the server enforces the recipient's 4-digit handover code.
+  Future<void> _deliverToDoor(BuildContext sheetCtx, String ref) async {
+    Navigator.pop(sheetCtx); // close the "how did it move on" sheet
+    if (!mounted) return;
+    final otpCtrl = TextEditingController();
+    String? podUrl;
+    final res = await showDialog<ApiResponse>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          title: Text('Handover — $ref', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Ask the recipient for the 4-digit DropOff code from their booking SMS. Never type a code the parcel-owner hasn\'t shown you.',
+              style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: otpCtrl,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              autofocus: true,
+              decoration: const InputDecoration(
+                counterText: '',
+                labelText: '4-digit DropOff code',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              icon: Icon(podUrl == null ? Icons.camera_alt_outlined : Icons.check_circle, size: 18),
+              label: Text(podUrl == null ? 'Add proof photo (recommended)' : 'Proof photo attached ✓',
+                style: const TextStyle(fontSize: 12.5)),
+              onPressed: () async {
+                setDialog(() => podUrl = null); // visual pending state
+                final url = await _pickPodPhoto();
+                setDialog(() => podUrl = url);
+              },
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                final code = otpCtrl.text.trim();
+                if (code.length < 4) {
+                  _snack('Enter the recipient\'s 4-digit code.');
+                  return;
+                }
+                final r = await DropOffApi.jobEvent(
+                  jobRef: ref, status: 'delivered', otp: code,
+                  photoUrl: podUrl, stage: podUrl == null ? null : 'delivery');
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx, r);
+              },
+              child: const Text('Confirm handover'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (res == null) return; // cancelled
+    if (res.ok) {
+      await _snack('$ref — delivered and code-verified ✓');
+      _load();
+      return;
+    }
+    // Server-side OTP errors map to rider-readable guidance.
+    final err = res.error ?? '';
+    final detail = (res.body['detail'] as String?) ?? '';
+    await _snack(switch (err) {
+      'otp_required' => 'Code rejected. ${detail.isEmpty ? 'Ask the recipient to re-check their SMS.' : detail}',
+      'otp_locked' => 'Too many wrong codes — support has been notified.',
+      _ => 'Could not mark delivered ($err).',
+    });
   }
 
   @override
@@ -119,6 +285,14 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
                       Text('Seller: ${s['seller']} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${s['status']}'.replaceAll('_', ' '),
                           style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                     ])),
+                    IconButton(
+                      tooltip: 'Update stop',
+                      visualDensity: VisualDensity.compact,
+                      icon: _busyRef == '${s['ref']}'
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.check_circle_outline, color: AppColors.forest),
+                      onPressed: () => _advanceStop(s),
+                    ),
                   ]),
                 ),
               const SizedBox(height: 8),

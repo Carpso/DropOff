@@ -31,3 +31,13 @@ dist/
 # OS noise
 .DS_Store
 Thumbs.db
+
+
+# scratch/test helpers, intentionally untracked
+app/build_apk.bat
+workers/scripts/_*
+workers/test-auth.local.mjs
+tools/_rename_packs_plans*
+workers/scripts/_verify_pbkdf2.mjs
+_probe_out.json
+workers/backups/

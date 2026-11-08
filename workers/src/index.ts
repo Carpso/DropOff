@@ -9,6 +9,7 @@ import {
   verifyJwtClaims, verifyPassword,
 } from './auth';
 import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
+import { PRIVACY_MD, PRIVACY_TITLE, mdToHtml } from './legal';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VEHICLE_MAX_PARCELS, VehicleClass } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { sendSms } from './sms';
@@ -284,7 +285,7 @@ app.use('*', async (c, next) => {
 const PUBLIC_GETS = new Set(['/health', '/couriers', '/cities', '/plans', '/console', '/partner/console', '/promo/check']);
 app.use('*', async (c, next) => {
   const p = c.req.path;
-  if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks')) return next();
+  if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/')) return next();
   // '/track/incoming' is the signed-in recipient's parcel list - it needs the
   // JWT identity, so it does NOT get the public token-credential bypass.
   if (p.startsWith('/track/') && p !== '/track/incoming') return next(); // token IS the credential (GET page + token chat)
@@ -385,7 +386,20 @@ async function rateLimited(
 const devModeOn = (env: { AUTH_DEV_MODE?: string }) =>
   ['1', 'true', 'yes'].includes(String(env.AUTH_DEV_MODE ?? '').toLowerCase());
 
-/* ------------------------------- fraud score ------------------------------ */
+/* -------------------------- handover OTP (anti-fraud) ---------------------- */
+// Yango-style "false parcel" protection: the RECIPIENT gets a 4-digit DropOff
+// code by SMS at booking; the assigned rider MUST enter it when marking the
+// job 'delivered'. SHA-256 over ref+code+jwt secret (fast — 4 digits only has
+// 9k combinations server-side, answered exactly, attempts capped at 8).
+async function handoverOtpHash(env: Env, ref: string, code: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${ref}:${code}:${env.JWT_SECRET}`),
+  );
+  return [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+/* ------------------------------ fraud score ------------------------------ */
 // Heuristic, not a verdict: velocity + duplicate pattern + high value + new
 // account. Score >= 3 flags the job for ops review; it is never auto-cancelled
 // here, because a false positive would strand a real parcel.
@@ -600,6 +614,19 @@ app.use('GET /plans', cacheFor(30));
 
 /* --------------------------------- health --------------------------------- */
 app.get('/health', (c) => c.json({ ok: true, ts: Date.now() }));
+
+/* ----------------------------- legal (Play needs a live privacy URL) ------- */
+// Public, no auth. The middleware skips '/legal' (regex below includes it).
+const PRIVACY_HTML =
+`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${PRIVACY_TITLE}</title>
+<style>body{font:16px/1.6 system-ui,-apple-system,sans-serif;color:#1c2530;max-width:720px;margin:2rem auto;padding:0 1.25rem}h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:1.75rem}li{margin:0.35rem 0}</style>
+</head><body>
+${mdToHtml(PRIVACY_MD)}
+</body></html>`;
+
+app.get('/legal/privacy', (c) => c.html(PRIVACY_HTML));
 
 // Identity for the signed-in caller � the app uses this to reveal admin/ops
 // surfaces (the owner's phone is admin via OWNER_PHONE middleware grant) and
@@ -1427,12 +1454,19 @@ app.post('/jobs', async (c) => {
         .catch(() => {}),
     );
 
+    // Handover proof code (anti-false-parcel): recipient-only 4-digit code,
+    // SMSed with the tracking link; the rider must supply it on delivery.
+    const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
+    await c.env.DB.prepare(
+      'UPDATE jobs SET delivery_otp_hash = ?2 WHERE ref = ?1',
+    ).bind(ref, await handoverOtpHash(c.env, ref, deliveryOtp)).run();
+
     // Recipient tracking link (no account): SMS the buyer a live status page.
     const trackingToken = await issueTrackingToken(c.env, meta.last_row_id, ref, recipientPhone);
     const trackUrl = trackingUrl(c.env, trackingToken);
     c.executionCtx.waitUntil(
       sendSms(c.env, recipientPhone,
-      `DropOff: your parcel ${ref} is on the move. Follow it live � status, rider location and arrival time: ${trackUrl}`).catch(() => {}),
+      `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
     );
 
     if (pickupAt) {
@@ -1615,17 +1649,20 @@ app.post('/collections', async (c) => {
   const total = round2(riderFee + processing);
   const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
   const senderName = String(b.sender_name ?? '').trim() || phoneName || 'DropOff customer';
+  const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000)); // handover proof (anti-false-parcel)
+  const deliveryOtpHash = await handoverOtpHash(c.env, ref, deliveryOtp);
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
        counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
-       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka')`,
+       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, delivery_otp_hash)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka',?19)`,
   ).bind(
     ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
     String(b.description ?? 'Collection').trim().slice(0, 200), String(b.weight_class ?? '0-5kg'),
     riderFee, processing, total, window, pickupAt, payMethod, parcels, vehicleClass,
+    deliveryOtpHash,
   ).run();
 
   await c.env.DB.prepare(
@@ -1637,6 +1674,12 @@ app.post('/collections', async (c) => {
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'pickup_tomorrow', ?2)`,
     ).bind(meta.last_row_id, 'Slot booked for tomorrow 6:00 � 7:30 AM sweep (after today\'s last window)').run();
   }
+
+  // Handover proof SMS — the recipient (never the sender) holds the code
+  c.executionCtx.waitUntil(
+    sendSms(c.env, recipientPhone,
+    `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
+  );
 
   return c.json({
     ok: true,
@@ -1803,6 +1846,37 @@ app.post('/jobs/:ref/events', async (c) => {
 
   const dbStatements: D1PreparedStatement[] = [];
 
+  // HANDOVER PROOF (anti-false-parcel): marking a job 'delivered' requires the
+  // recipient's 4-digit DropOff code (SMSed to them at booking). Ops/admin keys
+  // bypass it for depot-side reconciliation; legacy jobs without a hash pass
+  // through (their booking predates the gate).
+  if (status === 'delivered' && !isAdminKey && !isOpsKey) {
+    const otpRow = await c.env.DB.prepare(
+      'SELECT delivery_otp_hash, delivery_otp_attempts, last_mile FROM jobs WHERE id = ?1',
+    ).bind(job.id).first<any>();
+    // Only DOOR deliveries (last mile to the recipient) need the code — depot
+    // drops already carry AI-checked depot photo evidence.
+    if (otpRow?.delivery_otp_hash && Number(otpRow.last_mile) === 1) {
+      if ((otpRow.delivery_otp_attempts ?? 0) >= 8) {
+        return c.json({ error: 'otp_locked', detail: 'Too many wrong codes — contact DropOff support to unlock this delivery.' }, 429);
+      }
+      const otp = String(b.otp ?? '').replace(/\D/g, '');
+      const want = String(otpRow.delivery_otp_hash);
+      const got = otp.length === 4 ? await handoverOtpHash(c.env, c.req.param('ref'), otp) : '';
+      const match = got.length === want.length && got.split('').every((ch, i) => ch === want[i]);
+      if (!match) {
+        await c.env.DB.prepare(
+          'UPDATE jobs SET delivery_otp_attempts = COALESCE(delivery_otp_attempts, 0) + 1 WHERE id = ?1',
+        ).bind(job.id).run();
+        return c.json({
+          error: 'otp_required',
+          detail: 'Ask the recipient for their 4-digit DropOff code — it is in the handover SMS. It protects both of you against false parcels.',
+        }, 403);
+      }
+      dbStatements.push(c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id));
+    }
+  }
+
   // waiting-time billing (event kept as dispute evidence). Canonical recompute —
   // promo discount is honoured here too so totals never drift from /payments.
   if (b.wait_minutes !== undefined) {
@@ -1886,7 +1960,13 @@ app.post('/jobs/:ref/events', async (c) => {
     const sets = ['status = ?2'];
     const vals: unknown[] = [job.id, status];
     if (b.waybill) { sets.push('courier_waybill = ?3'); vals.push(b.waybill); }
-    if (b.photo_url) { sets.push('dropoff_photo_url = ?4'); vals.push(b.photo_url); }
+    if (b.photo_url) {
+      sets.push('dropoff_photo_url = ?4'); vals.push(b.photo_url);
+      // Proof-of-delivery stages: the pickup photo and the handover photo each
+      // land in their own evidence column (false-parcel disputability).
+      if (b.stage === 'pickup' && status === 'picked_up') { sets.push('pod_pickup_url = ?5'); vals.push(b.photo_url); }
+      else if (b.stage === 'delivery' && status === 'delivered') { sets.push('pod_delivery_url = ?5'); vals.push(b.photo_url); }
+    }
     dbStatements.push(c.env.DB.prepare(
       `UPDATE jobs SET ${sets.join(', ')} WHERE id = ?1`).bind(...vals));
   }
