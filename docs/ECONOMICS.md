@@ -34,11 +34,11 @@ Cycle length is the plan's `cycle_days` (1 / 7 / 30) — `period_end` is always 
 
 **Usage outlives the drop.** Unused parcels still expire with the cycle (no rollover), but the endpoints (`/jobs`, `/collections`, `/subscriptions`) all agree on `plan_used`/`plan_cap`, so what the app shows as "used" matches what the server enforces at booking time.
 
-## 3. Sweep driver economics (salaried, not per-parcel)
+## 3. Sweep rider economics (salaried, performance-gated)
 
-- **Driver pay: K3,000/month flat, per driver.** Daily expectation: **30 parcels/day** per driver (ops monitoring target, not a wage unit).
-- Break-even per driver: 30 parcels/day × 30 days = ~900 parcels/month served.
-  - At an average plan yield of K20/parcel (blended Silver K25 / Gold K20 / Platinum K15): ~K18,000 plan revenue vs K3,000 wage + ~K1,500 route cost (fuel/time per sweep) → **~K13,500 gross margin per driver/month**.
+- **Rider pay: K3,200/month inclusive of a K300/week fuel allowance** (4 weeks = K1,200 fuel; base K2,000). Daily expectation: **30 parcels/day** per rider (ops monitoring target). Weekly fuel/pay is pace-gated to the sweep target (see `/rider/targets` `pay.adjusted` shortfall); consecutive off-pace weeks trigger an ops performance review.
+- Break-even per rider (illustrative): 30 parcels/day × 30 days = ~900 parcels/month served.
+  - At an average plan yield of K20/parcel (blended Silver K25 / Gold K20 / Platinum K15): ~K18,000 plan revenue vs K3,200 inclusive pay (fuel covered in allowance) → strong gross margin per rider/month when routes are dense.
 - Paygo parcels on the same runs still pay riders their normal 90% share of the rider fee — the salary covers the committed sweep workload only.
 
 ## 4. Batch pickup — scattered points, one run

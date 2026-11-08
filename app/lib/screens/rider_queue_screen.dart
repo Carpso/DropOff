@@ -110,7 +110,23 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
               setState(() => _busyRef = null);
               Navigator.pop(ctx);
               await _snack(res.ok ? '$ref — depot drop ✓' : 'Could not update (${res.error})');
-              if (res.ok) _load();
+              if (res.ok) {
+                // Best-effort: compare seller's booking photo vs this drop photo.
+                if (photo != null) {
+                  final chk = await DropOffApi.parcelCheck(ref);
+                  if (!mounted) return;
+                  if (chk.ok) {
+                    final verdict = chk.body['same_parcel'] ?? 'uncertain';
+                    final flagged = chk.body['flagged'] == true;
+                    await _snack(flagged
+                        ? '$ref parcel check: possible mismatch — ops flagged for review'
+                        : '$ref parcel check: $verdict');
+                  } else if (chk.status == 409) {
+                    await _snack('$ref parcel check skipped: ${chk.body['detail'] ?? chk.body['error'] ?? 'photo missing'}');
+                  }
+                }
+                _load();
+              }
             },
           ),
           ListTile(

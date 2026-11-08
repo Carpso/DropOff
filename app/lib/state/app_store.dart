@@ -497,6 +497,7 @@ class AppStore extends ChangeNotifier {
     int parcels = 1,
     String vehicleClass = 'motorcycle',
     String? branch,
+    String? parcelPhotoUrl,
   }) async {
     final now = DateTime.now();
     final id = now.microsecondsSinceEpoch.toString();
@@ -528,6 +529,7 @@ class AppStore extends ChangeNotifier {
       'service': service ?? 'standard',
       'pickup_window': pickupWindow,
       'pickup_time': pickupWindow,
+      if (parcelPhotoUrl != null && parcelPhotoUrl.isNotEmpty) 'parcel_photo_url': parcelPhotoUrl,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode.trim().toUpperCase(),
     };
     if (DropOffApi.enabled) {

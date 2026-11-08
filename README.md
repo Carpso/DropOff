@@ -23,12 +23,21 @@
 
 ### Core flow (booking → handover)
 1. **Quote screen** — sender enters pickup & destination city + package weight/options.
-2. **Rider request** — the closest available rider is assigned and heads to the sender.
-3. **Package capture** — after pickup, the rider/ops agent weighs the package and captures the courier counter price (the "chargebook") into the app.
-4. **Rider takes it to the depot** — the destination depot and (optional) receiver are set on the waybill.
-5. **Receipt sync** — counter charge + delivery fee are reconciled against the money received; services are auto-billed weekly. The sender sees the courier charges + DropOff fee, and everything pays out of one wallet balance.
-6. **Tracking** — status moves `pickup → at_depot → departed → arrived → delivered/ready_for_collection`.
-7. **Payment** — pick the Lipila payment channel (D20 merchant, or an Airtel/MTN/Zamtel Money collect request); the client then polls payment status in the background until it flips to `success`. One day the **sender** pays the courier fare and the rider; the receiver can pay the leg-2 door-delivery fee and any COD and settle it online.
+2. **Book a slot** — every parcel is booked onto a Sweep slot (`now`, `06:00`, `10:00`, `14:00`, or `tomorrow:06:00`). No untimed parcels.
+3. **Rider request** — the closest available rider is assigned and heads to the sender (pay-as-you-go first-time senders may need to approve a small booking deposit before dispatch; subscribers are exempt).
+4. **Package capture** — sender may attach a parcel photo at booking; after pickup, rider/ops captures details and the courier counter price (the "chargebook"). At the depot drop, the rider's photo can be AI-checked against the booking photo.
+5. **Rider takes it to the depot** — the destination depot and (optional) receiver are set on the waybill. Depot partners can confirm receipt via the POS webhook.
+6. **Receipt sync** — counter charge + delivery fee are reconciled against the money received; services are auto-billed weekly. The sender sees the courier charges + DropOff fee, and everything pays out of one wallet balance.
+7. **Tracking** — status moves `pickup → at_depot → departed → arrived → delivered/ready_for_collection`. Shared tracking links require sign-in or SMS-verified access (sender/recipient phone).
+8. **Payment** — pick the Lipila payment channel (D20 merchant, or an Airtel/MTN/Zamtel Money collect request); the client then polls payment status in the background until it flips to `success`. The **sender** pays the courier fare and the rider; the receiver can pay the leg-2 door-delivery fee and any COD and settle it online.
+
+### Security & anti-fraud (live)
+- **No untimed parcels:** every booking declares a Sweep slot.
+- **Seller parcel photo + AI check:** sender can attach a parcel photo at booking; the rider's depot drop-off photo is compared (AI-assisted, conservative) and mismatches can be flagged for review.
+- **Recipient handover OTP (door deliveries):** a 4-digit code is SMSed to the recipient; the rider must enter it to complete a door handover (depot drops rely on photo + depot confirmation).
+- **Ghost-booking controls:** pay-as-you-go first-time senders approve a small booking deposit before dispatch (subscribers exempt); missed pickups auto-cancel and earn strikes (3 in 14 days → booking hold). OTP abuse is strike-worthy.
+- **Depot counter confirmation:** depot/POS partners confirm receipt via webhook (`partner_confirmed`). See [`docs/POS_WEBHOOKS.md`](docs/POS_WEBHOOKS.md).
+- **Tracking privacy:** shared tracking links never expose parcel data without sign-in or an SMS-verified grant to the sender/recipient phone.
 
 ### What makes it catchy 🚀
 - **Name** — "DropOff" says *we drop it off for you*. Short, delivery-native, easy to say in any language. ("DropOfff — one tap to the depot.")

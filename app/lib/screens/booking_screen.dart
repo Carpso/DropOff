@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
@@ -74,6 +75,8 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _packActive = false;
   bool _saving = false;
   bool _aiBusy = false;
+  String? _parcelPhotoUrl;
+  bool _parcelPhotoUploading = false;
   List<String> _cities = cities;
   double? _promoPct;
   String _promoNote = '';
@@ -206,6 +209,30 @@ class _BookingScreenState extends State<BookingScreen> {
 
   void _message(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
+  Future<void> _pickParcelPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take parcel photo'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+          ListTile(leading: const Icon(Icons.photo_library), title: const Text('Pick from gallery'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+        ]),
+      ),
+    );
+    if (source == null || !mounted) return;
+    final picked = await ImagePicker().pickImage(source: source, imageQuality: 82, maxWidth: 1600);
+    if (picked == null) return;
+    setState(() => _parcelPhotoUploading = true);
+    final bytes = await picked.readAsBytes();
+    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'parcel.jpg', kind: 'kyc');
+    if (!mounted) return;
+    setState(() {
+      _parcelPhotoUploading = false;
+      if (res.ok && res.body['url'] is String) _parcelPhotoUrl = res.body['url'] as String;
+    });
+    _message(res.ok ? 'Parcel photo attached — protects you if the parcel is disputed.' : 'Photo upload failed. You can still book.');
+  }
+
   /// AI tidy-up of the free-text pickup address (best-effort; never blocks).
   Future<void> _aiTidyAddress() async {
     final text = _pickup.text.trim();
@@ -274,6 +301,7 @@ class _BookingScreenState extends State<BookingScreen> {
       pickupAt: null,
       parcels: _parcels,
       vehicleClass: _vehicleClass,
+      parcelPhotoUrl: _parcelPhotoUrl,
     );
     if (store.lastBookingWindowRolled != null) {
       _message('The ${store.lastBookingWindowRolled} window had closed — your booking moved to the next open slot automatically.');
@@ -512,7 +540,19 @@ class _BookingScreenState extends State<BookingScreen> {
         ),
         const SizedBox(height: 16),
         TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents', hintText: 'e.g. Two boxed phones', prefixIcon: Icon(Icons.inventory_2_outlined))),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _parcelPhotoUploading ? null : _pickParcelPhoto,
+          icon: _parcelPhotoUploading
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : Icon(_parcelPhotoUrl == null ? Icons.add_a_photo_outlined : Icons.check_circle, color: _parcelPhotoUrl == null ? null : AppColors.success),
+          label: Text(_parcelPhotoUrl == null ? 'Add parcel photo (recommended)' : 'Parcel photo attached'),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 4),
+          child: Text('A clear photo of the parcel protects you — the rider\'s depot drop-off photo is checked against it.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+        ),
+        const SizedBox(height: 8),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: DropdownButtonFormField<String>(
             initialValue: _vehicleClass,

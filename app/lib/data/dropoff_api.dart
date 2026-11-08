@@ -481,6 +481,12 @@ class DropOffApi {
         if (lng != null) 'lng': lng,
       });
 
+  /// AI parcel photo check: compares the seller's booking capture against the
+  /// rider's depot/delivery photo. Returns {same_parcel, confidence, note, flagged}.
+  /// 409 when either photo is missing — treat as "no check available", not an error.
+  static Future<ApiResponse> parcelCheck(String ref) =>
+      post('/jobs/$ref/parcel-check', {});
+
   /// Rate one side of a delivery — seller, driver (rider) or courier — with an
   /// optional comment. Resubmitting updates the previous score.
   static Future<ApiResponse> rateJob({

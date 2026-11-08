@@ -10,15 +10,15 @@ Last updated: November 2026
 
 DropOff is Zambia's first-mile parcel marketplace: senders book a local rider to pick up a parcel at their door and drop it at a nominated courier depot branch **within the same city**, and pay through Lipila mobile money. City-to-city transport is handled entirely by the courier you choose — DropOff does not carry parcels between cities and is not a courier itself. This policy explains what personal information we collect, why, and your rights over it.
 
-## Handover codes and proof of delivery
+## Handover codes, parcel photos and proof of delivery
 
-At booking we send the parcel recipient a 4-digit DropOff code by SMS. The assigned rider must enter this code to mark the delivery complete, and may photograph the parcel at pickup and handover. The code and photos exist solely as delivery evidence that protects both sender and recipient from false-parcel disputes; we do not use them for advertising.
+At booking we send the parcel recipient a 4-digit DropOff code by SMS. The assigned rider must enter this code to mark a door delivery complete. Senders may attach a photo of the parcel at booking; riders may photograph the parcel at pickup and at the depot/courier drop-off or handover. We may compare booking and drop-off photos (including with automated checks) to help detect parcel swaps or false-parcel disputes. Codes and photos exist solely as delivery and anti-fraud evidence — not for advertising.
 
 ## What we collect
 
 - **Account details:** email address, full name, and mobile-money phone number (used for refunds, payouts, and job status).
-- **Job details:** pickup location, the nominated depot branch, the recipient's city for the onward courier leg, recipient name and phone, parcel description, declared parcel value, weight class, payment method, and booking history.
-- **Location:** your live GPS fix only when you explicitly share it through the Rider live position feature; it is shown to the sender of your jobs so they can track the parcel. Riders may also capture a delivery photo as booking evidence.
+- **Job details:** pickup location, the nominated depot branch, the recipient's city for the onward courier leg, recipient name and phone, parcel description, declared parcel value, weight class, payment method, booking history, and any parcel photo you attach at booking.
+- **Location:** your live GPS fix only when you explicitly share it through the Rider live position feature; it is shown to the sender of your jobs so they can track the parcel. Riders may capture pickup/drop-off or handover photos as booking evidence.
 - **Device & security:** your Firebase Cloud Messaging token, device identifiers and platform so we can send you job status and payment notifications and detect unauthorised devices. You can turn this off by signing out.
 - **Payments:** Lipila transaction references and payment status. We never see or store mobile-money PINs or card numbers.
 
@@ -28,7 +28,8 @@ At booking we send the parcel recipient a 4-digit DropOff code by SMS. The assig
 - To pay riders and send refunds via mobile money.
 - To show you your booking history and standing orders.
 - To send push notifications about your parcels and payments.
-- To prevent fraud (velocity checks, duplicate-booking detection, handover verification) and meet legal obligations.
+- To prevent fraud (velocity checks, duplicate-booking detection, handover/parcel-photo verification, booking-deposit and no-show controls) and meet legal obligations.
+- To verify access to shared parcel tracking links, we may send a one-time SMS code to the sender or recipient phone number on the booking before showing tracking details.
 
 ## Sharing
 
