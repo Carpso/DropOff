@@ -12,6 +12,24 @@ class AppLocalizationsToi extends AppLocalizations {
   String get appTitle => 'DropOff Zambia';
 
   @override
+  String get selectLanguage => 'Mwaambo wa app';
+
+  @override
+  String get languageEnglish => 'Cingisi';
+
+  @override
+  String get languageNyanja => 'Cinyanja';
+
+  @override
+  String get languageBemba => 'Cibemba';
+
+  @override
+  String get languageTongaZambia => 'Chitonga (Zambia)';
+
+  @override
+  String get languageLozi => 'Silozi';
+
+  @override
   String get skipRideWarningTitle => 'Mutaphonyi kubwezegwa';
 
   @override
@@ -44,6 +62,21 @@ class AppLocalizationsToi extends AppLocalizations {
       'Amubbukke cutoff kaitanasika kutegwa mutaunki kuciindi citobela.';
 
   @override
+  String get handoverCodeWarning =>
+      'Amubuzye uutambula koodi ya DropOff ya manamba 4. Mutanjizyi koodi mwini cintu njatana kumutondezya.';
+
+  @override
+  String get coverTosTitle => 'Milawo yacikwabilizyo cacintu';
+
+  @override
+  String get coverTosBody =>
+      'Cikwabilizyo ncakusala, tacinshuwalansi pe. Mipimo, milawo abumboni zilabeleka. Cilabeleka buyo DropOff yaakuzumina. Kwiinda mukusala, mulazumina milawo eeyi.';
+
+  @override
+  String get coverAcceptTerms =>
+      'Ndazumina milawo yacikwabilizyo (tacinshuwalansi)';
+
+  @override
   String get evidenceShare => 'Amwaabile bumboni';
 
   @override
@@ -51,6 +84,18 @@ class AppLocalizationsToi extends AppLocalizations {
 
   @override
   String get savedRecipients => 'Batambula babikkidwe';
+
+  @override
+  String get pickRecipient => 'Amusale uutambula uubikkidwe';
+
+  @override
+  String get saveRecipient => 'Amubikke uutambula ooyu';
+
+  @override
+  String get recipientSaved => 'Uutambula wabikkwa';
+
+  @override
+  String get quickRebook => 'Amubbukke alimwi cakufwambaana';
 
   @override
   String get declaredValue => 'Muulo waambidwe (ZMW)';

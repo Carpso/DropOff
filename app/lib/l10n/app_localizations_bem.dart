@@ -12,6 +12,24 @@ class AppLocalizationsBem extends AppLocalizations {
   String get appTitle => 'DropOff Zambia';
 
   @override
+  String get selectLanguage => 'Ululimi lwa app';
+
+  @override
+  String get languageEnglish => 'Icingeleshi';
+
+  @override
+  String get languageNyanja => 'Icinyanja';
+
+  @override
+  String get languageBemba => 'Ichibemba';
+
+  @override
+  String get languageTongaZambia => 'Chitonga (Zambia)';
+
+  @override
+  String get languageLozi => 'Silozi';
+
+  @override
   String get skipRideWarningTitle => 'Mwilacelela ukupokwa';
 
   @override
@@ -44,6 +62,21 @@ class AppLocalizationsBem extends AppLocalizations {
       'Bukisheni ilyo cutoff tailafika pakuti mwilaya ku nshita ikakonkapo.';
 
   @override
+  String get handoverCodeWarning =>
+      'Ipusheni uupokelela koodi ya DropOff iya manambala 4. Mwilalemba koodi uyo umwine wa cipe tashimikumwesha.';
+
+  @override
+  String get coverTosTitle => 'Amafunde ya buchingo bwa cipe';
+
+  @override
+  String get coverTosBody =>
+      'Ubuchingo bupepala ubwakusalapo, te inshuwalansi iyine. Imipaka, amafunde na bunte filabomba. Bucitika fye nga DropOff yasuminisha. Nga mwasalapo, mwalisumina aya mafunde.';
+
+  @override
+  String get coverAcceptTerms =>
+      'Nasumina amafunde ya buchingo (te inshuwalansi)';
+
+  @override
   String get evidenceShare => 'Akeni ubunte';
 
   @override
@@ -51,6 +84,18 @@ class AppLocalizationsBem extends AppLocalizations {
 
   @override
   String get savedRecipients => 'Abapokelela abasungilwe';
+
+  @override
+  String get pickRecipient => 'Saleni uupokelela uwasungilwe';
+
+  @override
+  String get saveRecipient => 'Sungeni uyu uupokelela';
+
+  @override
+  String get recipientSaved => 'Uupokelela asungilwe';
+
+  @override
+  String get quickRebook => 'Bukisheni bwangu na kabili';
 
   @override
   String get declaredValue => 'Umutengo uwalumbulwa (ZMW)';

@@ -385,6 +385,8 @@ class AppStore extends ChangeNotifier {
   int? lastBookingPlanUsed;
   int? lastBookingPlanCap;
   int? lastBookingParcels;
+  String? lastBookingError;
+  String? lastBookingErrorDetail;
 
   void _captureAuthError(ApiResponse res) {
     lastAuthError = res.ok ? null : authErrorText(res.body['error'] as String? ?? '');
@@ -528,6 +530,7 @@ class AppStore extends ChangeNotifier {
     String? parcelPhotoUrl,
     double? declaredValueZmw,
     bool coverOptIn = false,
+    bool coverTosAccepted = false,
   }) async {
     final now = DateTime.now();
     final id = now.microsecondsSinceEpoch.toString();
@@ -562,12 +565,18 @@ class AppStore extends ChangeNotifier {
       if (parcelPhotoUrl != null && parcelPhotoUrl.isNotEmpty) 'parcel_photo_url': parcelPhotoUrl,
       if (declaredValueZmw != null && declaredValueZmw > 0) 'declared_value_zmw': declaredValueZmw,
       if (coverOptIn) 'cover_opt_in': true,
+      if (coverOptIn && coverTosAccepted) 'cover_tos_accepted': true,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode.trim().toUpperCase(),
     };
+    lastBookingError = null;
+    lastBookingErrorDetail = null;
     if (DropOffApi.enabled) {
       response = await DropOffApi.createJob(jobPayload);
       if (!response.ok && response.error == 'network_error') {
         await _enqueueJob(id, jobPayload);
+      } else if (!response.ok) {
+        lastBookingError = response.body['error']?.toString() ?? response.error?.toString();
+        lastBookingErrorDetail = response.body['detail']?.toString() ?? response.body['message']?.toString();
       }
     }
     final serverRef = response.body['ref'] as String?;
@@ -614,6 +623,10 @@ class AppStore extends ChangeNotifier {
       vehicleClass: vehicleClass,
       branch: branch,
     );
+    if (lastBookingError != null && lastBookingError != 'network_error') {
+      notifyListeners();
+      return booking;
+    }
     _bookings.insert(0, booking);
     await _saveBookings();
     notifyListeners();

@@ -82,6 +82,7 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _parcelPhotoUploading = false;
   final _declaredValue = TextEditingController();
   bool _coverOptIn = false;
+  bool _coverTosAccepted = false;
   List<String> _cities = cities;
   double? _promoPct;
   String _promoNote = '';
@@ -127,7 +128,12 @@ class _BookingScreenState extends State<BookingScreen> {
         case '5-15kg': _size = ParcelSize.medium; break;
         case '15kg+': _size = ParcelSize.large; break;
       }
-      _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
+      final catalogCourier = '${pre['courier_catalog_id'] ?? ''}'.trim();
+      if (catalogCourier.isNotEmpty) {
+        _courierId = catalogCourier;
+      } else {
+        _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
+      }
       final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
       if (parcels > 0 && parcels <= _maxParcelsByVehicle[_vehicleClass]!) _parcels = parcels;
       final vehicle = '${pre['vehicle_class'] ?? ''}';
@@ -135,6 +141,14 @@ class _BookingScreenState extends State<BookingScreen> {
         _vehicleClass = vehicle;
         if (_parcels > _maxParcelsByVehicle[vehicle]!) _parcels = _maxParcelsByVehicle[vehicle]!;
       }
+      final pw = '${pre['pickup_window'] ?? pre['pickupWindow'] ?? ''}'.trim();
+      if (pw == 'tomorrow:06:00') {
+        _tomorrowMorning = true;
+      } else if (pickupWindows.containsKey(pw)) {
+        _pickupWindow = pw;
+      }
+      final dv = '${pre['declared_value_zmw'] ?? ''}'.trim();
+      if (dv.isNotEmpty) _declaredValue.text = dv;
     }
     _courierSearchCtl.addListener(() => setState(() {}));
     _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
@@ -278,12 +292,84 @@ class _BookingScreenState extends State<BookingScreen> {
     setState(() => _step++);
   }
 
+  Future<void> _openRecipientsPicker() async {
+    final l10n = AppLocalizations.of(context);
+    final list = await DropOffApi.recipients();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(l10n.savedRecipients, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 8),
+            if (list.isEmpty)
+              const Padding(padding: EdgeInsets.symmetric(vertical: 18), child: Text('No saved recipients yet. Fill in a recipient and tap “Save this recipient”.', style: TextStyle(color: AppColors.muted)))
+            else
+              Flexible(child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: list.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (_, i) {
+                  final r = list[i];
+                  final name = '${r['name'] ?? ''}';
+                  final phone = '${r['phone'] ?? ''}';
+                  final meta = [if ('${r['city'] ?? ''}'.isNotEmpty) r['city'], if ('${r['address'] ?? ''}'.isNotEmpty) r['address']].whereType<Object>().join(' · ');
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text([phone, if (meta.isNotEmpty) meta].join('\n')),
+                    isThreeLine: meta.isNotEmpty,
+                    onTap: () {
+                      _recipientName.text = name;
+                      _recipientPhone.text = phone;
+                      setState(() {});
+                      Navigator.pop(ctx);
+                    },
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline, color: AppColors.muted),
+                      onPressed: () async {
+                        final id = (r['id'] as num?)?.toInt();
+                        if (id != null) await DropOffApi.deleteRecipient(id);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) _openRecipientsPicker();
+                      },
+                    ),
+                  );
+                },
+              )),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveCurrentRecipient() async {
+    final l10n = AppLocalizations.of(context);
+    final name = _recipientName.text.trim();
+    final phone = _recipientPhone.text.trim();
+    if (name.length < 2 || !_validPhone(phone)) {
+      _message('Enter a valid recipient name and Zambian phone number first.');
+      return;
+    }
+    final res = await DropOffApi.saveRecipient({'name': name, 'phone': phone, 'city': _to});
+    if (!mounted) return;
+    _message(res.ok ? l10n.recipientSaved : 'Could not save recipient (${res.error ?? 'try again'}).');
+  }
+
   Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context);
     if (_senderName.text.trim().length < 2 || _recipientName.text.trim().length < 2) {
       return _message('Enter the sender and recipient names.');
     }
     if (!_validPhone(_senderPhone.text) || !_validPhone(_recipientPhone.text)) {
       return _message('Use valid Zambian phone numbers, e.g. 0971234567.');
+    }
+    if (_coverOptIn && !_coverTosAccepted) {
+      return _message(l10n.coverAcceptTerms);
     }
     if (_roundTrip && _returnAddress.text.trim().isEmpty) {
       return _message('Enter the return address for the round trip.');
@@ -317,7 +403,21 @@ class _BookingScreenState extends State<BookingScreen> {
       parcelPhotoUrl: _parcelPhotoUrl,
       declaredValueZmw: double.tryParse(_declaredValue.text.trim()),
       coverOptIn: _coverOptIn,
+      coverTosAccepted: _coverTosAccepted,
     );
+    if (store.lastBookingError != null && store.lastBookingError != 'network_error') {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      final msg = switch (store.lastBookingError) {
+        'booking_on_hold' => l10n.bookingOnHoldBody,
+        'slot_required' || 'pickup_window_required' => l10n.slotRequiredBody,
+        _ => store.lastBookingErrorDetail?.isNotEmpty == true
+            ? store.lastBookingErrorDetail!
+            : 'Booking could not be created (${store.lastBookingError}).',
+      };
+      _message(msg);
+      return;
+    }
     if (store.lastBookingWindowRolled != null) {
       _message('The ${store.lastBookingWindowRolled} window had closed — your booking moved to the next open slot automatically.');
     } else if (_tomorrowMorning) {
@@ -579,8 +679,27 @@ class _BookingScreenState extends State<BookingScreen> {
           controlAffinity: ListTileControlAffinity.leading,
           title: Text(AppLocalizations.of(context).parcelCover),
           subtitle: Text(AppLocalizations.of(context).coverDisclaimer, style: const TextStyle(fontSize: 11, height: 1.3)),
-          onChanged: (v) => setState(() => _coverOptIn = v ?? false),
+          onChanged: (v) => setState(() { _coverOptIn = v ?? false; if (!_coverOptIn) _coverTosAccepted = false; }),
         ),
+        if (_coverOptIn)
+          Container(
+            margin: const EdgeInsets.only(top: 2, bottom: 4),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.amber.withValues(alpha: 0.6))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(AppLocalizations.of(context).coverTosTitle, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+              const SizedBox(height: 4),
+              Text(AppLocalizations.of(context).coverTosBody, style: const TextStyle(fontSize: 11, height: 1.35, color: Color(0xFF5D4200))),
+              CheckboxListTile(
+                value: _coverTosAccepted,
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: Text(AppLocalizations.of(context).coverAcceptTerms, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                onChanged: (v) => setState(() => _coverTosAccepted = v ?? false),
+              ),
+            ]),
+          ),
         const SizedBox(height: 8),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: DropdownButtonFormField<String>(
@@ -699,6 +818,19 @@ class _BookingScreenState extends State<BookingScreen> {
         TextField(controller: _recipientName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Recipient name', prefixIcon: Icon(Icons.person_pin_circle_outlined))),
         const SizedBox(height: 12),
         TextField(controller: _recipientPhone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Recipient mobile number', hintText: '0961234567', prefixIcon: Icon(Icons.phone_outlined))),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          OutlinedButton.icon(
+            onPressed: _openRecipientsPicker,
+            icon: const Icon(Icons.contacts_outlined, size: 18),
+            label: Text(AppLocalizations.of(context).pickRecipient),
+          ),
+          TextButton.icon(
+            onPressed: _saveCurrentRecipient,
+            icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+            label: Text(AppLocalizations.of(context).saveRecipient),
+          ),
+        ]),
         const SizedBox(height: 12),
         TextField(
           controller: _promo,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../data/analytics_service.dart';
 import '../data/catalog.dart';
@@ -334,30 +335,36 @@ class BookingDetailScreen extends StatelessWidget {
             TextButton.icon(
               icon: const Icon(Icons.verified_user_outlined),
               label: Text(AppLocalizations.of(context).evidenceShare),
-              onPressed: () async {
-                final ref = booking.serverRef ?? booking.reference;
-                final data = await DropOffApi.jobEvidence(ref);
-                if (!context.mounted) return;
-                if (data == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Evidence not available right now.')));
-                  return;
-                }
-                final ev = (data['evidence'] as Map?) ?? const {};
-                final check = (ev['parcel_check'] as Map?) ?? const {};
-                final summary = [
-                  'DropOff evidence — ${data['ref'] ?? ref}',
-                  'Status: ${data['status'] ?? ''}',
-                  'Booking photo: ${ev['booking_photo'] ?? 'n/a'}',
-                  'Dropoff photo: ${ev['depot_or_dropoff_photo'] ?? 'n/a'}',
-                  'Parcel check: ${check['same_parcel'] ?? 'n/a'} (${check['confidence'] ?? ''}) review=${check['review_status'] ?? check['needs_review'] ?? ''}',
-                  'Partner confirmed: ${ev['partner_confirmed'] ?? false}',
-                  'OTP required: ${ev['otp_required'] ?? false}',
-                ].join('\n');
-                await Share.share(summary, subject: 'DropOff evidence ${data['ref'] ?? ref}');
-              },
+              onPressed: () => _showEvidenceLocker(context, booking),
             ),
           ]),
         ],
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton.icon(
+            icon: const Icon(Icons.replay_outlined),
+            label: Text(AppLocalizations.of(context).quickRebook),
+            onPressed: () {
+              BookingScreen.prefill = {
+                'from': booking.fromCity,
+                'to': booking.toCity,
+                'pickup': booking.pickupAddress,
+                'description': booking.description,
+                'sender_name': booking.senderName,
+                'sender_phone': booking.senderPhone,
+                'recipient_name': booking.recipientName,
+                'recipient_phone': booking.recipientPhone,
+                'size': booking.parcelSize.name,
+                'courier_catalog_id': booking.courierId,
+                'parcels': booking.parcels,
+                'vehicle_class': booking.vehicleClass,
+                'pickup_window': booking.pickupWindow,
+                if (booking.branch != null && booking.branch!.isNotEmpty) 'branch': booking.branch,
+              };
+              Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
+            },
+          ),
+        ),
         const SizedBox(height: 12),
         const Text('Rider controls update this device. Photo proof, courier waybill upload and seller notifications run through the linked backend.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
       ]),
@@ -372,6 +379,68 @@ class BookingDetailScreen extends StatelessWidget {
           Expanded(child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.35))),
         ]),
       );
+}
+
+Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
+  final l10n = AppLocalizations.of(context);
+  final ref = booking.serverRef ?? booking.reference;
+  final data = await DropOffApi.jobEvidence(ref);
+  if (!context.mounted) return;
+  if (data == null) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Evidence not available right now. Sign in and ensure this booking is synced.')));
+    return;
+  }
+  final ev = (data['evidence'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+  final check = (ev['parcel_check'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+  String line(String label, Object? value) => '$label: ${value == null || '$value'.isEmpty ? 'n/a' : value}';
+  final summary = [
+    'DropOff evidence — ${data['ref'] ?? ref}',
+    line('Status', data['status']),
+    line('Booked', data['created_at']),
+    line('Booking photo', ev['booking_photo']),
+    line('Pickup photo', ev['pickup_photo']),
+    line('Dropoff photo', ev['depot_or_dropoff_photo']),
+    line('Partner confirmed', ev['partner_confirmed']),
+    line('OTP required', ev['otp_required']),
+    line('Parcel check', check['same_parcel']),
+    line('Confidence', check['confidence']),
+    line('Review', check['review_status'] ?? (check['needs_review'] == true ? 'needs_review' : '')),
+    line('Declared value', ev['declared_value_zmw']),
+    line('Cover', ev['cover_status']),
+  ].join('\n');
+
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(l10n.evidenceShare, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 6),
+          const Text('Proof-of-condition timeline (booking, pickup, dropoff, parcel check, confirmation). Share only with trusted parties.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+          const SizedBox(height: 12),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(12)),
+                child: SelectableText(summary, style: const TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.45)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))),
+            const SizedBox(width: 10),
+            Expanded(child: FilledButton.icon(onPressed: () async { await Share.share(summary, subject: 'DropOff evidence ${data['ref'] ?? ref}'); }, icon: const Icon(Icons.share_outlined), label: Text(l10n.evidenceShare))),
+          ]),
+        ]),
+      ),
+    ),
+  );
 }
 
 /// App-bar door into chat: total unread badge across all my threads.

@@ -110,6 +110,42 @@ abstract class AppLocalizations {
   /// **'DropOff Zambia'**
   String get appTitle;
 
+  /// No description provided for @selectLanguage.
+  ///
+  /// In en, this message translates to:
+  /// **'App language'**
+  String get selectLanguage;
+
+  /// No description provided for @languageEnglish.
+  ///
+  /// In en, this message translates to:
+  /// **'English'**
+  String get languageEnglish;
+
+  /// No description provided for @languageNyanja.
+  ///
+  /// In en, this message translates to:
+  /// **'Nyanja (Chinyanja)'**
+  String get languageNyanja;
+
+  /// No description provided for @languageBemba.
+  ///
+  /// In en, this message translates to:
+  /// **'Bemba (Ichibemba)'**
+  String get languageBemba;
+
+  /// No description provided for @languageTongaZambia.
+  ///
+  /// In en, this message translates to:
+  /// **'Tonga (Zambia) / Chitonga'**
+  String get languageTongaZambia;
+
+  /// No description provided for @languageLozi.
+  ///
+  /// In en, this message translates to:
+  /// **'Lozi (Silozi)'**
+  String get languageLozi;
+
   /// No description provided for @skipRideWarningTitle.
   ///
   /// In en, this message translates to:
@@ -164,6 +200,30 @@ abstract class AppLocalizations {
   /// **'Book before the slot cutoff to avoid moving to the next open slot.'**
   String get cutoffWarning;
 
+  /// No description provided for @handoverCodeWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask the recipient for their 4-digit DropOff code. Never enter a code the parcel owner hasn\'t shown you.'**
+  String get handoverCodeWarning;
+
+  /// No description provided for @coverTosTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Parcel cover terms'**
+  String get coverTosTitle;
+
+  /// No description provided for @coverTosBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional cover is a quoted protection product, NOT automatic insurance. Limits, exclusions, eligibility, and evidence requirements apply. Cover is only active if DropOff confirms it under the applicable terms (legal/commercial sign-off required). By opting in you accept these terms.'**
+  String get coverTosBody;
+
+  /// No description provided for @coverAcceptTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'I accept the cover terms (quoted, not insurance)'**
+  String get coverAcceptTerms;
+
   /// No description provided for @evidenceShare.
   ///
   /// In en, this message translates to:
@@ -181,6 +241,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Saved recipients'**
   String get savedRecipients;
+
+  /// No description provided for @pickRecipient.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick saved recipient'**
+  String get pickRecipient;
+
+  /// No description provided for @saveRecipient.
+  ///
+  /// In en, this message translates to:
+  /// **'Save this recipient'**
+  String get saveRecipient;
+
+  /// No description provided for @recipientSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Recipient saved'**
+  String get recipientSaved;
+
+  /// No description provided for @quickRebook.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick rebook'**
+  String get quickRebook;
 
   /// No description provided for @declaredValue.
   ///

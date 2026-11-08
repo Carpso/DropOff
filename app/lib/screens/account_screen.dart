@@ -10,6 +10,7 @@ import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../data/push_service.dart';
+import '../l10n/app_localizations.dart';
 import '../main.dart';
 import '../screens/admin_screen.dart';
 import '../screens/chat_screen.dart';
@@ -333,6 +334,60 @@ class _AccountScreenState extends State<AccountScreen> {
   String get _biomeDescription =>
       'On: opening DropOff asks for your fingerprint or face — your parcels and bookings are nobody else\'s business. Off: the app opens straight away.';
 
+  String _localeLabel(AppLocalizations l10n, String? code) {
+    switch ((code ?? 'en').toLowerCase()) {
+      case 'ny': return l10n.languageNyanja;
+      case 'bem': return l10n.languageBemba;
+      case 'toi': return l10n.languageTongaZambia;
+      case 'loz': return l10n.languageLozi;
+      default: return l10n.languageEnglish;
+    }
+  }
+
+  Future<void> _showLanguagePicker(AppStore store) async {
+    final l10n = AppLocalizations.of(context);
+    final options = <({String code, String label})>[
+      (code: 'en', label: l10n.languageEnglish),
+      (code: 'ny', label: l10n.languageNyanja),
+      (code: 'bem', label: l10n.languageBemba),
+      (code: 'toi', label: l10n.languageTongaZambia),
+      (code: 'loz', label: l10n.languageLozi),
+    ];
+    String selected = store.localeCode ?? 'en';
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Align(alignment: Alignment.centerLeft, child: Text(l10n.selectLanguage, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900))),
+            ),
+            RadioGroup<String>(
+              groupValue: selected,
+              onChanged: (v) async {
+                if (v == null) return;
+                setSheet(() => selected = v);
+                await store.setLocaleCode(v);
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final o in options)
+                    RadioListTile<String>(value: o.code, title: Text(o.label)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ]),
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   Future<void> _setBiometric(bool on, AppStore store) async {
     if (on) {
       final ok = await DeviceLock.isAvailable;
@@ -573,6 +628,15 @@ class _AccountScreenState extends State<AccountScreen> {
                     icon: const Icon(Icons.devices, size: 18),
                     label: const Text('Devices signed in'),
                   ),
+                ),
+                const Divider(height: 20),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.language, color: AppColors.forest),
+                  title: Text(AppLocalizations.of(context).selectLanguage, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  subtitle: Text(_localeLabel(AppLocalizations.of(context), store.localeCode), style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                  trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+                  onTap: () => _showLanguagePicker(store),
                 ),
               ]))),
             ],

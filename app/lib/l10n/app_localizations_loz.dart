@@ -12,6 +12,24 @@ class AppLocalizationsLoz extends AppLocalizations {
   String get appTitle => 'DropOff Zambia';
 
   @override
+  String get selectLanguage => 'Puo ya app';
+
+  @override
+  String get languageEnglish => 'Sikuwa';
+
+  @override
+  String get languageNyanja => 'Chinyanja';
+
+  @override
+  String get languageBemba => 'Chibemba';
+
+  @override
+  String get languageTongaZambia => 'Chitonga (Zambia)';
+
+  @override
+  String get languageLozi => 'Silozi';
+
+  @override
   String get skipRideWarningTitle => 'Musike mwa phonya kunangwa';
 
   @override
@@ -45,6 +63,21 @@ class AppLocalizationsLoz extends AppLocalizations {
       'Amu beele pili cutoff i sika fita ku se ye kwa nako ye tatama.';
 
   @override
+  String get handoverCodeWarning =>
+      'Amu buze muamuheli khoutu ya DropOff ya linomolo ze 4. Musike mwa kenya khoutu ye mu si ka boniswa ki mong\'a sika.';
+
+  @override
+  String get coverTosTitle => 'Milao ya sikwalikanyi sa sika';
+
+  @override
+  String get coverTosBody =>
+      'Sikwalikanyi ki sa ku keta, ha si inshuwalansi. Mikwakwa, milao ni bupaki li ya sebeza. Si sebeza feela ha DropOff i ka si lumela. Ka ku keta, mu lumela milao ye.';
+
+  @override
+  String get coverAcceptTerms =>
+      'Na lumela milao ya sikwalikanyi (ha si inshuwalansi)';
+
+  @override
   String get evidenceShare => 'Abelelana ka bupaki';
 
   @override
@@ -52,6 +85,18 @@ class AppLocalizationsLoz extends AppLocalizations {
 
   @override
   String get savedRecipients => 'Baamuheli ba babulukilwe';
+
+  @override
+  String get pickRecipient => 'Keta muamuheli ya babulukilwe';
+
+  @override
+  String get saveRecipient => 'Buluka muamuheli yo';
+
+  @override
+  String get recipientSaved => 'Muamuheli u bulukilwe';
+
+  @override
+  String get quickRebook => 'Beela hape ka kapili';
 
   @override
   String get declaredValue => 'Teko ye bizizwe (ZMW)';

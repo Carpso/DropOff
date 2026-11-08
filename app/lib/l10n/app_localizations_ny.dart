@@ -12,6 +12,24 @@ class AppLocalizationsNy extends AppLocalizations {
   String get appTitle => 'DropOff Zambia';
 
   @override
+  String get selectLanguage => 'Chilankhulo cha app';
+
+  @override
+  String get languageEnglish => 'Chingerezi';
+
+  @override
+  String get languageNyanja => 'Chinyanja';
+
+  @override
+  String get languageBemba => 'Chibemba';
+
+  @override
+  String get languageTongaZambia => 'Chitonga (Zambia)';
+
+  @override
+  String get languageLozi => 'Silozi';
+
+  @override
   String get skipRideWarningTitle => 'Musaphonye kulandidwa';
 
   @override
@@ -44,6 +62,21 @@ class AppLocalizationsNy extends AppLocalizations {
       'Bukitsani nthawi yomaliza isanathe kuti musaike ku nthawi yotsatira.';
 
   @override
+  String get handoverCodeWarning =>
+      'Funsani wolandira nambala ya 4 ya DropOff. Musalowetse nambala imene mwini katundu sanakuonetseni.';
+
+  @override
+  String get coverTosTitle => 'Malamulo a chitetezo cha katundu';
+
+  @override
+  String get coverTosBody =>
+      'Chitetezo ndichosankha ndipo si inshuwalansi yokha. Malire, malamulo ndi umboni zimagwira ntchito. Chitetezo chimagwira pokhapokha DropOff itavomereza. Mwa kusankha, mukuvomereza malamulowa.';
+
+  @override
+  String get coverAcceptTerms =>
+      'Ndikuvomereza malamulo a chitetezo (si inshuwalansi)';
+
+  @override
   String get evidenceShare => 'Gawani umboni';
 
   @override
@@ -51,6 +84,18 @@ class AppLocalizationsNy extends AppLocalizations {
 
   @override
   String get savedRecipients => 'Olandira osungidwa';
+
+  @override
+  String get pickRecipient => 'Sankhani wolandira wosungidwa';
+
+  @override
+  String get saveRecipient => 'Sungani wolandira uyu';
+
+  @override
+  String get recipientSaved => 'Wolandira wasungidwa';
+
+  @override
+  String get quickRebook => 'Bukitsaninso mwachangu';
 
   @override
   String get declaredValue => 'Mtengo wolengezedwa (ZMW)';

@@ -12,6 +12,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'DropOff Zambia';
 
   @override
+  String get selectLanguage => 'App language';
+
+  @override
+  String get languageEnglish => 'English';
+
+  @override
+  String get languageNyanja => 'Nyanja (Chinyanja)';
+
+  @override
+  String get languageBemba => 'Bemba (Ichibemba)';
+
+  @override
+  String get languageTongaZambia => 'Tonga (Zambia) / Chitonga';
+
+  @override
+  String get languageLozi => 'Lozi (Silozi)';
+
+  @override
   String get skipRideWarningTitle => 'Don\'t miss your pickup';
 
   @override
@@ -44,6 +62,21 @@ class AppLocalizationsEn extends AppLocalizations {
       'Book before the slot cutoff to avoid moving to the next open slot.';
 
   @override
+  String get handoverCodeWarning =>
+      'Ask the recipient for their 4-digit DropOff code. Never enter a code the parcel owner hasn\'t shown you.';
+
+  @override
+  String get coverTosTitle => 'Parcel cover terms';
+
+  @override
+  String get coverTosBody =>
+      'Optional cover is a quoted protection product, NOT automatic insurance. Limits, exclusions, eligibility, and evidence requirements apply. Cover is only active if DropOff confirms it under the applicable terms (legal/commercial sign-off required). By opting in you accept these terms.';
+
+  @override
+  String get coverAcceptTerms =>
+      'I accept the cover terms (quoted, not insurance)';
+
+  @override
   String get evidenceShare => 'Share evidence';
 
   @override
@@ -51,6 +84,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get savedRecipients => 'Saved recipients';
+
+  @override
+  String get pickRecipient => 'Pick saved recipient';
+
+  @override
+  String get saveRecipient => 'Save this recipient';
+
+  @override
+  String get recipientSaved => 'Recipient saved';
+
+  @override
+  String get quickRebook => 'Quick rebook';
 
   @override
   String get declaredValue => 'Declared value (ZMW)';

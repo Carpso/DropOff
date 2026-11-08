@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../data/dropoff_api.dart';
+import '../l10n/app_localizations.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 
@@ -153,8 +154,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
         builder: (ctx, setDialog) => AlertDialog(
           title: Text('Handover — $ref', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Ask the recipient for the 4-digit DropOff code from their booking SMS. Never type a code the parcel-owner hasn\'t shown you.',
-              style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),
+            Text(AppLocalizations.of(context).handoverCodeWarning,
+              style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),
             const SizedBox(height: 12),
             TextField(
               controller: otpCtrl,
