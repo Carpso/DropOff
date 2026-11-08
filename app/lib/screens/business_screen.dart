@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../ui/in_app_browser.dart';
 import 'account_screen.dart';
+import 'admin_screen.dart';
 import 'booking_screen.dart';
 import 'track_screen.dart';
 
@@ -84,11 +85,11 @@ class _BusinessScreenState extends State<BusinessScreen> {
     if (mounted) _load();
   }
 
-  Future<void> _shareReferral() async {
+  void _shareReferral() async {
     final code = '${_refer?['code'] ?? ''}';
     if (code.isEmpty) return;
     final text = '${_refer?['share_text'] ?? 'Join me on DropOff — Code $code'}';
-    await launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}'), mode: LaunchMode.externalApplication);
+    await openInApp('https://wa.me/?text=${Uri.encodeComponent(text)}');
   }
 
   // ---- retention math -------------------------------------------------------
@@ -227,7 +228,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
         FilledButton(
           style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
           onPressed: onCta,
-          child: Text(cta, maxLines: 1),
+          // ellipsis so a long label ('See platinum', 'Renew now') clips cleanly
+          // instead of pushing the body text off the banner on small phones.
+          child: Text(cta, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ]),
     );
@@ -242,6 +245,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       );
     }
     final retention = _retentionCard();
+    final staffGlance = _staffGlance();
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: _load,
@@ -270,6 +274,10 @@ class _BusinessScreenState extends State<BusinessScreen> {
               ],
               _statsRow(),
               const SizedBox(height: 14),
+              if (staffGlance != null) ...[
+                staffGlance,
+                const SizedBox(height: 14),
+              ],
               _inFlightCard(),
               const SizedBox(height: 14),
               _referralCard(),
@@ -484,7 +492,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
                 children: [
                   Text('$used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 30, color: AppColors.forest)),
                   const SizedBox(width: 5),
-                  Text(' / $cap parcels used', style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700)),
+                  Flexible(
+                    child: Text('/ $cap parcels used', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700)),
+                  ),
                 ],
               ),
             ),
@@ -528,6 +538,73 @@ class _BusinessScreenState extends State<BusinessScreen> {
         icon: Icons.account_balance_wallet_outlined,
       )),
     ]);
+  }
+
+  /// Staff-only "At a glance" KPIs: the device-local bookings count, how many
+  /// of those are still in flight, and a door into the Admin console. Numbers
+  /// come from the local store (this device), not the server — the console
+  /// shows the live org-wide truth.
+  Widget? _staffGlance() {
+    final store = AppScope.of(context);
+    final isStaff = store.isStaff || store.isSuperAdmin;
+    if (!isStaff) return null;
+    final bookings = store.bookings;
+    final total = bookings.length;
+    final inFlight = bookings.where((b) => b.stage < b.timeline.length - 1).length;
+    final totalParcels = bookings.fold<int>(0, (sum, b) => sum + b.parcels);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.dashboard_outlined, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('At a glance', maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.forest.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.forest.withValues(alpha: 0.35)),
+              ),
+              // compact staff badge — same idea as the SUPERADMIN chip in the console
+              child: const Text('STAFF', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.8, color: AppColors.forest)),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text('This device · $totalParcels parcel${totalParcels == 1 ? '' : 's'} logged locally',
+              style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: _Stat(value: '$total', label: 'Bookings · this device', icon: Icons.receipt_long_outlined)),
+            const SizedBox(width: 10),
+            Expanded(child: _Stat(value: '$inFlight', label: 'In flight · not delivered', icon: Icons.local_shipping_outlined, accent: true)),
+          ]),
+          const SizedBox(height: 6),
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AdminScreen())),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+              child: Row(children: [
+                Icon(Icons.admin_panel_settings_outlined, size: 18, color: AppColors.forest),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Admin console', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                    Text('Account → Admin console', style: TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                  ]),
+                ),
+                Icon(Icons.chevron_right, size: 20, color: AppColors.muted),
+              ]),
+            ),
+          ),
+        ]),
+      ),
+    );
   }
 
   Widget _inFlightCard() {
@@ -663,8 +740,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
           Row(children: [
             const Icon(Icons.card_giftcard_outlined, color: AppColors.forest),
             const SizedBox(width: 8),
-            const Expanded(child: Text('Invite sellers — earn', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
-            Text('$rewarded earned', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.forest)),
+            const Expanded(child: Text('Invite sellers — earn', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            const SizedBox(width: 8),
+            Text('$rewarded earned', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.forest)),
           ]),
           const SizedBox(height: 10),
           Row(children: [

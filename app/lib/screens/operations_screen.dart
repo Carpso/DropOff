@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -11,6 +10,7 @@ import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../ui/in_app_browser.dart';
 import '../widgets/common.dart';
 import 'rider_queue_screen.dart';
 
@@ -889,10 +889,7 @@ class _SmartRouteCardState extends State<_SmartRouteCard> {
                       IconButton(
                         icon: const Icon(Icons.navigation_rounded, color: AppColors.forest),
                         tooltip: 'Navigate this stop',
-                        onPressed: () => launchUrl(
-                          Uri.parse('https://waze.com/ul?ll=${stops[i]['lat']},${stops[i]['lng']}&navigate=yes&follow_deep=1'),
-                          mode: LaunchMode.externalApplication,
-                        ),
+                        onPressed: () => openInApp('https://waze.com/ul?ll=${stops[i]['lat']},${stops[i]['lng']}&navigate=yes&follow_deep=1'),
                       ),
                     ]),
                   ),

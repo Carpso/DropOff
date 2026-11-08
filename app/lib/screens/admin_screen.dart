@@ -118,6 +118,22 @@ class _AdminScreenState extends State<AdminScreen> {
       appBar: AppBar(
         title: const Text('Admin console', style: TextStyle(fontWeight: FontWeight.w900)),
         actions: [
+          if (_superadmin)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: AppColors.amber.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.amber.withValues(alpha: 0.65)),
+              ),
+              // compact SUPERADMIN chip — flags the owner-only console to itself
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.shield, size: 12, color: Color(0xFF7A5200)),
+                SizedBox(width: 4),
+                Text('SUPERADMIN', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.9, color: Color(0xFF7A5200))),
+              ]),
+            ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: () => setState(() { _loading = true; _load(); }),
@@ -1487,6 +1503,34 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
     });
   }
 
+  /// GET /admin/analytics/kpi may ship `by_role` either as a map
+  /// ({admin: 123} or {admin: {n: 123, users: 45}}) or as a list of
+  /// {role, n} rows — normalise both shapes; returns [] when absent/odd.
+  List<MapEntry<String, num>> _roleEntries(Object? raw) {
+    final out = <MapEntry<String, num>>[];
+    if (raw is Map) {
+      raw.forEach((k, v) {
+        if (v is num) {
+          out.add(MapEntry('$k', v));
+        } else if (v is Map && v['n'] is num) {
+          out.add(MapEntry('$k', v['n'] as num));
+        }
+      });
+    } else if (raw is List) {
+      for (final e in raw) {
+        if (e is! Map) continue;
+        final role = '${e['role'] ?? ''}'.trim();
+        final n = e['n'] ?? e['events'] ?? e['users'];
+        if (role.isEmpty || n is! num) continue;
+        out.add(MapEntry(role, n));
+      }
+    }
+    out.sort((a, b) => b.value.compareTo(a.value));
+    return out;
+  }
+
+  static String _fmtCount(num n) => n == n.roundToDouble() ? n.toInt().toString() : n.toStringAsFixed(1);
+
   @override
   Widget build(BuildContext context) {
     final kpi = _kpi;
@@ -1497,6 +1541,9 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
         .cast<Map<String, dynamic>>();
     final dau = ((kpi?['dau'] as List?) ?? const [])
         .cast<Map<String, dynamic>>();
+    final screens = ((kpi?['top_screens'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    final roles = _roleEntries(kpi?['by_role']);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1504,8 +1551,14 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
           Row(children: [
             const Icon(Icons.insights_outlined, color: AppColors.forest),
             const SizedBox(width: 8),
-            const Expanded(child: Text('App usage KPI (30 days)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
-            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+            const Expanded(child: Text('App usage KPI (30 days)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            TextButton.icon(
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 10)),
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh, size: 17),
+              // persistent, clearly-labelled refresh — the card owns its reload
+              label: const Text('Refresh KPIs', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+            ),
           ]),
           const SizedBox(height: 10),
           Row(children: [
@@ -1528,6 +1581,33 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
                 Text('${f['users']} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
               ]),
             )),
+            const SizedBox(height: 10),
+            const Text('Most visited screens (30d)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+            const SizedBox(height: 6),
+            if (screens.isEmpty)
+              const Text('No screen views recorded yet.', style: TextStyle(color: AppColors.muted, fontSize: 12))
+            else
+              ...screens.take(8).map((s) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  Expanded(child: Text('${s['screen'] ?? 'unknown'}', style: const TextStyle(fontSize: 12.5), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  Text('${s['n'] ?? 0}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.forest)),
+                  const SizedBox(width: 6),
+                  Text('${s['users'] ?? 0} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                ]),
+              )),
+            if (roles.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              const Text('Role usage', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 8, runSpacing: 6, children: [
+                for (final r in roles.take(6))
+                  Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text('${r.key} · ${_fmtCount(r.value)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  ),
+              ]),
+            ],
             const SizedBox(height: 10),
             const Text('Conversion funnel (unique users)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
             const SizedBox(height: 6),

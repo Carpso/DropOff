@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../data/dropoff_api.dart';
 import '../ui/app_theme.dart';
+import '../ui/in_app_browser.dart';
 import '../widgets/rider_map.dart';
 
 /// Sender-side live rider screen: PMTiles Zambia map, fresh fix every 12s while open.
@@ -102,10 +102,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                     label: const Text('Navigate to route', maxLines: 1, overflow: TextOverflow.ellipsis),
                     onPressed: _rider == null
                         ? null
-                        : () => launchUrl(
-                              Uri.parse('https://waze.com/ul?ll=${_rider!.latitude},${_rider!.longitude}&navigate=yes'),
-                              mode: LaunchMode.externalApplication,
-                            ),
+                        : () => openInApp('https://waze.com/ul?ll=${_rider!.latitude},${_rider!.longitude}&navigate=yes'),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -115,10 +112,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                     label: const Text('Google Maps', maxLines: 1, overflow: TextOverflow.ellipsis),
                     onPressed: _rider == null
                         ? null
-                        : () => launchUrl(
-                              Uri.parse(_live?['maps_link'] as String? ?? 'https://maps.google.com/?q=${_rider!.latitude},${_rider!.longitude}'),
-                              mode: LaunchMode.externalApplication,
-                            ),
+                        : () => openInApp(_live?['maps_link'] as String? ?? 'https://maps.google.com/?q=${_rider!.latitude},${_rider!.longitude}'),
                   ),
                 ),
               ]),

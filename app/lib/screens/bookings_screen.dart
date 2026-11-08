@@ -16,6 +16,7 @@ import 'chat_screen.dart';
 import 'inbox_screen.dart';
 import 'rider_map_screen.dart';
 import 'track_screen.dart';
+import 'waybill_screen.dart';
 
 class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
@@ -339,6 +340,17 @@ class BookingDetailScreen extends StatelessWidget {
             ),
           ]),
         ],
+        // Depot counter receipt / waybill — always available, no network needed.
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: OutlinedButton.icon(
+            icon: const Icon(Icons.receipt_long_outlined),
+            label: const Text('Depot receipt / waybill'),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => WaybillScreen(bookingId: booking.id),
+            )),
+          )),
+        ]),
         const SizedBox(height: 8),
         Center(
           child: TextButton.icon(

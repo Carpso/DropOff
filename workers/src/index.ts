@@ -6371,6 +6371,12 @@ app.get('/admin/analytics/kpi', async (c) => {
     `SELECT feature, action, COUNT(*) AS n ${base}
       GROUP BY feature, action ORDER BY n DESC LIMIT 24`,
   ).all<any>();
+  // Most-visited screens/tabs (feature=screen, action=view).
+  const topScreens = await c.env.DB.prepare(
+    `SELECT context AS screen, COUNT(*) AS n, COUNT(DISTINCT phone) AS users ${base}
+      AND feature = 'screen' AND action = 'view'
+      GROUP BY context ORDER BY n DESC LIMIT 15`,
+  ).all<any>();
   // Conversion funnel: key milestones (unique users).
   const funnel = await c.env.DB.prepare(
     `SELECT feature, COUNT(DISTINCT phone) AS users ${base}
@@ -6398,6 +6404,7 @@ app.get('/admin/analytics/kpi', async (c) => {
     total_events: Number(totalEvents?.n ?? 0),
     top_features: ((topFeatures?.results ?? []) as any[]).map((r) => ({ feature: r.feature, n: Number(r.n), users: Number(r.users) })),
     top_actions: ((topActions?.results ?? []) as any[]).map((r) => ({ feature: r.feature, action: r.action, n: Number(r.n) })),
+    top_screens: ((topScreens?.results ?? []) as any[]).map((r) => ({ screen: r.screen ?? 'unknown', n: Number(r.n), users: Number(r.users) })),
     funnel: ((funnel?.results ?? []) as any[]).map((r) => ({ feature: r.feature, users: Number(r.users) })),
     dau: ((dau?.results ?? []) as any[]).map((r) => ({ day: r.day, users: Number(r.users) })),
     by_role: ((byRole?.results ?? []) as any[]).map((r) => ({ role: r.role, n: Number(r.n), users: Number(r.users) })),
@@ -6421,6 +6428,11 @@ app.get('/dashboard/analytics', async (c) => {
     `SELECT feature, action, COUNT(*) AS n ${base}
       GROUP BY feature, action ORDER BY n DESC LIMIT 14`,
   ).all<any>();
+  const screens = await c.env.DB.prepare(
+    `SELECT context AS screen, COUNT(*) AS n, COUNT(DISTINCT phone) AS users ${base}
+      AND feature = 'screen' AND action = 'view'
+      GROUP BY context ORDER BY n DESC LIMIT 15`,
+  ).all<any>();
   const fun = await c.env.DB.prepare(
     `SELECT feature, COUNT(DISTINCT phone) AS users ${base}
       AND feature IN ('booking','subscriptions','pack_codes','rider_verification','collections')
@@ -6430,12 +6442,26 @@ app.get('/dashboard/analytics', async (c) => {
     `SELECT date(created_at) AS day, COUNT(DISTINCT phone) AS users ${base}
       GROUP BY day ORDER BY day`,
   ).all<any>();
-  const byRole = await c.env.DB.prepare(
+  const byRol2 = await c.env.DB.prepare(
     `SELECT role, COUNT(*) AS n, COUNT(DISTINCT phone) AS users ${base}
       GROUP BY role ORDER BY n DESC`,
   ).all<any>();
+  const byHour = await c.env.DB.prepare(
+    `SELECT CAST(strftime('%H', created_at) AS INTEGER) AS hour, COUNT(*) AS n ${base}
+      GROUP BY hour ORDER BY hour`,
+  ).all<any>();
+  const hourRows = ((byHour?.results ?? []) as any[]).map((r) => `<tr>
+    <td>${Number(r.hour)}:00</td>
+    <td>${Number(r.n)}</td>
+  </tr>`).join('');
+
   const featureRows = ((feats?.results ?? []) as any[]).map((r) => `<tr>
     <td>${h(r.feature)}</td>
+    <td>${Number(r.n)}</td>
+    <td>${Number(r.users)}</td>
+  </tr>`).join('');
+  const screenRows = ((screens?.results ?? []) as any[]).map((r) => `<tr>
+    <td>${h(r.screen ?? 'unknown')}</td>
     <td>${Number(r.n)}</td>
     <td>${Number(r.users)}</td>
   </tr>`).join('');
@@ -6452,7 +6478,7 @@ app.get('/dashboard/analytics', async (c) => {
     <td>${r.day}</td>
     <td>${Number(r.users)}</td>
   </tr>`).join('');
-  const roleRows = ((byRole?.results ?? []) as any[]).map((r) => `<tr>
+  const roleRows = ((byRol2?.results ?? []) as any[]).map((r) => `<tr>
     <td>${h(r.role ?? 'anonymous')}</td>
     <td>${Number(r.n)}</td>
     <td>${Number(r.users)}</td>
@@ -6468,6 +6494,13 @@ app.get('/dashboard/analytics', async (c) => {
       <label style="font-size:12px;color:#65736d">Days</label>
       <select name="days" onchange="this.form.submit()" style="padding:6px 10px;border-radius:8px;border:1px solid #e2e6e1;font-size:13px">${dayOpts}</select>
     </form>
+  </div>
+  <div class="card">
+    <h2>Most visited screens</h2>
+    <table>
+      <thead><tr><th>Screen</th><th>Views</th><th>Users</th></tr></thead>
+      <tbody>${screenRows || '<tr><td colspan="3" class="empty">No screen events yet.</td></tr>'}</tbody>
+    </table>
   </div>
   <div class="card">
     <h2>Feature usage leaderboard</h2>
@@ -6496,6 +6529,13 @@ app.get('/dashboard/analytics', async (c) => {
       <table style="font-size:12px">
         <thead><tr><th>Day</th><th>Users</th></tr></thead>
         <tbody>${dauRows || '<tr><td colspan="2" class="empty">�</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="card" style="flex:1;min-width:260px">
+      <h2>Hourly activity</h2>
+      <table style="font-size:12px">
+        <thead><tr><th>Hour</th><th>Events</th></tr></thead>
+        <tbody>${hourRows || '<tr><td colspan="2" class="empty">No hourly data.</td></tr>'}</tbody>
       </table>
     </div>
     <div class="card" style="flex:1;min-width:260px">

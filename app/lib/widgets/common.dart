@@ -1,6 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../ui/in_app_browser.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
 
@@ -118,7 +118,7 @@ class _LinkableTextState extends State<LinkableText> {
       final url = match.group(0)!.replaceFirst(RegExp(r'[.,;:!?]+$'), '');
       if (url.isEmpty) continue;
       final recognizer = TapGestureRecognizer()
-        ..onTap = () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        ..onTap = () => openInApp(url);
       _recognizers.add(recognizer);
       spans.add(TextSpan(
         text: url,

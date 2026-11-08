@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
@@ -17,6 +16,7 @@ import '../screens/chat_screen.dart';
 import '../screens/legal_screen.dart';
 import '../state/app_store.dart';
 import '../ui/app_theme.dart';
+import '../ui/in_app_browser.dart';
 import '../services/device_lock.dart';
 
 /// Email + password sign in / create account (the JWT + phone persist locally;
@@ -1062,7 +1062,7 @@ class _ReferralCardState extends State<_ReferralCard> {
     final code = _data?['code'] as String? ?? '';
     if (code.isEmpty) return;
     final text = 'Join me on DropOff — sellers get home pickup to their courier: https://dropoff-api.godfreymoseskalambo.workers.dev · Code $code';
-    await launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}'), mode: LaunchMode.externalApplication);
+    await openInApp('https://wa.me/?text=${Uri.encodeComponent(text)}');
   }
 
   @override

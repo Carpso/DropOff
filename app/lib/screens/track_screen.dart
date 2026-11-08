@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../ui/in_app_browser.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
 import '../screens/account_screen.dart';
@@ -434,7 +434,7 @@ class _TrackScreenState extends State<TrackScreen> {
             IconButton(
               tooltip: 'Open in Maps',
               icon: const Icon(Icons.map_outlined, color: AppColors.forest),
-              onPressed: () => launchUrl(Uri.parse('https://maps.google.com/?q=${loc['lat']},${loc['lng']}')),
+              onPressed: () => openInApp('https://maps.google.com/?q=${loc['lat']},${loc['lng']}'),
             ),
         ]),
       ),
