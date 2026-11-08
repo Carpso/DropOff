@@ -8,6 +8,7 @@ import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
+import '../l10n/app_localizations.dart';
 import 'account_screen.dart';
 import 'booking_screen.dart';
 import 'chat_screen.dart';
@@ -322,13 +323,40 @@ class BookingDetailScreen extends StatelessWidget {
         ],
         if (booking.dispatched && DropOffApi.enabled) ...[
           const SizedBox(height: 8),
-          TextButton.icon(
-            icon: const Icon(Icons.map_outlined),
-            label: const Text('Track rider live'),
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => RiderMapScreen(jobRef: booking.serverRef!),
-            )),
-          ),
+          Wrap(spacing: 8, runSpacing: 4, alignment: WrapAlignment.center, children: [
+            TextButton.icon(
+              icon: const Icon(Icons.map_outlined),
+              label: const Text('Track rider live'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => RiderMapScreen(jobRef: booking.serverRef!),
+              )),
+            ),
+            TextButton.icon(
+              icon: const Icon(Icons.verified_user_outlined),
+              label: Text(AppLocalizations.of(context).evidenceShare),
+              onPressed: () async {
+                final ref = booking.serverRef ?? booking.reference;
+                final data = await DropOffApi.jobEvidence(ref);
+                if (!context.mounted) return;
+                if (data == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Evidence not available right now.')));
+                  return;
+                }
+                final ev = (data['evidence'] as Map?) ?? const {};
+                final check = (ev['parcel_check'] as Map?) ?? const {};
+                final summary = [
+                  'DropOff evidence — ${data['ref'] ?? ref}',
+                  'Status: ${data['status'] ?? ''}',
+                  'Booking photo: ${ev['booking_photo'] ?? 'n/a'}',
+                  'Dropoff photo: ${ev['depot_or_dropoff_photo'] ?? 'n/a'}',
+                  'Parcel check: ${check['same_parcel'] ?? 'n/a'} (${check['confidence'] ?? ''}) review=${check['review_status'] ?? check['needs_review'] ?? ''}',
+                  'Partner confirmed: ${ev['partner_confirmed'] ?? false}',
+                  'OTP required: ${ev['otp_required'] ?? false}',
+                ].join('\n');
+                await Share.share(summary, subject: 'DropOff evidence ${data['ref'] ?? ref}');
+              },
+            ),
+          ]),
         ],
         const SizedBox(height: 12),
         const Text('Rider controls update this device. Photo proof, courier waybill upload and seller notifications run through the linked backend.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),

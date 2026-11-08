@@ -397,10 +397,10 @@ const devModeOn = (env: { AUTH_DEV_MODE?: string }) =>
   ['1', 'true', 'yes'].includes(String(env.AUTH_DEV_MODE ?? '').toLowerCase());
 
 /* ---------------- local-language SMS helpers (Bemba/Tonga/Lozi/Nyanja) ----- */
-const LOCAL_SKIP_WARN = 'Cenjezo(NY): musaphonye rider — ulendo ungathetsedwe. Icicenjesho(BEM): mwilacelela rider. Cenjezyo(TOI): mutamuleki rider. Temoso(LOZ): musiye rider.';
-const LOCAL_HANDOVER_WARN = 'Musapereke code musanalandire(NY). Mwipela code mwapokelela(BEM). Mutapi code kamutana kutambula(TOI). Musife code musika amuhela(LOZ).';
-function localSkipSuffix(): string { return ` ${LOCAL_SKIP_WARN}`; }
-function localHandoverSuffix(): string { return ` ${LOCAL_HANDOVER_WARN}`; }
+// SMS are English-only until the user sets an app language preference.
+// When locale prefs land, resolve per-recipient and append a short local hint.
+function localSkipSuffix(_locale?: string | null): string { return ''; }
+function localHandoverSuffix(_locale?: string | null): string { return ''; }
 
 /* -------------------------- handover OTP (anti-fraud) ---------------------- */
 // Yango-style "false parcel" protection: the RECIPIENT gets a 4-digit DropOff
@@ -657,12 +657,13 @@ app.get('/me', async (c) => {
     const r = await c.env.DB.prepare('SELECT id, full_name, photo_url FROM riders WHERE phone = ?1 AND active = 1')
       .bind(phone).first<{ id: number; full_name: string; photo_url: string | null }>();
     if (r) { rider = { id: r.id, name: r.full_name }; photoUrl = r.photo_url; fullName = r.full_name; }
-    const u = await c.env.DB.prepare('SELECT email, full_name, photo_url FROM auth_users WHERE phone = ?1')
-      .bind(phone).first<{ email: string | null; full_name: string | null; photo_url: string | null }>();
+    const u = await c.env.DB.prepare('SELECT email, full_name, photo_url, locale_pref FROM auth_users WHERE phone = ?1')
+      .bind(phone).first<{ email: string | null; full_name: string | null; photo_url: string | null; locale_pref: string | null }>();
     if (u?.full_name) fullName = u.full_name;
     // Account photo (incl. seller uploads) wins for display; rider photo is the tracking identity.
     if (u?.photo_url) photoUrl = u.photo_url;
     email = u?.email ?? null;
+    (c as any)._localePref = u?.locale_pref ?? null;
   }
   return c.json({
     phone: phone ?? null,
@@ -671,7 +672,76 @@ app.get('/me', async (c) => {
     rider,
     photo_url: photoUrl,
     full_name: fullName,
+    locale_pref: (c as any)._localePref ?? null,
     ...(email ? { email } : {}),
+  });
+});
+
+// Set profile preferences (e.g. locale). English SMS remain default until locale is used.
+app.patch('/me', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const allowed = new Set(['en', 'ny', 'bem', 'toi', 'loz', 'lun', 'kqn', 'lue']);
+  if (b?.locale_pref != null) {
+    const loc = String(b.locale_pref).trim().toLowerCase();
+    if (loc && !allowed.has(loc)) return c.json({ error: 'unsupported_locale', allowed: [...allowed] }, 400);
+    await c.env.DB.prepare('UPDATE auth_users SET locale_pref = ?2 WHERE phone = ?1').bind(phone, loc || null).run();
+  }
+  return c.json({ ok: true });
+});
+
+// Saved recipients / address book (quick rebook)
+app.get('/recipients', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, name, phone, address, city, notes, updated_at FROM saved_recipients
+      WHERE owner_phone = ?1 ORDER BY updated_at DESC LIMIT 100`,
+  ).bind(phone).all<any>();
+  return c.json({ recipients: results ?? [] });
+});
+app.post('/recipients', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const name = String(b?.name ?? '').trim().slice(0, 120);
+  let rphone = '';
+  try { rphone = normalizeZmPhone(String(b?.phone ?? '').trim() || ''); } catch {}
+  if (!name || !rphone) return c.json({ error: 'name_and_phone_required' }, 400);
+  await c.env.DB.prepare(
+    `INSERT INTO saved_recipients (owner_phone, name, phone, address, city, notes, updated_at)
+     VALUES (?1,?2,?3,?4,?5,?6,datetime('now'))
+     ON CONFLICT(owner_phone, phone, name) DO UPDATE SET address=excluded.address, city=excluded.city, notes=excluded.notes, updated_at=datetime('now')`,
+  ).bind(phone, name, rphone, b?.address ? String(b.address).slice(0, 200) : null, b?.city ? String(b.city).slice(0, 80) : null, b?.notes ? String(b.notes).slice(0, 200) : null).run();
+  return c.json({ ok: true });
+});
+app.delete('/recipients/:id', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  await c.env.DB.prepare('DELETE FROM saved_recipients WHERE id = ?1 AND owner_phone = ?2').bind(Number(c.req.param('id')), phone).run();
+  return c.json({ ok: true });
+});
+
+// Density/slot optimization: suggest the least-loaded open slot (simple heuristic).
+app.get('/slots/suggest', async (c) => {
+  const fromCity = String(c.req.query('from_city') ?? c.req.query('city') ?? '').trim() || null;
+  const now = new Date();
+  const counts: Record<string, number> = {};
+  for (const w of ['06:00', '10:00', '14:00']) counts[w] = 0;
+  try {
+    const q = fromCity
+      ? c.env.DB.prepare(`SELECT pickup_window, COUNT(*) n FROM jobs WHERE status IN ('created','rider_assigned','picked_up') AND pickup_window IN ('06:00','10:00','14:00') AND from_city = ?1 AND created_at > datetime('now','-1 day') GROUP BY pickup_window`).bind(fromCity)
+      : c.env.DB.prepare(`SELECT pickup_window, COUNT(*) n FROM jobs WHERE status IN ('created','rider_assigned','picked_up') AND pickup_window IN ('06:00','10:00','14:00') AND created_at > datetime('now','-1 day') GROUP BY pickup_window`);
+    const { results } = await q.all<any>();
+    for (const r of results ?? []) counts[String(r.pickup_window)] = Number(r.n ?? 0);
+  } catch {}
+  const ranked = ['06:00', '10:00', '14:00'].sort((a, b) => (counts[a] ?? 0) - (counts[b] ?? 0));
+  return c.json({
+    suggested_window: ranked[0],
+    loads: counts,
+    reason: 'Least-loaded slot in the recent window improves batching and pickup speed.',
+    windows: ranked,
   });
 });
 
@@ -1434,6 +1504,12 @@ app.post('/jobs', async (c) => {
 
     const total = round2(totals.total_zmw + returnLegFee);
     const dropOffLeg = totals.dropoff_leg_zmw;
+    // Declared value + optional cover (quoted only; NOT active insurance).
+    const declaredValueZmw = Math.max(0, Number(b.declared_value_zmw ?? 0) || 0);
+    const coverOptIn = b.cover_opt_in === true || b.cover_opt_in === 1 || b.cover_opt_in === '1';
+    const cover = coverOptIn ? coverQuote(declaredValueZmw, weightClass) : { fee_zmw: 0, cap_zmw: 0 };
+    const coverStatus = !coverOptIn ? 'none' : (declaredValueZmw > 0 ? 'quoted' : 'declined');
+    if (coverOptIn && declaredValueZmw <= 0) return c.json({ error: 'declared_value_required_for_cover', detail: 'Enter a declared parcel value to receive a cover quote.' }, 400);
 
     // Wider entropy: date + 5 random chars (the old 2-digit suffix was guessable)
     const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
@@ -1456,8 +1532,9 @@ app.post('/jobs', async (c) => {
          promo_code, promo_discount_zmw,
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile,
-         parcels, vehicle_class, branch, from_city, parcel_photo_url)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34)`,
+         parcels, vehicle_class, branch, from_city, parcel_photo_url,
+         declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38)`,
     ).bind(
       ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -1470,6 +1547,7 @@ app.post('/jobs', async (c) => {
       b.branch ? String(b.branch).trim().slice(0, 80) : null,
       fromCity,
       parcelUrl,
+      declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
     ).run();
 
     if (promoCode) {
@@ -1751,6 +1829,11 @@ app.post('/collections', async (c) => {
   if (parCell && !/^\/media\/uploads\/(kyc|selfie)\/[^/]+\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i.test(parCell)) {
     return c.json({ error: 'bad_parcel_photo_url', detail: 'Upload the parcel photo via /uploads first, then pass its url.' }, 400);
   }
+  const declaredValueZmw = Math.max(0, Number(b.declared_value_zmw ?? 0) || 0);
+  const coverOptIn = b.cover_opt_in === true || b.cover_opt_in === 1 || b.cover_opt_in === '1';
+  const cover = coverOptIn ? coverQuote(declaredValueZmw, String(b.weight_class ?? '0-5kg')) : { fee_zmw: 0, cap_zmw: 0 };
+  const coverStatus = !coverOptIn ? 'none' : (declaredValueZmw > 0 ? 'quoted' : 'declined');
+  if (coverOptIn && declaredValueZmw <= 0) return c.json({ error: 'declared_value_required_for_cover' }, 400);
   // Ghost-booking guard for collections too (pay-as-you-go, zero deliveries done).
   const completedEver = (await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
@@ -1762,14 +1845,16 @@ app.post('/collections', async (c) => {
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
        counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
-       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, delivery_otp_hash, parcel_photo_url)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka',?19,?20)`,
+       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, delivery_otp_hash, parcel_photo_url,
+       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka',?19,?20,?21,?22,?23,?24)`,
   ).bind(
     ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
     String(b.description ?? 'Collection').trim().slice(0, 200), String(b.weight_class ?? '0-5kg'),
     riderFee, processing, total, window, pickupAt, payMethod, parcels, vehicleClass,
     deliveryOtpHash, parcelUrl,
+    declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
   ).run();
 
   await c.env.DB.prepare(
@@ -1785,7 +1870,7 @@ app.post('/collections', async (c) => {
   // Handover proof SMS — the recipient (never the sender) holds the code
   c.executionCtx.waitUntil(
     sendSms(c.env, recipientPhone,
-    `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {}),
+    `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
   );
 
   // Ghost-booking deposit for first ride collections (same as /jobs bookings)
@@ -5669,20 +5754,95 @@ app.post('/rider/profile/ai-face-check', async (c) => {
   return c.json({ ok: true, face });
 });
 
-/* --------------------- anti-fraud: AI parcel photo match ------------------- */
+/* ------------------- declared value + optional cover (NOT insurance) ------- */
+// Optional quoted protection: priced transparently, recorded as evidence context.
+// NOT automatic/regulated insurance. Cover becomes "active" only under confirmed
+// terms/eligibility (future). Until then status is quoted/declined/none.
+const COVER_TERMS_VERSION = '2026-11-08';
+const COVER_TERMS_SUMMARY = 'Optional parcel cover quote (not insurance). Limits, exclusions, and eligibility apply. Photo/OTP/parcel-check evidence may be required for any review. No cover is active until DropOff confirms terms in writing/in-app.';
+function coverQuote(declaredValueZmw: number, weightClass: string): { fee_zmw: number; cap_zmw: number } {
+  const v = Math.max(0, declaredValueZmw);
+  if (v <= 0) return { fee_zmw: 0, cap_zmw: 0 };
+  // Simple transparent quote: 1.5% of declared value, min K5, max K150 fee; cap = declared value up to K5000 by default.
+  const base = v * 0.015;
+  const heavy = /15\+|large|bulk/i.test(weightClass) ? 5 : 0;
+  const fee = Math.min(150, Math.max(5, round2(base + heavy)));
+  const cap = Math.min(5000, round2(v));
+  return { fee_zmw: fee, cap_zmw: cap };
+}
+
+/* --------------------- hybrid parcel photo check (AI + signals + rules) ---- */
 // The SELLER captures the parcel at booking (parcel_photo_url); the rider
 // captures it again at the depot/courier drop-off (dropoff_photo_url /
-// pod_delivery_url). A vision model describes both and a text model decides
-// whether they plausibly show the same parcel — assistive evidence, never the
-// verdict. Same conservative shape as compareFaceToId above.
+// pod_delivery_url). Hybrid verdict = deterministic signals + LLM semantic
+// comparison + rules → needs_review/flag. Perceptual hash/embedding is a
+// pluggable upgrade (needs pixel decode or an embedding model); today we use
+// exact SHA-256 fingerprints + LLM + rules and store feedback for training/eval.
 type ParcelCheck = {
   same_parcel: 'yes' | 'uncertain' | 'no';
   confidence: 'high' | 'medium' | 'low';
   note: string;
   checked_at: string;
+  exact_fingerprint_match?: boolean;
+  booking_fingerprint_sha256?: string;
+  dropoff_fingerprint_sha256?: string;
+  booking_bytes?: number;
+  dropoff_bytes?: number;
+  perceptual_hash?: string | null; // semv1 semantic signal now; true pHash/embedding later
+  similarity_score?: number | null;
+  llm?: { booking_desc?: string; dropoff_desc?: string; model: string };
+  rules?: { needs_review: boolean; reasons: string[]; risk_score: number; semantic_score?: number | null };
+  needs_review?: boolean;
+  review_status?: 'pending' | 'confirmed_match' | 'confirmed_mismatch' | 'inconclusive';
 };
 
-async function compareParcelPhotos(env: Env, bookingBytes: number[], dropoffBytes: number[]): Promise<ParcelCheck> {
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+function normalizeTokens(s: string): string[] {
+  return (s.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((t: string) => t.length > 2 && !['the','and','with','one','two','has','for','its','parcel','photo'].includes(t));
+}
+function jaccard(a: string[], b: string[]): number {
+  if (!a.length && !b.length) return 1;
+  const A = new Set(a), B = new Set(b);
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  return union ? inter / union : 0;
+}
+async function semanticSignature(descA: string, descB: string): Promise<{ score: number; signature: string }> {
+  const ta = normalizeTokens(descA), tb = normalizeTokens(descB);
+  const score = Math.round(jaccard(ta, tb) * 1000) / 1000;
+  const sig = `semv1:${(await sha256Hex(new TextEncoder().encode([...new Set([...ta, ...tb].sort())].join('|')))).slice(0, 16)}:${score.toFixed(3)}`;
+  return { score, signature: sig };
+}
+
+function parcelCheckRules(result: Pick<ParcelCheck, 'same_parcel' | 'confidence'>, exactMatch: boolean, semanticScore: number | null, ctx: { partnerConfirmed?: boolean; hasOtp?: boolean }): { needs_review: boolean; reasons: string[]; risk_score: number; semantic_score?: number | null } {
+  const reasons: string[] = [];
+  let risk = 0;
+  if (exactMatch) reasons.push('exact_fingerprint_match'); // same bytes reused — notable
+  if (semanticScore != null) {
+    if (semanticScore >= 0.55) { reasons.push('semantic_high'); risk = Math.max(0, risk - 1); }
+    else if (semanticScore < 0.20) { reasons.push('semantic_low'); risk += 1; }
+    else reasons.push('semantic_mid');
+  }
+  if (result.same_parcel === 'no') { risk += 4; reasons.push('llm_mismatch'); }
+  if (result.same_parcel === 'uncertain') { risk += 1; reasons.push('llm_uncertain'); }
+  if (result.confidence === 'low') { risk += 1; reasons.push('low_confidence'); }
+  if (ctx.partnerConfirmed) { risk = Math.max(0, risk - 1); reasons.push('partner_confirmed'); }
+  if (ctx.hasOtp) { risk = Math.max(0, risk - 1); reasons.push('otp_verified'); }
+  const needs_review = result.same_parcel !== 'yes' || risk >= 2 || reasons.includes('exact_fingerprint_match') || semanticScore != null && semanticScore < 0.20;
+  return { needs_review, reasons, risk_score: risk, semantic_score: semanticScore };
+}
+
+async function compareParcelPhotos(env: Env, bookingBytesArr: number[], dropoffBytesArr: number[], ctx: { partnerConfirmed?: boolean; hasOtp?: boolean } = {}): Promise<ParcelCheck> {
+  const bookingBytes = new Uint8Array(bookingBytesArr);
+  const dropoffBytes = new Uint8Array(dropoffBytesArr);
+  const [bookingFp, dropoffFp] = await Promise.all([sha256Hex(bookingBytes), sha256Hex(dropoffBytes)]);
+  const exactMatch = bookingFp === dropoffFp;
+
   const describe = async (bytes: number[], hint: string) => {
     const out: any = await (env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
       image: bytes,
@@ -5691,27 +5851,54 @@ async function compareParcelPhotos(env: Env, bookingBytes: number[], dropoffByte
     });
     return String(out?.response ?? out?.description ?? '').trim().slice(0, 300);
   };
-  const bookingDesc = await describe(bookingBytes, 'the parcel photo captured by the sender at booking');
-  const dropoffDesc = await describe(dropoffBytes, 'the parcel photo captured by the rider at the depot/courier drop-off');
-  const out: any = await (env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
-    messages: [
-      { role: 'system', content: 'You compare two descriptions of parcel photos to detect parcel swaps or fabricated deliveries. Be conservative: if either description is vague or contradicts nothing but proves little, answer uncertain. Reply with JSON ONLY.' },
-      { role: 'user', content: `Description A (booking photo from the seller): ${bookingDesc}\nDescription B (drop-off photo from the rider): ${dropoffDesc}\nCould these plausibly show the SAME parcel? Reply with JSON ONLY: {"same_parcel":"yes"|"uncertain"|"no","confidence":"high"|"medium"|"low","note":"<one short sentence>"}` },
-    ],
-    max_tokens: 120,
-  });
-  const raw = (typeof out?.response === 'string' ? out.response
-    : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim();
-  const m = raw.match(/\{[\s\S]*\}/);
-  let j: any = {};
-  try { j = m ? JSON.parse(m[0]) : {}; } catch { j = {}; }
-  const sp = String(j.same_parcel ?? 'uncertain').toLowerCase();
-  const conf = String(j.confidence ?? 'low').toLowerCase();
+  let bookingDesc = '', dropoffDesc = '';
+  let llmVerdict: { same_parcel: 'yes' | 'uncertain' | 'no'; confidence: 'high' | 'medium' | 'low'; note: string } = {
+    same_parcel: 'uncertain', confidence: 'low', note: 'AI unavailable — photos filed as evidence for manual review.',
+  };
+  if (env.AI) {
+    try {
+      [bookingDesc, dropoffDesc] = await Promise.all([
+        describe(bookingBytesArr, 'the parcel photo captured by the sender at booking'),
+        describe(dropoffBytesArr, 'the parcel photo captured by the rider at the depot/courier drop-off'),
+      ]);
+      const out: any = await (env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
+        messages: [
+          { role: 'system', content: 'You compare two descriptions of parcel photos to detect parcel swaps or fabricated deliveries. Be conservative: if either description is vague or contradicts nothing but proves little, answer uncertain. Reply with JSON ONLY.' },
+          { role: 'user', content: `Description A (booking photo from the seller): ${bookingDesc}\nDescription B (drop-off photo from the rider): ${dropoffDesc}\nCould these plausibly show the SAME parcel? Reply with JSON ONLY: {"same_parcel":"yes"|"uncertain"|"no","confidence":"high"|"medium"|"low","note":"<one short sentence>"}` },
+        ],
+        max_tokens: 120,
+      });
+      const raw = (typeof out?.response === 'string' ? out.response
+        : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim();
+      const m = raw.match(/\{[\s\S]*\}/);
+      let j: any = {};
+      try { j = m ? JSON.parse(m[0]) : {}; } catch { j = {}; }
+      const sp = String(j.same_parcel ?? 'uncertain').toLowerCase();
+      const conf = String(j.confidence ?? 'low').toLowerCase();
+      llmVerdict = {
+        same_parcel: sp === 'yes' || sp === 'no' ? sp : 'uncertain',
+        confidence: conf === 'high' || conf === 'medium' ? conf : 'low',
+        note: String(j.note ?? '').slice(0, 200),
+      };
+    } catch { /* keep default uncertain */ }
+  }
+  const semantic = (bookingDesc || dropoffDesc) ? await semanticSignature(bookingDesc, dropoffDesc) : null;
+  const rules = parcelCheckRules(llmVerdict, exactMatch, semantic?.score ?? null, ctx);
   return {
-    same_parcel: sp === 'yes' || sp === 'no' ? sp : 'uncertain',
-    confidence: conf === 'high' || conf === 'medium' ? conf : 'low',
-    note: String(j.note ?? '').slice(0, 200),
+    ...llmVerdict,
     checked_at: new Date().toISOString(),
+    exact_fingerprint_match: exactMatch,
+    booking_fingerprint_sha256: bookingFp,
+    dropoff_fingerprint_sha256: dropoffFp,
+    booking_bytes: bookingBytes.length,
+    dropoff_bytes: dropoffBytes.length,
+    // semv1 = semantic (description-derived) similarity signal; upgrade path: true pHash (WASM) or image-embedding model.
+    perceptual_hash: semantic?.signature ?? null,
+    similarity_score: semantic?.score ?? null,
+    llm: { booking_desc: bookingDesc || undefined, dropoff_desc: dropoffDesc || undefined, model: '@cf/meta/llama-3.2-11b-vision-instruct+llama-3.1-8b-instruct-fast' },
+    rules,
+    needs_review: rules.needs_review,
+    review_status: 'pending',
   };
 }
 
@@ -5724,6 +5911,7 @@ app.post('/jobs/:ref/parcel-check', async (c) => {
   const isOpsKey = c.get('role') === 'ops';
   const job = await c.env.DB.prepare(
     `SELECT j.id, j.ref, j.sender_phone, j.parcel_photo_url, j.dropoff_photo_url, j.pod_delivery_url,
+            j.partner_confirmed, j.last_mile, j.delivery_otp_hash,
             r.phone AS rider_phone
        FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
       WHERE j.ref = ?1`,
@@ -5740,33 +5928,136 @@ app.post('/jobs/:ref/parcel-check', async (c) => {
   const booking = await c.env.BACKUPS.get(bookingKey).catch(() => null);
   const drop = await c.env.BACKUPS.get(dropKey).catch(() => null);
   if (!booking || !drop) return c.json({ error: 'photo_missing' }, 404);
-  let check: ParcelCheck | null = null;
-  if (c.env.AI) {
-    try {
-      check = await compareParcelPhotos(
-        c.env,
-        [...new Uint8Array(await booking.arrayBuffer())],
-        [...new Uint8Array(await drop.arrayBuffer())],
-      );
-    } catch { check = null; }
-  }
-  const result: ParcelCheck = check ?? {
-    same_parcel: 'uncertain', confidence: 'low',
-    note: 'AI unavailable — photos filed as evidence for manual review.',
-    checked_at: new Date().toISOString(),
+  const ctx = {
+    partnerConfirmed: Number(job.partner_confirmed ?? 0) === 1,
+    hasOtp: !!job.delivery_otp_hash && job.delivery_otp_hash !== '0000',
   };
+  let result: ParcelCheck;
+  try {
+    result = await compareParcelPhotos(
+      c.env,
+      [...new Uint8Array(await booking.arrayBuffer())],
+      [...new Uint8Array(await drop.arrayBuffer())],
+      ctx,
+    );
+  } catch {
+    result = {
+      same_parcel: 'uncertain', confidence: 'low',
+      note: 'Check failed — photos filed as evidence for manual review.',
+      checked_at: new Date().toISOString(),
+      perceptual_hash: null,
+      rules: { needs_review: true, reasons: ['check_error'], risk_score: 1 },
+      needs_review: true,
+      review_status: 'pending',
+    };
+  }
   const flag = result.same_parcel === 'no' ? 1 : 0;
-  await c.env.DB.batch([
+  const reviewFlag = result.needs_review ? 1 : 0;
+  const stmts: D1PreparedStatement[] = [
     c.env.DB.prepare('UPDATE jobs SET parcel_check = ?2 WHERE id = ?1').bind(job.id, JSON.stringify(result)),
     c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'parcel_check', ?2)`,
-    ).bind(job.id, `Parcel photo check: ${result.same_parcel} (${result.confidence}) — ${result.note}`),
-    ...(flag ? [c.env.DB.prepare(
+    ).bind(job.id, `Parcel check [hybrid]: ${result.same_parcel} (${result.confidence}) review=${reviewFlag} — ${result.note}`),
+  ];
+  if (flag) {
+    stmts.push(c.env.DB.prepare(
       `INSERT INTO fraud_flags (job_id, job_ref, phone, score, reasons, status)
          VALUES (?1, ?2, ?3, 4, 'parcel_mismatch_ai', 'open')`,
-    ).bind(job.id, job.ref, job.sender_phone)] : []),
+    ).bind(job.id, job.ref, job.sender_phone));
+  }
+  if (reviewFlag) {
+    try {
+      stmts.push(c.env.DB.prepare(
+        `INSERT INTO parcel_check_feedback (job_id, job_ref, verdict, decision, reviewer, note, signals_json)
+         VALUES (?1, ?2, ?3, 'pending_review', 'system', ?4, ?5)`,
+      ).bind(job.id, job.ref, result.same_parcel, result.note ?? '', JSON.stringify({ rules: result.rules, exact_fingerprint_match: result.exact_fingerprint_match })));
+    } catch { /* feedback table may not exist yet on old DBs */ }
+  }
+  await c.env.DB.batch(stmts);
+  return c.json({ ok: true, ...result, flagged: flag === 1, needs_review: reviewFlag === 1 });
+});
+
+// Human review for hybrid parcel checks (ops/admin). Stores feedback for eval/training.
+app.post('/jobs/:ref/parcel-review', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const decision = String(b?.decision ?? '');
+  if (!['confirm_match', 'confirm_mismatch', 'inconclusive'].includes(decision)) {
+    return c.json({ error: 'decision must be confirm_match, confirm_mismatch, or inconclusive' }, 400);
+  }
+  const note = String(b?.note ?? '').trim().slice(0, 500) || null;
+  const reviewer = c.get('phone') ?? 'admin-key';
+  const job = await c.env.DB.prepare(
+    'SELECT id, ref, parcel_check FROM jobs WHERE ref = ?1',
+  ).bind(c.req.param('ref')).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  let check: any = {};
+  try { check = job.parcel_check ? JSON.parse(job.parcel_check) : {}; } catch { check = {}; }
+  check.review_status = decision === 'confirm_match' ? 'confirmed_match' : decision === 'confirm_mismatch' ? 'confirmed_mismatch' : 'inconclusive';
+  check.reviewed_by = reviewer;
+  check.reviewed_at = new Date().toISOString();
+  check.review_note = note;
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE jobs SET parcel_check = ?2, parcel_check_review = ?3 WHERE id = ?1')
+      .bind(job.id, JSON.stringify(check), JSON.stringify({ decision, reviewer, note, reviewed_at: check.reviewed_at })),
+    c.env.DB.prepare(
+      `INSERT INTO parcel_check_feedback (job_id, job_ref, verdict, decision, reviewer, note, signals_json)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+    ).bind(job.id, job.ref, check.same_parcel ?? null, decision, reviewer, note, JSON.stringify(check)),
+    c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'parcel_review', ?2)`)
+      .bind(job.id, `Parcel review: ${decision}${note ? ` — ${note}` : ''}`),
   ]);
-  return c.json({ ok: true, ...result, flagged: flag === 1 });
+  return c.json({ ok: true, ref: job.ref, review: check });
+});
+
+// Proof-of-condition / evidence locker: immutable timeline for disputes & insurance.
+// Access: sender, recipient (verified track grant), assigned rider, ops/admin.
+app.get('/jobs/:ref/evidence', async (c) => {
+  const phone = c.get('phone') ?? null;
+  const isAdminKey = isAdmin(c);
+  const isOpsKey = c.get('role') === 'ops';
+  const job = await c.env.DB.prepare(
+    `SELECT j.id, j.ref, j.sender_phone, j.recipient_phone, j.status, j.created_at,
+            j.parcel_photo_url, j.dropoff_photo_url, j.pod_pickup_url, j.pod_delivery_url,
+            j.parcel_check, j.parcel_check_review, j.partner_confirmed, j.last_mile,
+            j.declared_value_zmw, j.cover_opt_in, j.cover_fee_zmw, j.cover_status,
+            j.delivery_otp_hash, j.courier_waybill, j.pickup_window, j.dest_city, j.branch,
+            r.phone AS rider_phone, r.full_name AS rider_name
+       FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
+      WHERE j.ref = ?1`,
+  ).bind(c.req.param('ref')).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  let authorized = isAdminKey || isOpsKey || (phone && (phone === job.sender_phone || phone === job.rider_phone));
+  if (!authorized && phone && phone === job.recipient_phone) authorized = true; // signed-in recipient
+  if (!authorized) return c.json({ error: 'forbidden' }, 403);
+  const { results: events } = await c.env.DB.prepare(
+    `SELECT status, note, created_at FROM job_events WHERE job_id = ?1 ORDER BY id ASC`,
+  ).bind(job.id).all<any>();
+  let parcelCheck: any = null;
+  try { parcelCheck = job.parcel_check ? JSON.parse(job.parcel_check) : null; } catch {}
+  const evidence = {
+    booking_photo: job.parcel_photo_url || null,
+    pickup_photo: job.pod_pickup_url || null,
+    depot_or_dropoff_photo: job.dropoff_photo_url || job.pod_delivery_url || null,
+    handover_photo: job.pod_delivery_url || null,
+    parcel_check: parcelCheck,
+    parcel_review: parcelCheck?.review_status ?? null,
+    partner_confirmed: Number(job.partner_confirmed ?? 0) === 1,
+    otp_required: !!job.delivery_otp_hash && job.delivery_otp_hash !== '0000' && Number(job.last_mile) === 1,
+    waybill: job.courier_waybill || null,
+  };
+  return c.json({
+    ok: true,
+    ref: job.ref,
+    status: job.status,
+    created_at: job.created_at,
+    route: { dest_city: job.dest_city, branch: job.branch, pickup_window: job.pickup_window },
+    rider: job.rider_name ? { name: job.rider_name } : null,
+    declared_value_zmw: job.declared_value_zmw,
+    cover: { opt_in: Number(job.cover_opt_in ?? 0) === 1, fee_zmw: job.cover_fee_zmw, status: job.cover_status },
+    evidence,
+    timeline: (events ?? []).map((e: any) => ({ status: e.status, at: e.created_at, note: e.note })),
+  });
 });
 
 /* ------------------------------ web dashboard ----------------------------- */
@@ -6704,7 +6995,7 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
       ]);
       await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
       await sendSms(env, job.sender_phone,
-        `DropOff: ${job.ref} was auto-canceled because the parcel wasn't handed over in time (no-show). Repeated missed pickups can pause new bookings.${localSkipSuffix()}`).catch(() => {});
+        `DropOff: ${job.ref} was auto-canceled because the parcel wasn't handed over in time (no-show). Repeated missed pickups can pause new bookings.`).catch(() => {});
       canceled++;
     } catch { /* never break the minute cron */ }
   }
@@ -6727,7 +7018,7 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
       ]);
       await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
       await sendSms(env, job.sender_phone,
-        `DropOff: ${job.ref} was auto-canceled after its slot window (no-show). Repeated missed pickups can pause new bookings.${localSkipSuffix()}`).catch(() => {});
+        `DropOff: ${job.ref} was auto-canceled after its slot window (no-show). Repeated missed pickups can pause new bookings.`).catch(() => {});
       canceled++;
     } catch { /* never break the minute cron */ }
   }

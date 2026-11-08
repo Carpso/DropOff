@@ -1,0 +1,19 @@
+{
+  "@@locale": "toi",
+  "appTitle": "DropOff Zambia",
+  "skipRideWarningTitle": "Mutaphonyi kubwezegwa",
+  "skipRideWarningBody": "Na mwaphonya rider naa mutapa cintu aciindi, kubbukka kulakonzya kumana alimwi no-show strike ilalembwa. Ma strike 3 mumazuba 14 alakonzya kulesya kubbukka kupya.",
+  "bookingOnHoldTitle": "Kubbukka kwayimikizigwa",
+  "bookingOnHoldBody": "Kuphonya kwakunembo kwayimikizya kubbukka kupya. Amwaambe ku DropOff support naa ops.",
+  "depositRequiredTitle": "Deposit ilayandika rider katana kutumwa",
+  "depositRequiredBody": "Bakubbukka ciindi cakusaanguna (pay-as-you-go) balayandika kuzumina deposit niini rider katana kutumwa. Bapulani tabayandiki. Deposit inookkala mu wallet yanu ya DropOff.",
+  "slotRequiredTitle": "Amusale ciindi cakubwezegwa",
+  "slotRequiredBody": "Cintu acimwi ceelede kubbukkiwa aciindi ca Sweep (tacili cakubwezegwa citajisi ciindi).",
+  "cutoffWarning": "Amubbukke cutoff kaitanasika kutegwa mutaunki kuciindi citobela.",
+  "evidenceShare": "Amwaabile bumboni",
+  "bestSlot": "Ciindi cibotu mucooko canu",
+  "savedRecipients": "Batambula babikkidwe",
+  "declaredValue": "Muulo waambidwe (ZMW)",
+  "parcelCover": "Cikwabilizyo cacintu (kusala)",
+  "coverDisclaimer": "Cikwabilizyo ncintu cakusala. Milawo amipimo ilabeleka; tacinshuwalansi pe kusikila cazuminwa."
+}

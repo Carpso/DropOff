@@ -37,6 +37,10 @@ At booking we send the parcel recipient a 4-digit DropOff code by SMS. The assig
 - Payment processing goes through Lipila under Lipila's own terms.
 - We do not sell your personal data.
 
+## Optional parcel cover (quoted protection)
+
+If you choose optional parcel cover, we record your declared value and provide a **quote** (fee/cap) for tracking and dispute context. **This is not automatic insurance.** Cover is not active unless and until DropOff confirms eligibility and terms in writing or in-app. Limits, exclusions, evidence requirements (photos, handover/OTP, parcel-check, partner confirmation), and claim review rules apply. Do not rely on a quote as insurance coverage.
+
 ## Your rights
 
 You may ask to see, correct, or delete your account data at any time by emailing support or using the sign-out/unlink flow, which removes your stored session and push token from this device. Server records needed for financial audit are kept as required by law.

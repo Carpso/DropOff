@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'l10n/app_localizations.dart';
 import 'screens/app_shell.dart';
 import 'screens/bookings_screen.dart';
 import 'screens/lock_screen.dart';
@@ -48,25 +50,36 @@ class DropOffApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AppScope(
         store: store,
-        child: MaterialApp(
-          navigatorKey: navigatorKey,
-          title: 'DropOff Zambia',
-          debugShowCheckedModeBanner: false,
-          theme: buildAppTheme(),
-          // Universal text-scale clamp: wrap EVERY screen so a large system
-          // font can never crush a row/card into a vertical letter-per-line
-          // ribbon (Business "No plan yet", Parcels in flight, stats, …).
-          // Never shrink below the system size; never grow past 1.30x.
-          builder: (context, child) => MediaQuery(
-                data: MediaQuery.of(context).copyWith(
-                  textScaler: MediaQuery.textScalerOf(context).clamp(
-                    minScaleFactor: 1.0,
-                    maxScaleFactor: 1.30,
+        child: AnimatedBuilder(
+          animation: store,
+          builder: (context, _) => MaterialApp(
+            navigatorKey: navigatorKey,
+            onGenerateTitle: (ctx) => AppLocalizations.of(ctx).appTitle,
+            debugShowCheckedModeBanner: false,
+            theme: buildAppTheme(),
+            locale: store.locale,
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            supportedLocales: AppLocalizations.supportedLocales,
+            // Universal text-scale clamp: wrap EVERY screen so a large system
+            // font can never crush a row/card into a vertical letter-per-line
+            // ribbon (Business "No plan yet", Parcels in flight, stats, …).
+            // Never shrink below the system size; never grow past 1.30x.
+            builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: MediaQuery.textScalerOf(context).clamp(
+                      minScaleFactor: 1.0,
+                      maxScaleFactor: 1.30,
+                    ),
                   ),
+                  child: child!,
                 ),
-                child: child!,
-              ),
-          home: _SplashScreen(store: store, initFuture: initFuture),
+            home: _SplashScreen(store: store, initFuture: initFuture),
+          ),
         ),
       );
 }

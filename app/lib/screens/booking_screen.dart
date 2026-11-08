@@ -8,6 +8,7 @@ import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
+import '../l10n/app_localizations.dart';
 import 'account_screen.dart';
 import 'bookings_screen.dart';
 
@@ -77,6 +78,8 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _aiBusy = false;
   String? _parcelPhotoUrl;
   bool _parcelPhotoUploading = false;
+  final _declaredValue = TextEditingController();
+  bool _coverOptIn = false;
   List<String> _cities = cities;
   double? _promoPct;
   String _promoNote = '';
@@ -148,7 +151,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
   @override
   void dispose() {
-    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress, _courierSearchCtl]) {
+    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress, _courierSearchCtl, _declaredValue]) {
       controller.dispose();
     }
     super.dispose();
@@ -302,6 +305,8 @@ class _BookingScreenState extends State<BookingScreen> {
       parcels: _parcels,
       vehicleClass: _vehicleClass,
       parcelPhotoUrl: _parcelPhotoUrl,
+      declaredValueZmw: double.tryParse(_declaredValue.text.trim()),
+      coverOptIn: _coverOptIn,
     );
     if (store.lastBookingWindowRolled != null) {
       _message('The ${store.lastBookingWindowRolled} window had closed — your booking moved to the next open slot automatically.');
@@ -550,7 +555,21 @@ class _BookingScreenState extends State<BookingScreen> {
         ),
         const Padding(
           padding: EdgeInsets.only(top: 4, bottom: 4),
-          child: Text('A clear photo of the parcel protects you — the rider\'s depot drop-off photo is checked against it.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+          child: Text('A clear photo of the parcel protects you - the rider\'s depot drop-off photo is checked against it.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _declaredValue,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(labelText: AppLocalizations.of(context).declaredValue, hintText: 'e.g. 500', prefixIcon: const Icon(Icons.payments_outlined)),
+        ),
+        CheckboxListTile(
+          value: _coverOptIn,
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          title: Text(AppLocalizations.of(context).parcelCover),
+          subtitle: Text(AppLocalizations.of(context).coverDisclaimer, style: const TextStyle(fontSize: 11, height: 1.3)),
+          onChanged: (v) => setState(() => _coverOptIn = v ?? false),
         ),
         const SizedBox(height: 8),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -687,7 +706,32 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
         ),
         const SizedBox(height: 14),
-        const Text('Select pickup slot', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.amber)),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFF7B5710)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(AppLocalizations.of(context).skipRideWarningBody, style: const TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
+          ]),
+        ),
+        const SizedBox(height: 10),
+        Row(children: [
+          const Expanded(child: Text('Select pickup slot', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800))),
+          TextButton.icon(
+            onPressed: () async {
+              final s = await DropOffApi.slotsSuggest(fromCity: _from);
+              if (!mounted || s == null) return;
+              final w = '${s['suggested_window'] ?? ''}';
+              if (pickupWindows.containsKey(w) && !_slotClosed(w)) {
+                setState(() => _pickupWindow = w);
+                _message('${AppLocalizations.of(context).bestSlot}: $w');
+              }
+            },
+            icon: const Icon(Icons.auto_awesome, size: 16),
+            label: Text(AppLocalizations.of(context).bestSlot, style: const TextStyle(fontSize: 12)),
+          ),
+        ]),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           ChoiceChip(

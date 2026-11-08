@@ -487,6 +487,29 @@ class DropOffApi {
   static Future<ApiResponse> parcelCheck(String ref) =>
       post('/jobs/$ref/parcel-check', {});
 
+  static Future<Map<String, dynamic>?> jobEvidence(String ref) => get('/jobs/$ref/evidence');
+  static Future<Map<String, dynamic>?> slotsSuggest({String? fromCity}) =>
+      get('/slots/suggest', {if (fromCity != null && fromCity.isNotEmpty) 'from_city': fromCity});
+  static Future<List<Map<String, dynamic>>> recipients() async {
+    final data = await get('/recipients');
+    return ((data?['recipients'] as List?) ?? const []).cast<Map<String, dynamic>>();
+  }
+  static Future<ApiResponse> saveRecipient(Map<String, dynamic> r) => post('/recipients', r);
+  static Future<ApiResponse> deleteRecipient(int id) => delete('/recipients/$id');
+  static Future<ApiResponse> patchMe(Map<String, dynamic> body) => _patchJson('/me', body);
+
+  static Future<ApiResponse> _patchJson(String path, Map<String, dynamic> body) async {
+    if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
+    try {
+      final headers = <String, String>{'Content-Type': 'application/json', ...authHeaders};
+      final res = await http.patch(_uri(path), headers: headers, body: jsonEncode(body)).timeout(const Duration(seconds: 20));
+      final data = res.body.isEmpty ? <String, dynamic>{} : (jsonDecode(res.body) as Map<String, dynamic>? ?? {});
+      return ApiResponse(status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, body: data);
+    } catch (_) {
+      return const ApiResponse(error: 'network_error');
+    }
+  }
+
   /// Rate one side of a delivery — seller, driver (rider) or courier — with an
   /// optional comment. Resubmitting updates the previous score.
   static Future<ApiResponse> rateJob({

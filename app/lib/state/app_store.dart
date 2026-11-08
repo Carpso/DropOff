@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' show Locale;
 
 import 'package:flutter/foundation.dart';
 import '../services/secure_store.dart';
@@ -40,6 +41,7 @@ class AppStore extends ChangeNotifier {
   String? _role;
   String? _photoUrl;
   String? _fullName;
+  String? _localeCode;
   bool _superadmin = false;
   bool _biometricEnabled = false;
   String _deviceId = 'unknown';
@@ -59,6 +61,8 @@ class AppStore extends ChangeNotifier {
   /// photo on file — views fall back to initials.
   String? get photoUrl => _photoUrl;
   String? get fullName => _fullName;
+  String? get localeCode => _localeCode;
+  Locale? get locale => _localeCode == null || _localeCode!.isEmpty ? null : Locale(_localeCode!);
 
   /// Server role for the signed-in identity: customer | partner | admin | ops |
   /// rider. Admin/ops unlock the Team tab and the admin console; rider unlocks
@@ -143,6 +147,7 @@ class AppStore extends ChangeNotifier {
     DropOffApi.token = _token;
     _linkedPhone = preferences.getString(_phoneKey);
     _email = preferences.getString(_emailKey);
+    _localeCode = preferences.getString(_scoped('locale'));
     await _reloadAccountCache();
     // Team roster is the server's list (shared across admins/devices) —
     // sync it on every cold start so it never resets to empty on this device.
@@ -170,6 +175,22 @@ class AppStore extends ChangeNotifier {
     if (DropOffApi.enabled) unawaited(refreshRole());
   }
 
+  Future<void> setLocaleCode(String? code) async {
+    final normalized = (code == null || code.trim().isEmpty) ? null : code.trim().toLowerCase();
+    if (normalized == _localeCode) return;
+    _localeCode = normalized;
+    final preferences = await SharedPreferences.getInstance();
+    if (normalized != null) {
+      await preferences.setString(_scoped('locale'), normalized);
+    } else {
+      await preferences.remove(_scoped('locale'));
+    }
+    notifyListeners();
+    if (DropOffApi.enabled && linked) {
+      await DropOffApi.patchMe({'locale_pref': normalized});
+    }
+  }
+
   /// Pulls the signed-in identity's role from GET /me so the shell can hide
   /// Team/admin surfaces from ordinary sellers and recipients. Runs even
   /// without a JWT: an ops-key device (rider build) resolves role='ops' via
@@ -184,15 +205,22 @@ class AppStore extends ChangeNotifier {
     final photo = me['photo_url'] as String?;
     final name = me['full_name'] as String?;
     final email = me['email'] as String?;
-    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email) {
+    final loc = me['locale_pref'] as String?;
+    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email || loc != _localeCode) {
       _role = role;
       _superadmin = sa;
       _photoUrl = photo;
       _fullName = name;
+      _localeCode = (loc == null || loc.isEmpty) ? null : loc;
+      final preferences = await SharedPreferences.getInstance();
       if (email != null) {
         _email = email;
-        final preferences = await SharedPreferences.getInstance();
         await preferences.setString(_emailKey, email);
+      }
+      if (_localeCode != null) {
+        await preferences.setString(_scoped('locale'), _localeCode!);
+      } else {
+        await preferences.remove(_scoped('locale'));
       }
       notifyListeners();
     }
@@ -498,6 +526,8 @@ class AppStore extends ChangeNotifier {
     String vehicleClass = 'motorcycle',
     String? branch,
     String? parcelPhotoUrl,
+    double? declaredValueZmw,
+    bool coverOptIn = false,
   }) async {
     final now = DateTime.now();
     final id = now.microsecondsSinceEpoch.toString();
@@ -530,6 +560,8 @@ class AppStore extends ChangeNotifier {
       'pickup_window': pickupWindow,
       'pickup_time': pickupWindow,
       if (parcelPhotoUrl != null && parcelPhotoUrl.isNotEmpty) 'parcel_photo_url': parcelPhotoUrl,
+      if (declaredValueZmw != null && declaredValueZmw > 0) 'declared_value_zmw': declaredValueZmw,
+      if (coverOptIn) 'cover_opt_in': true,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode.trim().toUpperCase(),
     };
     if (DropOffApi.enabled) {

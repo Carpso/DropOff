@@ -1,0 +1,19 @@
+{
+  "@@locale": "en",
+  "appTitle": "DropOff Zambia",
+  "skipRideWarningTitle": "Don't miss your pickup",
+  "skipRideWarningBody": "If you miss your rider or don't hand over the parcel in time, the booking may be auto-canceled and a no-show strike recorded. 3 strikes in 14 days can pause new bookings.",
+  "bookingOnHoldTitle": "Booking on hold",
+  "bookingOnHoldBody": "Recent missed pickups put new bookings on hold. Contact DropOff support or ask ops to review your account.",
+  "depositRequiredTitle": "Deposit required before dispatch",
+  "depositRequiredBody": "First-time pay-as-you-go bookings need a small deposit approval before a rider is dispatched. Subscribers are exempt. The deposit stays on your DropOff wallet.",
+  "slotRequiredTitle": "Choose a pickup slot",
+  "slotRequiredBody": "Every parcel must be booked onto a Sweep slot (no untimed pickups).",
+  "cutoffWarning": "Book before the slot cutoff to avoid moving to the next open slot.",
+  "evidenceShare": "Share evidence",
+  "bestSlot": "Best slot for your area",
+  "savedRecipients": "Saved recipients",
+  "declaredValue": "Declared value (ZMW)",
+  "parcelCover": "Parcel cover (optional)",
+  "coverDisclaimer": "Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed."
+}
