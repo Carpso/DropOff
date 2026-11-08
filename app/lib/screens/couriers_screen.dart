@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -21,6 +23,25 @@ class CouriersScreen extends StatefulWidget {
 
 class _CouriersScreenState extends State<CouriersScreen> {
   String _query = '';
+  Timer? _hintTimer;
+  int _hintIdx = 0;
+  final _searchCtl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(() => _hintIdx = (_hintIdx + 1) % courierSearchSamples.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _hintTimer?.cancel();
+    _searchCtl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +70,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
         ),
       );
     }
-    final filtered = couriers.where((item) => item.name.toLowerCase().contains(_query.toLowerCase())).toList();
+    final filtered = smartCourierSearch(_query, fromCity: 'Lusaka', toCity: '', size: ParcelSize.small);
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
@@ -59,8 +80,14 @@ class _CouriersScreenState extends State<CouriersScreen> {
           const Text('Compare available rates, inspect sample receipts, then book a rider to your preferred depot.', style: TextStyle(color: AppColors.muted, height: 1.45)),
           const SizedBox(height: 20),
           TextField(
+            controller: _searchCtl,
             onChanged: (value) => setState(() => _query = value),
-            decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search couriers'),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search),
+              hintText: courierSearchSamples[_hintIdx % courierSearchSamples.length],
+              labelText: 'Search courier, town or route price',
+              helperText: 'Search by destination (e.g. Ndola) or route price — published depot fares only.',
+            ),
           ),
           const SizedBox(height: 20),
           _LiveDepotsSection(query: _query),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -135,6 +137,10 @@ class _BookingScreenState extends State<BookingScreen> {
       }
     }
     _courierSearchCtl.addListener(() => setState(() {}));
+    _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(() => _hintIdx = (_hintIdx + 1) % courierSearchSamples.length);
+    });
     // Prefer the live chargebook's coverage when the API is on.
     if (DropOffApi.enabled) {
       DropOffApi.cities().then((list) {
@@ -151,6 +157,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
   @override
   void dispose() {
+    _hintTimer?.cancel();
     for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress, _courierSearchCtl, _declaredValue]) {
       controller.dispose();
     }
@@ -199,7 +206,10 @@ class _BookingScreenState extends State<BookingScreen> {
     }
   }
 
-  List<CourierInfo> get _filteredCouriers => couriers.where((c) => c.name.toLowerCase().contains(_courierSearchCtl.text.toLowerCase())).toList();
+  Timer? _hintTimer;
+  int _hintIdx = 0;
+  String get _searchHint => courierSearchSamples[_hintIdx % courierSearchSamples.length];
+  List<CourierInfo> get _filteredCouriers => smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size);
 
   double? get _courierFare => courierFareFor(courierId: _courierId, fromCity: _from, toCity: _to, size: _size);
 
@@ -598,7 +608,18 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 12),
         const Text('Search couriers', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.muted)),
         const SizedBox(height: 6),
-        TextField(controller: _courierSearchCtl, decoration: const InputDecoration(labelText: 'Filter by name', hintText: 'e.g. DHL, Platinum', prefixIcon: Icon(Icons.search), isDense: true)),
+        TextField(
+          controller: _courierSearchCtl,
+          decoration: InputDecoration(
+            labelText: 'Search courier, town, or route price',
+            hintText: _searchHint,
+            prefixIcon: const Icon(Icons.search),
+            isDense: true,
+            helperText: (_from == 'Lusaka' && _to.isNotEmpty)
+                ? 'Tip: shows published depot fares for $_from → $_to when available (public rates only).'
+                : 'Try: “$_searchHint”',
+          ),
+        ),
         const SizedBox(height: 12),
         if (_from != 'Lusaka') ...[
           const SizedBox(height: 12),

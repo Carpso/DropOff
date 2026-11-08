@@ -242,6 +242,80 @@ double? courierFareFor({
   required ParcelSize size,
 }) {
   final courier = courierById(courierId);
-  if (courier.id != 'platinum' || fromCity != 'Lusaka') return null;
+  if (fromCity.trim().toLowerCase() != 'lusaka') return null; // only guess from verified "from Lusaka" boards
   return courier.rateFor(toCity)?.priceFor(size).toDouble();
 }
+
+/// Best-effort published price for a route/size. Rate boards we hold are priced
+/// FROM Lusaka; if sender is elsewhere we do not guess — return null (quote at depot).
+({int? amount, String label})? publishedRoutePrice({
+  required CourierInfo courier,
+  required String fromCity,
+  required String toCity,
+  required ParcelSize size,
+}) {
+  if (courier.rates.isEmpty) return null;
+  if (fromCity.trim().toLowerCase() != 'lusaka') return null;
+  final rate = courier.rateFor(toCity);
+  if (rate == null) return null;
+  final label = switch (size) {
+    ParcelSize.small => 'K${rate.small}',
+    ParcelSize.medium => 'K${rate.medium}',
+    ParcelSize.large => rate.large,
+  };
+  final amount = size == ParcelSize.large
+      ? int.tryParse(rate.large.replaceAll(RegExp(r'[^0-9]'), ''))
+      : rate.priceFor(size);
+  return (amount: amount, label: label);
+}
+
+/// Smart courier search: name/strapline/status + branch/rate towns + route/price intent.
+/// Pass route context to rank couriers that publish a price for that route.
+List<CourierInfo> smartCourierSearch(
+  String query, {
+  String? fromCity,
+  String? toCity,
+  ParcelSize size = ParcelSize.small,
+}) {
+  final q = query.trim().toLowerCase();
+  final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  final wantsPrice = q.contains('price') || q.contains('how much') || q.contains('cost') ||
+      q.contains('rate') || q.contains('charge') || RegExp(r'\bk\d+').hasMatch(q);
+  bool matches(CourierInfo c) {
+    if (q.isEmpty) return true;
+    final hay = [c.name, c.strapline, c.id, c.priceStatus, c.note].join(' ').toLowerCase();
+    if (tokens.every((t) => hay.contains(t))) return true;
+    for (final b in c.branches) {
+      final bh = '${b.city} ${b.name} ${b.address}'.toLowerCase();
+      if (tokens.any(bh.contains)) return true;
+    }
+    for (final r in c.rates) {
+      for (final town in r.towns) {
+        if (tokens.any((t) => town.toLowerCase().contains(t) || t.contains(town.toLowerCase()))) return true;
+      }
+    }
+    if (wantsPrice) return c.hasVerifiedRates || c.rates.isNotEmpty;
+    return false;
+  }
+  final list = couriers.where(matches).toList();
+  if (fromCity != null && toCity != null && fromCity.isNotEmpty && toCity.isNotEmpty) {
+    list.sort((a, b) {
+      final pa = publishedRoutePrice(courier: a, fromCity: fromCity, toCity: toCity, size: size);
+      final pb = publishedRoutePrice(courier: b, fromCity: fromCity, toCity: toCity, size: size);
+      if (pa != null && pb == null) return -1;
+      if (pa == null && pb != null) return 1;
+      return a.name.compareTo(b.name);
+    });
+  }
+  return list;
+}
+
+const courierSearchSamples = <String>[
+  'Lusaka to Ndola small parcel price',
+  'How much to Kitwe from Lusaka?',
+  'Platinum Livingstone rate',
+  'Chipata depot parcel cost',
+  'Solwezi medium parcel',
+  'Courier to Kabwe',
+  'Lusaka to Mongu charge',
+];
