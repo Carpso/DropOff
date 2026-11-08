@@ -225,8 +225,6 @@ class _BookingScreenState extends State<BookingScreen> {
   String get _searchHint => courierSearchSamples[_hintIdx % courierSearchSamples.length];
   List<CourierInfo> get _filteredCouriers => smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size);
 
-  double? get _courierFare => courierFareFor(courierId: _courierId, fromCity: _from, toCity: _to, size: _size);
-
   /// DropOff-only leg: rider fee + door leg (+door-leg platform cut). Never partner money.
   double get _dropOffLeg => riderFee + (_lastMile ? lastMilePrice + DropOffApi.platformFee(lastMilePrice) : 0);
 
@@ -402,14 +400,14 @@ class _BookingScreenState extends State<BookingScreen> {
       recipientPhone: _recipientPhone.text,
       paymentMethod: _payment,
       riderFee: riderFee,
-      courierFare: _courierFare,
+      courierFare: null,
       lastMileFee: _lastMile ? lastMilePrice : 0,
       pickupWindow: _tomorrowMorning ? 'tomorrow:06:00' : _pickupWindow,
       promoCode: _promo.text.trim(),
       roundTrip: _roundTrip,
       returnCity: _roundTrip ? _returnCity : null,
       returnAddress: _roundTrip ? _returnAddress.text.trim().isEmpty ? null : _returnAddress.text.trim() : null,
-      returnLegFee: _roundTrip ? (_courierFare ?? 0) : 0,
+      returnLegFee: 0,
       pickupAt: null,
       parcels: _parcels,
       vehicleClass: _vehicleClass,
@@ -654,7 +652,7 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 10),
           TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Your door — where the parcel comes back', prefixIcon: Icon(Icons.house_outlined))),
           const SizedBox(height: 6),
-          const Text('The return ride (depot → your door) is estimated at the depot counter fare for the reverse leg and confirmed at the counter.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+          const Text('The return ride (depot → your door) is confirmed at the counter before the return starts.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
         ],
         const SizedBox(height: 16),
         const InfoPill(icon: Icons.two_wheeler, label: 'Pickup rider fee: from K45'),
@@ -796,7 +794,7 @@ class _BookingScreenState extends State<BookingScreen> {
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(courier.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
                       const SizedBox(height: 3),
-                      Text(courierFareFor(courierId: courier.id, fromCity: _from, toCity: _to, size: _size) == null ? 'Courier fare confirmed at depot' : 'Courier fare ${kwacha(courierFareFor(courierId: courier.id, fromCity: _from, toCity: _to, size: _size))}', style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                      const Text('Depot fare confirmed at counter', style: TextStyle(fontSize: 11, color: AppColors.muted)),
                     ])),
                     Icon(_courierId == courier.id ? Icons.check_circle : Icons.circle_outlined, color: _courierId == courier.id ? AppColors.forest : AppColors.line),
                   ]),
@@ -1017,14 +1015,6 @@ class _BookingScreenState extends State<BookingScreen> {
             _priceLine('Destination door delivery', kwacha(lastMilePrice)),
             _priceLine('Processing fee (door leg — platform + mobile money)', kwacha(DropOffApi.platformFee(lastMilePrice))),
           ],
-          _priceLine('${courier.name.split(' ').first} counter fare', kwacha(_courierFare)),
-          const Padding(
-            padding: EdgeInsets.only(left: 2, bottom: 4),
-            child: Text(
-              'Paid directly by you at the depot counter. DropOff never collects partner money — in-app partner collection is coming soon.',
-              style: TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.35),
-            ),
-          ),
           if (_payment == 'Mobile money') Builder(builder: (context) {
             final fees = DropOffApi.collectionFees(DropOffApi.round2(_dropOffLeg), riderFee: riderFee);
             final processing = fees['processing_fee_zmw'] ?? 0.0;
@@ -1039,8 +1029,8 @@ class _BookingScreenState extends State<BookingScreen> {
           ]);
           }),
           const Divider(height: 24),
-          _priceLine(_courierFare != null ? 'Estimated total outlay (DropOff + depot)' : 'DropOff charge est. now', kwacha(_courierFare != null ? _dropOffDue + _courierFare! : _dropOffLeg), bold: true),
-          if (_courierFare == null) const Padding(padding: EdgeInsets.only(top: 8), child: Text('+ courier counter fare to be confirmed at the depot. No estimate is invented.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
+          _priceLine('DropOff charge est. now', kwacha(_dropOffDue), bold: true),
+          const Padding(padding: EdgeInsets.only(top: 8), child: Text('The depot counter fare is confirmed and paid at the counter — never collected by DropOff.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
         ]))),
         ];
 
@@ -1064,8 +1054,8 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(width: 8),
           const Expanded(child: Text('Estimated total you pay', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: AppColors.muted))),
           const SizedBox(width: 8),
-          Text(kwacha(_courierFare != null ? _dropOffDue + _courierFare! : _dropOffLeg), maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
-          if (_courierFare == null) const Text(' + depot counter fare', maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          Text(kwacha(_dropOffDue), maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
+          const Text(' + depot counter fare', maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: TextStyle(fontSize: 12, color: AppColors.muted)),
         ]),
       );
 

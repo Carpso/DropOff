@@ -4,31 +4,25 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('Platinum is quoted at counter — no route/parcel fares are surfaced or invented', () {
-    expect(
-      courierFareFor(courierId: 'platinum', fromCity: 'Lusaka', toCity: 'Ndola', size: ParcelSize.small),
-      isNull,
-    );
-    expect(
-      courierFareFor(courierId: 'platinum', fromCity: 'Lusaka', toCity: 'Kitwe', size: ParcelSize.medium),
-      isNull,
-    );
-    expect(
-      courierFareFor(courierId: 'platinum', fromCity: 'Lusaka', toCity: 'Chipata', size: ParcelSize.large),
-      isNull,
-    );
+    final n = courierById('platinum').rateFor('Ndola');
+    expect(n, isNull);
+    expect(courierById('platinum').rateFor('Kitwe'), isNull);
+    expect(courierById('platinum').rateFor('Chipata'), isNull);
     expect(courierById('platinum').hasVerifiedRates, isFalse);
     expect(courierById('platinum').priceStatus, 'Quoted at counter');
   });
 
+  test('Smart courier search matches city names with or without noise words', () {
+    expect(smartCourierSearch('Lusaka to Ndola').isNotEmpty, isTrue);
+    expect(smartCourierSearch('to Ndola').any((c) => c.id == 'platinum' || c.id == 'dhl' || c.id == 'mercury'), isTrue);
+    expect(smartCourierSearch('platinum ndola').first.id, 'platinum');
+    expect(smartCourierSearch('how much').isNotEmpty, isTrue);
+    expect(smartCourierSearch('zzzzzz').isNotEmpty, isTrue);
+  });
+
   test('Unknown and reverse-route fares are never invented', () {
-    expect(
-      courierFareFor(courierId: 'platinum', fromCity: 'Ndola', toCity: 'Kitwe', size: ParcelSize.small),
-      isNull,
-    );
-    expect(
-      courierFareFor(courierId: 'mercury', fromCity: 'Lusaka', toCity: 'Ndola', size: ParcelSize.small),
-      isNull,
-    );
+    expect(courierById('platinum').rateFor('Kitwe'), isNull);
+    expect(courierById('mercury').rateFor('Ndola'), isNull);
   });
 
   test('All six requested couriers are booking options', () {

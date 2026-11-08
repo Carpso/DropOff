@@ -215,42 +215,15 @@ String? branchDistanceLabel(CourierBranch branch, String sellerCity) {
 }
 
 
-double? courierFareFor({
-  required String courierId,
-  required String fromCity,
-  required String toCity,
-  required ParcelSize size,
-}) {
-  final courier = courierById(courierId);
-  if (fromCity.trim().toLowerCase() != 'lusaka') return null; // only guess from verified "from Lusaka" boards
-  return courier.rateFor(toCity)?.priceFor(size).toDouble();
-}
+const _stopWords = {
+  'to', 'in', 'from', 'the', 'a', 'an', 'and', 'or', 'for', 'of', 'vs',
+  'parcel', 'parcels', 'package', 'small', 'medium', 'large', 'courier',
+};
 
-/// Best-effort published price for a route/size. Rate boards we hold are priced
-/// FROM Lusaka; if sender is elsewhere we do not guess — return null (quote at depot).
-({int? amount, String label})? publishedRoutePrice({
-  required CourierInfo courier,
-  required String fromCity,
-  required String toCity,
-  required ParcelSize size,
-}) {
-  if (courier.rates.isEmpty) return null;
-  if (fromCity.trim().toLowerCase() != 'lusaka') return null;
-  final rate = courier.rateFor(toCity);
-  if (rate == null) return null;
-  final label = switch (size) {
-    ParcelSize.small => 'K${rate.small}',
-    ParcelSize.medium => 'K${rate.medium}',
-    ParcelSize.large => rate.large,
-  };
-  final amount = size == ParcelSize.large
-      ? int.tryParse(rate.large.replaceAll(RegExp(r'[^0-9]'), ''))
-      : rate.priceFor(size);
-  return (amount: amount, label: label);
-}
-
-/// Smart courier search: name/strapline/status + branch/rate towns + route/price intent.
-/// Pass route context to rank couriers that publish a price for that route.
+/// Smart courier search: matches name/strapline/status/id/branches plus route
+/// cities extracted from the query itself. Rates are quoted at the counter —
+/// results never depend on published price boards. Empty/unknown-intent queries
+/// return all couriers so the UI never dead-ends.
 List<CourierInfo> smartCourierSearch(
   String query, {
   String? fromCity,
@@ -258,44 +231,87 @@ List<CourierInfo> smartCourierSearch(
   ParcelSize size = ParcelSize.small,
 }) {
   final q = query.trim().toLowerCase();
-  final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  final rawTokens = q.split(RegExp(r'[^a-z0-9]+')).where((t) => t.isNotEmpty).toList();
+  final tokens = rawTokens.where((t) => !_stopWords.contains(t)).toList();
   final wantsPrice = q.contains('price') || q.contains('how much') || q.contains('cost') ||
-      q.contains('rate') || q.contains('charge') || RegExp(r'\bk\d+').hasMatch(q);
-  bool matches(CourierInfo c) {
-    if (q.isEmpty) return true;
-    final hay = [c.name, c.strapline, c.id, c.priceStatus, c.note].join(' ').toLowerCase();
-    if (tokens.every((t) => hay.contains(t))) return true;
-    for (final b in c.branches) {
-      final bh = '${b.city} ${b.name} ${b.address}'.toLowerCase();
-      if (tokens.any(bh.contains)) return true;
-    }
-    for (final r in c.rates) {
-      for (final town in r.towns) {
-        if (tokens.any((t) => town.toLowerCase().contains(t) || t.contains(town.toLowerCase()))) return true;
+      q.contains('rate') || q.contains('charge') || q.contains('quote') || RegExp(r'\bk\d+').hasMatch(q);
+
+  // Resolve cities mentioned in the query (handles "Lusaka to Ndola" and single-town queries).
+  final lowerCities = cities.map((c) => c.toLowerCase()).toList();
+  String? cityMatch(String t) {
+    // exact town match, or a town that contains the token (min length 3)
+    if (t.length >= 3) {
+      for (final c in lowerCities) {
+        if (c == t) return c;
+        final cityWord = c.split(RegExp(r'[\s-]+')).last; // e.g. "Kapiri Mposhi" -> "mposhi"
+        if (cityWord == t) return c;
+      }
+      for (final c in lowerCities) {
+        if (c.contains(t)) return c;
       }
     }
-    if (wantsPrice) return c.hasVerifiedRates || c.rates.isNotEmpty;
-    return false;
+    return null;
   }
-  final list = couriers.where(matches).toList();
-  if (fromCity != null && toCity != null && fromCity.isNotEmpty && toCity.isNotEmpty) {
-    list.sort((a, b) {
-      final pa = publishedRoutePrice(courier: a, fromCity: fromCity, toCity: toCity, size: size);
-      final pb = publishedRoutePrice(courier: b, fromCity: fromCity, toCity: toCity, size: size);
-      if (pa != null && pb == null) return -1;
-      if (pa == null && pb != null) return 1;
-      return a.name.compareTo(b.name);
-    });
+  final queryCities = tokens.map(cityMatch).whereType<String>().toSet().toList();
+  final effectiveFrom = (fromCity ?? '').trim().toLowerCase();
+  final effectiveTo = (toCity ?? '').trim().toLowerCase();
+  final contextCities = [
+    if (effectiveFrom.isNotEmpty) effectiveFrom,
+    if (effectiveTo.isNotEmpty) effectiveTo,
+  ].whereType<String>().toSet();
+  final routeCities = {...queryCities, ...contextCities};
+
+  int score(CourierInfo c) {
+    if (queryCities.isEmpty && tokens.isEmpty) return 1;
+    final hay = [c.name, c.strapline, c.id, c.priceStatus, c.note, c.sourceLabel]
+        .join(' ').toLowerCase();
+    int s = 0;
+    for (final t in tokens) {
+      if (hay.contains(t)) s += 4;
+    }
+    for (final b in c.branches) {
+      final bh = '${b.city} ${b.name} ${b.address}'.toLowerCase();
+      for (final t in [...tokens, ...routeCities]) {
+        if (bh.contains(t)) {
+          s += 6;
+          break;
+        }
+      }
+    }
+    // Route intent: strongly prefer couriers whose branches cover the requested cities.
+    if (routeCities.isNotEmpty) {
+      final branchCities = c.branches.map((b) => b.city.toLowerCase()).toSet();
+      int cityHits = 0;
+      for (final rc in routeCities) {
+        if (branchCities.contains(rc)) cityHits++;
+      }
+      if (cityHits > 0) s += cityHits * 10;
+      if (cityHits == 0 && tokens.isEmpty) s += 1;
+    }
+    // Price intent: keep counter-quote couriers visible, but don't pretend to have published fares.
+    if (wantsPrice) s += 2;
+    return s;
   }
-  return list;
+
+  final scored = <CourierInfo>[...couriers]
+      .map((c) => (c: c, s: score(c)))
+      .where((entry) => entry.s > 0)
+      .toList()
+    ..sort((a, b) => b.s.compareTo(a.s) == 0 ? a.c.name.compareTo(b.c.name) : b.s.compareTo(a.s));
+  if (scored.isEmpty && q.isNotEmpty) {
+    // Never dead-end: show all couriers (sorted by name) and let the user pick.
+    return <CourierInfo>[...couriers]..sort((a, b) => a.name.compareTo(b.name));
+  }
+  return scored.map((e) => e.c).toList();
 }
 
 const courierSearchSamples = <String>[
-  'Lusaka to Ndola small parcel price',
-  'How much to Kitwe from Lusaka?',
-  'Platinum Livingstone rate',
-  'Chipata depot parcel cost',
+  'Lusaka to Ndola parcel',
+  'Courier to Kitwe',
+  'How much to Livingstone? Quote at counter',
+  'Platinum depot quote',
+  'Same-day courier Kabwe',
   'Solwezi medium parcel',
-  'Courier to Kabwe',
-  'Lusaka to Mongu charge',
+  'Chipata drop-off',
+  'Copperbelt delivery',
 ];
