@@ -60,6 +60,7 @@ $env:APK_NAME = "DropOff-$ver-release.apk"
 Write-Host "== artifacts from version $ver =="
 if ($doApk) {
   $src = 'build/app/outputs/flutter-apk/DropOff.apk'
+  if (-not (Test-Path $src)) { $src = 'build/app/outputs/flutter-apk/app-release.apk' }
   if (Test-Path $src) {
     Copy-Item $src (Join-Path $dist 'DropOff-release.apk') -Force
     Copy-Item $src (Join-Path $dist $env:APK_NAME) -Force
@@ -68,7 +69,10 @@ if ($doApk) {
 }
 if ($doAab) {
   $src = 'build/app/outputs/bundle/release/app-release.aab'
-  if (Test-Path $src) { Copy-Item $src (Join-Path $dist 'DropOff-release.aab') -Force }
+  if (Test-Path $src) {
+    Copy-Item $src (Join-Path $dist 'DropOff-release.aab') -Force
+    Copy-Item $src (Join-Path $dist "DropOff-$ver-release.aab") -Force
+  }
   Write-Host "AAB: $src"
 }
 if ($doWeb) {
