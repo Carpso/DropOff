@@ -1507,9 +1507,13 @@ app.post('/jobs', async (c) => {
     // Declared value + optional cover (quoted only; NOT active insurance).
     const declaredValueZmw = Math.max(0, Number(b.declared_value_zmw ?? 0) || 0);
     const coverOptIn = b.cover_opt_in === true || b.cover_opt_in === 1 || b.cover_opt_in === '1';
+    const coverTosAccepted = coverOptIn && (b.cover_tos_accepted === true || b.cover_tos_accepted === 1 || b.cover_tos_accepted === '1');
+    const coverTosVersion = coverTosAccepted ? String(b.cover_tos_version ?? 'v1-cover-quoted').slice(0, 40) : null;
+    const coverTosAcceptedAt = coverTosAccepted ? new Date().toISOString() : null;
     const cover = coverOptIn ? coverQuote(declaredValueZmw, weightClass) : { fee_zmw: 0, cap_zmw: 0 };
     const coverStatus = !coverOptIn ? 'none' : (declaredValueZmw > 0 ? 'quoted' : 'declined');
     if (coverOptIn && declaredValueZmw <= 0) return c.json({ error: 'declared_value_required_for_cover', detail: 'Enter a declared parcel value to receive a cover quote.' }, 400);
+    if (coverOptIn && !coverTosAccepted) return c.json({ error: 'cover_tos_required', detail: 'Accept the parcel cover terms (quoted protection, not insurance) before opting in.' }, 400);
 
     // Wider entropy: date + 5 random chars (the old 2-digit suffix was guessable)
     const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
@@ -1533,8 +1537,8 @@ app.post('/jobs', async (c) => {
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile,
          parcels, vehicle_class, branch, from_city, parcel_photo_url,
-         declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38)`,
+         declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41)`,
     ).bind(
       ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -1548,6 +1552,7 @@ app.post('/jobs', async (c) => {
       fromCity,
       parcelUrl,
       declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
+      coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt,
     ).run();
 
     if (promoCode) {
@@ -1831,9 +1836,13 @@ app.post('/collections', async (c) => {
   }
   const declaredValueZmw = Math.max(0, Number(b.declared_value_zmw ?? 0) || 0);
   const coverOptIn = b.cover_opt_in === true || b.cover_opt_in === 1 || b.cover_opt_in === '1';
+  const coverTosAccepted = coverOptIn && (b.cover_tos_accepted === true || b.cover_tos_accepted === 1 || b.cover_tos_accepted === '1');
+  const coverTosVersion = coverTosAccepted ? String(b.cover_tos_version ?? 'v1-cover-quoted').slice(0, 40) : null;
+  const coverTosAcceptedAt = coverTosAccepted ? new Date().toISOString() : null;
   const cover = coverOptIn ? coverQuote(declaredValueZmw, String(b.weight_class ?? '0-5kg')) : { fee_zmw: 0, cap_zmw: 0 };
   const coverStatus = !coverOptIn ? 'none' : (declaredValueZmw > 0 ? 'quoted' : 'declined');
   if (coverOptIn && declaredValueZmw <= 0) return c.json({ error: 'declared_value_required_for_cover' }, 400);
+  if (coverOptIn && !coverTosAccepted) return c.json({ error: 'cover_tos_required', detail: 'Accept the parcel cover terms (quoted protection, not insurance) before opting in.' }, 400);
   // Ghost-booking guard for collections too (pay-as-you-go, zero deliveries done).
   const completedEver = (await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
@@ -1846,8 +1855,8 @@ app.post('/collections', async (c) => {
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
        counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
        pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, delivery_otp_hash, parcel_photo_url,
-       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka',?19,?20,?21,?22,?23,?24)`,
+       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka',?19,?20,?21,?22,?23,?24,?25,?26,?27)`,
   ).bind(
     ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
@@ -1855,6 +1864,7 @@ app.post('/collections', async (c) => {
     riderFee, processing, total, window, pickupAt, payMethod, parcels, vehicleClass,
     deliveryOtpHash, parcelUrl,
     declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
+    coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt,
   ).run();
 
   await c.env.DB.prepare(

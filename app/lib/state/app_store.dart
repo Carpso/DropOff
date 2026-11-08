@@ -566,6 +566,7 @@ class AppStore extends ChangeNotifier {
       if (declaredValueZmw != null && declaredValueZmw > 0) 'declared_value_zmw': declaredValueZmw,
       if (coverOptIn) 'cover_opt_in': true,
       if (coverOptIn && coverTosAccepted) 'cover_tos_accepted': true,
+      if (coverOptIn && coverTosAccepted) 'cover_tos_version': 'v1-cover-quoted',
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode.trim().toUpperCase(),
     };
     lastBookingError = null;

@@ -9,16 +9,16 @@ Status: `done` / `server-done` / `scaffolded` / `planned` / `blocked-external`. 
 
 ## 11 value-add features (status)
 1. [server-done/app-planned] **Proof-of-condition chain / evidence locker** — `GET /jobs/:ref/evidence` returns an access-controlled, shareable timeline (booking/pickup/dropoff/handover photos, parcel check + review, partner_confirmed, OTP/POD/waybill, declared value/cover, events). **App:** “one tap share” + UI.
-2. [scaffolded] **Declared value + micro-insurance/cover** — `0049` adds `declared_value_zmw`, `cover_opt_in/fee/status` (recorded/quoted). **Needed:** accept/store on booking flows, pricing rules, **commercial/legal underwriting/terms**, claims workflow, partner.
-3. [scaffolded/server-partial] **No-show risk & smarter deposits** — strikes/auto-cancel/SMS warnings live; risk context used in hybrid rules. **Needed:** explicit booking risk score to tune deposits, in-app localized pre-cutoff warnings, ops clear/appeal.
+2. [scaffolded/consent-captured] **Declared value + cover (quoted, NOT insurance)** — `0049` adds quote fields; `0050` persists **cover T&Cs acceptance** (`cover_tos_*`); app gates opt-in on acceptance. **Needed:** claims submission + ops/admin review, underwriting/eligibility/limits/exclusions/partner terms, pricing rules. **Do not activate as insurance without legal/commercial sign-off.**
+3. [scaffolded/server-partial] **No-show risk & smarter deposits** — strikes/auto-cancel/SMS warnings live; risk context used in hybrid rules. **Needed:** explicit booking risk score to tune deposits, richer pre-cutoff localization/notifications, ops clear/appeal.
 4. [server-done/app-planned] **Density/slot optimization** — `GET /slots/suggest` returns least-loaded open slot + nudge (heuristic). **Needed:** app nudges, geo-aware density, dynamic incentives.
 5. [scaffolded] **COD digitization & trust** — COD/remit events exist. **Needed:** sender/recipient receipts, faster reconcile UI, mismatch flags/alerts.
 6. [planned] **Seller analytics** — **Needed:** no-show rate, on-time %, best slots, cost/parcel, repeat recipients, peaks, SME export (extend analytics endpoints/UI).
-7. [server-done/app-planned] **Saved recipients/address book** — `GET/POST/DELETE /recipients` (migration `0049` `saved_recipients`). **Needed:** app UI + quick rebook with slot prefill.
+7. [done - app+server] **Saved recipients/address book** — `GET/POST/DELETE /recipients` (`0049`). App: picker/manage, save current, **quick rebook** with slot/recipient/route prefill.
 8. [scaffolded] **Returns/reverse logistics** — `0049` adds `job_kind`/`return_job_ref`. **Needed:** booking flow support, routing/pricing, same evidence chain in UI.
 9. [planned/external] **WhatsApp/SMS booking & status (localized)** — requires WhatsApp Business API/provider setup and inbound webhooks + templates. **Needed:** integration, opt-in, localized templates.
 10. [scaffolded] **Referrals, loyalty, SLA guarantees** — referrals table/logic exists; SLA is partner-fed. **Needed:** “my referral code/stats” UX polish, reward rules, loyalty, partner SLA fields/feeds and guarantees.
-11. [scaffolded/app-planned] **Full in-app localization & accessibility** — `PATCH /me` stores `locale_pref` (en/ny/bem/toi/loz/lun/kqn/lue); **SMS remain English-only until locale is used**. **Needed:** Flutter ARB/l10n for all screens, localized in-app warnings (skip/hold/cutoff), accessibility/voice notes.
+11. [done-foundation b/c] **In-app localization & critical warnings** — ARBs + generated l10n (`en, ny, bem, toi` = **Tonga Zambia/Chitonga**, `loz`), language picker, `locale_pref` via `GET/PATCH /me`; localized skip/hold/slot, handover OTP, cover T&Cs/acceptance, richer evidence UI. **SMS remain English-only** until locale applied. **Needed:** native-speaker review (`docs/L10N_REVIEW.md`), full coverage of remaining screens, accessibility/voice notes.
 
 ## Anti-false-parcel / anti-ghost kit (done)
 - [done] Seller parcel photo at booking; hybrid parcel-check compare/flag; depot `partner_confirmed` (POS webhook, `docs/POS_WEBHOOKS.md`).

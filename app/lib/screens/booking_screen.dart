@@ -411,6 +411,8 @@ class _BookingScreenState extends State<BookingScreen> {
       final msg = switch (store.lastBookingError) {
         'booking_on_hold' => l10n.bookingOnHoldBody,
         'slot_required' || 'pickup_window_required' => l10n.slotRequiredBody,
+        'cover_tos_required' => l10n.coverTosBody,
+        'declared_value_required_for_cover' => AppLocalizations.of(context).declaredValue,
         _ => store.lastBookingErrorDetail?.isNotEmpty == true
             ? store.lastBookingErrorDetail!
             : 'Booking could not be created (${store.lastBookingError}).',
