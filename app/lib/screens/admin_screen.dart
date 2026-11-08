@@ -1157,7 +1157,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
                   IconButton(icon: const Icon(Icons.copy, size: 16), onPressed: () => _copy(code), tooltip: 'Copy'),
                 ]),
               );
-            }).toList(),
+            }),
         ]),
       ),
     );

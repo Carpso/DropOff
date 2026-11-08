@@ -46,8 +46,8 @@ class AppStore extends ChangeNotifier {
   bool _biometricEnabled = false;
   String _deviceId = 'unknown';
 
-  /// Keystore/keychain on mobile; SharedPreferences mirror on web.
-  final _secureStorage = SecureStore();
+  /// Keystore/keychain on mobile; SharedPreferences(web) / fail-soft mirror(IO).
+  final _secureStorage = const SecureStore();
 
   List<Booking> get bookings => List.unmodifiable(_bookings);
   List<Rider> get riders => List.unmodifiable(_riders);

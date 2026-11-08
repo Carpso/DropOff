@@ -83,8 +83,8 @@ class HomeScreen extends StatelessWidget {
           // share the header row with the icons and rendered truncated ("WE CAR…").
           // FittedBox scales it down instead of cutting it off at any width.
           const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.only(left: 58),
+          const Padding(
+            padding: EdgeInsets.only(left: 58),
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,

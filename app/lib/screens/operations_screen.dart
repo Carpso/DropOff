@@ -1341,14 +1341,14 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.forest.withValues(alpha: 0.3))),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Row(children: [
+                child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
                     Icon(Icons.check_circle, color: AppColors.forest),
                     SizedBox(width: 8),
                     Text('Verification submitted', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: AppColors.forest)),
                   ]),
-                  const SizedBox(height: 6),
-                  const Text('Your documents are in the owner/admin review queue. You will be notified once verified.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+                  SizedBox(height: 6),
+                  Text('Your documents are in the owner/admin review queue. You will be notified once verified.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
                 ]),
               ),
               const SizedBox(height: 10),

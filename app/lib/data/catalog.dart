@@ -15,39 +15,19 @@ const cities = [
   'Chembe', 'Lufwanyama', 'Chingambwe',
 ];
 
-const platinumRates = <CourierRate>[
-  CourierRate(province: 'Copperbelt', towns: ['Ndola', 'Kitwe', 'Luanshya', 'Kalulushi', 'Mufulira', 'Chambishi', 'Chingola', 'Chililabombwe'], small: 50, medium: 60, large: 'K80 & above'),
-  CourierRate(province: 'Copperbelt', towns: ['Kasumbalesa'], small: 50, medium: 70, large: 'K100 & above'),
-  CourierRate(province: 'Copperbelt', towns: ['Mpongwe'], small: 70, medium: 100, large: 'K120 & above'),
-  CourierRate(province: 'Central', towns: ['Kabwe', 'Kapiri Mposhi'], small: 50, medium: 60, large: 'K80 & above'),
-  CourierRate(province: 'Central', towns: ['Mumbwa'], small: 50, medium: 70, large: 'K100 & above'),
-  CourierRate(province: 'Central', towns: ['Mkushi', 'Serenje', 'Mukando'], small: 70, medium: 100, large: 'K120 & above'),
-  CourierRate(province: 'Southern', towns: ['Kafue'], small: 40, medium: 50, large: 'K70 & above'),
-  CourierRate(province: 'Southern', towns: ['Mazabuka', 'Monze', 'Pemba', 'Choma', 'Kalomo', 'Zimba', 'Livingstone', 'Kazungula'], small: 50, medium: 70, large: 'K100 & above'),
-  CourierRate(province: 'Western', towns: ['T.B.Z'], small: 50, medium: 70, large: 'K100 & above'),
-  CourierRate(province: 'Western', towns: ['Kaoma', 'Mongu', 'Senanga', 'Mwandi', 'Katima Mulilo', 'Sesheke'], small: 100, medium: 130, large: 'K150 & above'),
-  CourierRate(province: 'North-Western', towns: ['Solwezi'], small: 100, medium: 130, large: 'K150 & above'),
-  CourierRate(province: 'North-Western', towns: ['Kalumbila', 'Kisasa', 'Manyama'], small: 100, medium: 130, large: 'K150 & above'),
-  CourierRate(province: 'Luapula', towns: ['Chembe', 'Mansa', 'Samfya'], small: 100, medium: 130, large: 'K150 & above'),
-  CourierRate(province: 'Eastern', towns: ['Nyimba', 'Katete', 'Petauke', 'Sinda', 'Chipata'], small: 70, medium: 100, large: 'K130 & above'),
-  CourierRate(province: 'Northern', towns: ['Kasama'], small: 100, medium: 130, large: 'K150 & above'),
-  CourierRate(province: 'Northern', towns: ['Mbala'], small: 130, medium: 150, large: 'K180 & above'),
-  CourierRate(province: 'Muchinga', towns: ['Mpika'], small: 100, medium: 130, large: 'K150 & above'),
-  CourierRate(province: 'Muchinga', towns: ['Isoka', 'Chinsali', 'Nakonde'], small: 100, medium: 130, large: 'K150 & above'),
-];
-
 const couriers = <CourierInfo>[
   CourierInfo(
     id: 'platinum',
     name: 'Platinum Courier Services',
     strapline: 'Countrywide parcels • depot to depot',
-    priceStatus: '2026 Lusaka price list captured',
-    sourceLabel: 'In-app source: supplied depot price board',
+    priceStatus: 'Quoted at counter',
+    sourceLabel: 'Counter quote recorded at booking',
     sourceUrl: '',
-    sourceDate: 'Effective 1 July 2026 • photographed 2 September 2026',
-    note: 'Published prices are FROM Lusaka. Large parcels start at the shown amount. Handle-with-care parcels are charged at the office. Confirm the final counter charge before payment.',
+    sourceDate: 'Checked 4 November 2026',
+    note: 'No public route/parcel price card is surfaced in-app. The counter fare is confirmed at the depot and recorded before dispatch. Handle-with-care parcels are charged at the office. Confirm the final counter charge before payment.',
     colorValue: 0xFF176B87,
-    rates: platinumRates,
+    // Rates confirmed at counter — none surfaced/invented in-app.
+    rates: [],
     // Depot cities taken from the same published rate board (the towns the
     // price list serves) — shown nearest-to-seller first in the app.
     branches: [

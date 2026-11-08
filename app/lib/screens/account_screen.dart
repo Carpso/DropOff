@@ -36,9 +36,9 @@ class _AccountScreenState extends State<AccountScreen> {
   final _referral = TextEditingController();
   final _otpPhone = TextEditingController();
   final _otpCode = TextEditingController();
-  bool _creating = false;
+  final bool _creating = false;
   bool _busy = false;
-  bool _agreed = false;
+  final bool _agreed = false;
   bool _remember = true;
   bool _obscure = true;
   bool _otpBusy = false;
@@ -267,7 +267,7 @@ class _AccountScreenState extends State<AccountScreen> {
                     final trusted = d['trusted'] == true;
                     final tz = '${d['last_seen'] ?? ''}';
                     final parts = tz.split(' ');
-                    final day = parts.length >= 1 ? parts.first : tz;
+                    final day = parts.isNotEmpty ? parts.first : tz;
                     final time = parts.length >= 2 ? parts[1] : '';
                     final ua = '${d['user_agent'] ?? d['device_id'] ?? 'unknown'}';
                     final ip = '${d['ip'] ?? 'unknown'}';
@@ -276,7 +276,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
                         child: Row(children: [
-                          Icon(Icons.phone_iphone, size: 22, color: AppColors.muted),
+                          const Icon(Icons.phone_iphone, size: 22, color: AppColors.muted),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

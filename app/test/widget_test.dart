@@ -3,19 +3,21 @@ import 'package:dropoff/models/booking.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Platinum published Lusaka fares are applied by parcel size', () {
+  test('Platinum is quoted at counter — no route/parcel fares are surfaced or invented', () {
     expect(
       courierFareFor(courierId: 'platinum', fromCity: 'Lusaka', toCity: 'Ndola', size: ParcelSize.small),
-      50,
+      isNull,
     );
     expect(
       courierFareFor(courierId: 'platinum', fromCity: 'Lusaka', toCity: 'Kitwe', size: ParcelSize.medium),
-      60,
+      isNull,
     );
     expect(
       courierFareFor(courierId: 'platinum', fromCity: 'Lusaka', toCity: 'Chipata', size: ParcelSize.large),
-      130,
+      isNull,
     );
+    expect(courierById('platinum').hasVerifiedRates, isFalse);
+    expect(courierById('platinum').priceStatus, 'Quoted at counter');
   });
 
   test('Unknown and reverse-route fares are never invented', () {

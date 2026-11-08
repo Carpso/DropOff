@@ -422,17 +422,9 @@ class CourierDetailScreen extends StatelessWidget {
                 )),
             const SizedBox(height: 6),
           ],
-          if (courier.rates.isNotEmpty) ...[
-            const SectionTitle('Published prices from Lusaka'),
-            const Text('ZMW • one-way counter fare, excluding DropOff pickup', style: TextStyle(color: AppColors.muted, fontSize: 12)),
-            const SizedBox(height: 12),
-            const _PlatinumRateTable(),
-            const SizedBox(height: 24),
-          ] else ...[
-            const SectionTitle('How pricing works'),
-            _noteCard('The DropOff rider fee is shown before you book. The courier fare is confirmed at the counter using route, parcel size, weight and service. You keep the original courier receipt.'),
-            const SizedBox(height: 24),
-          ],
+          const SectionTitle('How pricing works'),
+          _noteCard('The DropOff rider fee is shown before you book. The courier fare is confirmed at the counter using route, parcel size, weight and service. You keep the original courier receipt.'),
+          const SizedBox(height: 24),
           const SectionTitle('Source & pricing note'),
           const SizedBox(height: 6),
           _noteCard('${courier.note}\n\n${courier.sourceLabel}\n${courier.sourceDate}${courier.sourceUrl.isEmpty ? '' : '\n${courier.sourceUrl}'}'),
@@ -476,39 +468,6 @@ class CourierDetailScreen extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(18),
           child: LinkableText(text: text, style: const TextStyle(color: AppColors.muted, height: 1.55, fontSize: 13)),
-        ),
-      );
-}
-
-class _PlatinumRateTable extends StatelessWidget {
-  const _PlatinumRateTable();
-
-  @override
-  Widget build(BuildContext context) => Card(
-        clipBehavior: Clip.antiAlias,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            headingRowColor: const WidgetStatePropertyAll(AppColors.forest),
-            headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
-            dataTextStyle: const TextStyle(fontSize: 12, color: AppColors.ink),
-            columnSpacing: 20,
-            columns: const [
-              DataColumn(label: Text('Province / towns')),
-              DataColumn(label: Text('Small'), numeric: true),
-              DataColumn(label: Text('Medium'), numeric: true),
-              DataColumn(label: Text('Large')),
-            ],
-            rows: [
-              for (final rate in platinumRates)
-                DataRow(cells: [
-                  DataCell(SizedBox(width: 245, child: Text('${rate.province}\n${rate.towns.join(', ')}', style: const TextStyle(height: 1.35)))),
-                  DataCell(Text('K${rate.small}')),
-                  DataCell(Text('K${rate.medium}')),
-                  DataCell(Text(rate.large)),
-                ]),
-            ],
-          ),
         ),
       );
 }

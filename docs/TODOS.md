@@ -29,6 +29,10 @@ Status: `done` / `server-done` / `scaffolded` / `planned` / `blocked-external`. 
 - [done] Rider pay K3,200/mo incl. K300/wk fuel (pace-gated). Versioned release script; Play docs. Fresh `dist/` APK/AAB (0.5.1+12).
 - [blocked-external] Play Console upload; Lipila payout whitelist `260976847775`; physical-device verification.
 
+## Audit 2026-11-08 (docs/AUDIT-2026-11-08.md)
+- [done-pass] Tests pass; analyze 0 errors/warnings (4 intentional info); secrets hygiene ok; ops key build-time only; Platinum **quoted at counter** (no invented fares); mobile keystore token-at-rest (web fallback).
+- [external] Native-speaker L10n sign-off (`docs/L10N_REVIEW.md`); cover activation/claims + legal-commercial sign-off (quoted, not insurance); true pHash/embedding drop-in.
+
 ## Training on “our own data” (Cloudflare)
 - Collect: `parcel_check` signals + `parcel_check_feedback` (and export D1→R2). Optionally log via **AI Gateway**.
 - Improve: **embeddings + Vectorize** for similarity/retrieval; evaluate against labeled feedback. True model fine-tuning on CF is limited to supported Workers AI models/workflows (evolving) — for custom vision (parcel re-ID) you’ll typically train externally and serve/compare via API, keeping data in R2. Not a general “train any model on a Worker”.

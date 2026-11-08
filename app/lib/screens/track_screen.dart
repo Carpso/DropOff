@@ -250,11 +250,11 @@ class _TrackScreenState extends State<TrackScreen> {
         child: Row(children: [
           const Icon(Icons.inbox_rounded, color: AppColors.amber, size: 26),
           const SizedBox(width: 12),
-          Expanded(
+          const Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('This parcel is addressed to you', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-              const SizedBox(height: 3),
-              const Text('Create your account and it stays here forever — along with everything sent to your number.',
+              Text('This parcel is addressed to you', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+              SizedBox(height: 3),
+              Text('Create your account and it stays here forever — along with everything sent to your number.',
                   style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
             ]),
           ),

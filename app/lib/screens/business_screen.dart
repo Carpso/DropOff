@@ -411,24 +411,24 @@ class _BusinessScreenState extends State<BusinessScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
+              const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(top: 2),
                     child: Icon(Icons.card_giftcard_outlined, color: AppColors.forest, size: 22),
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text(
+                        Text(
                           'No plan yet',
                           style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
                         ),
-                        const SizedBox(height: 6),
+                        SizedBox(height: 6),
                         Text(
                           'Subscription plans bundle the rider — Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.',
                           softWrap: true,

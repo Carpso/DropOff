@@ -42,7 +42,7 @@
 ### What makes it catchy 🚀
 - **Name** — "DropOff" says *we drop it off for you*. Short, delivery-native, easy to say in any language. ("DropOfff — one tap to the depot.")
 - **The number-1 hook** — *“We meet you anywhere; your package leaves your hands in 30 minutes.”*
-- **Price-anchoring mechanic** — the sender selects their courier (Platinum, Mercury, etc.), and DropOff quotes the *counter price PLUS* the rider fee. That's honest and kills the driver guessing game.
+- **Price-anchoring mechanic** — the sender selects their courier; the depot fare is **quoted/recorded at the counter** and shown separately from DropOff’s rider fee (rider fee is shown before booking). No invented/unverified depot prices are surfaced.
 - **City-per-option booking flow** — in Lusaka, a "daily runner" pack for a seller doing 20 Platinum drops/week: fixed small rates, weekly automatic settlement (perfected by the driver!). WhatsApp/Group promos can push this.
 - **Emergency/surge mechanic** — the sender can add a "tinder-style" urgent button that previews their distance-radius on a map and the extra surcharge for getting a rider within the hour.
 - **Raise trust** — all riders are outfitted in chitenge-yellow/green DropOff gear; every pickup/drop-off needs a picture + a signature; parcels are only released against the recipient's courier waybill.
