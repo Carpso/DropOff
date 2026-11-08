@@ -1,0 +1,5 @@
+.secrets-local.md
+.wrangler/
+node_modules/
+.dev.vars
+dist/

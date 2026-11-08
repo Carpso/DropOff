@@ -69,11 +69,19 @@ export function providerFromPhone(zm: string): Provider {
 }
 
 function lipilaHeaders(apiKey: string, env: Env): HeadersInit {
+  // Chisomo pattern: embed our shared secret directly in the callbackUrl —
+  // Lipila echoes the full URL back on the webhook, so /webhooks/lipila can
+  // verify the `secret` query param (Lipila does NOT send signature headers).
+  const callbackUrl = env.LIPILA_CALLBACK_URL
+    ? (env.LIPILA_WEBHOOK_SECRET
+        ? `${env.LIPILA_CALLBACK_URL}?secret=${encodeURIComponent(env.LIPILA_WEBHOOK_SECRET)}`
+        : env.LIPILA_CALLBACK_URL)
+    : undefined;
   return {
     'accept': 'application/json',
     'Content-Type': 'application/json',
     'x-api-key': apiKey,
-    ...(env.LIPILA_CALLBACK_URL ? { callbackUrl: env.LIPILA_CALLBACK_URL } : {}),
+    ...(callbackUrl ? { callbackUrl } : {}),
   };
 }
 

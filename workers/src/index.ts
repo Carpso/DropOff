@@ -3454,7 +3454,8 @@ app.get('/payments/:id/receipt', async (c) => {
 app.post('/webhooks/lipila', async (c) => {
   // Optional shared-secret gate (defence in depth � the body is never trusted).
   if (c.env.LIPILA_WEBHOOK_SECRET) {
-    const got = c.req.header('X-Lipila-Signature') ?? c.req.header('X-Webhook-Secret') ?? '';
+    const got = c.req.header('X-Lipila-Signature') ?? c.req.header('X-Webhook-Secret')
+      ?? new URL(c.req.url).searchParams.get('secret') ?? '';
     const want = c.env.LIPILA_WEBHOOK_SECRET;
     const equal = got.length === want.length && got.split('').every((ch, i) => ch === want[i]);
     if (!equal) return c.json({ error: 'unauthorized' }, 401);
@@ -6235,8 +6236,8 @@ async function dumpTable(env: Env, table: string): Promise<string | null> {
   } catch { return null; }
 }
 
-async function backupAppData(env: Env): Promise<void> {
-  if (!env.BACKUPS) return;
+async function backupAppData(env: Env): Promise<{ ok: string[]; skipped: string[]; manifest_key?: string }> {
+  if (!env.BACKUPS) return { ok: [], skipped: [] };
   const tables = ['auth_users','jobs','payments','wallets','wallet_ledger','subscriptions',
     'recurring_plans','referrals','riders','couriers','quotes','job_events'];
   const stamp = new Date(Date.now() + 2 * 3600_000).toISOString().slice(0, 10); // CAT date
@@ -6253,7 +6254,18 @@ async function backupAppData(env: Env): Promise<void> {
   }
   const manifest = JSON.stringify({ date: stamp, ok, skipped, generated_at: new Date().toISOString() });
   try { await env.BACKUPS.put(`backups/${stamp}/manifest.json`, manifest, { httpMetadata: { contentType: 'application/json' } }); } catch {}
+  return { ok, skipped, manifest_key: `backups/${stamp}/manifest.json` };
 }
+
+/* --------------------------- admin: backup on demand ----------------------- */
+// Same dump the 02:00 CAT cron runs — lets you verify the R2 target and grab a
+// fresh snapshot at any moment (e.g. before a large migration or launch).
+app.get('/admin/backup-now', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!c.env.BACKUPS) return c.json({ error: 'backups_not_configured' }, 503);
+  const res = await backupAppData(c.env);
+  return c.json({ ...res, ok: true, bucket: 'dropoff-backups' });
+});
 
 /* ------------- cron: timed-pickup reminders (every minute) ----------------- */
 // Jobs with a booked pickup_at get a push at T-30 and T-10 to sender + rider,
@@ -6438,12 +6450,31 @@ export default {
           await notifyExpiryNudges(env);
           return;
         }
-        await purgeStaleRows(env);
-        await billExpiringSubscriptions(env);
-        await materializeRecurringJobs(env);
-        await backupAppData(env);
-        await reconcilePayments(env);
-        await sweepPlatformIncome(env);
+        // Daily chain — each task isolated so one failure (e.g. a Lipila
+        // collect throw in billing) can no longer starve the rest. Before
+        // this fix a single nightly exception silently skipped the R2
+        // backup, payment reconcile AND the platform income sweep (the
+        // outer catch only logged to Sentry, which is not configured).
+        const daily: Array<[string, () => Promise<unknown>]> = [
+          ['purge', () => purgeStaleRows(env)],
+          ['backup', () => backupAppData(env)],
+          ['reconcile', () => reconcilePayments(env)],
+          ['sweep', () => sweepPlatformIncome(env)],
+          ['bill', () => billExpiringSubscriptions(env)],
+          ['recurring', () => materializeRecurringJobs(env)],
+        ];
+        for (const [name, task] of daily) {
+          try { await task(); } catch (e) {
+            await captureError(env, e, { method: 'CRON', url: `https://cron/daily/${name}` });
+            try {
+              await env.BACKUPS?.put(
+                `cron_errors/daily-${name}-${new Date().toISOString().slice(0, 19)}.json`,
+                JSON.stringify({ task: name, at: new Date().toISOString(), error: String(e).slice(0, 500) }),
+                { httpMetadata: { contentType: 'application/json' } },
+              );
+            } catch { /* logging must never throw */ }
+          }
+        }
       } catch (e) {
         await captureError(env, e, { method: 'CRON', url: `https://cron/${event.cron}` });
       }
