@@ -77,6 +77,21 @@ function lipilaHeaders(apiKey: string, env: Env): HeadersInit {
   };
 }
 
+/**
+ * Lipila rejects any narration containing anything but letters, numbers and
+ * spaces (HTTP 400 "Narration can only contain letters, numbers and
+ * spaces"). Colons, dashes, apostrophes and emoji all fail the whole
+ * request — sanitize first, exactly as chisomo (Kingdom Sponsor) does.
+ */
+export function sanitizeNarration(s: string): string {
+  return String(s ?? '')
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 50);
+}
+
 /** Customer collection (pushes a pin prompt to the payer's phone). */
 export async function lipilaCollect(
   env: Env,
@@ -94,11 +109,11 @@ export async function lipilaCollect(
       body: JSON.stringify({
         referenceId: reference,
         amount: amountZmw,
-        narration: note,
+        narration: sanitizeNarration(note),
         accountNumber: phoneZm,
         currency: 'ZMW',
         ...(email ? { email } : {}),
-        referenceData: note,
+        referenceData: sanitizeNarration(note),
       }),
     }));
   } catch (e: any) {
@@ -138,8 +153,8 @@ export async function lipilaDisburse(
         amount: amountZmw,
         accountNumber: phoneZm,
         currency: 'ZMW',
-        narration: note,
-        referenceData: note,
+        narration: sanitizeNarration(note),
+        referenceData: sanitizeNarration(note),
       }),
     }));
   } catch (e: any) {
