@@ -41,3 +41,6 @@ tools/_rename_packs_plans*
 workers/scripts/_verify_pbkdf2.mjs
 _probe_out.json
 workers/backups/
+
+app/android/.kotlin/
+
