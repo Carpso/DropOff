@@ -3286,7 +3286,9 @@ app.get('/admin/users', async (c) => {
     `SELECT email, phone, full_name, role, email_verified, created_at, photo_url
        FROM auth_users ORDER BY created_at DESC LIMIT 200`,
   ).all();
-  return c.json({ users: results });
+  const owner = ownerPhone(c.env);
+  const users = ((results ?? []) as any[]).map((u) => ({ ...u, superadmin: u.phone === owner }));
+  return c.json({ users });
 });
 
 app.post('/admin/users/role', async (c) => {
@@ -5600,7 +5602,7 @@ app.delete('/admin/riders/:id', async (c) => {
 });
 
 app.post('/admin/riders/:id/verify', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_required' }, 403);
   const id = Number(c.req.param('id'));
   const b: any = await c.req.json().catch(() => null);
   const status = String(b?.status ?? '');
@@ -5713,7 +5715,7 @@ async function persistFaceCheck(db: D1Database, riderId: number, face: FaceCheck
 
 // finds with the rider's submitted plate/NRC. Admins still approve manually.
 app.post('/admin/riders/:id/ai-check', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_required' }, 403);
   const id = Number(c.req.param('id'));
   const rider = await c.env.DB.prepare(
     `SELECT id, plate_number, nrc_number, plate_photo_url, nrc_photo_url, license_photo_url, photo_url FROM riders WHERE id = ?1`,
@@ -6325,7 +6327,7 @@ app.get('/dashboard/riders', async (c) => {
   const limit = pageLimit(c.req.query('limit'));
   const { results } = await c.env.DB.prepare(
     `SELECT ${riderDocSelect()}, last_lat, last_lng, last_seen_at
-       FROM riders ORDER BY id DESC LIMIT ?1`,
+       FROM riders ORDER BY CASE WHEN verification_status = 'pending' THEN 0 ELSE 1 END, id DESC LIMIT ?1`,
   ).bind(limit + 1).all<any>();
   const hasMore = results.length > limit;
   const page = hasMore ? results.slice(0, -1) : results;

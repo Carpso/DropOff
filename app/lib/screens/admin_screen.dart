@@ -804,31 +804,48 @@ class _UsersCardState extends State<_UsersCard> {
           else
             ..._users.take(60).map((u) {
               final role = '${u['role'] ?? 'customer'}';
+              final superadmin = u['superadmin'] == true;
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(children: [
                   const Icon(Icons.person_outline, size: 16, color: AppColors.forest),
                   const SizedBox(width: 10),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('${u['full_name'] ?? u['email'] ?? u['phone'] ?? 'Account'}',
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                    Row(children: [
+                      Text('${u['full_name'] ?? u['email'] ?? u['phone'] ?? 'Account'}',
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                      if (superadmin) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.amber.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppColors.amber.withValues(alpha: 0.65)),
+                          ),
+                          child: const Text('SUPERADMIN', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.7, color: Color(0xFF7A5200))),
+                        ),
+                      ],
+                    ]),
                     Text('${u['email'] ?? ''} · ${u['phone'] ?? ''}',
                         style: const TextStyle(color: AppColors.muted, fontSize: 11)),
                   ])),
-                  PopupMenuButton<String>(
-                    tooltip: 'Change role',
-                    initialValue: role,
-                    onSelected: (r) => _setRole(u, r),
-                    itemBuilder: (context) => const [
-                      PopupMenuItem(value: 'customer', child: Text('customer')),
-                      PopupMenuItem(value: 'admin', child: Text('admin')),
-                      PopupMenuItem(value: 'partner', child: Text('partner')),
-                    ],
-                    child: Chip(
-                      visualDensity: VisualDensity.compact,
-                      label: Text(role, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  if (superadmin) const Chip(visualDensity: VisualDensity.compact, label: Text('SUPERADMIN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)))
+                  else
+                    PopupMenuButton<String>(
+                      tooltip: 'Change role',
+                      initialValue: role,
+                      onSelected: (r) => _setRole(u, r),
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(value: 'customer', child: Text('customer')),
+                        PopupMenuItem(value: 'admin', child: Text('admin')),
+                        PopupMenuItem(value: 'partner', child: Text('partner')),
+                      ],
+                      child: Chip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(role, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                      ),
                     ),
-                  ),
                 ]),
               );
             }),
@@ -1167,7 +1184,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
                     decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
                     child: Row(children: [
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 1.0)),
+                        Text(code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 1.0, color: AppColors.ink)),
                         const SizedBox(height: 2),
                         Text('${c['tier']} • ${c['cycle_days']}d${c['note'] != null && '${c['note']}'.isNotEmpty ? ' • ${c['note']}' : ''}', style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
                         if (usedBy.isNotEmpty)
@@ -1204,6 +1221,7 @@ class _RiderVerificationAdminCard extends StatefulWidget {
 class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard> {
   List<Map<String, dynamic>> _riders = const [];
   bool _loading = true;
+  bool _showAll = false;
   String? _busy;
 
   @override
@@ -1380,6 +1398,11 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
           Text('$pending pending review - $verified verified. Daily target is 30 parcels; month pace carries any missed day.',
               style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
           const SizedBox(height: 12),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            ChoiceChip(selected: !_showAll, label: Text('Pending only ($pending)'), onSelected: (v) => setState(() => _showAll = !v)),
+            ChoiceChip(selected: _showAll, label: Text('All riders (${_riders.length})'), onSelected: (v) => setState(() => _showAll = v)),
+          ]),
+          const SizedBox(height: 8),
           if (_loading)
             const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
           else if (_riders.isEmpty)
@@ -1391,7 +1414,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
                 shrinkWrap: true,
                 physics: const ClampingScrollPhysics(),
                 children: [
-                  for (final rider in _riders) ...[
+                  for (final rider in (_showAll ? _riders : _riders.where((r) => '${r['verification_status']}' == 'pending'))) ...[
               Container(
                 key: ValueKey('rider-${rider['id']}'),
                 margin: const EdgeInsets.only(bottom: 10),
