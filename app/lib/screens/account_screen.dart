@@ -22,6 +22,8 @@ import '../services/device_lock.dart';
 /// Email + password sign in / create account (the JWT + phone persist locally;
 /// the ops device-link stays separate under Team).
 class AccountScreen extends StatefulWidget {
+  /// Optional one-shot referral code for pre-fill (used by dropoff.app/r/CODE deep link).
+  static String? prefillReferral;
   final bool focusPlans;
   const AccountScreen({super.key, this.focusPlans = false});
 
@@ -53,6 +55,11 @@ class _AccountScreenState extends State<AccountScreen> {
   @override
   void initState() {
     super.initState();
+    // /r/CODE deep link: prefill the referral box on account creation.
+    if (AccountScreen.prefillReferral != null && _cReferral.text.isEmpty) {
+      _cReferral.text = AccountScreen.prefillReferral!;
+      AccountScreen.prefillReferral = null;
+    }
     if (widget.focusPlans) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToPlans());
     }
@@ -1061,7 +1068,8 @@ class _ReferralCardState extends State<_ReferralCard> {
   Future<void> _share() async {
     final code = _data?['code'] as String? ?? '';
     if (code.isEmpty) return;
-    final text = 'Join me on DropOff — sellers get home pickup to their courier: https://dropoff-api.godfreymoseskalambo.workers.dev · Code $code';
+    final link = 'https://dropoff-api.godfreymoseskalambo.workers.dev/r/$code';
+    final text = 'Join me on DropOff — sellers get home pickup to their courier: $link';
     await openInApp('https://wa.me/?text=${Uri.encodeComponent(text)}');
   }
 

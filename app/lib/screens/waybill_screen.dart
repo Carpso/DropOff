@@ -117,10 +117,11 @@ class _WaybillScreenState extends State<WaybillScreen> {
       final bytes = await _capturePng();
       if (bytes == null) throw StateError('capture failed');
       final name = _fileName(booking);
+      final track = _trackingUrl ?? '';
       await Share.shareXFiles(
         [XFile.fromData(bytes, mimeType: 'image/png', name: name)],
         subject: 'DropOff waybill ${booking.serverRef ?? booking.reference}',
-        text: 'DropOff waybill ${booking.serverRef ?? booking.reference} — ${booking.fromCity} → ${booking.toCity}. Show at the depot counter.',
+        text: 'DropOff waybill ${booking.serverRef ?? booking.reference} — ${booking.fromCity} → ${booking.toCity}. Show at the depot counter.${track.isNotEmpty ? '\nTrack: $track' : ''}',
       );
     } catch (_) {
       if (mounted) {

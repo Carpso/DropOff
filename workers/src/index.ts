@@ -295,7 +295,7 @@ app.use('*', async (c, next) => {
 const PUBLIC_GETS = new Set(['/health', '/couriers', '/cities', '/plans', '/console', '/partner/console', '/promo/check']);
 app.use('*', async (c, next) => {
   const p = c.req.path;
-  if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/')) return next();
+  if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/') || p.startsWith('/.well-known/')) return next();
   // '/track/incoming' is the signed-in recipient's parcel list - it needs the
   // JWT identity, so it does NOT get the public token-credential bypass.
   if (p.startsWith('/track/') && p !== '/track/incoming') return next(); // token IS the credential (GET page + token chat)
@@ -643,6 +643,25 @@ ${mdToHtml(PRIVACY_MD)}
 </body></html>`;
 
 app.get('/legal/privacy', (c) => c.html(PRIVACY_HTML));
+
+// Deep-linkwell-known assets: let Android/iOS open DropOff links instead of
+// a bare browser tab. Hosted on the API origin until the branded domain exists.
+const APP_LINK_HOST = 'dropoff-api.godfreymoseskalambo.workers.dev';
+const DROPOFF_PACKAGE = 'zm.dropoff.dropoff';
+const UPLOAD_CERT_SHA256 = 'D0:DB:11:37:43:29:51:04:02:8F:42:3B:AB:B7:89:06:67:68:F0:48:D2:F1:AB:BF:76:21:A4:B8:5A:B0:E9:37';
+app.get('/.well-known/assetlinks.json', (c) => c.json([{
+  relation: ['delegate_permission/common.handle_all_urls'],
+  target: { namespace: 'android_app', package_name: DROPOFF_PACKAGE, sha256_cert_fingerprints: [UPLOAD_CERT_SHA256] },
+}], 200, { 'Cache-Control': 'public, max-age=3600' }));
+app.get('/.well-known/apple-app-site-association', (c) => {
+  const appleTeam = String(c.env.APPLE_TEAM_ID ?? '').trim();
+  if (!appleTeam) return c.json({ error: 'apple_app_site_association_not_configured' }, 404);
+  return new Response(JSON.stringify({
+    applinks: { details: [{ appID: `${appleTeam}.zm.dropoff.dropoff`, paths: ['/track/*', '/r/*', '/promo/*', '/rate/*', '/bookings/*', '/claim', '/plans'] }] },
+  }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
+});
+
+
 
 // Identity for the signed-in caller � the app uses this to reveal admin/ops
 // surfaces (the owner's phone is admin via OWNER_PHONE middleware grant) and
@@ -2455,6 +2474,16 @@ app.post('/admin/fraud/:id/review', async (c) => {
 // prices, sender phone or payment data.
 app.get('/track/:token', async (c) => {
   const token = c.req.param('token');
+  // Browser view: show "Open in DropOff" rather than raw JSON.
+  if (c.req.header('accept')?.includes('text/html')) {
+    return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DropOff</title></head>
+<body style="font-family:system-ui;margin:0;background:#123C32;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px">
+<div style="max-width:420px"><h1 style="margin:0 0 8px">Open in DropOff</h1>
+<p style="opacity:.9">Tap below to open this tracking link in the app. The app uses your phone number to show the parcel.</p>
+<a href="dropoff://track/${encodeURIComponent(token)}" style="display:inline-block;margin-top:18px;background:#F6B73C;color:#123C32;font-weight:800;text-decoration:none;padding:14px 28px;border-radius:12px">Open DropOff</a>
+<p style="margin-top:16px;font-size:12px;opacity:.7">If the app says "not found" or "not authorized", the phone used to address the parcel may not match this device.</p>
+</div></body></html>`);
+  }
   const access = await trackAccess(c, token);
   if (!access.jobId) return c.json({ error: 'not found' }, 404);
   if (!access.granted) {
@@ -4595,7 +4624,7 @@ app.get('/refer/code', async (c) => {
   ).bind(phone).first<any>();
   return c.json({
     code,
-    share_text: `Join me on DropOff — sellers get home pickup to their courier. Use my code ${code}: https://dropoff-api.godfreymoseskalambo.workers.dev`,
+    share_text: `Join me on DropOff — sellers get home pickup to their courier. Use my link: https://dropoff-api.godfreymoseskalambo.workers.dev/r/${code}`,
     stats: { pending: stats?.pending ?? 0, rewarded: stats?.rewarded ?? 0, total: stats?.total ?? 0 },
   });
 });

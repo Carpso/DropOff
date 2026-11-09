@@ -149,6 +149,8 @@ class _BookingScreenState extends State<BookingScreen> {
       }
       final dv = '${pre['declared_value_zmw'] ?? ''}'.trim();
       if (dv.isNotEmpty) _declaredValue.text = dv;
+      final promo = '${pre['promo_code'] ?? ''}'.trim();
+      if (promo.isNotEmpty) _promo.text = promo;
     }
     _courierSearchCtl.addListener(() => setState(() {}));
     _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {

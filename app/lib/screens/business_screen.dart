@@ -88,7 +88,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
   void _shareReferral() async {
     final code = '${_refer?['code'] ?? ''}';
     if (code.isEmpty) return;
-    final text = '${_refer?['share_text'] ?? 'Join me on DropOff — Code $code'}';
+    final text = '${_refer?['share_text'] ?? 'Join me on DropOff — use my link: r/$code'}';
     await openInApp('https://wa.me/?text=${Uri.encodeComponent(text)}');
   }
 

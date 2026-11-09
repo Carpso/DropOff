@@ -405,9 +405,11 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   final ev = (data['evidence'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
   final check = (ev['parcel_check'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
   String line(String label, Object? value) => '$label: ${value == null || '$value'.isEmpty ? 'n/a' : value}';
+  final track = '${data['tracking_token'] ?? ''}';
   final summary = [
     'DropOff evidence — ${data['ref'] ?? ref}',
     line('Status', data['status']),
+    if (track.isNotEmpty) 'Track: https://dropoff-api.godfreymoseskalambo.workers.dev/track/$track',
     line('Booked', data['created_at']),
     line('Booking photo', ev['booking_photo']),
     line('Pickup photo', ev['pickup_photo']),

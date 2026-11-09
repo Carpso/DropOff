@@ -4,6 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'l10n/app_localizations.dart';
+import 'data/catalog.dart' as cat;
+import 'screens/couriers_screen.dart';
+import 'screens/track_screen.dart';
+import 'screens/waybill_screen.dart';
+import 'screens/account_screen.dart';
+import 'screens/booking_screen.dart';
+import 'package:app_links/app_links.dart';
 import 'screens/app_shell.dart';
 import 'screens/bookings_screen.dart';
 import 'screens/lock_screen.dart';
@@ -15,8 +22,91 @@ import 'data/push_service.dart';
 import 'services/device_lock.dart';
 import 'widgets/common.dart';
 
-/// Root navigator so push-notification taps can open Bookings from anywhere.
+/// Root navigator so push-notification taps and deep links can open the right screen from anywhere.
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+/// Handle `dropoff.app/...` deep links coming from the OS (URI stream from app_links
+/// or `getInitialLink()` on a cold start). Known paths are routed; unknown are shell.
+void _handleDeepLink(AppStore store, Uri uri) {
+  final ctx = navigatorKey.currentContext;
+  if (ctx == null) return;
+  final seg = uri.pathSegments;
+  AnalyticsService.instance.track(feature: 'deeplink', action: 'open', context: uri.path, meta: {'query': uri.queryParameters});
+  if (seg.isEmpty) return;
+  // /track/:token
+  if (seg.length >= 2 && seg[0] == 'track' && seg[1] != 'incoming') {
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => TrackScreen(initialToken: seg[1])));
+    return;
+  }
+  // /bookings/:ref[/rate]
+  if (seg.length >= 2 && seg[0] == 'bookings') {
+    final ref = seg[1];
+    final match = store.bookings.where((b) => b.serverRef == ref).firstOrNull;
+    if (match != null) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: match.id)));
+      return;
+    }
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingsScreen()));
+    return;
+  }
+  // /rate/:ref
+  if (seg.length >= 2 && seg[0] == 'rate') {
+    final ref = seg[1];
+    final match = store.bookings.where((b) => b.serverRef == ref).firstOrNull;
+    if (match != null) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: match.id)));
+      return;
+    }
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingsScreen()));
+    return;
+  }
+  // /waybill/:ref
+  if (seg.length >= 2 && seg[0] == 'waybill') {
+    final ref = seg[1];
+    final match = store.bookings.where((b) => b.serverRef == ref).firstOrNull;
+    if (match != null) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => WaybillScreen(bookingId: match.id)));
+      return;
+    }
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingsScreen()));
+    return;
+  }
+  // /promo/:ref, /promo?code=..., /r/:code — referral prefill/claim
+  if (seg.length >= 2 && (seg[0] == 'promo' || seg[0] == 'r')) {
+    final code = seg[1].trim().toUpperCase();
+    AnalyticsService.instance.track(feature: 'deeplink', action: 'open_referral_or_promo', context: code);
+    BookingScreen.prefill = {'promo_code': code};
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
+    return;
+  }
+  if (seg.length == 1 && seg[0] == 'promo') {
+    final code = (uri.queryParameters['code'] ?? '').trim().toUpperCase();
+    if (code.isNotEmpty) {
+      AnalyticsService.instance.track(feature: 'deeplink', action: 'open_promo', context: code);
+      BookingScreen.prefill = {'promo_code': code};
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
+      return;
+    }
+  }
+  // /plans?focus=gold
+  if (seg.isNotEmpty && seg[0] == 'plans') {
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true)));
+    return;
+  }
+  // /couriers/:id
+  if (seg.length >= 2 && seg[0] == 'couriers') {
+    final courier = cat.courierById(seg[1]);
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => CourierDetailScreen(courier: courier)));
+    return;
+  }
+  // /auth/link?k=...&t=... — open account screen
+  if (seg.length >= 2 && seg[0] == 'auth' && seg[1] == 'link') {
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
+    return;
+  }
+  // Fallback: shell
+  Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const AppShell()));
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,7 +119,21 @@ Future<void> main() async {
   PushService.onNotificationTap.stream.listen((jobRef) {
     final ctx = navigatorKey.currentContext;
     if (ctx == null || !ctx.mounted) return;
+    AnalyticsService.instance.track(feature: 'push', action: 'tap', context: jobRef ?? '');
+    if (jobRef != null) {
+      final ref = jobRef;
+      final match = store.bookings.where((b) => b.serverRef == ref).firstOrNull;
+      if (match != null) {
+        Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: match.id)));
+        return;
+      }
+    }
     Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingsScreen()));
+  });
+  final appLinks = AppLinks();
+  appLinks.uriLinkStream.listen((uri) => _handleDeepLink(store, uri));
+  appLinks.getInitialLink().then((uri) {
+    if (uri != null) _handleDeepLink(store, uri);
   });
   runApp(DropOffApp(store: store, navigatorKey: navigatorKey, initFuture: initFuture));
 }
