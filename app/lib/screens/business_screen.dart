@@ -9,6 +9,7 @@ import '../ui/in_app_browser.dart';
 import 'account_screen.dart';
 import 'admin_screen.dart';
 import 'booking_screen.dart';
+import 'coverage_screen.dart';
 import 'track_screen.dart';
 
 /// The seller's business dashboard: plan usage, parcels in flight, delivered
@@ -273,6 +274,16 @@ class _BusinessScreenState extends State<BusinessScreen> {
                 const SizedBox(height: 14),
               ],
               _statsRow(),
+              const SizedBox(height: 14),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.map_outlined, color: AppColors.forest),
+                  title: const Text('Depot coverage', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                  subtitle: const Text('See which cities have live pickup → depot today.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                  trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const CoverageScreen())),
+                ),
+              ),
               const SizedBox(height: 14),
               if (staffGlance != null) ...[
                 staffGlance,
