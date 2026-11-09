@@ -320,6 +320,17 @@ class _BusinessScreenState extends State<BusinessScreen> {
 
   /// DropOff Predict card: what the seller will likely ship next 30 days,
   /// and the cheapest plan that covers it. Hidden when the worker has no data.
+  ///
+  /// Honest savings wording: a "recommendation" that actually costs more than
+  /// pay-as-you-go must not read as a saving (K-315 read like nonsense).
+  String savingsLine(Map<String, dynamic>? rec) {
+    if (rec == null) return '';
+    final save = (rec['est_savings_zmw'] as num?) ?? 0;
+    if (save > 0) return 'Covers ~${rec['parcels_per_month']} parcels — est. save K${save.toStringAsFixed(0)} vs pay-as-you-go';
+    if (save < 0) return 'Covers ~${rec['parcels_per_month']} parcels — costs K${(-save).toStringAsFixed(0)} more than pay-as-you-go';
+    return 'Covers ~${rec['parcels_per_month']} parcels — about the same as pay-as-you-go';
+  }
+
   Widget? _predictCard() {
     final p = _predict;
     if (p == null) return null;
@@ -381,25 +392,26 @@ class _BusinessScreenState extends State<BusinessScreen> {
           ]),
           if (rec != null) ...[
             const SizedBox(height: 12),
+            // No Row+Expanded here: on some devices the side-by-side layout
+            // squeezed the text column to a single character (rendered as
+            // one letter per line). Stacking keeps every line full-width.
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
-              child: Row(children: [
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Best fit: ${(rec['tag'] as String?) ?? '${rec['tier']}'.toUpperCase()} · K${(rec['fee_zmw'] as num?)?.toStringAsFixed(0)}',
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
-                    const SizedBox(height: 2),
-                    Text('Covers ~${rec['parcels_per_month']} parcels — est. save K${(rec['est_savings_zmw'] as num?)?.toStringAsFixed(0) ?? '0'} vs pay-as-you-go',
-                        style: const TextStyle(color: AppColors.muted, fontSize: 11)),
-                  ]),
-                ),
-                const SizedBox(width: 8),
-                FilledButton.tonal(
-                  style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-                  onPressed: () => _switchToPlan('${rec['tier']}', '${rec['tag'] ?? rec['tier']}'),
-                  child: const Text('Switch'),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text('Best fit: ${(rec['tag'] as String?) ?? '${rec['tier']}'.toUpperCase()} · K${(rec['fee_zmw'] as num?)?.toStringAsFixed(0)}',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
+                const SizedBox(height: 3),
+                Text(savingsLine(rec), style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3)),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.tonal(
+                    style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                    onPressed: () => _switchToPlan('${rec['tier']}', '${rec['tag'] ?? rec['tier']}'),
+                    child: const Text('Switch'),
+                  ),
                 ),
               ]),
             ),
