@@ -13,6 +13,7 @@ import '../widgets/common.dart';
 import '../l10n/app_localizations.dart';
 import 'account_screen.dart';
 import 'bookings_screen.dart';
+import 'waybill_screen.dart';
 
 class BookingScreen extends StatefulWidget {
   final String? initialCourierId;
@@ -1122,6 +1123,12 @@ class BookingSuccessScreen extends StatelessWidget {
             const SizedBox(height: 18),
             InfoPill(icon: Icons.route_rounded, label: 'DropOff rides to the courier — reference ${booking.reference}'),
             const Spacer(),
+            FilledButton.tonalIcon(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => WaybillScreen(bookingId: booking.id))),
+              icon: const Icon(Icons.receipt_long_outlined, size: 20),
+              label: const Text('Show at depot'),
+            ),
+            const SizedBox(height: 10),
             FilledButton(onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: booking.id))), child: const Text('Track this booking')),
             const SizedBox(height: 10),
             TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Back to home')),

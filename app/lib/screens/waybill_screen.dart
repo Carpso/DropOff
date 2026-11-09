@@ -121,7 +121,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       await Share.shareXFiles(
         [XFile.fromData(bytes, mimeType: 'image/png', name: name)],
         subject: 'DropOff waybill ${booking.serverRef ?? booking.reference}',
-        text: 'DropOff waybill ${booking.serverRef ?? booking.reference} — ${booking.fromCity} → ${booking.toCity}. Show at the depot counter.${track.isNotEmpty ? '\nTrack: $track' : ''}',
+        text: 'DropOff waybill ${booking.serverRef ?? booking.reference} — ${booking.fromCity} → ${booking.toCity}. Show at the depot counter.${track.isNotEmpty ? '\nTrack: https://dropoff-api.godfreymoseskalambo.workers.dev/t/$track' : ''}',
       );
     } catch (_) {
       if (mounted) {

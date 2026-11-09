@@ -409,7 +409,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   final summary = [
     'DropOff evidence — ${data['ref'] ?? ref}',
     line('Status', data['status']),
-    if (track.isNotEmpty) 'Track: https://dropoff-api.godfreymoseskalambo.workers.dev/track/$track',
+    if (track.isNotEmpty) 'Track: https://dropoff-api.godfreymoseskalambo.workers.dev/t/$track',
     line('Booked', data['created_at']),
     line('Booking photo', ev['booking_photo']),
     line('Pickup photo', ev['pickup_photo']),

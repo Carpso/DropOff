@@ -33,8 +33,8 @@ void _handleDeepLink(AppStore store, Uri uri) {
   final seg = uri.pathSegments;
   AnalyticsService.instance.track(feature: 'deeplink', action: 'open', context: uri.path, meta: {'query': uri.queryParameters});
   if (seg.isEmpty) return;
-  // /track/:token
-  if (seg.length >= 2 && seg[0] == 'track' && seg[1] != 'incoming') {
+  // /track/:token and  /t/:token (short)
+  if (seg.length >= 2 && (seg[0] == 'track' || seg[0] == 't')) {
     Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => TrackScreen(initialToken: seg[1])));
     return;
   }

@@ -39,6 +39,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="dropoff-api.godfreymoseskalambo.workers.dev" android:pathPrefix="/track" />
+                <data android:scheme="https" android:host="dropoff-api.godfreymoseskalambo.workers.dev" android:pathPrefix="/t" />
                 <data android:scheme="https" android:host="dropoff-api.godfreymoseskalambo.workers.dev" android:pathPrefix="/bookings" />
                 <data android:scheme="https" android:host="dropoff-api.godfreymoseskalambo.workers.dev" android:pathPrefix="/rate" />
                 <data android:scheme="https" android:host="dropoff-api.godfreymoseskalambo.workers.dev" android:pathPrefix="/waybill" />

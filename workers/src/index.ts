@@ -657,7 +657,7 @@ app.get('/.well-known/apple-app-site-association', (c) => {
   const appleTeam = String(c.env.APPLE_TEAM_ID ?? '').trim();
   if (!appleTeam) return c.json({ error: 'apple_app_site_association_not_configured' }, 404);
   return new Response(JSON.stringify({
-    applinks: { details: [{ appID: `${appleTeam}.zm.dropoff.dropoff`, paths: ['/track/*', '/r/*', '/promo/*', '/rate/*', '/bookings/*', '/claim', '/plans'] }] },
+    applinks: { details: [{ appID: `${appleTeam}.zm.dropoff.dropoff`, paths: ['/track/*', '/t/*', '/r/*', '/promo/*', '/rate/*', '/bookings/*', '/claim', '/plans', '/couriers/*'] }] },
   }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
 });
 
@@ -1671,15 +1671,21 @@ app.post('/jobs', async (c) => {
     let depositAmount = 0;
     let depositRef: string | null = null;
     if (c.get('role') !== 'ops' && packInclusion !== 'pack') {
-      const done = (await c.env.DB.prepare(
-        `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
-      ).bind(senderPhone).first<any>())?.n ?? 0;
-      if (done === 0) {
-        depositRequired = true;
-        depositAmount = round2(platformFee(riderFee) + MOMO_COLLECTION_FEE);
-        depositRef = `dep-${ref}`;
-        const init = await lipilaCollect(c.env, senderPhone, depositAmount, depositRef,
-          `DropOff deposit ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+      // Waive the pay-as-you-go deposit if this seller was referred by an
+      // existing user — referral enrollment replaces the anti-ghost gate.
+      const referred = await c.env.DB.prepare(
+        'SELECT referrer_phone FROM referrals WHERE referred_phone = ?1 LIMIT 1',
+      ).bind(senderPhone).first<any>();
+      if (!referred) {
+        const done = (await c.env.DB.prepare(
+          `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
+        ).bind(senderPhone).first<any>())?.n ?? 0;
+        if (done === 0) {
+          depositRequired = true;
+          depositAmount = round2(platformFee(riderFee) + MOMO_COLLECTION_FEE);
+          depositRef = `dep-${ref}`;
+          const init = await lipilaCollect(c.env, senderPhone, depositAmount, depositRef,
+            `DropOff deposit ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
         if (init.ok) {
           await c.env.DB.prepare(
             `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
@@ -1691,6 +1697,7 @@ app.post('/jobs', async (c) => {
         } else {
           depositRequired = false; // Lipila down — let the sweep assign a rider, fee still owed
         }
+      }
       }
     }
     if (depositRequired) {
@@ -2474,8 +2481,8 @@ app.post('/admin/fraud/:id/review', async (c) => {
 // prices, sender phone or payment data.
 app.get('/track/:token', async (c) => {
   const token = c.req.param('token');
-  // Browser view: show "Open in DropOff" rather than raw JSON.
-  if (c.req.header('accept')?.includes('text/html')) {
+  const wantsHtml = c.req.header('accept')?.includes('text/html') ?? false;
+  if (wantsHtml) {
     return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DropOff</title></head>
 <body style="font-family:system-ui;margin:0;background:#123C32;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px">
 <div style="max-width:420px"><h1 style="margin:0 0 8px">Open in DropOff</h1>
@@ -2550,6 +2557,9 @@ app.get('/track/:token', async (c) => {
 // POST /track/:token/verify {phone} � proves the caller owns a participant
 // phone (the recipient's or the sender's) and mints an X-Track-Grant.
 // Rate-limited so the gate cannot be brute-forced.
+// Short vanity path used in shares/SMS — same behaviour as /track/:token.
+app.get('/t/:token', (c) => c.redirect(`/track/${c.req.param('token')}`, 302));
+
 app.post('/track/:token/verify', async (c) => {
   if (await rateLimited(c, 'track_verify', 15)) return c.json({ error: 'too_many_requests' }, 429);
   // Per-token throttle too: 10 attempts / hour against ONE link, even from
