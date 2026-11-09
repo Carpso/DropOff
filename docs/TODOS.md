@@ -26,8 +26,15 @@ Status: `done` / `server-done` / `scaffolded` / `planned` / `blocked-external`. 
 - [done] Tracking SMS-OTP verification; recipient handover OTP (door) + POD; OTP abuse strike. SMS **English-only** until user language pref is applied.
 
 ## Pay & ops
-- [done] Rider pay K3,200/mo incl. K300/wk fuel (pace-gated). Versioned release script; Play docs. Fresh `dist/` APK/AAB (0.5.1+12).
+- [done] Rider pay K3,200/mo incl. K300/wk fuel (pace-gated). Versioned release script; Play docs. Fresh `dist/` APK/AAB (0.5.2+13).
+- [done] Fresh release build 0.5.3+14 prepared for Play upload (deep links, short `/t/<token>` path, admin JWT fallback, drift detection cron, depot coverage, referrer deposit waiver, Show-at-depot CTA).
 - [blocked-external] Play Console upload; Lipila payout whitelist `260976847775`; physical-device verification.
+
+## Deep links & Play Store release
+- [server-done/app] `/track/:token`, `/bookings/:ref`, `/rate/:ref`, `/waybill/:ref`, `/r/:code`, `/promo/:code`, `/plans`, `/couriers/:id`, `/auth/*`, `/t/:token` (short). Intent-filters set; HTML “Open in DropOff” gate for browsers; AASA hosted by worker (`/.well-known/*`).
+- [blocked-external] iOS Universal Links — configure `APPLE_TEAM_ID` in wrangler secrets, rebuild with matching entitlements, then verify on a real device.
+- [blocked-external] Play App Links verification depends on Play signing cert fingerprint; confirm final fingerprint matches `assetlinks.json`.
+- [external] Play Console listing: category (App), Logistics/Transportation, store assets (icon, feature graphic, screenshots), reviewer test accounts, content rating, data-safety, rollout.
 
 ## Audit 2026-11-08 (docs/AUDIT-2026-11-08.md)
 - [done-pass] Tests pass; analyze 0 errors/warnings (4 intentional info); secrets hygiene ok; ops key build-time only; Platinum **quoted at counter** (no invented fares); mobile keystore token-at-rest (web fallback).
