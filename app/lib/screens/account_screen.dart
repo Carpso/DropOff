@@ -395,7 +395,7 @@ class _AccountScreenState extends State<AccountScreen> {
                 if (v == null) return;
                 setSheet(() => selected = v);
                 await store.setLocaleCode(v);
-                if (ctx.mounted) Navigator.pop(ctx);
+                if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
               },
               child: Column(
                 mainAxisSize: MainAxisSize.min,

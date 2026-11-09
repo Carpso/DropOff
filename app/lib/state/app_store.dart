@@ -61,8 +61,8 @@ class AppStore extends ChangeNotifier {
   /// photo on file — views fall back to initials.
   String? get photoUrl => _photoUrl;
   String? get fullName => _fullName;
-  String? get localeCode => _localeCode;
-  Locale? get locale => _localeCode == null || _localeCode!.isEmpty ? null : Locale(_localeCode!);
+  String? get localeCode => _localeCode == null || _localeCode!.isEmpty ? 'en' : _localeCode;
+  Locale? get locale => Locale(localeCode ?? 'en');
 
   /// Server role for the signed-in identity: customer | partner | admin | ops |
   /// rider. Admin/ops unlock the Team tab and the admin console; rider unlocks
