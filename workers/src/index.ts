@@ -5038,7 +5038,7 @@ app.post('/admin/pack-codes', async (c) => {
             u.full_name AS redeemed_name, u.email AS redeemed_email,
             (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) AS period_end,
             CASE WHEN pc.used_by IS NULL THEN 'unused'
-                 WHEN (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) IS NULL THEN 'used'
+                 WHEN NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.phone = pc.used_by AND s.status = 'active' AND s.period_end > datetime('now')) THEN 'used'
                  WHEN (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) <= datetime('now') THEN 'expired'
                  ELSE 'active' END AS status
        FROM pack_codes pc
@@ -5055,7 +5055,7 @@ app.get('/admin/pack-codes', async (c) => {
             u.full_name AS redeemed_name, u.email AS redeemed_email,
             (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) AS period_end,
             CASE WHEN pc.used_by IS NULL THEN 'unused'
-                 WHEN (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) IS NULL THEN 'used'
+                 WHEN NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.phone = pc.used_by AND s.status = 'active' AND s.period_end > datetime('now')) THEN 'used'
                  WHEN (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) <= datetime('now') THEN 'expired'
                  ELSE 'active' END AS status
        FROM pack_codes pc
@@ -6253,7 +6253,7 @@ function statusBadge(s: string): string {
 
 /* Dashboard home: key metrics + quick links */
 app.get('/dashboard', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const phone = c.get('phone') ?? 'admin';
   const stats = await c.env.DB.prepare(
     `SELECT (SELECT COUNT(*) FROM riders) AS riders,
@@ -6499,7 +6499,7 @@ app.get('/admin/analytics/kpi', async (c) => {
 
 /* Analytics KPI page (HTML) � server-rendered view of the same aggregation. */
 app.get('/dashboard/analytics', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const phone = c.get('phone') ?? 'admin';
   const days = Math.min(Math.max(Number(c.req.query('days') ?? '30'), 1), 90);
   const since = `datetime('now', '-${days} days')`;
