@@ -19,6 +19,9 @@ import {
   lockoutStatus, recordAttempt, noteDevice, alertOwner, raiseAlert, acknowledgeAlert,
 } from './security';
 import { ChatRoom } from './chat_do';
+import {
+  containsAbuse, recordAbuseStrike, chatSuspendedUntil, clearChatStrikes,
+} from './moderation';
 
 export { ChatRoom };
 
@@ -2280,11 +2283,11 @@ const RATING_TARGETS = new Set(['seller', 'driver', 'courier']);
 const RATING_OPEN = new Set(['delivered', 'ready_for_collection']);
 
 // Lightweight comment guard � enough to keep abuse out of a public feed without
-// pretending to be a full moderation system. Hidden-by-admin is the real lever.
-const BLOCKED_WORDS = ['fuck', 'shit', 'bitch', 'asshole', 'dick', 'cunt', 'nigger', 'faggot'];
+// Lightweight comment guard — the shared containsAbuse() matcher lives in
+// moderation.ts (normalization + Zambian-language terms) so chat and comments
+// enforce identical rules. Hidden-by-admin and strikes are the real levers.
 function containsProfanity(text: string): boolean {
-  const t = text.toLowerCase();
-  return BLOCKED_WORDS.some((w) => t.includes(w));
+  return containsAbuse(text);
 }
 
 async function ratingTargetKey(job: any, targetType: string): Promise<string | null> {
@@ -3057,16 +3060,45 @@ async function getOrCreateJobThread(env: Env, jobId: number): Promise<number> {
   return meta.last_row_id as number;
 }
 
-async function chatMessages(env: Env, threadId: number) {
+// Viewers never see: messages hidden by admin review, or messages from
+// participants *they* have blocked (unblocks restore them instantly).
+// Returns the filtered list; the caller also gets the phones this viewer
+// blocks among the thread's senders, so clients can show an unblock banner.
+async function chatMessages(env: Env, threadId: number, viewerPhone: string | null = null) {
   const { results } = await env.DB.prepare(
     `SELECT m.id, m.sender_phone, m.sender_role, m.body, m.created_at,
             COALESCE(au.photo_url, r.photo_url) AS sender_photo_url
        FROM chat_messages m
        LEFT JOIN auth_users au ON au.phone = m.sender_phone
        LEFT JOIN riders r ON r.phone = m.sender_phone
-      WHERE m.thread_id = ?1 ORDER BY m.id ASC LIMIT 200`,
+      WHERE m.thread_id = ?1 AND m.hidden = 0 ORDER BY m.id ASC LIMIT 200`,
   ).bind(threadId).all();
-  return results;
+  if (!viewerPhone) return { messages: results, blocked_senders: [] as string[] };
+  const blockedRows = await env.DB.prepare('SELECT blocked FROM user_blocks WHERE blocker = ?1')
+    .bind(viewerPhone).all<{ blocked: string }>();
+  const blocked = new Set(blockedRows.results.map((r) => r.blocked));
+  const messages = blocked.size ? results.filter((m) => !blocked.has(String(m.sender_phone))) : results;
+  const senders = await env.DB.prepare(
+    'SELECT DISTINCT sender_phone FROM chat_messages WHERE thread_id = ?1 AND hidden = 0',
+  ).bind(threadId).all<{ sender_phone: string }>();
+  return {
+    messages,
+    blocked_senders: [...senders.results.map((r) => r.sender_phone)].filter((p) => blocked.has(p) && p !== 'ops'),
+  };
+}
+
+// One gate for every REST chat send: suspensions first (403), then abuse
+// (400 + an automatic strike toward the 3-strike suspension).
+async function chatSendGate(c: any, body: string, senderPhone: string | null): Promise<Response | null> {
+  if (senderPhone) {
+    const until = await chatSuspendedUntil(c.env, senderPhone);
+    if (until) return c.json({ error: 'chat_suspended', until }, 403);
+  }
+  if (containsAbuse(body)) {
+    if (senderPhone) await recordAbuseStrike(c.env, senderPhone);
+    return c.json({ error: 'message_blocked', message: 'Keep messages respectful.' }, 400);
+  }
+  return null;
 }
 
 async function markThreadRead(env: Env, threadId: number, phone: string): Promise<void> {
@@ -3109,22 +3141,28 @@ app.get('/jobs/:ref/chat', async (c) => {
   const chatRole = await jobChatRole(c, job);
   if (!chatRole) return c.json({ error: 'not found' }, 404); // no existence leak
   const threadId = await getOrCreateJobThread(c.env, job.id);
-  if (c.get('phone')) await markThreadRead(c.env, threadId, c.get('phone')!);
-  return c.json({ thread_id: threadId, role: chatRole, messages: await chatMessages(c.env, threadId) });
+  const viewerPhone = c.get('phone');
+  if (viewerPhone) await markThreadRead(c.env, threadId, viewerPhone);
+  const chat = await chatMessages(c.env, threadId, viewerPhone);
+  return c.json({ thread_id: threadId, role: chatRole, ...chat });
 });
+
+// Suspended or abusive senders are stopped before insertion; a profanity-hit
+// counts as an automatic strike (3 strikes = 7-day chat suspension).
 
 app.post('/jobs/:ref/chat', async (c) => {
   if (await rateLimited(c, 'chat_send', 30, 10)) return c.json({ error: 'too_many_requests' }, 429);
   const b: any = await c.req.json().catch(() => null);
   const body = String(b?.body ?? '').trim().slice(0, 500);
   if (!body) return c.json({ error: 'body required' }, 400);
-  if (containsProfanity(body)) return c.json({ error: 'message_blocked', message: 'Keep messages respectful.' }, 400);
   const job = await c.env.DB.prepare(
     'SELECT id, ref, sender_phone, recipient_phone, courier_id, rider_id FROM jobs WHERE ref = ?1',
   ).bind(c.req.param('ref')).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
   const chatRole = await jobChatRole(c, job);
   if (!chatRole) return c.json({ error: 'not found' }, 404);
+  const gate = await chatSendGate(c, body, c.get('phone') ?? null);
+  if (gate) return gate;
   const threadId = await getOrCreateJobThread(c.env, job.id);
   const senderPhone = c.get('phone') ?? 'ops';
   const { meta } = await c.env.DB.prepare(
@@ -3143,10 +3181,10 @@ app.get('/track/:token/chat', async (c) => {
   if (!access.jobId) return c.json({ error: 'not found' }, 404);
   if (!access.granted) return c.json({ error: 'verification_required' }, 401);
   const threadId = await getOrCreateJobThread(c.env, access.jobId);
-  const messages = await chatMessages(c.env, threadId);
+  const chat = await chatMessages(c.env, threadId, access.recipientPhone);
   // recipient read state keyed by their phone on the job
   if (access.recipientPhone) await markThreadRead(c.env, threadId, access.recipientPhone);
-  return c.json({ thread_id: threadId, role: 'recipient', messages });
+  return c.json({ thread_id: threadId, role: 'recipient', ...chat });
 });
 
 app.post('/track/:token/chat', async (c) => {
@@ -3159,10 +3197,11 @@ app.post('/track/:token/chat', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const body = String(b?.body ?? '').trim().slice(0, 500);
   if (!body) return c.json({ error: 'body required' }, 400);
-  if (containsProfanity(body)) return c.json({ error: 'message_blocked', message: 'Keep messages respectful.' }, 400);
   const access = await trackAccess(c, c.req.param('token'));
   if (!access.jobId) return c.json({ error: 'not found' }, 404);
   if (!access.granted) return c.json({ error: 'verification_required' }, 401);
+  const gate = await chatSendGate(c, body, access.recipientPhone);
+  if (gate) return gate;
   const job = await c.env.DB.prepare(
     'SELECT id, ref, sender_phone, recipient_phone, courier_id, rider_id FROM jobs WHERE id = ?1',
   ).bind(access.jobId).first<any>();
@@ -3197,7 +3236,8 @@ app.post('/chat/support', async (c) => {
     threadId = meta.last_row_id as number;
   }
   if (body) {
-    if (containsProfanity(body)) return c.json({ error: 'message_blocked' }, 400);
+    const gate = await chatSendGate(c, body, phone);
+    if (gate) return gate;
     await c.env.DB.prepare(
       `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, 'seller', ?3)`,
     ).bind(threadId, phone, body).run();
@@ -3205,7 +3245,8 @@ app.post('/chat/support', async (c) => {
     c.executionCtx.waitUntil(notifyChatParticipants(c.env, thread, null, phone, body.slice(0, 60)).catch(() => {}));
   }
   await markThreadRead(c.env, threadId, phone);
-  return c.json({ thread_id: threadId, role: 'seller', messages: await chatMessages(c.env, threadId) });
+  const chat = await chatMessages(c.env, threadId, phone);
+  return c.json({ thread_id: threadId, role: 'seller', ...chat });
 });
 
 // Ops replies on a support thread
@@ -3222,6 +3263,133 @@ app.post('/chat/support/:id/reply', async (c) => {
   ).bind(threadId, c.get('phone') ?? 'ops', body).run();
   c.executionCtx.waitUntil(notifyChatParticipants(c.env, thread, null, c.get('phone') ?? 'ops', body.slice(0, 60)).catch(() => {}));
   return c.json({ ok: true });
+});
+
+/* ----------------------- UGC safety: report & block ------------------------ */
+// Play-required user-reporting and user-blocking for chat content.
+
+// Rate-limited report of a single chat message by a participant of the thread.
+app.post('/chat/messages/:id/report', async (c) => {
+  if (await rateLimited(c, 'chat_report', 10, 3600)) return c.json({ error: 'too_many_requests' }, 429);
+  const reporter = c.get('phone');
+  if (!reporter) return c.json({ error: 'identity_required' }, 401);
+  const messageId = Number(c.req.param('id'));
+  if (!Number.isFinite(messageId)) return c.json({ error: 'bad id' }, 400);
+  const b: any = await c.req.json().catch(() => ({}));
+  const cat = ['harassment', 'spam', 'other'].includes(String(b?.reason)) ? String(b.reason) : 'other';
+  const note = typeof b?.note === 'string' ? String(b.note).trim().slice(0, 200) : '';
+
+  const msg = await c.env.DB.prepare('SELECT id, thread_id, sender_phone FROM chat_messages WHERE id = ?1')
+    .bind(messageId).first<any>();
+  // No existence leak: an unknown id, your own or an ops message is a 404.
+  if (!msg || msg.sender_phone === reporter || msg.sender_phone === 'ops') return c.json({ error: 'not found' }, 404);
+  const thread = await c.env.DB.prepare('SELECT id, kind, phone, job_id FROM chat_threads WHERE id = ?1')
+    .bind(msg.thread_id).first<any>();
+  if (!thread) return c.json({ error: 'not found' }, 404);
+  if (thread.kind === 'support') {
+    if (thread.phone !== reporter) return c.json({ error: 'forbidden' }, 403);
+  } else if (thread.job_id) {
+    const job = await c.env.DB.prepare(
+      'SELECT id, sender_phone, recipient_phone, courier_id, rider_id FROM jobs WHERE id = ?1',
+    ).bind(thread.job_id).first<any>();
+    const chatRole = job ? await jobChatRole(c, job) : null;
+    if (!chatRole) return c.json({ error: 'forbidden' }, 403);
+  }
+  const dup = await c.env.DB.prepare(
+    'SELECT id FROM chat_reports WHERE message_id = ?1 AND reported_by = ?2',
+  ).bind(messageId, reporter).first<{ id: number }>();
+  if (dup) return c.json({ ok: true, already_reported: true });
+  const reason = note ? `${cat}: ${note}` : cat;
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO chat_reports (message_id, thread_id, reported_by, reason) VALUES (?1, ?2, ?3, ?4)`,
+  ).bind(messageId, msg.thread_id, reporter, reason).run();
+  return c.json({ ok: true, id: meta.last_row_id });
+});
+
+// Block / unblock a user. Their messages disappear from my chat views only.
+app.get('/users/blocks', async (c) => {
+  const me = c.get('phone');
+  if (!me) return c.json({ error: 'identity_required' }, 401);
+  const { results } = await c.env.DB.prepare(
+    'SELECT blocked, created_at FROM user_blocks WHERE blocker = ?1 ORDER BY created_at DESC LIMIT 200',
+  ).bind(me).all();
+  return c.json({ blocks: results });
+});
+
+app.post('/users/blocks', async (c) => {
+  const me = c.get('phone');
+  if (!me) return c.json({ error: 'identity_required' }, 401);
+  const b: any = await c.req.json().catch(() => ({}));
+  const target = normalizeZmPhone(String(b?.phone ?? ''));
+  // Never blockable: yourself and system/ops.
+  if (!target || target === me || target === 'ops') return c.json({ error: 'bad user' }, 400);
+  await c.env.DB.prepare(
+    'INSERT INTO user_blocks (blocker, blocked) VALUES (?1, ?2) ON CONFLICT(blocker, blocked) DO NOTHING',
+  ).bind(me, target).run();
+  return c.json({ ok: true });
+});
+
+app.delete('/users/blocks/:phone', async (c) => {
+  const me = c.get('phone');
+  if (!me) return c.json({ error: 'identity_required' }, 401);
+  const target = normalizeZmPhone(String(c.req.param('phone')));
+  if (!target) return c.json({ error: 'bad user' }, 400);
+  await c.env.DB.prepare('DELETE FROM user_blocks WHERE blocker = ?1 AND blocked = ?2').bind(me, target).run();
+  return c.json({ ok: true });
+});
+
+/* ---------------------------- chat moderation queue ------------------------- */
+// Admin review of user chat reports. "Confirm" hides the message from every
+// participant and auto-strikes the sender (3 strikes = 7-day suspension).
+
+app.get('/admin/chat/reports', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const status = ['open', 'actioned', 'dismissed'].includes(c.req.query('status') ?? '')
+    ? c.req.query('status') : 'open';
+  const { results } = await c.env.DB.prepare(
+    `SELECT r.*, m.body AS message_body, m.sender_phone, m.sender_role, m.hidden AS msg_hidden,
+            t.kind AS thread_kind, t.job_id, j.ref AS job_ref
+       FROM chat_reports r
+       JOIN chat_messages m ON m.id = r.message_id
+       JOIN chat_threads t ON t.id = r.thread_id
+       LEFT JOIN jobs j ON j.id = t.job_id
+      WHERE r.status = ?1 ORDER BY r.id DESC LIMIT 200`,
+  ).bind(status).all();
+  const strikes = await c.env.DB.prepare(
+    `SELECT s.phone, s.strikes, s.suspended_until, s.updated_at FROM chat_strikes s
+      WHERE s.strikes > 0 OR s.suspended_until IS NOT NULL
+      ORDER BY s.updated_at DESC LIMIT 100`,
+  ).all();
+  return c.json({ reports: results, strikes: strikes.results });
+});
+
+app.post('/admin/chat/reports/:id/review', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => ({}));
+  const action = String(b?.action ?? '');
+  if (action !== 'confirm' && action !== 'dismiss') return c.json({ error: 'bad action' }, 400);
+  const { results } = await c.env.DB.prepare(
+    `SELECT r.id, r.status, r.message_id, m.sender_phone, m.hidden AS msg_hidden
+       FROM chat_reports r JOIN chat_messages m ON m.id = r.message_id
+      WHERE r.id = ?1 AND r.status = 'open' LIMIT 1`,
+  ).bind(Number(c.req.param('id'))).all();
+  const report = results[0];
+  if (!report) return c.json({ error: 'not found' }, 404);
+  if (action === 'confirm' && report.msg_hidden !== 1) {
+    await c.env.DB.prepare('UPDATE chat_messages SET hidden = 1 WHERE id = ?1')
+      .bind(report.message_id).run();
+    await recordAbuseStrike(c.env, String(report.sender_phone ?? ''));
+  }
+  await c.env.DB.prepare('UPDATE chat_reports SET status = ?2 WHERE id = ?1')
+    .bind(report.id, action === 'confirm' ? 'actioned' : 'dismissed').run();
+  return c.json({ ok: true });
+});
+
+// Forgiveness lever — clear a user's strikes and lift any chat suspension.
+app.post('/admin/chat/strikes/:phone/clear', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const cleared = await clearChatStrikes(c.env, String(c.req.param('phone')));
+  return c.json({ ok: true, cleared });
 });
 
 // Inbox: my threads with unread counts (seller + recipient-with-JWT + rider view)

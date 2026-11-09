@@ -50,6 +50,9 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _wsOpen = false;
   int _wsBackoff = 0; // seconds; doubles on each failure, capped at 60
   Timer? _reconnect;
+  /// Phones this viewer has blocked that sent messages in this thread —
+  /// the server already hides their messages; we show an unblock banner.
+  List<String> _blockedSenders = const [];
 
   @override
   void initState() {
@@ -107,6 +110,7 @@ class _ChatScreenState extends State<ChatScreen> {
           try {
             final msg = jsonDecode(data as String) as Map<String, dynamic>;
             if (msg['type'] == 'message') _append(Map<String, dynamic>.from(msg));
+            if (msg['type'] == 'error') _showModerationError(msg['error'] as String?, '${msg['until'] ?? ''}');
           } catch (_) {}
         },
         onDone: () => _onWsDown(),
@@ -170,6 +174,10 @@ class _ChatScreenState extends State<ChatScreen> {
         _messages = incoming;
         _myRole = data!['role'] as String?;
         _threadId = (data['thread_id'] as num?)?.toInt();
+        _blockedSenders = ((data['blocked_senders'] as List?) ?? const [])
+            .map((p) => '$p')
+            .where((p) => p.isNotEmpty)
+            .toList();
         _loading = false;
       });
       _scrollToEnd();
@@ -191,8 +199,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } else {
       ApiResponse res;
       if (widget.support) {
-        await DropOffApi.supportChat(body: body);
-        res = const ApiResponse(ok: true);
+        res = await DropOffApi.supportChatSend(body);
       } else if (widget.jobRef != null) {
         res = await DropOffApi.sendJobChat(widget.jobRef!, body);
       } else {
@@ -200,9 +207,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       if (!mounted) return;
       if (!res.ok) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.error == 'message_blocked'
-            ? 'Keep messages respectful.'
-            : 'Message not sent — check your connection.')));
+        _showModerationError(res.error, '${res.body['until'] ?? ''}');
       }
     }
     if (!mounted) return;
@@ -218,6 +223,125 @@ class _ChatScreenState extends State<ChatScreen> {
         'ops' => 'DropOff',
         _ => 'User',
       };
+
+  /// Report/block actions need a real account (JWT) — ops-key and token-only
+  /// sessions can't prove their identity to the moderation endpoints.
+  bool get _canModerate => DropOffApi.token != null;
+
+  void _showModerationError(String? error, String until) {
+    if (!mounted) return;
+    final text = switch (error) {
+      'message_blocked' => 'Keep messages respectful.',
+      'chat_suspended' => until.isNotEmpty
+          ? 'Messaging paused by moderation until ${until.split(' ').first}.'
+          : 'Messaging is paused by moderation.',
+      'too_many_requests' => 'Sending too fast — wait a moment.',
+      _ => 'Message not sent — check your connection.',
+    };
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  String _maskPhone(String phone) =>
+      phone.length >= 4 ? '••• ${phone.substring(phone.length - 4)}' : phone;
+
+  Future<void> _openMessageActions(Map<String, dynamic> m) async {
+    if (!_canModerate) return;
+    final phone = '${m['sender_phone'] ?? ''}';
+    final id = (m['id'] as num?)?.toInt() ?? 0;
+    // System messages (ops) can't be reported or blocked.
+    if (id <= 0 || phone.isEmpty || phone == 'ops') return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.flag_outlined, color: Colors.redAccent),
+            title: const Text('Report message', style: TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: const Text('Goes to DropOff moderation — kept private.', style: TextStyle(fontSize: 11.5)),
+            onTap: () => Navigator.pop(ctx, 'report'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_off_outlined, color: Colors.redAccent),
+            title: Text('Block ${_roleLabel(m['sender_role'])} (${_maskPhone(phone)})',
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: const Text('Hide all their messages in this chat, for you only.',
+                style: TextStyle(fontSize: 11.5)),
+            onTap: () => Navigator.pop(ctx, 'block'),
+          ),
+        ]),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'report') {
+      await _reportMessage(id);
+    } else if (action == 'block') {
+      await _confirmBlock(phone, _roleLabel(m['sender_role']));
+    }
+  }
+
+  Future<void> _reportMessage(int id) async {
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Align(alignment: Alignment.centerLeft,
+                child: Text('Why are you reporting this message?',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900))),
+          ),
+          ListTile(title: const Text('Harassment or abuse'), onTap: () => Navigator.pop(ctx, 'harassment')),
+          ListTile(title: const Text('Spam or scam'), onTap: () => Navigator.pop(ctx, 'spam')),
+          ListTile(title: const Text('Other'), onTap: () => Navigator.pop(ctx, 'other')),
+        ]),
+      ),
+    );
+    if (reason == null) return;
+    final res = await DropOffApi.reportChatMessage(id, reason);
+    if (!mounted) return;
+    final already = res.body['already_reported'] == true;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+      res.ok ? (already ? 'Already reported — DropOff has it.' : 'Thanks — reported to DropOff.')
+             : 'Could not report right now. Try again later.',
+    )));
+  }
+
+  Future<void> _confirmBlock(String phone, String label) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Block $label ($_maskPhone(phone))?'),
+        content: const Text(
+            'Their messages will disappear from this chat for you. You can unblock any time. '
+            'Delivery coordination for open parcels is unaffected for everyone else.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Block')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    final res = await DropOffApi.blockUser(phone);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+      res.ok ? 'User blocked in your chats.' : 'Could not block right now (${res.error}).',
+    )));
+    if (res.ok) {
+      setState(() => _blockedSenders = [..._blockedSenders, phone]);
+      await _refresh();
+    }
+  }
+
+  Future<void> _unblock(String phone) async {
+    final res = await DropOffApi.unblockUser(phone);
+    if (!mounted) return;
+    if (res.ok) {
+      setState(() => _blockedSenders = _blockedSenders.where((p) => p != phone).toList());
+      await _refresh();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -271,9 +395,25 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         SafeArea(
           top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
-            child: Row(children: [
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // Block notice: server already hides this person's messages for you.
+            for (final phone in _blockedSenders)
+              Material(
+                color: Colors.amber.shade50,
+                child: ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.person_off_outlined, color: Colors.black87),
+                  title: Text('Messages from ${_maskPhone(phone)} are hidden',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                  trailing: TextButton(
+                    onPressed: () => _unblock(phone),
+                    child: const Text('Unblock', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
+              child: Row(children: [
               Expanded(
                 child: TextField(
                   controller: _input,
@@ -298,7 +438,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     : const Icon(Icons.send_rounded),
               ),
             ]),
-          ),
+            ),
+          ]),
         ),
       ]),
     );
@@ -330,10 +471,14 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     return Align(
       alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: alignRight ? [bubble, const SizedBox(width: 7), avatar] : [avatar, const SizedBox(width: 7), bubble],
+      child: GestureDetector(
+        // UGC safety: long-press someone else's message → report / block.
+        onLongPress: alignRight ? null : () => _openMessageActions(m),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: alignRight ? [bubble, const SizedBox(width: 7), avatar] : [avatar, const SizedBox(width: 7), bubble],
+        ),
       ),
     );
   }

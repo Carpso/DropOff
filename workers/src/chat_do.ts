@@ -15,11 +15,11 @@ import { DurableObject } from 'cloudflare:workers';
 import { verifyJwtClaims } from './auth';
 import type { Env } from './lipila';
 import { sendToPhone } from './push';
+import { containsAbuse, chatSuspendedUntil, recordAbuseStrike } from './moderation';
 
 interface ClientInfo { role: string; phone: string }
 
 const MAX_BODY = 500;
-const BLOCKED = ['fuck', 'shit', 'bitch', 'asshole', 'dick', 'cunt', 'nigger', 'faggot'];
 
 export class ChatRoom extends DurableObject {
   private get db(): D1Database { return (this.env as any).DB; }
@@ -50,12 +50,21 @@ export class ChatRoom extends DurableObject {
     try { parsed = JSON.parse(message); } catch { return; }
     if (parsed?.type !== 'send') return;
     const body = String(parsed.body ?? '').trim().slice(0, MAX_BODY);
-    if (!body || BLOCKED.some((w) => body.toLowerCase().includes(w))) {
+    if (!body) return;
+    // Realtime path mirrors the REST gate exactly (moderation.ts): suspension
+    // first, then abuse — a profanity-hit still counts as an automatic strike.
+    const client = (ws as any).deserializeAttachment() as (ClientInfo & { threadId: number }) | undefined;
+    if (!client) { ws.close(1011, 'no identity'); return; }
+    const suspended = await chatSuspendedUntil(this.env as Env, client.phone);
+    if (suspended) {
+      ws.send(JSON.stringify({ type: 'error', error: 'chat_suspended', until: suspended }));
+      return;
+    }
+    if (containsAbuse(body)) {
+      await recordAbuseStrike(this.env as Env, client.phone).catch(() => {});
       ws.send(JSON.stringify({ type: 'error', error: 'message_blocked' }));
       return;
     }
-    const client = (ws as any).deserializeAttachment() as (ClientInfo & { threadId: number }) | undefined;
-    if (!client) { ws.close(1011, 'no identity'); return; }
     const threadId = Number(client.threadId);
     const thread = await this.db.prepare('SELECT id, kind, job_id, phone FROM chat_threads WHERE id = ?1')
       .bind(threadId).first<any>();
@@ -74,7 +83,18 @@ export class ChatRoom extends DurableObject {
       sender_role: client.role, body, created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
     });
     for (const socket of this.ctx.getWebSockets()) {
-      try { socket.send(outgoing); } catch { /* stale socket — hibernation cleans up */ }
+      try {
+        // Each live socket belongs to one viewer: skip anyone the sender has
+        // been blocked by (their next full refresh shows nothing either).
+        const viewer = (socket as any).deserializeAttachment() as (ClientInfo & { threadId: number }) | undefined;
+        if (viewer?.phone && viewer.phone !== client.phone && viewer.phone !== 'ops') {
+          const blocked = await this.db.prepare(
+            'SELECT 1 FROM user_blocks WHERE blocker = ?1 AND blocked = ?2',
+          ).bind(viewer.phone, client.phone).first();
+          if (blocked) continue;
+        }
+        socket.send(outgoing);
+      } catch { /* stale socket — hibernation cleans up */ }
     }
     await this.notifyOthers(thread, client, body).catch(() => {});
   } catch (e) {

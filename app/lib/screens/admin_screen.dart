@@ -19,6 +19,8 @@ class _AdminScreenState extends State<AdminScreen> {
   Map<String, dynamic>? _stats;
   List<Map<String, dynamic>> _alerts = const [];
   List<Map<String, dynamic>> _flags = const [];
+  List<Map<String, dynamic>> _chatReports = const [];
+  List<Map<String, dynamic>> _chatStrikes = const [];
   bool _loading = true;
   bool _authorized = false;
   bool _superadmin = false;
@@ -51,6 +53,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final stats = await DropOffApi.adminStats();
     final alerts = await DropOffApi.securityAlerts();
     final flags = await DropOffApi.fraudFlags();
+    final moderation = await DropOffApi.chatReports();
     if (!mounted) return;
     setState(() {
       _authorized = true;
@@ -58,6 +61,8 @@ class _AdminScreenState extends State<AdminScreen> {
       _stats = stats;
       _alerts = ((alerts?['alerts'] as List?) ?? const []).cast<Map<String, dynamic>>();
       _flags = ((flags?['flags'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _chatReports = ((moderation?['reports'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _chatStrikes = ((moderation?['strikes'] as List?) ?? const []).cast<Map<String, dynamic>>();
       _loading = false;
     });
   }
@@ -174,6 +179,7 @@ class _AdminScreenState extends State<AdminScreen> {
             const SizedBox(height: 18),
             _fraudCard(),
             const SizedBox(height: 18),
+            _chatReportsCard(),
             const _SupportInboxCard(),
             if (_superadmin) ...[
               const SizedBox(height: 18),
@@ -324,6 +330,103 @@ class _AdminScreenState extends State<AdminScreen> {
                   ),
                 ]),
               ),
+          ]),
+        ),
+      );
+
+  /// Chat moderation: open user reports on chat messages ("hide & strike" /
+  /// dismiss) plus the strike ledger with the forgiveness lever. Confirms ask
+  /// first and track the action like every other admin surface does.
+  static String _maskAdminPhone(String phone) =>
+      phone.length >= 4 ? '••• ${phone.substring(phone.length - 4)}' : phone;
+
+  Widget _chatReportsCard() => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.report_outlined, color: AppColors.forest),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Chat reports (open)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+              Text('${_chatReports.length}', style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.forest)),
+            ]),
+            const SizedBox(height: 8),
+            if (_chatReports.isEmpty)
+              const Text('No open chat reports.', style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+            for (final r in _chatReports.take(10))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(
+                      '${r['job_ref'] ?? 'Support'} · from ${_maskAdminPhone('${r['reported_by'] ?? ''}')} · ${r['reason'] ?? 'other'}',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                    ),
+                    Text(
+                      '${r['sender_role'] ?? ''} (${_maskAdminPhone('${r['sender_phone'] ?? ''}')}): "${r['message_body'] ?? ''}"',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 11.5),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ])),
+                  TextButton(
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Hide this message?'),
+                          content: const Text('It disappears from every view of the chat and the sender gets a strike. 3 strikes auto-suspend chat for 7 days.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Hide')),
+                          ],
+                        ),
+                      );
+                      if (ok != true) return;
+                      await DropOffApi.reviewChatReport((r['id'] as num).toInt(), action: 'confirm');
+                      AnalyticsService.instance.track(
+                        feature: 'chat_moderation', action: 'confirm', context: 'admin_chat_reports',
+                        meta: {'report_id': r['id']},
+                      );
+                      _load();
+                    },
+                    child: const Text('Hide & strike'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      await DropOffApi.reviewChatReport((r['id'] as num).toInt(), action: 'dismiss');
+                      AnalyticsService.instance.track(
+                        feature: 'chat_moderation', action: 'dismiss', context: 'admin_chat_reports',
+                        meta: {'report_id': r['id']},
+                      );
+                      _load();
+                    },
+                    child: const Text('Dismiss'),
+                  ),
+                ]),
+              ),
+            // Strike ledger: abusers accumulate strikes; suspension auto-lifts.
+            if (_chatStrikes.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              const Text('Strike ledger', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+              for (final s in _chatStrikes.take(8))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    Expanded(child: Text(
+                      '${_maskAdminPhone('${s['phone'] ?? ''}')} · ${s['strikes'] ?? 0} strikes${s['suspended_until'] != null ? ' · suspended until ${'${s['suspended_until']}'.split(' ').first}' : ''}',
+                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                    )),
+                    TextButton(
+                      onPressed: () async {
+                        await DropOffApi.clearChatStrikes('${s['phone'] ?? ''}');
+                        _load();
+                      },
+                      child: const Text('Forgive'),
+                    ),
+                  ]),
+                ),
+            ],
           ]),
         ),
       );

@@ -699,7 +699,34 @@ class DropOffApi {
       post('/chat/support', {if (body != null && body.trim().isNotEmpty) 'body': body.trim()})
           .then((res) => res.ok ? res.body : null);
 
+  /// Same as [supportChat] but the caller keeps the raw [ApiResponse] so
+  /// moderation failures (message_blocked / chat_suspended) are visible.
+  static Future<ApiResponse> supportChatSend(String body) =>
+      post('/chat/support', {'body': body});
+
   static Future<Map<String, dynamic>?> chatThreads() => get('/chat/threads');
+
+  /* ---------------------- chat moderation (UGC safety) ---------------------- */
+
+  /// Report an abusive chat message. [reason] is harassment | spam | other;
+  /// [note] is the optional free-text detail. Frequency-capped server-side.
+  static Future<ApiResponse> reportChatMessage(int messageId, String reason, {String? note}) =>
+      post('/chat/messages/$messageId/report', {'reason': reason, 'note': note ?? ''});
+
+  /// People I have blocked — their chat messages disappear from my views only.
+  static Future<List<String>> blockedUsers() async {
+    final data = await get('/users/blocks');
+    return ((data?['blocks'] as List?) ?? const [])
+        .map((r) => '${(r as Map<String, dynamic>)['blocked'] ?? ''}')
+        .where((p) => p.isNotEmpty)
+        .toList();
+  }
+
+  static Future<ApiResponse> blockUser(String phone) =>
+      post('/users/blocks', {'phone': phone});
+
+  static Future<ApiResponse> unblockUser(String phone) =>
+      delete('/users/blocks/${Uri.encodeComponent(phone)}');
 
   /// Recipient's auto-claimed parcels: every live parcel addressed to the
   /// signed-in caller's phone, newest first, each with a ready tracking URL.
@@ -761,6 +788,18 @@ class DropOffApi {
 
   static Future<ApiResponse> reviewFraud(int id, {required String status}) =>
       post('/admin/fraud/$id/review', {'status': status}, admin: true);
+
+  /// Chat-moderation queue: open user reports + chat strike/suspension rows.
+  static Future<Map<String, dynamic>?> chatReports({String status = 'open'}) =>
+      getAdmin('/admin/chat/reports?status=$status');
+
+  /// Confirm = hide the message from everyone + strike the sender.
+  static Future<ApiResponse> reviewChatReport(int id, {required String action}) =>
+      post('/admin/chat/reports/$id/review', {'action': action}, admin: true);
+
+  /// Forgive strikes and lift any chat suspension for [phone].
+  static Future<ApiResponse> clearChatStrikes(String phone) =>
+      post('/admin/chat/strikes/${Uri.encodeComponent(phone)}/clear', const {}, admin: true);
 
   static Future<ApiResponse> adminSms({required String phone, required String message}) =>
       post('/admin/sms', {'phone': phone, 'message': message}, admin: true);
