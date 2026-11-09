@@ -1,6 +1,6 @@
 # DropOff TODOs (tracked features)
 
-Status: `done` / `server-done` / `scaffolded` / `planned` / `blocked-external`. Updated 2026-11-08.
+Status: `done` / `server-done` / `scaffolded` / `planned` / `blocked-external`. Updated 2026-11-09.
 
 ## Hybrid parcel check (implemented)
 - [done/server-done] **Hybrid parcel check** — `POST /jobs/:ref/parcel-check` now returns deterministic signals + LLM verdict + rules: `exact_fingerprint_match` (SHA-256 of each image), `booking/dropoff_fingerprint_sha256`, byte sizes, LLM descriptions/verdict (`@cf/meta/llama-3.2-11b-vision-instruct` + `llama-3.1-8b-instruct-fast`), `rules` (`needs_review`, `risk_score`, reasons incl. `partner_confirmed`/`otp_verified` context), `perceptual_hash: null` (pluggable). Mismatch still auto-flags `parcel_mismatch_ai`; `needs_review` items are queued for human review.
@@ -25,9 +25,15 @@ Status: `done` / `server-done` / `scaffolded` / `planned` / `blocked-external`. 
 - [done] Paygo first-time booking deposit (subscribers exempt) → wallet credit + dispatch; auto-cancel + strikes (3/14d → `booking_on_hold`); no untimed slots.
 - [done] Tracking SMS-OTP verification; recipient handover OTP (door) + POD; OTP abuse strike. SMS **English-only** until user language pref is applied.
 
+## Admin console & current release (2026-11-09)
+- [pending] **Support-ticket tap crash** — "Null check operator used on a null value" when tapping a ticket in **Admin console → Support inbox**. Hardened in `0.5.5+16` (safe id handling, error view + Retry, snackbar prints the exception); root cause still unconfirmed — ticket path audits clean in current source and live D1 messages are clean text. **Action:** install `dist/DropOff-0.5.5-release.*`, tap a ticket, capture the snackbar text (`Could not open ticket #N: …`) or a screenshot.
+- [done/server-done] **Account roles not changing as admin** — `/admin/users/role` required superadmin (`X-Admin-Key` | `phone === OWNER_PHONE`); the signed-in owner email account (`godfreymoseskalambo@gmail.com`, DB `role='admin'`) was only an admin → silent 403. Fixed: `OWNER_EMAIL` now counts as owner identity for superadmin/`/me`/`/admin/users` (worker `22ba542c`); owner row (phone or email) can never be demoted.
+- [done] Language picker closed with a stale sheet-context pop (greyed-out screen/back/nav) — closes via rootNavigator now.
+- [done] Release hygiene: `dist/` holds release artifacts only and is cleaned of superseded pairs on each release (`AGENTS.md`, current = `0.5.5+16`).
+
 ## Pay & ops
-- [done] Rider pay K3,200/mo incl. K300/wk fuel (pace-gated). Versioned release script; Play docs. Fresh `dist/` APK/AAB (0.5.2+13).
-- [done] Fresh release build 0.5.3+14 prepared for Play upload (deep links, short `/t/<token>` path, admin JWT fallback, drift detection cron, depot coverage, referrer deposit waiver, Show-at-depot CTA).
+- [done] Rider pay K3,200/mo incl. K300/wk fuel (pace-gated). Versioned release script; Play docs. Fresh `dist/` APK/AAB (0.5.5+16).
+- [done] Fresh release build 0.5.5+16 prepared for Play upload (deep links, short `/t/<token>` path, admin JWT fallback, drift detection cron, depot coverage, referrer deposit waiver, Show-at-depot CTA, language-picker close fix, support-inbox hardening).
 - [blocked-external] Play Console upload; Lipila payout whitelist `260976847775`; physical-device verification.
 
 ## Deep links & Play Store release
