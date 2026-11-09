@@ -370,46 +370,10 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   Future<void> _showLanguagePicker(AppStore store) async {
-    final l10n = AppLocalizations.of(context);
-    final options = <({String code, String label})>[
-      (code: 'en', label: l10n.languageEnglish),
-      (code: 'ny', label: l10n.languageNyanja),
-      (code: 'bem', label: l10n.languageBemba),
-      (code: 'toi', label: l10n.languageTongaZambia),
-      (code: 'loz', label: l10n.languageLozi),
-    ];
-    String selected = store.localeCode ?? 'en';
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => SafeArea(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Align(alignment: Alignment.centerLeft, child: Text(l10n.selectLanguage, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900))),
-            ),
-            RadioGroup<String>(
-              groupValue: selected,
-              onChanged: (v) async {
-                if (v == null) return;
-                setSheet(() => selected = v);
-                await store.setLocaleCode(v);
-                if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
-              },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final o in options)
-                    RadioListTile<String>(value: o.code, title: Text(o.label)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-          ]),
-        ),
-      ),
-    );
+    // Full-screen page, not a bottom sheet: a small sheet that nobody notices
+    // is indistinguishable from a greyed-out, dead app (barrier eats every
+    // tap) — this way the picker is unmissable and closable like any page.
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _LanguagePickerPage(store: store)));
     if (mounted) setState(() {});
   }
 
@@ -1582,6 +1546,67 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
           ]),
         );
       },
+    );
+  }
+}
+
+/// Full-screen language picker — a page with an AppBar, not a bottom sheet.
+/// A small sheet nobody notices is indistinguishable from a greyed-out, dead
+/// app (its barrier eats every tap). This picker applies the selection and
+/// pops itself, so it can never be left stuck open.
+class _LanguagePickerPage extends StatefulWidget {
+  const _LanguagePickerPage({required this.store});
+
+  final AppStore store;
+
+  @override
+  State<_LanguagePickerPage> createState() => _LanguagePickerPageState();
+}
+
+class _LanguagePickerPageState extends State<_LanguagePickerPage> {
+  String get _selected => widget.store.localeCode ?? 'en';
+
+  Future<void> _pick(String code) async {
+    setState(() {}); // refreshing now so the radio dot moves instantly
+    await widget.store.setLocaleCode(code);
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final options = <({String code, String label})>[
+      (code: 'en', label: l10n.languageEnglish),
+      (code: 'ny', label: l10n.languageNyanja),
+      (code: 'bem', label: l10n.languageBemba),
+      (code: 'toi', label: l10n.languageTongaZambia),
+      (code: 'loz', label: l10n.languageLozi),
+    ];
+    return Scaffold(
+      appBar: AppBar(title: Text(l10n.selectLanguage, style: const TextStyle(fontWeight: FontWeight.w900))),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+        children: [
+          // RadioGroup owns the selection: each tile forwards its tap to the
+          // group's onChanged, so there is no per-tile state to desync.
+          RadioGroup<String>(
+            groupValue: _selected,
+            onChanged: (v) { if (v != null && v != _selected) _pick(v); },
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              for (final o in options)
+                RadioListTile<String>(
+                  value: o.code,
+                  title: Text(o.label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
+            child: Text('Applies immediately on this device.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+          ),
+        ],
+      ),
     );
   }
 }

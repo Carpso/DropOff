@@ -206,13 +206,22 @@ class AppStore extends ChangeNotifier {
     final name = me['full_name'] as String?;
     final email = me['email'] as String?;
     final loc = me['locale_pref'] as String?;
-    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email || loc != _localeCode) {
+    // The language choice saved ON THIS DEVICE is authoritative: an explicit
+    // pick in the picker must never be silently reverted by a /me refresh
+    // (cold start, sign-in, photo flows) — otherwise the user is stuck in
+    // whatever the server last knew about, e.g. 'ny'. The server only seeds
+    // devices that have no choice saved yet.
+    final preferences = await SharedPreferences.getInstance();
+    final localChoice = preferences.getString(_scoped('locale'));
+    final wantedLoc = (localChoice != null && localChoice.isNotEmpty)
+        ? localChoice
+        : ((loc == null || loc.isEmpty) ? null : loc);
+    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email || wantedLoc != _localeCode) {
       _role = role;
       _superadmin = sa;
       _photoUrl = photo;
       _fullName = name;
-      _localeCode = (loc == null || loc.isEmpty) ? null : loc;
-      final preferences = await SharedPreferences.getInstance();
+      _localeCode = wantedLoc;
       if (email != null) {
         _email = email;
         await preferences.setString(_emailKey, email);
