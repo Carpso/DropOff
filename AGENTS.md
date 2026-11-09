@@ -16,6 +16,8 @@ Every upload to Google Play **must** use a **strictly higher `versionCode`** tha
 - Never reuse a `versionCode`, even locally or on internal/track builds. Released Play version codes are immutable in effect.
 - `dist/DropOff-<version>-release.apk|.aab` names come from this script; don’t hand-rename.
 - `dist/` artifacts are the upload source of truth; do not upload stale builds.
+- **Release artifacts only**: `dist/` never carries debug or profile builds. Every artifact copied there must come from a release build path (`tools/build_release.ps1`).
+- **Clean `dist/` on each build**: after copying a new release pair into `dist/`, delete the previous versioned `DropOff-<version>-release.apk|.aab` so `dist/` only ever holds the current release plus `DropOff-release.apk|.aab` (unversioned alias of the latest). Never leave superseded version pairs for upload or inspection.
 
 ## Repo conventions
 
