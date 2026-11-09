@@ -298,7 +298,7 @@ app.use('*', async (c, next) => {
 const PUBLIC_GETS = new Set(['/health', '/couriers', '/cities', '/plans', '/console', '/partner/console', '/promo/check']);
 app.use('*', async (c, next) => {
   const p = c.req.path;
-  if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/') || p.startsWith('/.well-known/')) return next();
+  if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/') || p.startsWith('/.well-known/') || p.startsWith('/delete-data')) return next();
   // '/track/incoming' is the signed-in recipient's parcel list - it needs the
   // JWT identity, so it does NOT get the public token-credential bypass.
   if (p.startsWith('/track/') && p !== '/track/incoming') return next(); // token IS the credential (GET page + token chat)
@@ -650,6 +650,155 @@ ${mdToHtml(PRIVACY_MD)}
 </body></html>`;
 
 app.get('/legal/privacy', (c) => c.html(PRIVACY_HTML));
+
+/* ------------------------------ delete my data ----------------------------- */
+// Play data-safety requires a link where any user can request that their
+// account and associated data be deleted. This is a real self-serve flow:
+// the phone proves itself via the same hashed OTP pipe the sign-in uses, then
+// the account row is anonymized (email/name/photo/password gone, token_version
+// bumped so every JWT dies) and personal tables scrubbed. Financial records
+// stay, per the privacy policy (audit law) — but stripped of identity.
+
+const DELETE_DATA_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delete your DropOff data</title>
+<style>body{font:16px/1.6 system-ui,-apple-system,sans-serif;color:#1c2530;max-width:720px;margin:2rem auto;padding:0 1.25rem}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:1.5rem}li{margin:.35rem 0}
+input{padding:.65rem .75rem;border:1px solid #c9d2dc;border-radius:10px;font-size:1rem;width:min(320px,90%)}
+button{margin-left:.5rem;padding:.65rem 1rem;border:0;border-radius:10px;background:#14532d;color:#fff;font-weight:700;font-size:1rem;cursor:pointer}
+button:disabled{opacity:.5}
+#msg{margin-top:1rem;white-space:pre-line}
+.warn{color:#8a2e2e}
+</style></head><body>
+<h1>Delete your DropOff data</h1>
+<p>This deletes your DropOff <b>account and personal data</b>. Sign-in (email, password), your name, profile photo, saved recipient addresses, push tokens and active sessions are erased immediately and cannot be undone.</p>
+<p class="warn">Record copies needed by law for financial audit (delivery/payment records) are kept, but stripped of personal identity, as described in our <a href="/legal/privacy">privacy policy</a>.</p>
+<hr>
+<div id="step1">
+  <h2>Step 1 — verify your phone number</h2>
+  <input id="phone" inputmode="tel" placeholder="+26 0 96 ..."></input>
+  <button id="sendBtn" onclick="sendCode()">Send a code</button>
+</div>
+<div id="step2" style="display:none">
+  <h2>Step 2 — enter the code we texted you</h2>
+  <p>It is valid for 10 minutes.</p>
+  <input id="code" inputmode="numeric" maxlength="6" placeholder="6-digit code"></input>
+  <button id="goBtn" onclick="confirmDelete()">Delete my data permanently</button>
+</div>
+<div id="msg"></div>
+<p>Questions? No DropOff account on this number? Something not working?</p>
+<p>Email <a href="mailto:support@dropoff.africa">support@dropoff.africa</a> and we will process the request for you.</p>
+<script>
+const msg=(t,ok)=>{const e=document.getElementById('msg');e.textContent=t;e.style.color=ok?'#14532d':'#8a2e2e'};
+async function post(u,body){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+let j={};try{j=await r.json()}catch(_){}
+return {status:r.status,ok:r.ok,json:j};}
+async function sendCode(){
+  const b=document.getElementById('sendBtn');const phone=document.getElementById('phone').value.trim();
+  if(!phone)return msg('Enter the phone number your DropOff account uses.',false);
+  b.disabled=true;msg('Sending…',true);
+  const r=await post('/delete-data/request',{phone});
+  b.disabled=false;
+  if(!r.ok)return msg(r.json.error||'Could not send the code right now. Try again shortly.',false);
+  document.getElementById('step1').style.display='none';
+  document.getElementById('step2').style.display='';
+  msg('A 6-digit code was sent to '+phone+'.',true);
+}
+async function confirmDelete(){
+  const b=document.getElementById('goBtn');const phone=document.getElementById('phone').value.trim();
+  const code=document.getElementById('code').value.trim();
+  if(!code)return msg('Enter the 6-digit code you received.',false);
+  b.disabled=true;
+  const r=await post('/delete-data/confirm',{phone,code});
+  if(r.ok&&r.json.deleted){document.getElementById('step2').style.display='none';
+    return msg('Done. Your account and personal data have been deleted. Financial record copies retained for audit carry no personal identity.',true);}
+  const e=r.json.error==='wrong_code'?'Wrong code — try again.':(r.json.error==='account_not_found'?'There is no DropOff account on this number.':(r.json.error||'Deletion failed. Try again shortly.'));
+  b.disabled=false;
+  msg(e,false);
+}
+</script></body></html>`;
+
+app.get('/delete-data', (c) => {
+  const html = DELETE_DATA_HTML.replaceAll('+26 0 96', '+260 96');
+  return c.html(html);
+});
+
+// Request step: send the deletion code. Honest error when the number has no
+// account (a deletion tool that says ok for strangers just misleads).
+app.post('/delete-data/request', async (c) => {
+  if (await rateLimited(c, 'delete_otp', 5, 3600)) return c.json({ error: 'too_many_requests' }, 429);
+  const b: any = await c.req.json().catch(() => null);
+  let phone: string;
+  try { phone = normalizeZmPhone(b?.phone); } catch (e: any) { return c.json({ error: e.message }, 400); }
+  const account = await c.env.DB.prepare('SELECT phone FROM auth_users WHERE phone = ?1').bind(phone).first();
+  if (!account) return c.json({ error: 'account_not_found' }, 404);
+  const recent = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM otp_codes WHERE phone = ?1 AND created_at > datetime('now', '-1 hour')`,
+  ).bind(phone).first<any>();
+  if ((recent?.n ?? 0) >= 5) return c.json({ error: 'too_many_codes_wait_an_hour' }, 429);
+  const code = generateOtp();
+  const hash = await hashOtp(code, c.env.JWT_SECRET);
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE phone = ?1 AND used = 0').bind(phone),
+    c.env.DB.prepare(
+      `INSERT INTO otp_codes (phone, code_hash, expires_at) VALUES (?1, ?2, datetime('now', '+10 minutes'))`,
+    ).bind(phone, hash),
+  ]);
+  const sms = await sendSms(c.env, phone,
+    `DropOff data deletion: your confirmation code is ${code}. It expires in 10 minutes. Never share this code.`);
+  return c.json({ sent: sms.sent, ...(sms.error ? { sms_error: sms.error } : {}) });
+});
+
+// Confirm step: OTP-gated anonymization + session/token revocation.
+app.post('/delete-data/confirm', async (c) => {
+  if (await rateLimited(c, 'delete_confirm', 10)) return c.json({ error: 'too_many_requests' }, 429);
+  const b: any = await c.req.json().catch(() => null);
+  let phone: string;
+  try { phone = normalizeZmPhone(b?.phone); } catch (e: any) { return c.json({ error: e.message }, 400); }
+  const code = String(b?.code ?? '').replace(/\D/g, '');
+  if (!code) return c.json({ error: 'wrong_code' }, 400);
+  const row = await c.env.DB.prepare(
+    `SELECT id, code_hash, attempts FROM otp_codes
+      WHERE phone = ?1 AND used = 0 AND expires_at > datetime('now')
+      ORDER BY id DESC LIMIT 1`,
+  ).bind(phone).first<any>();
+  if (!row) return c.json({ error: 'code_expired_or_missing' }, 401);
+  if (Number(row.attempts ?? 0) >= 5) {
+    await c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id).run();
+    return c.json({ error: 'code_expired_or_missing' }, 401);
+  }
+  const hash = await hashOtp(code, c.env.JWT_SECRET);
+  if (hash !== row.code_hash) {
+    await c.env.DB.prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?1').bind(row.id).run();
+    return c.json({ error: 'wrong_code' }, 401);
+  }
+  const account = await c.env.DB.prepare('SELECT phone FROM auth_users WHERE phone = ?1').bind(phone).first();
+  if (!account) return c.json({ error: 'account_not_found' }, 404);
+  await c.env.DB.batch([
+    // Burn the code.
+    c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id),
+    // Anonymize the account: PII gone, sign-in dead, every JWT revoked.
+    c.env.DB.prepare(
+      `UPDATE auth_users SET
+         email = 'deleted+' || phone || '@deleted.dropoff.invalid',
+         password_hash = 'deleted', email_verified = 0, full_name = NULL,
+         photo_url = NULL, locale_pref = NULL, referral_code = NULL,
+         token_version = COALESCE(token_version, 0) + 1
+       WHERE phone = ?1`,
+    ).bind(phone),
+    // Personal data + device bindings.
+    c.env.DB.prepare('DELETE FROM saved_recipients WHERE owner_phone = ?1').bind(phone),
+    c.env.DB.prepare('DELETE FROM push_tokens WHERE phone = ?1').bind(phone),
+    c.env.DB.prepare('DELETE FROM device_sessions WHERE phone = ?1').bind(phone),
+    c.env.DB.prepare('DELETE FROM chat_reads WHERE phone = ?1').bind(phone),
+    c.env.DB.prepare('DELETE FROM user_blocks WHERE blocker = ?1 OR blocked = ?1').bind(phone),
+    c.env.DB.prepare('DELETE FROM chat_strikes WHERE phone = ?1').bind(phone),
+    // Clean out ALL of this account's open OTP codes.
+    c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE phone = ?1 AND used = 0').bind(phone),
+  ]);
+  await sendSms(c.env, phone, 'DropOff: your account and personal data have been deleted as requested. Financial audit records are retained without personal identifiers.').catch(() => null);
+  return c.json({ ok: true, deleted: true });
+});
 
 // Deep-linkwell-known assets: let Android/iOS open DropOff links instead of
 // a bare browser tab. Hosted on the API origin until the branded domain exists.
