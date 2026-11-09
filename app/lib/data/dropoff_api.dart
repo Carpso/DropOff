@@ -274,12 +274,23 @@ class DropOffApi {
     }
   }
 
-  /// GET helper; returns null on any failure (caller falls back to local data).
-  /// GET helper (admin)
+  /// GET helper (admin). Calls /admin/* with the best available credentials:
+  /// the widest admin key when the build was compiled with DROPOFF_ADMIN_KEY,
+  /// otherwise the signed-in JWT (server-side isAdmin decides). Store builds
+  /// without the admin key still work for admins via their normal account.
   static Future<Map<String, dynamic>?> getAdmin(String path, [Map<String, String>? query]) async {
-    if (!enabled || !adminEnabled) return null;
+    if (!enabled) return null;
+    if (adminEnabled) {
+      try {
+        final res = await http.get(_uri(path, query), headers: _adminHeaders).timeout(_timeout);
+        if (res.statusCode != 200) return null;
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      } catch (_) {
+        return null;
+      }
+    }
     try {
-      final res = await http.get(_uri(path, query), headers: _adminHeaders).timeout(_timeout);
+      final res = await http.get(_uri(path, query), headers: _headers).timeout(_timeout);
       if (res.statusCode != 200) return null;
       return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (_) {

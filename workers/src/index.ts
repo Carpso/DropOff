@@ -6240,6 +6240,30 @@ app.get('/dashboard', async (c) => {
             (SELECT COUNT(*) FROM security_alerts WHERE acknowledged = 0) AS unacked_alerts
        FROM riders LIMIT 1`,
   ).first<any>();
+  const pendingRiders = await c.env.DB.prepare(
+    `SELECT id, phone, full_name, vehicle, vehicle_class, nrc_number, plate_number, vehicle_make, vehicle_color, submitted_at, created_at
+       FROM riders WHERE verification_status = 'pending' ORDER BY submitted_at DESC LIMIT 10`,
+  ).all<any>();
+  const pendingRows = ((pendingRiders?.results ?? []) as any[]).map((r) => `<tr>
+    <td>${h(r.full_name)}</td>
+    <td>${h(r.phone)}</td>
+    <td>${h(r.vehicle)} ${h(r.vehicle_class ?? '')}</td>
+    <td>${h(r.nrc_number ?? '-')}</td>
+    <td>${h(r.plate_number ?? '-')}</td>
+    <td>${h(r.vehicle_make ?? '-')} ${h(r.vehicle_color ?? '')}</td>
+    <td>${h(r.submitted_at ?? r.created_at ?? '—')}</td>
+    <td>
+      <form method="post" action="/admin/riders/${h(r.id)}/verify" style="display:inline" onsubmit="return confirm('Verify this rider?')">
+        <input type="hidden" name="status" value="verified">
+        <button class="btn btn-sm">Verify</button>
+      </form>
+      <form method="post" action="/admin/riders/${h(r.id)}/verify" style="display:inline" onsubmit="return confirm('Reject this rider?')">
+        <input type="hidden" name="status" value="rejected">
+        <input type="hidden" name="note" value="Rejected from dashboard">
+        <button class="btn btn-sm btn-danger">Reject</button>
+      </form>
+    </td>
+  </tr>`).join('');
   const b = `
   <div class="metrics">
     <div class="metric"><div class="v">${h(stats?.jobs ?? 0)}</div><div class="l">Jobs total</div></div>
@@ -6248,6 +6272,13 @@ app.get('/dashboard', async (c) => {
     <div class="metric"><div class="v">${h(stats?.pending ?? 0)}</div><div class="l">Pending verification</div></div>
     <div class="metric"><div class="v">${h(stats?.open_fraud ?? 0)}</div><div class="l">Open fraud flags</div></div>
     <div class="metric"><div class="v">${h(stats?.unacked_alerts ?? 0)}</div><div class="l">Unacked alerts</div></div>
+  </div>
+  <div class="card" style="border-left:4px solid #b3261e">
+    <h2>Pending review</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th>NRC</th><th>Plate</th><th>Vehicle</th><th>Submitted</th><th>Action</th></tr></thead>
+      <tbody>${pendingRows || '<tr><td colspan="8" class="empty">No pending drivers.</td></tr>'}</tbody>
+    </table>
   </div>
   <div class="card">
     <h2>Quick actions</h2>

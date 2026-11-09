@@ -27,6 +27,7 @@ export interface Env {
   SENTRY_DSN?: string;                        // optional error tracking (Sentry)
   LIPILA_WEBHOOK_SECRET?: string;             // optional shared secret for callback headers
   BACKUPS?: R2Bucket;                         // daily app-data exports land here (optional)
+  APPLE_TEAM_ID?: string;                     // set to your Apple Team ID to enable universal links
   /** Workers AI binding: address parsing, support drafts, rider-doc checks. */
   AI?: Ai;
   CHAT: DurableObjectNamespace;               // realtime chat rooms (one per thread)
