@@ -7228,6 +7228,40 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
   return { canceled };
 }
 
+/* ------------------- cron: drift detection --------------------------------- */
+// If a rider was assigned more than 2h ago and there's no pickup/depot event,
+// or the job went to pickup but never reached the depot, flag it for ops review.
+async function detectDrift(env: Env): Promise<void> {
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT j.id, j.ref, j.sender_phone, j.status
+         FROM jobs j
+        WHERE j.status IN ('rider_assigned', 'picked_up')
+          AND datetime(j.assigned_at, '+2 hours') < datetime('now')
+          AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status = 'drift_flagged')`,
+    ).all<any>();
+    for (const job of rows.results ?? []) {
+      try {
+        await env.DB.batch([
+          env.DB.prepare(
+            `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'drift_flagged', ?2)`,
+          ).bind(job.id, `Rider assigned but no pickup/depot confirmation after 2h — flagged for ops review.`),
+          env.DB.prepare(`UPDATE jobs SET review_required = 1, fraud_score = fraud_score + 10 WHERE id = ?1`).bind(job.id),
+          env.DB.prepare(
+            `INSERT INTO fraud_flags (job_id, job_ref, phone, score, reasons, status) VALUES (?1, ?2, ?3, 10, 'rider_assigned_no_pickup_2h', 'open')`,
+          ).bind(job.id, job.ref, job.sender_phone),
+        ]);
+      } catch { /* never break cron */ }
+    }
+    if ((rows.results?.length ?? 0) > 0) {
+      await raiseAlert(env.DB, ownerPhone(env) ?? '', 'drift_detected', 'medium',
+        `DropOff: ${rows.results?.length} job(s) assigned 2h+ ago with no pickup/depot confirmation. See Admin → Fraud queue.`).catch(() => {});
+    }
+  } catch (e) {
+    /* never break cron */
+  }
+}
+
 /* ------------- cron: timed-pickup reminders (every minute) ----------------- */
 // Jobs with a booked pickup_at get a push at T-30 and T-10 to sender + rider,
 // and are flagged 'missed' when the window passes without a status change.
@@ -7408,6 +7442,7 @@ export default {
         if (event.cron === '* * * * *') {
           await cancelStaleOrders(env);
           await checkTimedPickups(env);
+          await detectDrift(env);
           await notifyCapNudges(env);
           await notifyExpiryNudges(env);
           return;
