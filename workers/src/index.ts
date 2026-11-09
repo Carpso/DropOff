@@ -5002,6 +5002,7 @@ app.get('/subscriptions/:phone?', async (c) => {
 // onto their own number: the pack activates with no payment prompt because it
 // was already paid for in bulk.
 app.post('/admin/pack-codes', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const b: any = await c.req.json().catch(() => null);
   const tier = String(b?.tier ?? '').toLowerCase() as PlanTier;
   const packs = await plans(c.env.DB);
@@ -5020,11 +5021,25 @@ app.post('/admin/pack-codes', async (c) => {
       if ((ins.meta.changes ?? 0) > 0) { codes.push(code); break; }
     }
   }
-  return c.json({ ok: true, tier, cycle_days: days, codes });
+  // Return the full persisted set from the DB (old + new), newest first, so
+  // the admin console can show history immediately after a batch.
+  const { results } = await c.env.DB.prepare(
+    `SELECT pc.code, pc.tier, pc.cycle_days, pc.note, pc.created_at, pc.used_by, pc.used_at,
+            u.full_name AS redeemed_name, u.email AS redeemed_email,
+            (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) AS period_end,
+            CASE WHEN pc.used_by IS NULL THEN 'unused'
+                 WHEN (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) IS NULL THEN 'used'
+                 WHEN (SELECT s.period_end FROM subscriptions s WHERE s.phone = pc.used_by ORDER BY s.period_end DESC LIMIT 1) <= datetime('now') THEN 'expired'
+                 ELSE 'active' END AS status
+       FROM pack_codes pc
+       LEFT JOIN auth_users u ON u.phone = pc.used_by
+       ORDER BY pc.id DESC LIMIT 200`,
+  ).all();
+  return c.json({ ok: true, tier, cycle_days: days, codes, persisted_codes: results ?? [] });
 });
 
 app.get('/admin/pack-codes', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
   const { results } = await c.env.DB.prepare(
     `SELECT pc.code, pc.tier, pc.cycle_days, pc.note, pc.created_at, pc.used_by, pc.used_at,
             u.full_name AS redeemed_name, u.email AS redeemed_email,

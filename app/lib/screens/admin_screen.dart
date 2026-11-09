@@ -1040,7 +1040,11 @@ class _PackCodesCardState extends State<_PackCodesCard> {
       return;
     }
     final codes = ((res.body['codes'] as List?) ?? const []).map((c) => '$c').toList();
-    setState(() => _codes = codes);
+    final persisted = ((res.body['persisted_codes'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    setState(() {
+      _codes = codes;
+      if (persisted.isNotEmpty) _history = persisted;
+    });
     AnalyticsService.instance.track(
       feature: 'pack_codes', action: 'generate', context: 'admin_pack_codes',
       meta: {'tier': _tier, 'count': codes.length},
@@ -1127,7 +1131,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
             TextButton(onPressed: _loadingHistory ? null : _loadHistory, child: const Text('Refresh')),
           ]),
           Wrap(spacing: 6, runSpacing: 6, children: [
-            for (final f in const ['all', 'unused', 'active', 'expired'])
+            for (final f in const ['all', 'unused', 'active', 'used', 'expired'])
               ChoiceChip(
                 selected: _filter == f,
                 label: Text(f[0].toUpperCase() + f.substring(1)),
@@ -1138,42 +1142,49 @@ class _PackCodesCardState extends State<_PackCodesCard> {
           if (_loadingHistory)
             const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
           else
-            ..._history
-                .where((c) => _filter == 'all' || (c['status'] as String? ?? '') == _filter)
-                .map((c) {
-              final code = '${c['code'] ?? ''}';
-              final status = '${c['status'] ?? ''}';
-              final usedBy = '${c['redeemed_name'] ?? c['used_by'] ?? ''}';
-              final color = status == 'active'
-                  ? AppColors.success
-                  : status == 'expired'
-                      ? AppColors.danger
-                      : status == 'used'
-                          ? AppColors.warning
-                          : AppColors.muted;
-              return Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
-                child: Row(children: [
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 1.0)),
-                    const SizedBox(height: 2),
-                    Text('${c['tier']} • ${c['cycle_days']}d${c['note'] != null && '${c['note']}'.isNotEmpty ? ' • ${c['note']}' : ''}', style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
-                    if (usedBy.isNotEmpty)
-                      Text('Redeemed by $usedBy ${c['redeemed_email'] != null ? '(${c['redeemed_email']})' : ''} • ${c['used_at']}', style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
-                  ])),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
-                    child: Text(status.toUpperCase(), style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900)),
-                  ),
-                  const SizedBox(width: 6),
-                  IconButton(icon: const Icon(Icons.copy, size: 16), onPressed: () => _copy(code), tooltip: 'Copy'),
-                ]),
-              );
-            }),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 360),
+              child: ListView(
+                shrinkWrap: true,
+                physics: const ClampingScrollPhysics(),
+                children: _history
+                    .where((c) => _filter == 'all' || (c['status'] as String? ?? '') == _filter)
+                    .map((c) {
+                  final code = '${c['code'] ?? ''}';
+                  final status = '${c['status'] ?? ''}';
+                  final usedBy = '${c['redeemed_name'] ?? c['used_by'] ?? ''}';
+                  final color = status == 'active'
+                      ? AppColors.success
+                      : status == 'expired'
+                          ? AppColors.danger
+                          : status == 'used'
+                              ? AppColors.warning
+                              : AppColors.muted;
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
+                    child: Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 1.0)),
+                        const SizedBox(height: 2),
+                        Text('${c['tier']} • ${c['cycle_days']}d${c['note'] != null && '${c['note']}'.isNotEmpty ? ' • ${c['note']}' : ''}', style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                        if (usedBy.isNotEmpty)
+                          Text('Redeemed by $usedBy ${c['redeemed_email'] != null ? '(${c['redeemed_email']})' : ''} • ${c['used_at']}', style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                      ])),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+                        child: Text(status.toUpperCase(), style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900)),
+                      ),
+                      const SizedBox(width: 6),
+                      IconButton(icon: const Icon(Icons.copy, size: 16), onPressed: () => _copy(code), tooltip: 'Copy'),
+                    ]),
+                  );
+                }).toList(),
+              ),
+            ),
         ]),
       ),
     );
@@ -1374,8 +1385,15 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
           else if (_riders.isEmpty)
             const Text('No riders registered yet.', style: TextStyle(color: AppColors.muted, fontSize: 12))
           else
-            for (final rider in _riders) ...[
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 480),
+              child: ListView(
+                shrinkWrap: true,
+                physics: const ClampingScrollPhysics(),
+                children: [
+                  for (final rider in _riders) ...[
               Container(
+                key: ValueKey('rider-${rider['id']}'),
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -1428,7 +1446,10 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
                   ]),
                 ]),
               ),
-            ],
+                  ],
+                ],
+              ),
+            ),
         ]),
       ),
     );
