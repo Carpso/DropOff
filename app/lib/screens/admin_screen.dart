@@ -405,17 +405,28 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
   }
 
   Future<void> _open(Map<String, dynamic> thread) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-      builder: (_) => _SupportTicketSheet(
-        threadId: (thread['id'] as num).toInt(),
-        phone: '${thread['phone'] ?? ''}',
-        photoUrl: '${thread['customer_photo_url'] ?? ''}'.isEmpty ? null : '${thread['customer_photo_url']}',
-        customerName: '${thread['customer_name'] ?? ''}'.trim().isEmpty ? null : '${thread['customer_name']}'.trim(),
-      ),
-    );
+    final messenger = ScaffoldMessenger.of(context);
+    final id = (thread['id'] as num?)?.toInt();
+    if (id == null) {
+      messenger.showSnackBar(const SnackBar(content: Text('Ticket is missing its id — pull to refresh and try again.')));
+      return;
+    }
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+        builder: (_) => _SupportTicketSheet(
+          threadId: id,
+          phone: '${thread['phone'] ?? ''}',
+          photoUrl: '${thread['customer_photo_url'] ?? ''}'.isEmpty ? null : '${thread['customer_photo_url']}',
+          customerName: '${thread['customer_name'] ?? ''}'.trim().isEmpty ? null : '${thread['customer_name']}'.trim(),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not open ticket #$id: $e')));
+      return;
+    }
     if (mounted) _load();
   }
 
@@ -524,6 +535,7 @@ class _SupportTicketSheet extends StatefulWidget {
 class _SupportTicketSheetState extends State<_SupportTicketSheet> {
   List<Map<String, dynamic>> _messages = const [];
   bool _loading = true;
+  String? _error;
   bool _sending = false;
   bool _drafting = false;
   final _reply = TextEditingController();
@@ -545,8 +557,13 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
   Future<void> _load() async {
     final data = await DropOffApi.adminSupportThread(widget.threadId);
     if (!mounted) return;
+    if (data == null) {
+      setState(() { _loading = false; _error = 'Could not load this ticket. Check your connection and staff role, then retry.'; });
+      return;
+    }
     setState(() {
-      _messages = ((data?['messages'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _messages = ((data['messages'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _error = null;
       _loading = false;
     });
     await Future<void>.delayed(const Duration(milliseconds: 30));
@@ -660,14 +677,31 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
                       style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                 ]),
               ),
-              IconButton(tooltip: 'Reload', onPressed: _load, icon: const Icon(Icons.refresh, size: 18)),
+              IconButton(tooltip: 'Reload', onPressed: () { setState(() { _loading = true; _error = null; }); _load(); }, icon: const Icon(Icons.refresh, size: 18)),
             ]),
           ),
           const Divider(height: 1),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : ListView.builder(
+                : _error != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(28),
+                          child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            const Icon(Icons.cloud_off_outlined, size: 36, color: AppColors.muted),
+                            const SizedBox(height: 10),
+                            Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.4)),
+                            const SizedBox(height: 14),
+                            FilledButton.icon(
+                              onPressed: () { setState(() { _loading = true; _error = null; }); _load(); },
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Retry'),
+                            ),
+                          ]),
+                        ),
+                      )
+                    : ListView.builder(
                     controller: _scroll,
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                     itemCount: _messages.length,
@@ -771,7 +805,7 @@ class _UsersCardState extends State<_UsersCard> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
         ? '$email is now $role.'
-        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'the owner account cannot be demoted' : res.error}')));
+        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'the owner account cannot be demoted' : res.error == 'superadmin_required' ? 'only the owner can change roles' : res.error}')));
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(

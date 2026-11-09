@@ -22,7 +22,7 @@ import { ChatRoom } from './chat_do';
 
 export { ChatRoom };
 
-const app = new Hono<{ Bindings: Env; Variables: { phone?: string; role?: 'customer' | 'partner' | 'ops' | 'admin' | 'rider'; riderId?: number; courierId?: number; reqId?: string } }>();
+const app = new Hono<{ Bindings: Env; Variables: { phone?: string; email?: string; role?: 'customer' | 'partner' | 'ops' | 'admin' | 'rider'; riderId?: number; courierId?: number; reqId?: string } }>();
 
 /* ------------------------- seller subscription packs ----------------------- */
 // MODEL (post-reprice, Daily Dash removed):
@@ -309,12 +309,13 @@ app.use('*', async (c, next) => {
       // role and token_version live on the account row — a password reset bumps
       // token_version, instantly invalidating every outstanding session
       const user = await c.env.DB.prepare(
-        'SELECT role, courier_id, token_version FROM auth_users WHERE phone = ?1',
+        'SELECT role, courier_id, token_version, email FROM auth_users WHERE phone = ?1',
       ).bind(claims.phone).first<any>();
       if (user && Number(user.token_version ?? 0) !== Number(claims.ver ?? 0)) {
         return c.json({ error: 'session_revoked' }, 401);
       }
       c.set('phone', claims.phone);
+      if (user?.email) c.set('email', user.email);
       if (claims.did) {
         const dev = await c.env.DB.prepare(
           'SELECT trusted FROM device_sessions WHERE phone = ?1 AND device_id = ?2',
@@ -377,7 +378,10 @@ const isOwner = (c: { env: Env; get?: (k: string) => unknown }) =>
 // every admin/ops surface works for them.
 const isSuperAdmin = (c: { env: Env; req: { header: (k: string) => string | undefined }; get?: (k: string) => unknown }) =>
   c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY
-  || (typeof c.get === 'function' && c.get('phone') === ownerPhone(c.env));
+  || (typeof c.get === 'function' && c.get('phone') === ownerPhone(c.env))
+  // The owner's email account is the same human as OWNER_PHONE — sign in via
+  // email/password must not lock them out of minting admins.
+  || (typeof c.get === 'function' && ownerEmail(c.env) != null && c.get('email') === ownerEmail(c.env));
 
 /** Naive per-IP throttle in D1 (e.g. 20 auth requests / hour / ip). */
 async function rateLimited(
@@ -3287,7 +3291,8 @@ app.get('/admin/users', async (c) => {
        FROM auth_users ORDER BY created_at DESC LIMIT 200`,
   ).all();
   const owner = ownerPhone(c.env);
-  const users = ((results ?? []) as any[]).map((u) => ({ ...u, superadmin: u.phone === owner }));
+  const ownerMail = ownerEmail(c.env);
+  const users = ((results ?? []) as any[]).map((u) => ({ ...u, superadmin: (owner != null && u.phone === owner) || (ownerMail != null && u.email === ownerMail) }));
   return c.json({ users });
 });
 
@@ -3304,7 +3309,9 @@ app.post('/admin/users/role', async (c) => {
   ).bind(email).first<any>();
   if (!user) return c.json({ error: 'not found' }, 404);
   // The owner account can never be demoted � you cannot lock yourself out.
-  if (role !== 'admin' && user.phone && user.phone === ownerPhone(c.env)) {
+  const isOwnerRow = (user.phone && user.phone === ownerPhone(c.env))
+    || (user.email && ownerEmail(c.env) != null && user.email === ownerEmail(c.env));
+  if (role !== 'admin' && isOwnerRow) {
     return c.json({ error: 'owner_cannot_be_demoted' }, 400);
   }
   const res = await c.env.DB.prepare('UPDATE auth_users SET role = ?2 WHERE email = ?1')
