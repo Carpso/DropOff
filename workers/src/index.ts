@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import {
   Env, Provider, lipilaCollect, lipilaDisburse, lipilaStatus, normalizeZmPhone, providerFromPhone,
 } from './lipila';
-import { hfInfer } from './hf';
+
 import {
   generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
   verifyJwtClaims, verifyPassword,
@@ -6551,11 +6551,17 @@ type FaceCheck = {
  *  real person (the rider) - not a document, screen photo, illustration,
  *  avatar or group shot? Strictly informational: admins still make the call. */
 async function analyzeSelfieFace(env: Env, bytes: number[]): Promise<FaceCheck> {
-  const out: any = await (env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+  if (!env?.AI) {
+    return { face: true, single_person: true, real_photo: true, document_or_id: false, illustration_or_avatar: false, verdict: 'review', note: 'AI selfie review unavailable — a human must judge.', checked_at: new Date().toISOString() };
+  }
+  const out: any = await runAi(env, '@cf/meta/llama-3.2-11b-vision-instruct', {
     image: bytes,
     prompt: 'You review rider profile photos for a delivery app. Decide whether this is a genuine photograph of one real person (the rider themself). Answer with JSON ONLY: {"has_face":true|false,"single_person":true|false,"real_photo":true|false,"document_or_id":true|false,"illustration_or_avatar":true|false,"note":"<one short sentence>"}. Rules: a document/NRC/plate/licence photo, a photo of a screen or paper, a drawing/avatar/cartoon/logo/meme/no face at all, or a group photo => set the matching flag true and real_photo false. If unsure, say so honestly. No extra text.',
     max_tokens: 200,
   });
+  if (!out) {
+    return { face: true, single_person: true, real_photo: true, document_or_id: false, illustration_or_avatar: false, verdict: 'review', note: 'AI selfie review failed — retry once, otherwise a human must judge.', checked_at: new Date().toISOString() };
+  }
   const raw = String(out?.response ?? out?.description ?? '').trim();
   const match = raw.match(/\{[\s\S]*\}/);
   let j: any = {};
@@ -6587,22 +6593,26 @@ async function compareFaceToId(env: Env, selfieBytes: number[], portraitBytes: n
   note: string;
 }> {
   const describe = async (bytes: number[], hint: string) => {
-    const out: any = await (env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+    const out: any = await runAi(env, '@cf/meta/llama-3.2-11b-vision-instruct', {
       image: bytes,
       prompt: `This is ${hint}. Describe this person's VISIBLE face as plainly as possible (gender presentation, apparent age range, hair style/colour, glasses, facial hair, skin tone, distinguishing marks). One sentence, no identity guesses, no comparisons yet.`,
       max_tokens: 120,
     });
+    if (!out) return 'unavailable';
     return String(out?.response ?? out?.description ?? '').trim().slice(0, 300);
   };
   const selfieDesc = await describe(selfieBytes, "a rider's selfie");
   const idDesc = await describe(portraitBytes, 'the portrait on an ID document');
-  const out: any = await (env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
+  const out: any = await runAi(env, '@cf/meta/llama-3.1-8b-instruct', {
     messages: [
       { role: 'system', content: 'You compare two interview-grade facial descriptions for consistency. Be conservative: if either is vague, answer uncertain. Reply with JSON ONLY.' },
       { role: 'user', content: `Description A (selfie): ${selfieDesc}\nDescription B (ID portrait): ${idDesc}\nDecide if these likely depict the same person. Reply with JSON ONLY: {"same_person":"yes"|"uncertain"|"no","confidence":"high"|"medium"|"low","note":"<one short sentence>"}` },
     ],
     max_tokens: 120,
   });
+  if (!out) {
+    return { same_person: 'uncertain', confidence: 'low', note: 'AI comparison unavailable — admin must decide.' };
+  }
   const raw = (typeof out?.response === 'string' ? out.response
     : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim();
   const m = raw.match(/\{[\s\S]*\}/);
@@ -6643,16 +6653,15 @@ app.post('/admin/riders/:id/ai-check', async (c) => {
   if (!object) return c.json({ error: 'photo_missing' }, 404);
   const bytes = [...new Uint8Array(await object.arrayBuffer())];
   let text = '';
-  try {
-    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
-      image: bytes,
-      prompt: 'This is a photo of a vehicle number plate or a Zambian NRC. Transcribe every visible character exactly (letters, digits, slashes, spaces). Output only the transcribed text.',
-      max_tokens: 120,
-    });
-    text = String(out?.response ?? out?.description ?? '').trim().slice(0, 500);
-  } catch (e: any) {
-    return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
+  const out: any = await runAi(c.env, '@cf/meta/llama-3.2-11b-vision-instruct', {
+    image: bytes,
+    prompt: 'This is a photo of a vehicle number plate or a Zambian NRC. Transcribe every visible character exactly (letters, digits, slashes, spaces). Output only the transcribed text.',
+    max_tokens: 120,
+  });
+  if (!out) {
+    return c.json({ error: 'ai_unavailable', detail: 'Vision call produced no output. Check `wrangler tail` for workers_ai logs.' }, 503);
   }
+  text = String(out?.response ?? out?.description ?? '').trim().slice(0, 500);
   const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
   const found = norm(text);
   const plateMatch = !!rider.plate_number && found.includes(norm(String(rider.plate_number)));
@@ -6892,11 +6901,12 @@ async function compareParcelPhotos(env: Env, bookingBytesArr: number[], dropoffB
   const exactMatch = bookingFp === dropoffFp;
 
   const describe = async (bytes: number[], hint: string) => {
-    const out: any = await (env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+    const out: any = await runAi(env, '@cf/meta/llama-3.2-11b-vision-instruct', {
       image: bytes,
       prompt: `This is ${hint}. Describe the PARCEL in it factually: dominant packaging material, shape (sack/box/envelope/bag/crate), colour, approximate size class, any visible tape/branding/labels/handles and how it is closed. If several parcels are visible, describe the most prominent one. One sentence, no guesses about contents.`,
       max_tokens: 140,
     });
+    if (!out) return '';
     return String(out?.response ?? out?.description ?? '').trim().slice(0, 300);
   };
   let bookingDesc = '', dropoffDesc = '';
@@ -6909,13 +6919,16 @@ async function compareParcelPhotos(env: Env, bookingBytesArr: number[], dropoffB
         describe(bookingBytesArr, 'the parcel photo captured by the sender at booking'),
         describe(dropoffBytesArr, 'the parcel photo captured by the rider at the depot/courier drop-off'),
       ]);
-      const out: any = await (env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
+      const out: any = await runAi(env, '@cf/meta/llama-3.1-8b-instruct', {
         messages: [
           { role: 'system', content: 'You compare two descriptions of parcel photos to detect parcel swaps or fabricated deliveries. Be conservative: if either description is vague or contradicts nothing but proves little, answer uncertain. Reply with JSON ONLY.' },
           { role: 'user', content: `Description A (booking photo from the seller): ${bookingDesc}\nDescription B (drop-off photo from the rider): ${dropoffDesc}\nCould these plausibly show the SAME parcel? Reply with JSON ONLY: {"same_parcel":"yes"|"uncertain"|"no","confidence":"high"|"medium"|"low","note":"<one short sentence>"}` },
         ],
         max_tokens: 120,
       });
+      if (!out) {
+        // keep default uncertain
+      } else {
       const raw = (typeof out?.response === 'string' ? out.response
         : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim();
       const m = raw.match(/\{[\s\S]*\}/);
@@ -6928,6 +6941,7 @@ async function compareParcelPhotos(env: Env, bookingBytesArr: number[], dropoffB
         confidence: conf === 'high' || conf === 'medium' ? conf : 'low',
         note: String(j.note ?? '').slice(0, 200),
       };
+      }
     } catch { /* keep default uncertain */ }
   }
   const semantic = (bookingDesc || dropoffDesc) ? await semanticSignature(bookingDesc, dropoffDesc) : null;
@@ -6943,7 +6957,7 @@ async function compareParcelPhotos(env: Env, bookingBytesArr: number[], dropoffB
     // semv1 = semantic (description-derived) similarity signal; upgrade path: true pHash (WASM) or image-embedding model.
     perceptual_hash: semantic?.signature ?? null,
     similarity_score: semantic?.score ?? null,
-    llm: { booking_desc: bookingDesc || undefined, dropoff_desc: dropoffDesc || undefined, model: '@cf/meta/llama-3.2-11b-vision-instruct+llama-3.1-8b-instruct-fast' },
+    llm: { booking_desc: bookingDesc || undefined, dropoff_desc: dropoffDesc || undefined, model: '@cf/meta/llama-3.2-11b-vision-instruct+llama-3.1-8b-instruct' },
     rules,
     needs_review: rules.needs_review,
     review_status: 'pending',
@@ -7552,6 +7566,26 @@ app.get('/dashboard/analytics', async (c) => {
 });
 
 /* ------------------------------ AI helpers -------------------------------- */
+// Shared model IDs + safe runners. The public Workers AI catalog uses the
+// bare `llama-3.1-8b-instruct` (no `-fast` suffix — that model does not exist;
+// calls against it 404 upstream and everything "silently failed"). Vision:
+// `llama-3.2-11b-vision-instruct` (the one we use for KYC + parcel verdicts).
+const LLM_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+const VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
+
+/** Run Workers AI with real diagnostics. Returns `null` on any failure but
+ *  ALWAYS emits a `console.error` line so `wrangler tail` (and captured logs)
+ *  show exactly why the call failed instead of a silent mystery. */
+async function runAi(env: any, model: string, input: Record<string, unknown>): Promise<any> {
+  if (!env?.AI) return null;
+  try {
+    return await (env.AI as any).run(model, input);
+  } catch (e: any) {
+    console.error(JSON.stringify({ where: 'workers_ai', model, err: String(e?.message ?? e).slice(0, 300) }));
+    return null;
+  }
+}
+
 // Address cleanup for the booking form: free text in, structured Lusaka address
 // out. Best-effort; the app keeps the seller's original text when AI is off.
 app.post('/ai/address', async (c) => {
@@ -7564,41 +7598,28 @@ app.post('/ai/address', async (c) => {
     return { street: parts[0] ?? text, area: parts[1] ?? '', landmark: parts.slice(2).join(', '), phone: '', notes: '' };
   };
   if (!c.env.AI) {
-    const hf = await hfInfer(c.env, 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.', `Address: ${text}`);
-    if (hf) {
-      const start = hf.indexOf('{'), end = hf.lastIndexOf('}');
-      const parsed = start >= 0 && end > start ? JSON.parse(hf.slice(start, end + 1)) : fallback();
-      return c.json({ fallback: false, parsed, raw: hf.slice(0, 400), provider: 'huggingface' });
-    }
-    return c.json({ fallback: true, parsed: fallback() });
+    return c.json({ fallback: true, parsed: fallback(), detail: 'Workers AI binding is missing on this Worker.' });
   }
-  try {
-    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
-      messages: [
-        { role: 'system', content: 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.' },
-        { role: 'user', content: `Address: ${text}` },
-      ],
-      max_tokens: 220,
-    });
-    let raw = '';
-    if (typeof out?.response === 'string') raw = out.response;
-    else if (typeof out?.choices?.[0]?.message?.content === 'string') raw = out.choices[0].message.content;
-    else if (typeof out?.result === 'string') raw = out.result;
-    else if (typeof out?.text === 'string') raw = out.text;
-    else raw = JSON.stringify(out ?? '');
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    const parsed = start >= 0 && end > start ? JSON.parse(raw.slice(start, end + 1)) : fallback();
-    return c.json({ fallback: false, parsed, raw: raw.slice(0, 400) });
-  } catch {
-    const hf = await hfInfer(c.env, 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.', `Address: ${text}`);
-    if (hf) {
-      const start = hf.indexOf('{'), end = hf.lastIndexOf('}');
-      const parsed = start >= 0 && end > start ? JSON.parse(hf.slice(start, end + 1)) : fallback();
-      return c.json({ fallback: false, parsed, raw: hf.slice(0, 400), provider: 'huggingface' });
-    }
-    return c.json({ fallback: true, parsed: fallback() });
+  const out: any = await runAi(c.env, LLM_MODEL, {
+    messages: [
+      { role: 'system', content: 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.' },
+      { role: 'user', content: `Address: ${text}` },
+    ],
+    max_tokens: 220,
+  });
+  if (!out) {
+    return c.json({ fallback: true, parsed: fallback(), detail: 'AI call failed — see wrangler tail logs for the exact model error.' });
   }
+  let raw = '';
+  if (typeof out?.response === 'string') raw = out.response;
+  else if (typeof out?.choices?.[0]?.message?.content === 'string') raw = out.choices[0].message.content;
+  else if (typeof out?.result === 'string') raw = out.result;
+  else if (typeof out?.text === 'string') raw = out.text;
+  else raw = JSON.stringify(out ?? '');
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  const parsed = start >= 0 && end > start ? JSON.parse(raw.slice(start, end + 1)) : fallback();
+  return c.json({ fallback: false, parsed, raw: raw.slice(0, 400) });
 });
 
 // Draft (never auto-send) a support reply from the ticket history.
@@ -7619,7 +7640,7 @@ app.post('/admin/support/threads/:id/ai-draft', async (c) => {
     let draft: string | null = null;
     if (c.env.AI) {
       try {
-        const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.1-8b-instruct-fast', {
+        const out: any = await runAi(c.env, '@cf/meta/llama-3.1-8b-instruct', {
           messages: [
             { role: 'system', content: 'You are DropOff support in Lusaka, Zambia. Write a short, warm, concrete reply (max 90 words). Never promise refunds or payments you cannot verify; ask for the parcel reference when needed. Output the reply text only.' },
             { role: 'user', content: `Support ticket history:\n${history}\n\nWrite the next reply from DropOff.` },
@@ -7630,12 +7651,7 @@ app.post('/admin/support/threads/:id/ai-draft', async (c) => {
           : (typeof out?.choices?.[0]?.message?.content === 'string' ? out.choices[0].message.content : '')).trim();
       } catch { draft = null; }
     }
-    if (!draft) {
-      draft = await hfInfer(c.env,
-        'You are DropOff support in Lusaka, Zambia. Write a short, warm, concrete reply (max 90 words). Never promise refunds or payments you cannot verify; ask for the parcel reference when needed. Output the reply text only.',
-        `Support ticket history:\n${history}\n\nWrite the next reply from DropOff.`);
-    }
-    if (!draft) return c.json({ error: 'ai_unavailable' }, 503);
+    if (!draft) return c.json({ error: 'ai_unavailable', detail: 'Model returned empty. Check `wrangler tail` for workers_ai logs.' }, 503);
     return c.json({ draft: draft.slice(0, 1200) });
   } catch (e: any) {
     return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
@@ -7666,11 +7682,12 @@ app.post('/ai/receipt/:ref', async (c) => {
   const bytes = [...new Uint8Array(await object.arrayBuffer())];
   let text = '';
   try {
-    const out: any = await (c.env.AI as any).run('@cf/meta/llama-3.2-11b-vision-instruct', {
+    const out: any = await runAi(c.env, '@cf/meta/llama-3.2-11b-vision-instruct', {
       image: bytes,
       prompt: 'This is a delivery drop-off / proof-of-delivery photo at a courier depot. Transcribe everything visible: depot name or location, number of parcels or packages, condition of parcels, any damage, shortage or discrepancy notes, dates, times and signatures. Output only the transcribed text, no extra labels.',
       max_tokens: 400,
     });
+    if (!out) return c.json({ error: 'ai_unavailable', detail: 'Vision call produced no output. Check `wrangler tail` for workers_ai logs.' }, 503);
     text = String(out?.response ?? out?.description ?? '').trim().slice(0, 1200);
   } catch (e: any) {
     return c.json({ error: 'ai_failed', detail: String(e?.message ?? e).slice(0, 200) }, 502);
