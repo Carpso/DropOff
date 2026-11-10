@@ -57,7 +57,11 @@ async function oauthAccessToken(sa: ServiceAccount): Promise<string | null> {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${encodeURIComponent(assertion)}`,
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    console.error(JSON.stringify({ where: 'fcm_token_exchange', kind: 'exchange_failed', status: res.status, body: txt.slice(0, 300) }));
+    return null;
+  }
   const data = (await res.json()) as { access_token?: string; expires_in?: number };
   if (!data.access_token) return null;
   cachedToken = { value: data.access_token, exp: now + (data.expires_in ?? 3600) };
@@ -74,7 +78,12 @@ export interface PushPayload {
 /** Sends a notification to every registered device for a phone. Best-effort. */
 export async function sendToPhone(env: Env, phone: string | null | undefined, payload: PushPayload): Promise<void> {
   try {
-    if (!phone || !env.FIREBASE_SERVICE_ACCOUNT) return;
+    if (!phone || !env.FIREBASE_SERVICE_ACCOUNT) {
+      if (phone && !env.FIREBASE_SERVICE_ACCOUNT) {
+        console.error(JSON.stringify({ where: 'fcm_send', kind: 'no_service_account', phone }));
+      }
+      return;
+    }
     let sa: ServiceAccount;
     try { sa = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT) as ServiceAccount; } catch { return; }
     if (!sa.project_id || !sa.client_email || !sa.private_key) return;
@@ -104,9 +113,12 @@ export async function sendToPhone(env: Env, phone: string | null | undefined, pa
       if (res.status === 404 || res.status === 410) {
         // Token unregistered/stale — drop it so the table never grows unbounded.
         await env.DB.prepare('DELETE FROM push_tokens WHERE token = ?1').bind(token).run();
+        console.log(JSON.stringify({ where: 'fcm_send', kind: 'token_gone', phone, status: res.status }));
+      } else if (!res.ok) {
+        console.error(JSON.stringify({ where: 'fcm_send', kind: 'send_failed', phone, status: res.status, body: (await res.text().catch(() => '')).slice(0, 160) }));
+      } else {
+        console.log(JSON.stringify({ where: 'fcm_send', kind: 'send_ok', phone }));
       }
-      // Other failures are logged by wrangler via the unhandled rejection guard:
-      // still swallowed to never block the API path that triggered this push.
     }
   } catch {
     // push is strictly best-effort; never fail the caller

@@ -3764,6 +3764,82 @@ app.get('/admin/sms/log', async (c) => {
   return c.json({ broadcasts: results });
 });
 
+/* ------------------- admin/superadmin notification broadcasts ------------------ */
+// Audience push — mirrors /admin/sms/broadcast and is recorded the same way.
+// Admin and superadmin can both send marketing pushes; isAdmin covers the owner.
+const PUSH_AUDIENCES = ['all', 'accounts', 'sellers', 'subscribers', 'riders'] as const;
+const PUSH_CAP = 500;
+
+app.post('/admin/push/broadcast', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const title = String(b?.title ?? '').trim().slice(0, 80);
+  const message = String(b?.message ?? '').trim().slice(0, 140);
+  const audience = String(b?.audience ?? '').toLowerCase();
+  const extraPhones = Array.isArray(b?.phones) ? b.phones.map((p: unknown) => String(p)) : [];
+  if (!title || !message) return c.json({ error: 'title and message required' }, 400);
+  if (!PUSH_AUDIENCES.includes(audience as any)) {
+    return c.json({ error: `audience must be one of: ${PUSH_AUDIENCES.join(', ')}` }, 400);
+  }
+  const phones = new Set<string>();
+  if (audience === 'all' || audience === 'accounts') {
+    const { results } = await c.env.DB.prepare('SELECT phone FROM auth_users WHERE phone IS NOT NULL').all();
+    for (const r of results as any[]) if (r.phone) phones.add(r.phone);
+  }
+  if (audience === 'all' || audience === 'sellers') {
+    const { results } = await c.env.DB.prepare('SELECT DISTINCT sender_phone AS phone FROM jobs').all();
+    for (const r of results as any[]) if (r.phone) phones.add(r.phone);
+  }
+  if (audience === 'all' || audience === 'subscribers') {
+    const { results } = await c.env.DB.prepare(`SELECT phone FROM subscriptions WHERE status = 'active'`).all();
+    for (const r of results as any[]) if (r.phone) phones.add(r.phone);
+  }
+  if (audience === 'all' || audience === 'riders') {
+    const { results } = await c.env.DB.prepare(`SELECT phone FROM riders WHERE active = 1`).all();
+    for (const r of results as any[]) if (r.phone) phones.add(r.phone);
+  }
+  for (const raw of extraPhones) {
+    try { phones.add(normalizeZmPhone(raw)); } catch { /* skip */ }
+  }
+  phones.delete('ops');
+
+  // Only send to phones with at least one registered push token.
+  const candidates = [...phones].slice(0, PUSH_CAP * 4);
+  const withTokens: string[] = [];
+  for (const q of candidates) {
+    const t = await c.env.DB.prepare('SELECT 1 FROM push_tokens WHERE phone = ?1').bind(q).first();
+    if (t) withTokens.push(q);
+    if (withTokens.length >= PUSH_CAP) break;
+  }
+
+  const sender = c.get('phone') ?? 'admin-key';
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO push_broadcasts (sender, audience, title, body, recipient_count) VALUES (?1, ?2, ?3, ?4, ?5)`,
+  ).bind(sender, audience, title, message, withTokens.length).run();
+  const broadcastId = meta.last_row_id as number;
+
+  c.executionCtx.waitUntil((async () => {
+    let sent = 0;
+    await Promise.allSettled(withTokens.map((p) =>
+      sendToPhone(c.env, p, { title, body: message, data: { kind: 'marketing', broadcast_id: String(broadcastId) } }),
+    ));
+    sent = withTokens.length;
+    await c.env.DB.prepare('UPDATE push_broadcasts SET sent_count = ?2 WHERE id = ?1')
+      .bind(broadcastId, sent).run().catch(() => {});
+  })());
+
+  return c.json({ ok: true, broadcast_id: broadcastId, audience, recipients: withTokens.length, targeted: candidates.length });
+});
+
+app.get('/admin/push/log', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, sender, audience, title, body, recipient_count, sent_count, created_at
+       FROM push_broadcasts ORDER BY id DESC LIMIT 50`,
+  ).all();
+  return c.json({ broadcasts: results });
+});
+
 /* ------------------------- courier branches (admin) ------------------------ */
 app.get('/admin/branches', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
@@ -3803,6 +3879,22 @@ app.delete('/admin/branches/:id', async (c) => {
 });
 
 /* ------------------------------ FCM push reg ------------------------------ */
+// POST /admin/push-test {phone, title?, body?} — one-tap verification that the
+// FCM chain (Worker secret → Google → device token) is alive. Admin/ops only.
+app.post('/admin/push-test', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const phone = normalizeZmPhone(String(b?.phone ?? ''));
+  if (!phone) return c.json({ error: 'phone required (260XXXXXXXXX)' }, 400);
+  const title = String(b?.title ?? 'DropOff — push test').slice(0, 80);
+  const body = String(b?.body ?? 'FCM is live and reaching this phone.').slice(0, 140);
+  const before = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM push_tokens WHERE phone = ?1',
+  ).bind(phone).first<any>();
+  await sendToPhone(c.env, phone, { title, body, data: { kind: 'push_test' } });
+  return c.json({ ok: true, phone, tokens: Number(before?.n ?? 0) });
+});
+
 // POST /push/register {token, platform} — upserts this device under the JWT's
 // phone so the Worker can reach it on job/payment events. DELETE removes it.
 app.post('/push/register', async (c) => {
