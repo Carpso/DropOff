@@ -540,6 +540,8 @@ class AppStore extends ChangeNotifier {
     double? declaredValueZmw,
     bool coverOptIn = false,
     bool coverTosAccepted = false,
+    double? pickupLat,
+    double? pickupLng,
   }) async {
     final now = DateTime.now();
     final id = now.microsecondsSinceEpoch.toString();
@@ -550,6 +552,8 @@ class AppStore extends ChangeNotifier {
       'idempotency_key': 'job-$id',
       'sender_name': senderName,
       'pickup_address': pickupAddress,
+      if (pickupLat != null && pickupLng != null) 'pickup_lat': pickupLat,
+      if (pickupLat != null && pickupLng != null) 'pickup_lng': pickupLng,
       'from_city': fromCity,
       'courier_id': courierId,
       'recipient_name': recipientName,

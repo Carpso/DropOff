@@ -2,6 +2,7 @@ import '../ui/app_toast.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../data/catalog.dart';
@@ -71,6 +72,9 @@ class _BookingScreenState extends State<BookingScreen> {
   String _from = 'Lusaka';
   String _to = 'Ndola';
   String _pickupWindow = '10:00';
+  double? _pickupLat;
+  double? _pickupLng;
+  bool _locating = false;
   late String _courierId = widget.initialCourierId ?? 'platinum';
   ParcelSize _size = ParcelSize.small;
   bool _lastMile = false;
@@ -298,6 +302,33 @@ class _BookingScreenState extends State<BookingScreen> {
     _message('AI tidied the address - check it before booking.');
   }
 
+  Future<void> _captureLocation() async {
+    setState(() => _locating = true);
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        _message('Location permission is needed to pin the pickup.');
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      ).timeout(const Duration(seconds: 12));
+      if (!mounted) return;
+      setState(() {
+        _pickupLat = pos.latitude;
+        _pickupLng = pos.longitude;
+      });
+      _message('Pickup location pinned — the nearest rider will dispatch.');
+    } catch (_) {
+      _message('Could not get your location — type the address or try again.');
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
   bool _validPhone(String value) => RegExp(r'^(?:\+?260|0)?[79][567]\d{7}$').hasMatch(value.replaceAll(RegExp(r'[\s-]'), ''));
 
   void _next() {
@@ -431,6 +462,8 @@ class _BookingScreenState extends State<BookingScreen> {
       pickupAt: null,
       parcels: _parcels,
       vehicleClass: _vehicleClass,
+      pickupLat: _pickupLat,
+      pickupLng: _pickupLng,
       parcelPhotoUrl: _parcelPhotoUrl,
       declaredValueZmw: double.tryParse(_declaredValue.text.trim()),
       coverOptIn: _coverOptIn,
@@ -656,7 +689,12 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 8),
         const InfoPill(icon: Icons.receipt_long, label: 'Your parcel is dropped at the courier depot. The destination above is for your receipt only â€” it is not the actual door drop-off.', color: AppColors.amber),
         const SizedBox(height: 18),
-              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: TextButton(onPressed: _aiBusy ? null : _aiTidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')))),
+              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _aiTidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
+        if (_pickupLat != null && _pickupLng != null) ...[
+          const SizedBox(height: 4),
+          const Text('Pickup pinned to your current location — we will match you with the nearest rider.',
+              style: TextStyle(color: AppColors.forest, fontSize: 10.5, height: 1.3)),
+        ],
         const SizedBox(height: 16),
         SwitchListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 14),
