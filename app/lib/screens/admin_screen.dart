@@ -37,6 +37,12 @@ class _AdminScreenState extends State<AdminScreen> {
 
   final _smsPhone = TextEditingController();
   final _smsBody = TextEditingController();
+  final _pushTitle = TextEditingController();
+  final _pushBody = TextEditingController();
+  String _pushAudience = 'accounts';
+  bool _pushSending = false;
+  String _pushPreview = '';
+
   String _audience = 'accounts';
   bool _sending = false;
 
@@ -50,6 +56,8 @@ class _AdminScreenState extends State<AdminScreen> {
   void dispose() {
     _smsPhone.dispose();
     _smsBody.dispose();
+    _pushTitle.dispose();
+    _pushBody.dispose();
     super.dispose();
   }
 
@@ -102,6 +110,29 @@ class _AdminScreenState extends State<AdminScreen> {
       AnalyticsService.instance.track(
         feature: 'sms_broadcast', action: broadcast ? 'broadcast' : 'send', context: 'admin_sms',
         meta: {'audience': _audience},
+      );
+    }
+  }
+
+  Future<void> _sendPushBroadcast() async {
+    final t = _pushTitle.text.trim();
+    final msg = _pushBody.text.trim();
+    if (t.isEmpty || msg.isEmpty) return;
+    setState(() { _pushSending = true; _pushPreview = '$t\n$msg'; });
+    final res = await DropOffApi.adminPushBroadcast(audience: _pushAudience, title: t, body: msg);
+    if (!mounted) return;
+    setState(() => _pushSending = false);
+    AppToast.show(context, res.ok
+        ? 'Push broadcast queued — FCM sends in the background.'
+        : 'Push failed: ${res.error}');
+    if (res.ok) {
+      _pushTitle.clear();
+      _pushBody.clear();
+      _pushPreview = '';
+      setState(() {});
+      AnalyticsService.instance.track(
+        feature: 'push_broadcast', action: 'broadcast', context: 'admin_push',
+        meta: {'audience': _pushAudience},
       );
     }
   }
@@ -238,6 +269,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const _BranchManagerCard(),
               const SizedBox(height: 18),
               _smsCard(),
+              const SizedBox(height: 18),
+              _marketingPushCard(),
             ],
           ],
         ),
@@ -754,6 +787,80 @@ class _AdminScreenState extends State<AdminScreen> {
                   ]),
                 ),
             ],
+          ]),
+        ),
+      );
+
+  Widget _marketingPushCard() => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.campaign_outlined, color: AppColors.forest),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Push — marketing broadcast', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            ]),
+            const SizedBox(height: 4),
+            const Text('Push an offer to app users by audience. Title ≤ 80 chars, body ≤ 140 chars. Delivered on devices that previously signed in to the app.',
+                style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              initialValue: _pushAudience,
+              decoration: const InputDecoration(labelText: 'Audience', prefixIcon: Icon(Icons.groups_outlined)),
+              items: const [
+                DropdownMenuItem(value: 'accounts', child: Text('Registered accounts')),
+                DropdownMenuItem(value: 'sellers', child: Text('All sellers (booked before)')),
+                DropdownMenuItem(value: 'subscribers', child: Text('Active plan subscribers')),
+                DropdownMenuItem(value: 'riders', child: Text('Verified riders')),
+                DropdownMenuItem(value: 'all', child: Text('Everyone')),
+              ],
+              onChanged: (v) => setState(() => _pushAudience = v ?? 'accounts'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _pushTitle,
+              maxLength: 80,
+              decoration: const InputDecoration(labelText: 'Title', hintText: 'e.g. K69 Daily Rider pass is live', counterText: ''),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _pushBody,
+              maxLength: 140,
+              maxLines: 2,
+              decoration: const InputDecoration(labelText: 'Message', hintText: 'e.g. Ride today for free — subscribe in-app.', counterText: ''),
+            ),
+            const SizedBox(height: 10),
+            if (_pushPreview.isNotEmpty || _pushTitle.text.isNotEmpty) Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Preview', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: AppColors.muted)),
+              const SizedBox(height: 4),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2D2D2D),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border(left: BorderSide(color: AppColors.amber, width: 3)),
+                ),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Icon(Icons.notifications_active, color: AppColors.amber, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(_pushTitle.text.isEmpty ? '(title)' : _pushTitle.text,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                    const SizedBox(height: 2),
+                    Text(_pushBody.text.isEmpty ? '(message)' : _pushBody.text,
+                        style: const TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.3)),
+                  ])),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: FilledButton(
+                onPressed: _pushSending || _pushTitle.text.trim().isEmpty ? null : _sendPushBroadcast,
+                child: Text(_pushSending ? 'Sending…' : 'Send push broadcast'),
+              )),
+            ]),
           ]),
         ),
       );

@@ -806,6 +806,13 @@ class DropOffApi {
   static Future<ApiResponse> adminBroadcast({required String audience, required String message}) =>
       post('/admin/sms/broadcast', {'audience': audience, 'message': message}, admin: true);
 
+  /// Marketing push to an audience segment.
+  static Future<ApiResponse> adminPushBroadcast({required String audience, required String title, required String body}) =>
+      post('/admin/push/broadcast', {'audience': audience, 'title': title, 'message': body}, admin: true);
+
+  static Future<Map<String, dynamic>?> adminPushLog({int limit = 20}) =>
+      getAdmin('/admin/push/log?limit=$limit');
+
   // ---- Rider payroll + ZRA turnover tax (admin console) ----------------------
 
   /// Payroll rows ({summary, payouts}) — pending/confirmed/paid salary payouts.

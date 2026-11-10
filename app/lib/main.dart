@@ -10,6 +10,7 @@ import 'screens/track_screen.dart';
 import 'screens/waybill_screen.dart';
 import 'screens/account_screen.dart';
 import 'screens/booking_screen.dart';
+import 'screens/chat_screen.dart';
 import 'package:app_links/app_links.dart';
 import 'screens/app_shell.dart';
 import 'screens/bookings_screen.dart';
@@ -116,17 +117,36 @@ Future<void> main() async {
   // outbox and on a timer.
   final initFuture = Future.wait([store.initialize(), AnalyticsService.instance.init()]);
   PushService.init();
-  PushService.onNotificationTap.stream.listen((jobRef) {
+  PushService.onPayloadTap.stream.listen((data) {
     final ctx = navigatorKey.currentContext;
     if (ctx == null || !ctx.mounted) return;
-    AnalyticsService.instance.track(feature: 'push', action: 'tap', context: jobRef ?? '');
-    if (jobRef != null) {
-      final ref = jobRef;
-      final match = store.bookings.where((b) => b.serverRef == ref).firstOrNull;
-      if (match != null) {
-        Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: match.id)));
-        return;
+    final jobRef = data?['job_ref']?.toString();
+    final kind = '${data?['kind'] ?? ''}'.toLowerCase();
+    AnalyticsService.instance.track(feature: 'push', action: 'tap', context: kind.isEmpty ? 'unknown' : kind);
+
+    Widget? routeTo;
+    if (kind == 'chat' || kind.startsWith('chat')) {
+      routeTo = jobRef != null && jobRef.isNotEmpty ? ChatScreen.job(jobRef) : const ChatScreen.supportThread();
+    } else if (kind == 'support_reply' || kind == 'support') {
+      routeTo = const ChatScreen.supportThread();
+    } else if (kind == 'job_assigned' || kind == 'rider_assigned' || kind == 'deposit_paid' || kind == 'pickup_reminder' || kind == 'job_delivered' || kind == 'payment_received') {
+      if (jobRef != null && jobRef.isNotEmpty) {
+        final match = store.bookings.where((b) => b.serverRef == jobRef).firstOrNull;
+        routeTo = match != null
+            ? BookingDetailScreen(bookingId: match.id)
+            : const BookingsScreen();
+      } else {
+        routeTo = const BookingsScreen();
       }
+    } else if (kind == 'plan_renewed' || kind == 'subscription_active' || kind == 'promo_issued' || kind == 'marketing') {
+      routeTo = const AccountScreen(focusPlans: true);
+    } else if (kind.contains('security') || kind.contains('fraud') || kind.contains('alert')) {
+      routeTo = const AccountScreen();
+    }
+
+    if (routeTo != null) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => routeTo!));
+      return;
     }
     Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingsScreen()));
   });
