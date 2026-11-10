@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -74,12 +75,12 @@ class _BusinessScreenState extends State<BusinessScreen> {
   Future<void> _track(Map<String, dynamic> job) async {
     final ref = '${job['ref'] ?? ''}';
     if (ref.isEmpty) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening tracking…')));
+    AppToast.show(context, 'Opening tracking…');
     final link = await DropOffApi.trackingLink(ref);
     if (!mounted) return;
     final url = '${link?['url'] ?? ''}';
     if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tracking not available for this parcel yet.')));
+      AppToast.show(context, 'Tracking not available for this parcel yet.');
       return;
     }
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrackScreen(initialToken: url)));
@@ -140,7 +141,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
     final tier = '${sub['tier'] ?? ''}';
     if (tier.isEmpty) return;
     FocusScope.of(context).unfocus();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Momo prompt on its way — approve it to renew.')));
+    AppToast.show(context, 'Momo prompt on its way — approve it to renew.');
     final res = await DropOffApi.subscribe(
       tier: tier,
       pickupWindow: '${sub['pickup_window'] ?? '10:00'}',
@@ -148,7 +149,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
     );
     if (!mounted) return;
     final err = res.error ?? (res.ok ? null : 'Something went wrong.');
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err == null || err.isEmpty ? 'Prompt sent — approve on your phone to renew $tier.' : err)));
+    AppToast.show(context, err == null || err.isEmpty ? 'Prompt sent — approve on your phone to renew $tier.' : err);
     if (err == null || err.isEmpty) _load();
   }
 
@@ -164,7 +165,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       return _banner(
         icon: Icons.trending_up_rounded,
         title: '3+ parcels a month pays off with a plan',
-        body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying per trip. A Weekly Sprint (K399, 20/cycle) or monthly Silver / Gold / Platinum removes the per-parcel rider cost — most regulars save K${(s.k).toStringAsFixed(0)}+.',
+        body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying per trip. A Weekly Sprint (K399, 20/cycle) or monthly Silver / Gold / Platinum bundles the rider fee into the parcel allowance — most regulars save K${(s.k).toStringAsFixed(0)}+.',
         cta: 'Browse plans',
         onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
       );
@@ -304,7 +305,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
   Future<void> _switchToPlan(String tier, String label) async {
     FocusScope.of(context).unfocus();
     final sub = _sub2;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Momo prompt on its way — approve it to activate $label.')));
+    AppToast.show(context, 'Momo prompt on its way — approve it to activate $label.');
     final res = await DropOffApi.subscribe(
       tier: tier,
       pickupWindow: '${sub?['pickup_window'] ?? '10:00'}',
@@ -312,9 +313,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
     );
     if (!mounted) return;
     final err = res.error ?? (res.ok ? null : 'Something went wrong.');
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(err == null || err.isEmpty ? 'Prompt sent — approve on your phone to activate.' : err),
-    ));
+    AppToast.show(context, err == null || err.isEmpty ? 'Prompt sent — approve on your phone to activate.' : err);
     if (err == null || err.isEmpty) _load();
   }
 
@@ -461,7 +460,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                         ),
                         SizedBox(height: 6),
                         Text(
-                          'Subscription plans bundle the rider — Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.',
+                          'Subscription plans bundle your DropOff legs — Daily Rider K49/day, Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.',
                           softWrap: true,
                           style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4),
                         ),

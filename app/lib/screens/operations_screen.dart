@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -77,7 +78,7 @@ class OperationsScreen extends StatelessWidget {
       )),
     );
     if (confirmed == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Device identity updated.')));
+      AppToast.show(context, 'Device identity updated.');
     }
     phone.dispose();
     code.dispose();
@@ -120,7 +121,7 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 20),
           FilledButton(onPressed: () {
             if (name.text.trim().length < 2 || phone.text.trim().length < 9) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a name and valid mobile number.')));
+              AppToast.show(context, 'Enter a name and valid mobile number.');
               return;
             }
             Navigator.of(sheetContext).pop(true);
@@ -136,7 +137,7 @@ class OperationsScreen extends StatelessWidget {
         vehicleClass: _vehicleClassOf(vehicle),
       );
       if (error != null && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+        AppToast.show(context, error);
       }
     }
     name.dispose();
@@ -176,7 +177,7 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 20),
           FilledButton(onPressed: () {
             if (name.text.trim().length < 2 || phone.text.trim().length < 9) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a name and valid mobile number.')));
+              AppToast.show(context, 'Enter a name and valid mobile number.');
               return;
             }
             Navigator.of(sheetContext).pop(true);
@@ -195,7 +196,7 @@ class OperationsScreen extends StatelessWidget {
         vehicleClass: _vehicleClassOf(vehicle),
       );
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? 'Rider updated.')));
+        AppToast.show(context, err ?? 'Rider updated.');
       }
     }
     name.dispose();
@@ -242,23 +243,22 @@ class OperationsScreen extends StatelessWidget {
       // "Deactivate instead" convenience action
       final err = await store.toggleRider('${rider.id}', false);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? '${rider.name} deactivated.')));
+        AppToast.show(context, err ?? '${rider.name} deactivated.');
       }
       return;
     }
     if (confirmed == true && context.mounted) {
       final err = await store.removeRider('${rider.id}', confirm: true);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? '${rider.name} removed from the team.')));
+        AppToast.show(context, err ?? '${rider.name} removed from the team.');
       }
     }
   }
 
   Future<void> _pingMyLocation(BuildContext context) async {
     final store = AppScope.of(context);
-    final messenger = ScaffoldMessenger.of(context);
     if (!store.linked) {
-      messenger.showSnackBar(const SnackBar(content: Text('Link this device first so your rider phone is known.')));
+      AppToast.show(context, 'Link this device first so your rider phone is known.');
       return;
     }
     var permission = await Geolocator.checkPermission();
@@ -266,15 +266,15 @@ class OperationsScreen extends StatelessWidget {
       permission = await Geolocator.requestPermission();
     }
     if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      messenger.showSnackBar(const SnackBar(content: Text('Location permission needed to share your live position.')));
+      AppToast.show(context, 'Location permission needed to share your live position.');
       return;
     }
     try {
       final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
       final res = await DropOffApi.riderPing(phone: store.linkedPhone!, lat: pos.latitude, lng: pos.longitude);
-      messenger.showSnackBar(SnackBar(content: Text(res.ok ? 'Live location shared with senders.' : 'Could not submit location right now.')));
+      AppToast.show(context, res.ok ? 'Live location shared with senders.' : 'Could not submit location right now.');
     } catch (e) {
-      messenger.showSnackBar(const SnackBar(content: Text('Location unavailable — check GPS.')));
+      AppToast.show(context, 'Location unavailable — check GPS.');
     }
   }
 
@@ -476,7 +476,7 @@ class OperationsScreen extends StatelessWidget {
                     onChanged: (value) async {
                       final err = await store.toggleRider(rider.id, value);
                       if (err != null && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                        AppToast.show(context, err);
                       }
                     },
                   ),
@@ -498,7 +498,7 @@ class OperationsScreen extends StatelessWidget {
           const SectionTitle('How DropOff earns'),
           const SizedBox(height: 8),
           const Card(child: Padding(padding: EdgeInsets.all(18), child: Column(children: [
-            _RevenueRow(number: '01', title: 'Pay-as-you-go pickup', text: 'K45 per pickup. Platform takes 10% (K4.50 to DropOff, K40.50 to the rider) — thin on purpose so riders stay loyal.'),
+            _RevenueRow(number: '01', title: 'Pay-as-you-go pickup', text: 'K45 per pickup, the DropOff leg accrues 100% to DropOff — riders are salaried (K3,000/mo incl. K300/wk fuel), pace-gated by delivery, never paid per parcel.'),
             _RevenueRow(number: '02', title: 'Subscription plans: Silver / Gold / Platinum', text: 'K250 / K500 / K750 per 30-day cycle for 10 / 25 / 50 parcels (plus Daily Rider K49/day and Weekly K399). Every parcel counts as one — even in the same trip.'),
             _RevenueRow(number: '03', title: 'Waiting & COD float', text: 'Waiting over 10 min bills K2/min (K50 cap) — paid to the driver in full. COD cash floats with the rider/driver — sender paid via momo disbursement minus our 2%.'),
             _RevenueRow(number: '04', title: 'Door delivery & subscription plans', text: 'Last-mile door delivery priced like first-mile pay-as-you-go (recipient-city distance + vehicle). Plan parcels bundle the rider inside the monthly fee.'),
@@ -627,9 +627,11 @@ class _RiderCashCardState extends State<_RiderCashCard> {
     if (!mounted) return;
     setState(() => _busyRef = null);
     final error = res.error ?? (res.ok ? null : 'Remittance failed.');
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(error ?? 'Remitted — seller notified, K${((res.body['credited_zmw'] as num?) ?? 0).toStringAsFixed(2)} sent.'),
-    ));
+    if (error == null) {
+      AppToast.success(context, 'Remitted — seller notified, K${((res.body['credited_zmw'] as num?) ?? 0).toStringAsFixed(2)} sent.');
+    } else {
+      AppToast.error(context, error);
+    }
     if (error == null) _load();
   }
 
@@ -775,7 +777,7 @@ class _BatchPickupCardState extends State<_BatchPickupCard> {
         .map((s) => '${s['seq']}. ${s['ref']} — ${s['address']} (+${s['km_from_prev']} km)')
         .join('\n');
     await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Manifest copied — paste it into your dispatch group.')));
+    if (mounted) AppToast.show(context, 'Manifest copied — paste it into your dispatch group.');
   }
 
   @override
@@ -939,7 +941,7 @@ class _RiderPayCard extends StatelessWidget {
               Expanded(child: Text('Your pay', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             ]),
             SizedBox(height: 6),
-            Text('K3,000/month flat with a 30-parcels/day target. After the cap you keep your tier discount off pay-as-you-go.',
+            Text('Your salary: K3,000/month inclusive of K300/week fuel. Paid weekly on Sundays (16:00 CAT) or monthly on the 1st. Pace target: 30 trips/day. No per-parcel or per-trip payment — your salary does not change with rides taken.',
                 style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
           ]),
         ),
@@ -1159,7 +1161,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
     if (!mounted) return;
     setState(() => _busyField = null);
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Photo upload failed (${res.error}).')));
+      AppToast.show(context, 'Photo upload failed (${res.error}).');
       return;
     }
     final url = '${res.body['url'] ?? ''}';
@@ -1214,7 +1216,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
     }
   }
 
-  void _snack(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  void _snack(String text) => AppToast.show(context, text);
 
   Widget _photoTile(String field, String label, String? url) {
     final local = _local[field];
@@ -1477,7 +1479,7 @@ class _SelfieBannerState extends State<_SelfieBanner> {
     setState(() => _needed = false);
   }
 
-  void _snack(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
+  void _snack(String t) => AppToast.show(context, t);
 
   @override
   Widget build(BuildContext context) {

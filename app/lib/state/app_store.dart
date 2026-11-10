@@ -559,10 +559,9 @@ class AppStore extends ChangeNotifier {
       'description': description,
       'parcels': parcels,
       'vehicle_class': vehicleClass,
-      'pay_method': switch (paymentMethod) {
-        'Cash at pickup' => 'cash',
-        _ => 'mobile_money',
-      },
+      // No cash path — every parcel is prepaid via mobile money at booking,
+      // in-line with the worker's prepaid gate (cash is rejected server-side).
+      'pay_method': 'mobile_money',
       'weight_class': switch (parcelSize) {
         ParcelSize.small => '0-5kg',
         ParcelSize.medium => '5-15kg',

@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -238,7 +239,7 @@ class _ChatScreenState extends State<ChatScreen> {
       'too_many_requests' => 'Sending too fast — wait a moment.',
       _ => 'Message not sent — check your connection.',
     };
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    AppToast.show(context, text);
   }
 
   String _maskPhone(String phone) =>
@@ -302,10 +303,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final res = await DropOffApi.reportChatMessage(id, reason);
     if (!mounted) return;
     final already = res.body['already_reported'] == true;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-      res.ok ? (already ? 'Already reported — DropOff has it.' : 'Thanks — reported to DropOff.')
-             : 'Could not report right now. Try again later.',
-    )));
+    AppToast.show(context, res.ok ? (already ? 'Already reported — DropOff has it.' : 'Thanks — reported to DropOff.')
+             : 'Could not report right now. Try again later.',);
   }
 
   Future<void> _confirmBlock(String phone, String label) async {
@@ -325,9 +324,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (yes != true) return;
     final res = await DropOffApi.blockUser(phone);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-      res.ok ? 'User blocked in your chats.' : 'Could not block right now (${res.error}).',
-    )));
+    AppToast.show(context, res.ok ? 'User blocked in your chats.' : 'Could not block right now (${res.error}).',);
     if (res.ok) {
       setState(() => _blockedSenders = [..._blockedSenders, phone]);
       await _refresh();

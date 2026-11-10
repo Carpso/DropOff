@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -105,9 +106,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
                     if (live) {
                       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CourierDetailScreen(courier: courier)));
                     } else {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Coming soon — this courier joins the DropOff network shortly. Lusaka couriers are live today.'),
-                      ));
+                      AppToast.show(context, 'Coming soon — this courier joins the DropOff network shortly. Lusaka couriers are live today.');
                     }
                   },
                   child: Padding(
@@ -232,9 +231,7 @@ class _LiveDepotsSection extends StatelessWidget {
                     if (isLusaka) {
                       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
                     } else {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text('Coming soon — ${c['city'] ?? 'this city'} depot coverage launches shortly. Lusaka is live today.'),
-                      ));
+                      AppToast.show(context, 'Coming soon — ${c['city'] ?? 'this city'} depot coverage launches shortly. Lusaka is live today.');
                     }
                   },
                   child: Padding(
@@ -379,9 +376,7 @@ class CourierDetailScreen extends StatelessWidget {
                             builder: (_) => BookingScreen(initialCourierId: courier.id),
                           ));
                         } else {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text('Coming soon — DropOff pickup in ${branch.city} launches shortly.'),
-                          ));
+                          AppToast.show(context, 'Coming soon — DropOff pickup in ${branch.city} launches shortly.');
                         }
                       },
                       child: Padding(

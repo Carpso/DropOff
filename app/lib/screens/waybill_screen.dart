@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -89,9 +90,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       _trackingUrl = data?['url'] as String?;
     });
     if (_trackingUrl == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not create the tracking link right now.')),
-      );
+      AppToast.warning(context, 'Tracking link not ready yet — try again in a moment.');
     }
   }
 
@@ -125,9 +124,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       );
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not create the waybill image — try again.')),
-        );
+        AppToast.error(context, 'Could not create the waybill image — try again.');
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -138,7 +135,6 @@ class _WaybillScreenState extends State<WaybillScreen> {
     final booking = _lookup();
     if (booking == null || _busy) return;
     setState(() => _busy = true);
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final bytes = await _capturePng();
       if (bytes == null) throw StateError('capture failed');
@@ -158,7 +154,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       dir ??= await getApplicationDocumentsDirectory();
       final file = File('${dir.path}${Platform.pathSeparator}$name');
       await file.writeAsBytes(bytes, flush: true);
-      messenger.showSnackBar(SnackBar(content: Text('Waybill saved to ${file.path}')));
+      AppToast.show(context, 'Waybill saved to ${file.path}');
     } catch (_) {
       // Filesystem save failed (permissions / platform) — fall back to the
       // share sheet so the user can still keep the image.
@@ -173,9 +169,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       } catch (_) {
         // fall through to snackbar below
       }
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Could not save the waybill image — try again.')),
-      );
+      AppToast.error(context, 'Could not save the waybill image — try again.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

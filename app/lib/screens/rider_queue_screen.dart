@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -61,7 +62,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
     final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc');
     if (!mounted) return null;
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Proof photo upload failed (${res.error ?? 'network'}) — moving on without it.')));
+      AppToast.show(context, 'Proof photo upload failed (${res.error ?? 'network'}) — moving on without it.');
       return null;
     }
     return '${res.body['url'] ?? ''}';
@@ -69,7 +70,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
 
   Future<void> _snack(String msg) async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    AppToast.show(context, msg);
   }
 
   Future<void> _advanceStop(Map<String, dynamic> s) async {

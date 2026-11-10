@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -62,7 +63,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
   Future<void> _openIncoming(Map<String, dynamic> parcel) async {
     final url = '${parcel['tracking_url'] ?? ''}';
     if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tracking link not available for this parcel yet.')));
+      AppToast.show(context, 'Tracking link not available for this parcel yet.');
       return;
     }
     await Navigator.of(context).push(MaterialPageRoute<void>(
@@ -399,7 +400,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   final data = await DropOffApi.jobEvidence(ref);
   if (!context.mounted) return;
   if (data == null) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Evidence not available right now. Sign in and ensure this booking is synced.')));
+    AppToast.show(context, 'Evidence not available right now. Sign in and ensure this booking is synced.');
     return;
   }
   final ev = (data['evidence'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
@@ -539,16 +540,12 @@ class _TrackingLinkCardState extends State<_TrackingLinkCard> {
     setState(() => _busy = false);
     final url = data?['url'] as String?;
     if (url == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not create the tracking link. Check your connection.')),
-      );
+      AppToast.warning(context, 'Tracking link not ready yet — check your connection and try again.');
       return;
     }
     await Clipboard.setData(ClipboardData(text: url));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Recipient tracking link copied — send it by SMS or WhatsApp.')),
-    );
+    AppToast.success(context, 'Recipient tracking link copied — send it by SMS or WhatsApp.');
   }
 
   @override

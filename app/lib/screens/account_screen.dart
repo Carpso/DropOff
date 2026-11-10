@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -126,7 +127,7 @@ class _AccountScreenState extends State<AccountScreen> {
     });
     if (ok) {
       unawaited(PushService.register());
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Device linked.')));
+      AppToast.show(context, 'Device linked.');
     }
   }
 
@@ -161,9 +162,7 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (!mounted) return;
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(_creating ? 'Account created — you are signed in.' : 'Signed in.'),
-      ));
+      AppToast.show(context, _creating ? 'Account created — you are signed in.' : 'Signed in.');
     } else {
       setState(() => _error = store.lastAuthError ?? AppStore.authErrorText('unknown'));
     }
@@ -200,7 +199,7 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (!mounted) return;
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Account created — you are signed in.')));
+      AppToast.show(context, 'Account created — you are signed in.');
     } else {
       setState(() => _error = store.lastAuthError ?? AppStore.authErrorText('unknown'));
     }
@@ -341,7 +340,7 @@ class _AccountScreenState extends State<AccountScreen> {
                     onPressed: () async {
                       final ok = await DropOffApi.post('/me/devices/revoke-others', const {});
                       if (!mounted) return;
-                      ScaffoldMessenger.of(sheetContext).showSnackBar(SnackBar(content: Text(ok.ok ? 'Signed out on all other devices.' : 'Could not sign out everywhere.')));
+                      AppToast.show(context, ok.ok ? 'Signed out on all other devices.' : 'Could not sign out everywhere.');
                       if (ok.ok) Navigator.of(sheetContext).pop();
                     },
                     icon: const Icon(Icons.logout, size: 18),
@@ -460,7 +459,7 @@ class _AccountScreenState extends State<AccountScreen> {
     if (mounted) _snackPhoto('Photo removed.');
   }
 
-  void _snackPhoto(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
+  void _snackPhoto(String t) => AppToast.show(context, t);
 
   String _initialsOf(String? seed) {
     final parts = (seed ?? '').trim().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
@@ -525,12 +524,9 @@ class _AccountScreenState extends State<AccountScreen> {
       return;
     }
     final store = AppScope.of(context);
-    final messenger = ScaffoldMessenger.of(context);
     final res = await store.resendVerification(email);
     if (!mounted) return;
-    messenger.showSnackBar(SnackBar(
-      content: Text(res.ok ? 'Verification email sent (check spam too).' : 'Could not send right now.'),
-    ));
+    AppToast.show(context, res.ok ? 'Verification email sent (check spam too).' : 'Could not send right now.');
   }
 
   Widget _legalLink(String title, String asset) => TextButton(
@@ -1124,9 +1120,8 @@ class _TiersCardState extends State<_TiersCard> {
 
   Future<void> _chooseTier(String tier) async {
     final store = AppScope.of(context);
-    final messenger = ScaffoldMessenger.of(context);
     if (!store.linked) {
-      messenger.showSnackBar(const SnackBar(content: Text('Sign in first — your plan is tied to your phone.')));
+      AppToast.show(context, 'Sign in first — your plan is tied to your phone.');
       return;
     }
     final currentTier = '${_current?['tier'] ?? ''}';
@@ -1135,7 +1130,7 @@ class _TiersCardState extends State<_TiersCard> {
       final curRank = _tierRank[currentTier] ?? -1;
       final newRank = _tierRank[tier] ?? -1;
       if (newRank < curRank) {
-        messenger.showSnackBar(const SnackBar(content: Text('Downgrades apply automatically at your next renewal — nothing to pay now.')));
+        AppToast.show(context, 'Downgrades apply automatically at your next renewal — nothing to pay now.');
         return;
       }
       if (newRank > curRank) {
@@ -1144,15 +1139,15 @@ class _TiersCardState extends State<_TiersCard> {
         if (!mounted) return;
         setState(() => _busyTier = null);
         if (!up.ok) {
-          messenger.showSnackBar(SnackBar(content: Text(up.error == 'payment_already_pending'
+          AppToast.show(context, up.error == 'payment_already_pending'
               ? 'A payment prompt is already waiting on your phone — approve it first.'
-              : 'Could not upgrade (${up.error}). Try again.')));
+              : 'Could not upgrade (${up.error}). Try again.');
           return;
         }
         final extra = ((up.body['amount_zmw'] as num?) ?? 0).toDouble();
-        messenger.showSnackBar(SnackBar(content: Text(extra > 0
+        AppToast.show(context, extra > 0
             ? '${tier.toUpperCase()} is live now — approve the K${extra.toStringAsFixed(2)} prorated prompt.'
-            : '${tier.toUpperCase()} is live — nothing extra to pay this cycle.')));
+            : '${tier.toUpperCase()} is live — nothing extra to pay this cycle.');
         setState(() => _usageCycle++);
         _loadCurrent();
         AnalyticsService.instance.track(
@@ -1167,7 +1162,7 @@ class _TiersCardState extends State<_TiersCard> {
     if (!res.ok) {
       if (!mounted) return;
       setState(() => _busyTier = null);
-      messenger.showSnackBar(SnackBar(content: Text('Could not start the plan (${res.error}). Try again.')));
+      AppToast.show(context, 'Could not start the plan (${res.error}). Try again.');
       return;
     }
     // Lipila prompt for the plan price; success activates the plan server-side.
@@ -1178,9 +1173,9 @@ class _TiersCardState extends State<_TiersCard> {
       // The Lipila prompt never reached the phone (no pending payment is
       // created on a failed init), so there's nothing to "pay from this
       // screen" — let the seller resubscribe to retry the prompt.
-      messenger.showSnackBar(SnackBar(content: Text(pay.error == 'lipila_init_failed'
+      AppToast.show(context, pay.error == 'lipila_init_failed'
           ? 'Mobile-money prompt failed to start — check your phone/network and tap the plan again.'
-          : 'Could not start the mobile-money prompt (${pay.error ?? 'network'}). Tap the plan again.')));
+          : 'Could not start the mobile-money prompt (${pay.error ?? 'network'}). Tap the plan again.');
       return;
     }
     final paymentId = '${pay.body['payment_id']}';
@@ -1197,12 +1192,12 @@ class _TiersCardState extends State<_TiersCard> {
       context: 'account_tiers',
       meta: {'tier': tier, 'status': status},
     );
-      messenger.showSnackBar(SnackBar(content: Text(switch (status) {
+      AppToast.show(context, switch (status) {
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
       'success' => '$tier plan is LIVE — your monthly parcels are ready.',
       'failed' => 'The mobile-money prompt was rejected — pay again from this screen.',
       _ => 'Payment still pending — the plan activates the moment it lands.',
-    })));
+    });
   }
 
   @override
@@ -1367,9 +1362,8 @@ class _PackCodeCardState extends State<_PackCodeCard> {
     final code = _code.text.trim().toUpperCase();
     if (code.isEmpty) return;
     final store = AppScope.of(context);
-    final messenger = ScaffoldMessenger.of(context);
     if (!store.linked) {
-      messenger.showSnackBar(const SnackBar(content: Text('Sign in first — the plan attaches to your number.')));
+      AppToast.show(context, 'Sign in first — the plan attaches to your number.');
       return;
     }
     setState(() => _busy = true);
@@ -1380,17 +1374,17 @@ class _PackCodeCardState extends State<_PackCodeCard> {
       _code.clear();
       final tier = '${res.body['tier'] ?? 'plan'}';
       final end = '${res.body['period_end'] ?? ''}'.split(' ').first;
-      messenger.showSnackBar(SnackBar(content: Text('$tier plan activated${end.isEmpty ? '' : ' — runs to $end'}. No payment needed.')));
+      AppToast.show(context, '$tier plan activated${end.isEmpty ? '' : ' — runs to $end'}. No payment needed.');
       AnalyticsService.instance.track(
         feature: 'pack_codes', action: 'redeem', context: 'account_pack_code',
         meta: {'tier': tier},
       );
     } else {
-      messenger.showSnackBar(SnackBar(content: Text(res.error == 'code_not_found'
+      AppToast.show(context, res.error == 'code_not_found'
           ? 'That plan code was not recognised.'
           : res.error == 'code_used'
               ? 'That plan code has already been used.'
-              : 'Could not redeem (${res.error}).')));
+              : 'Could not redeem (${res.error}).');
     }
   }
 
