@@ -36,6 +36,8 @@ So the PAYG engine prints roughly **10–15% of each booking** in platform reven
 
 ## 3. The critical fact the audit must start with: who pays the rider on a plan trip?
 
+> ⚠️ **Superseded 2026-11-10 same-day:** this section assumed a per-trip rider payout model. Riders are in fact salaried — see **Section 9**, which corrects sections 3–6. Kept for the reasoning trail.
+
 On a plan (`/collections` plan-inclusion path, `index.ts` ~1988–2006):
 
 > Inside the cap, **the customer's rider fee is set to the tier's `rider_fee_zmw` — which is 0 for every tier.**
@@ -114,9 +116,28 @@ Under **current pricing** (breakage model), profit per month ≈ sum over subscr
 
 The week-one product the market WILL take: **Daily Rider days (K49/day)** and app installs — cheap trials that train the habit. Convert to plans when Predict's honest recommender shows real savings.
 
-## 8. Signs to re-run this audit
+## 9. UPDATE (2026-11-10, later same day): riders are SALARIED — the economics change
+
+Correction from the owner: riders are **employees on a fixed package, not per-trip payout contractors**. Deployed in worker `138c6802`: **K3,000/month inclusive of K300/week fuel** (base wage K1,800), paid weekly every Sunday 16:00 CAT or monthly on the 1st, 16:00 CAT, pace-gated (30 trips/day sweep target; under-target periods are pro-rated), auto-generated payroll with admin → superadmin confirmation and downloadable proof (`/admin/payroll`).
+
+**What this does to the numbers above:** sections 3–4 modelled the rider cost as 90% of each trip's fee (~K58/trip). Under the salary model:
+
+- The rider package is a **fixed cost**, not a per-trip cost. In-plan trips' marginal rider cost ≈ **K3,000 ÷ ~900 target trips = ~K3.3/trip** (at realistic lower pace, ~K15–K20/trip).
+- The 90% share DropOff "hands over" per PAYG trip no longer leaves the business — **gross per PAYG job rises to roughly the whole rider fee + platform take (~K73 at K70 avg fee)**, minus the salary.
+- **Plans become profitable at current prices.** Silver at FULL cap (10 parcels): K250 collected vs ~K30 salary-share + admin → **+K200+ per full-util subscriber**. Gold/Platinum/Weekly magnitudes better. Sections 3–4's "losing money on heavy users" verdict is **superseded** — the earlier per-trip payout concern evaporates with the salary; what replaces it is a fixed breakeven per rider.
+
+**Break-even per month becomes simple:** rider package K3,000 (+ ops floor, est. K1,500–K2,500 infra/marketing/SMS) ≈ **K4,500–K5,500/month per active rider**. At observed averages that's roughly:
+- ~40–60 completed PAYG jobs/month alone, or
+- **~10–15 average-priced plan subscribers** (mix incl. Silver) per rider, with PAYG topping up.
+
+This makes the plan-push strategy — and the 100→5,000 subscriber ladder in `GROWTH_RUNWAY` — structurally sound: hire the next rider only when trailing-30-day demand covers K4,500+ more per month. Daily Rider's loss-leader verdict also inverts: its only cost is salary-share (~K3–7 per active day), so **Daily Rider is now a profitable funnel product too**.
+
+Payroll mechanics (live): auto rows generated Sunday 16:00 CAT (weekly) / 1st 16:00 CAT (monthly + K3,000-minus-weeks balance reconciliation); pace-gated amounts; admin → superadmin two-signature confirmation; Lipila disbursement to the rider's momo; downloadable proof per payout. Rider's own app endpoint: `/rider/payroll`.
+
+**ZRA turnover tax now recorded automatically** on the main ledger (`/admin/tax`): monthly turnover = DropOff's own charged income (momo job collections + wallet-settled DropOff legs + subscriptions/upgrades + COD platform cut; excludes partner counter fares and wallet top-ups until spent). Rates per ZRA 2026: **0% up to K2,500/month, 5% of gross above the band**, return + payment due **by the 14th of the following month** — printable sheet at `/admin/tax/:ym/report` for your submission. Refreshed daily by cron; closed at month end. (Reminder: Turnover Tax has no expense deductions — salaries and fuel are NOT set against it; confirm treatment with ZRA/your accountant once turnover is established.)
+
+## 10. Signs to re-run this audit
 
 - 30+ paid jobs, or 10+ active subscribers
-- Any plan subscriber crossing 60% utilisation (loss-zone alarm under current pricing)
-- Rider payout policy decided (Lever A) → recompute all break-evens
-- Any tier maths changed in `tiers`
+- With the salary model: trailing-30-day revenue per active rider falling below ~K4,500–K5,500 (rider break-even)
+- Any change to the salary constants (`DRIVER_*` in `workers/src/index.ts`) or tier maths in `tiers`

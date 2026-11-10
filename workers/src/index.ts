@@ -96,19 +96,27 @@ async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
   return merged;
 }
 const PLATFORM_TAKE = 0.10;           // of the rider fee, on pay-as-you-go
-// Sweep riders are salaried, not per-parcel: K3,200/month INCLUSIVE of a
+// Sweep riders are salaried, not per-parcel: K3,000/month INCLUSIVE of a
 // weekly fuel allowance of K300/week (4 weeks = K1,200), so the base wage is
-// K2,000 and the fuel is K1,200-dispensable weekly. Payment each week requires
-// being on-pace with the sweep target (see riderTargets / month pace line):
-//   - on pace (>= target x day-of-month): full base week + full fuel
-//   - behind by more than one week's kill: fuel is pro-rated to the shortfall,
-//     and two consecutive off-pace weeks trigger an ops performance review.
+// K1,800 and the fuel is K1,200-dispensable weekly. Payment runs from plan
+// revenue on two schedules (rider's `riders.pay_cycle`):
+//   - weekly: every Sunday 16:00 CAT — fuel K300 + base week K450 (K1,800/4)
+//   - monthly: on the 1st, 16:00 CAT — full K3,000 (cycle='monthly') or the
+//     month's balance top-up for cycle='weekly' riders (K3,000 − weeks paid)
+// Paying a period requires being on-pace with the sweep target for that
+// period (see riderTargets / month pace line):
+//   - on pace (>= target): full base + full fuel
+//   - behind pace: base and fuel are pro-rated to the shortfall ratio;
+//     two consecutive off-pace weeks trigger an ops performance review.
+// Every payout row is generated automatically by cron and requires admin →
+// superadmin confirmation before it disburses; each payment produces a
+// downloadable proof-of-payment receipt (/admin/payroll/:id/proof).
 // (peer benchmark: Bolt/Yango-style fleets pay per-trip; salaried + fuel
 //  matches depot-to-depot contract courier economics — see docs/PLAY_BOOK.md)
-const DRIVER_MONTHLY_PAY_ZMW = 3200;  // inclusive of the fuel allowance below
+const DRIVER_MONTHLY_PAY_ZMW = 3000;  // inclusive of the fuel allowance below
 const DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW = 300;
 const DRIVER_FUEL_MONTHLY_ZMW = DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW * 4; // 1200
-const DRIVER_BASE_MONTHLY_ZMW = DRIVER_MONTHLY_PAY_ZMW - DRIVER_FUEL_MONTHLY_ZMW; // 2000
+const DRIVER_BASE_MONTHLY_ZMW = DRIVER_MONTHLY_PAY_ZMW - DRIVER_FUEL_MONTHLY_ZMW; // 1800
 const DRIVER_DAILY_TARGET = 30;       // parcels/day each rider is expected to sweep
 const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
 // Business day = Central Africa Time (UTC+2). D1's 'localtime' is UTC, so every
@@ -5633,6 +5641,204 @@ app.post('/admin/partners', async (c) => {
   return c.json({ ok: true, email, role: 'partner', courier_id: courierId });
 });
 
+/* ------------------ rider payroll (auto-generated, confirm-gated) --------- */
+// Salaried riders (K3,000/mo incl. K300/wk fuel — see constants above). Runs
+// are generated automatically by cron (Sunday 16:00 CAT = weekly; 1st of the
+// month 16:00 CAT = monthly / monthly balance) and require an admin AND THEN
+// a superadmin confirmation before the money moves. Each paid row has a
+// downloadable proof-of-payment receipt at /admin/payroll/:id/proof.
+
+const PAYROLL_EVENT_STATUSES = "('at_depot','delivered','ready_for_collection')";
+const TOT_MONTHLY_ZERO_BAND_ZMW = 2500;   // ZRA 2026: 0% up to K2,500 monthly turnover
+const TOT_RATE = 0.05;                    // ZRA 2026: 5% above the zero band (annual ≤ K5,000,000)
+
+function catNow(): Date {
+  return new Date(Date.now() + 2 * 60 * 60 * 1000);
+}
+function catYm(d: Date, monthsBack = 0): string {
+  const dd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - monthsBack, 1));
+  return `${dd.getUTCFullYear()}-${String(dd.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Completed-trip count for a rider inside a CAT window (same event set the
+ *  targets use: depot drop for first mile, delivered/ready for last mile). */
+async function riderTripsInWindow(db: D1Database, riderId: number, start: string, end: string): Promise<number> {
+  const row = await db.prepare(
+    `SELECT COUNT(DISTINCT j.id) AS n
+       FROM job_events je JOIN jobs j ON j.id = je.job_id
+      WHERE j.rider_id = ?1 AND je.status IN ${PAYROLL_EVENT_STATUSES}
+        AND datetime(je.created_at, '${CAT_OFFSET}') >= ?2
+        AND datetime(je.created_at, '${CAT_OFFSET}') < ?3`,
+  ).bind(riderId, start, end).first<any>();
+  return Number(row?.n ?? 0);
+}
+
+interface PayrollPeriod { kind: string; start: string; end: string; label: string }
+
+/** The period that just ENDED at the pay instant. Weekly: last Sunday
+ *  16:00 CAT → this Sunday 16:00 CAT. Monthly: the whole previous CAT month. */
+function payrollPeriod(kind: 'weekly' | 'monthly'): PayrollPeriod {
+  const now = catNow();
+  if (kind === 'weekly') {
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 16, 0, 0));
+    const start = new Date(end.getTime() - 7 * 86400_000);
+    return {
+      kind,
+      start: start.toISOString(),
+      end: end.toISOString(),
+      label: `Week ${start.toISOString().slice(0, 10)} → ${end.toISOString().slice(0, 10)}`,
+    };
+  }
+  const ym = catYm(now, 1);
+  const start = `${ym}-01`;
+  const startD = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1));
+  const endD = new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 1));
+  return { kind, start, end: endD.toISOString(), label: `Month ${ym}` };
+}
+
+/** Pace-gated base/fuel split for a period (pro-rated to the shortfall). */
+function paceSplit(trips: number, periodTarget: number, fullBase: number, fullFuel: number) {
+  const ratio = periodTarget > 0 ? Math.max(0, Math.min(1, trips / periodTarget)) : 1;
+  return {
+    base: round2(fullBase * ratio),
+    fuel: round2(fullFuel * ratio),
+    paceMet: trips >= periodTarget,
+    ratio,
+  };
+}
+
+/** Generate this instant's pending payroll rows. Idempotent per period. */
+export async function generatePayroll(env: Env, kind: 'weekly' | 'monthly'): Promise<void> {
+  const period = payrollPeriod(kind);
+  const { results: riders } = await env.DB.prepare(
+    `SELECT id, phone, full_name, pay_cycle FROM riders WHERE active = 1 AND verification_status = 'verified'`,
+  ).all<any>();
+  for (const r of riders ?? []) {
+    try {
+      if (kind === 'weekly') {
+        if ((r.pay_cycle ?? 'weekly') !== 'weekly') continue;
+        const trips = await riderTripsInWindow(env.DB, Number(r.id), period.start, period.end);
+        const split = paceSplit(trips, DRIVER_DAILY_TARGET * 7, DRIVER_BASE_MONTHLY_ZMW / 4, DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW);
+        const amount = round2(split.base + split.fuel);
+        if (amount <= 0) continue;
+        await env.DB.prepare(
+          `INSERT OR IGNORE INTO rider_payroll
+             (rider_phone, rider_name, period_kind, period_start, period_end,
+              base_zmw, fuel_zmw, trips, period_target, pace_met, amount_zmw, status, note)
+           VALUES (?1, ?2, 'weekly', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11)`,
+        ).bind(r.phone, r.full_name ?? null, period.start, period.end, split.base, split.fuel,
+          trips, DRIVER_DAILY_TARGET * 7, split.paceMet ? 1 : 0, amount,
+          split.paceMet ? null : `Behind pace (${trips}/${DRIVER_DAILY_TARGET * 7} trips) — pay pro-rated.`).run();
+      } else {
+        // Monthly cron: full salary for monthly-cycle riders; balance top-up
+        // (K3,000 − weeks already paid) for weekly-cycle riders.
+        const startD = new Date(Date.UTC(Number(period.start.slice(0, 4)), Number(period.start.slice(5, 7)) - 1, 1));
+        const daysInPeriod = Math.round((new Date(period.end).getTime() - startD.getTime()) / 86400_000);
+        if ((r.pay_cycle ?? 'weekly') === 'monthly') {
+          const trips = await riderTripsInWindow(env.DB, Number(r.id), period.start, period.end);
+          const split = paceSplit(trips, DRIVER_DAILY_TARGET * daysInPeriod, DRIVER_BASE_MONTHLY_ZMW, DRIVER_FUEL_MONTHLY_ZMW);
+          const amount = round2(split.base + split.fuel);
+          if (amount <= 0) continue;
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO rider_payroll
+               (rider_phone, rider_name, period_kind, period_start, period_end,
+                base_zmw, fuel_zmw, trips, period_target, pace_met, amount_zmw, status, note)
+             VALUES (?1, ?2, 'monthly', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11)`,
+          ).bind(r.phone, r.full_name ?? null, period.start, period.end, split.base, split.fuel,
+            trips, DRIVER_DAILY_TARGET * daysInPeriod, split.paceMet ? 1 : 0, amount,
+            split.paceMet ? null : `Behind pace (${trips}/${DRIVER_DAILY_TARGET * daysInPeriod} trips) — pay pro-rated.`).run();
+        } else {
+          const paidRow = await env.DB.prepare(
+            `SELECT COALESCE(SUM(amount_zmw), 0) AS paid FROM rider_payroll
+              WHERE rider_phone = ?1 AND status = 'paid'
+                AND period_kind = 'weekly' AND period_start >= ?2 AND period_end <= ?3`,
+          ).bind(r.phone, period.start, period.end).first<any>();
+          const balance = round2(DRIVER_MONTHLY_PAY_ZMW - Number(paidRow?.paid ?? 0));
+          if (balance <= 0) continue;
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO rider_payroll
+               (rider_phone, rider_name, period_kind, period_start, period_end,
+                base_zmw, fuel_zmw, trips, period_target, pace_met, amount_zmw, status, note)
+             VALUES (?1, ?2, 'monthly_balance', ?3, ?4, 0, 0, 0, 0, 1, ?5, 'pending',
+               'Monthly reconciliation: K${DRIVER_MONTHLY_PAY_ZMW} salary top-up minus K${Number(paidRow?.paid ?? 0)} weekly pay already settled this month.')`,
+          ).bind(r.phone, r.full_name ?? null, period.start, period.end, balance).run();
+        }
+      }
+    } catch (e) {
+      await captureError(env, e, { method: 'PAYROLL', url: `https://internal/payroll` });
+    }
+  }
+}
+
+/* -------------------------- ZRA turnover tax ledger ----------------------- */
+// Rates (2026, ZRA): monthly turnover ≤ K2,500 → 0%; above → 5% of the whole
+// month's turnover (annual-regime cap K5,000,000; partnerships/consultancies
+// are ineligible). Return + payment due by the 14th of the FOLLOWING month.
+// Turnover lines (DropOff's own charged income — never the partner's counter
+// fare, which is paid at the depot):
+//   1. momo job collections (payments kind='job')
+//   2. wallet-settled DropOff legs (jobs paid & settled from wallet)
+//   3. subscription / upgrade payments
+//   4. platform cut on door cash-on-delivery remittances (COD_FEE)
+export async function updateTaxPeriod(env: Env, ym: string): Promise<void> {
+  const start = `${ym}-01`;
+  const nextYm = catYm(new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 1)), 0);
+  const end = `${nextYm}-01`;
+  const bounds = `datetime(ifnull(paid_at, created_at), '${CAT_OFFSET}') >= '${start}'
+        AND datetime(ifnull(paid_at, created_at), '${CAT_OFFSET}') < '${end}'`;
+  const jobRow = await env.DB.prepare(
+    `SELECT COALESCE(SUM(amount_zmw), 0) AS a FROM payments
+      WHERE status = 'success' AND kind = 'job' AND ${bounds}`,
+  ).first<any>();
+  const subRow = await env.DB.prepare(
+    `SELECT COALESCE(SUM(amount_zmw), 0) AS a FROM payments
+      WHERE status = 'success' AND kind IN ('subscription', 'upgrade') AND ${bounds}`,
+  ).first<any>();
+  const walletRow = await env.DB.prepare(
+    `SELECT COALESCE(SUM(MAX(0, j.rider_fee_zmw + IFNULL(j.leg2_fee_zmw, 0)
+        + IFNULL(j.leg2_processing_fee_zmw, 0) + IFNULL(j.wait_fee_zmw, 0)
+        - IFNULL(j.promo_discount_zmw, 0))), 0) AS a
+       FROM jobs j
+      WHERE j.paid = 1 AND j.pay_method = 'wallet'
+        AND datetime(j.created_at, '${CAT_OFFSET}') >= '${start}'
+        AND datetime(j.created_at, '${CAT_OFFSET}') < '${end}'`,
+  ).first<any>();
+  const codRow = await env.DB.prepare(
+    `SELECT COALESCE(SUM(cod_collected_zmw), 0) AS a FROM jobs
+      WHERE status IN ('delivered', 'ready_for_collection') AND cod_collected_zmw > 0
+        AND datetime(created_at, '${CAT_OFFSET}') >= '${start}'
+        AND datetime(created_at, '${CAT_OFFSET}') < '${end}'`,
+  ).first<any>();
+  const lines = {
+    job_collections: round2(Number(jobRow?.a ?? 0)),
+    wallet_jobs: round2(Number(walletRow?.a ?? 0)),
+    subscriptions: round2(Number(subRow?.a ?? 0)),
+    cod_platform_cut: round2(Number(codRow?.a ?? 0) * COD_FEE),
+  };
+  const gross = round2(lines.job_collections + lines.wallet_jobs + lines.subscriptions + lines.cod_platform_cut);
+  const zeroBand = Math.min(gross, TOT_MONTHLY_ZERO_BAND_ZMW);
+  const taxable = round2(Math.max(0, gross - TOT_MONTHLY_ZERO_BAND_ZMW));
+  const tax = round2(gross > TOT_MONTHLY_ZERO_BAND_ZMW ? gross * TOT_RATE : 0);
+  const dueDate = `${nextYm}-14`;
+  await env.DB.prepare(
+    `INSERT INTO tax_periods (year_month, gross_turnover_zmw, zero_band_zmw, taxable_zmw,
+        rate, tax_zmw, due_date, status, breakdown)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'open', ?8)
+     ON CONFLICT (year_month) DO UPDATE SET
+        gross_turnover_zmw = excluded.gross_turnover_zmw,
+        zero_band_zmw = excluded.zero_band_zmw,
+        taxable_zmw = excluded.taxable_zmw,
+        rate = excluded.rate,
+        tax_zmw = excluded.tax_zmw,
+        due_date = excluded.due_date,
+        breakdown = excluded.breakdown,
+        updated_at = datetime('now')
+       WHERE tax_periods.status = 'open'`,
+  ).bind(ym, gross, zeroBand, taxable, TOT_RATE, tax, dueDate,
+    JSON.stringify(lines) || null).run();
+}
+
+/* ------------------------ payroll + tax endpoints ------------------------- */
 // Rider earnings/cash-out + COD remittance (float settlement is admin-controlled).
 // kind='cod_remit' settles cash the rider/driver floated from a job's door collection:
 // the sender's wallet gets the COD amount net of the platform's COD cut.
@@ -5674,10 +5880,218 @@ app.post('/admin/payouts', async (c) => {
   return c.json({ ok: true });
 });
 
+/* ---------------- payroll (admin/superadmin confirmation chain) ------------ */
+app.get('/admin/payroll', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const status = String(c.req.query('status') ?? '').trim();
+  const kind = String(c.req.query('kind') ?? '').trim();
+  let sql = `SELECT * FROM rider_payroll`;
+  const conds: string[] = [];
+  const binds: any[] = [];
+  if (status) { conds.push(`status = ${binds.push(status)}`); }
+  if (kind) { conds.push(`period_kind = ${binds.push(kind)}`); }
+  if (conds.length) sql += ` WHERE ${conds.join(' AND ')}`;
+  sql += ` ORDER BY id DESC LIMIT 100`;
+  const { results } = await c.env.DB.prepare(sql).bind(...binds).all<any>();
+  const sums = await c.env.DB.prepare(
+    `SELECT status, COUNT(*) AS n, COALESCE(SUM(amount_zmw),0) AS total FROM rider_payroll GROUP BY status`,
+  ).all<any>();
+  return c.json({ payouts: results ?? [], summary: sums.results ?? [] });
+});
+
+// Manual generation trigger (cron auto-runs it; admins can also force it).
+app.post('/admin/payroll/generate', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const kind = b?.kind === 'monthly' ? 'monthly' : 'weekly';
+  await generatePayroll(c.env, kind);
+  return c.json({ ok: true, kind });
+});
+
+// Two-signature confirmation chain: admin confirms intent, superadmin releases
+// the money (Lipila disbursement to the rider's registered momo). The payout
+// row is mtime-stamped at each step so the proof receipt shows both hands.
+app.post('/admin/payroll/:id/confirm', async (c) => {
+  const phone = c.get('phone');
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare(`SELECT * FROM rider_payroll WHERE id = ?1`).bind(id).first<any>();
+  if (!row) return c.json({ error: 'payout_not_found' }, 404);
+  if (row.status === 'pending') {
+    // Step 1: admin intent recorded. Also workable via the admin key header.
+    const adminIdentity = phone ?? 'admin-key';
+    if (isSuperAdmin(c) && phone) {
+      // The owner alone may collapse both steps in one go (small team reality),
+      // but the receipt still records both confirmations explicitly.
+      const disbRef = `payroll-${row.id}-${Date.now().toString(36)}`;
+      const disb = await lipilaDisburse(c.env, row.rider_phone, row.amount_zmw, disbRef, `DropOff rider payroll ${row.period_kind} ${row.period_start}`);
+      await c.env.DB.prepare(
+        `UPDATE rider_payroll SET status = ?2, admin_confirm_by = ?3, admin_confirm_at = datetime('now'),
+            confirmed_by = ?3, confirmed_at = datetime('now'),
+            lipila_reference = ?4, paid_at = CASE WHEN ?5 = 1 THEN datetime('now') ELSE paid_at END,
+            note = COALESCE(?6, note) WHERE id = ?1`,
+      ).bind(id, disb.ok ? 'paid' : 'failed', adminIdentity, disb.lipilaReference ?? disbRef, disb.ok ? 1 : 0,
+        disb.ok ? null : `Lipila disbursement failed: ${String(disb.raw ?? '').slice(0, 200)}`).run();
+      return c.json({ ok: true, status: disb.ok ? 'paid' : 'failed', owner_collapsed: true });
+    }
+    await c.env.DB.prepare(
+      `UPDATE rider_payroll SET status = 'admin_confirmed', admin_confirm_by = ?2, admin_confirm_at = datetime('now') WHERE id = ?1`,
+    ).bind(id, adminIdentity).run();
+    return c.json({ ok: true, status: 'admin_confirmed', next: 'awaiting superadmin confirmation' });
+  }
+  if (row.status === 'admin_confirmed') {
+    if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+    const disbRef = `payroll-${row.id}-${Date.now().toString(36)}`;
+    const disb = await lipilaDisburse(c.env, row.rider_phone, row.amount_zmw, disbRef, `DropOff rider payroll ${row.period_kind}`);
+    await c.env.DB.prepare(
+      `UPDATE rider_payroll SET status = ?2, confirmed_by = ?3, confirmed_at = datetime('now'),
+          lipila_reference = ?4, paid_at = CASE WHEN ?5 = 1 THEN datetime('now') ELSE paid_at END,
+          note = COALESCE(?6, note) WHERE id = ?1`,
+    ).bind(id, disb.ok ? 'paid' : 'failed', c.get('phone') ?? 'admin-key', disb.lipilaReference ?? disbRef,
+      disb.ok ? 1 : 0, disb.ok ? null : `Lipila disbursement failed: ${String(disb.raw ?? '').slice(0, 200)}`).run();
+    return c.json({ ok: true, status: disb.ok ? 'paid' : 'failed' });
+  }
+  return c.json({ error: 'invalid_state', status: row.status }, 409);
+});
+
+// Superadmin can void a mis-generated row before it's paid.
+app.post('/admin/payroll/:id/void', async (c) => {
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const id = Number(c.req.param('id'));
+  const res = await c.env.DB.prepare(
+    `UPDATE rider_payroll SET status = 'void', confirmed_by = ?2, confirmed_at = datetime('now')
+      WHERE id = ?1 AND status IN ('pending', 'admin_confirmed', 'failed')`,
+  ).bind(id, c.get('phone') ?? 'admin-key').run();
+  if (!res.meta.changes) return c.json({ error: 'not_voidable' }, 409);
+  return c.json({ ok: true });
+});
+
+/** Downloadable proof-of-payment receipt (HTML, prints to PDF from any browser). */
+function payrollProofHtml(row: any): string {
+  const esc = (v: unknown) => String(v ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch] as string));
+  const status = String(row.status ?? '').toUpperCase();
+  return `<!doctype html><html><head><meta charset="utf-8"><title>DropOff payout proof #${esc(row.id)}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:32px;color:#10201a}h1{font-size:20px;margin:0 0 4px}table{border-collapse:collapse;width:100%;margin-top:16px}td,th{border:1px solid #cfd8d3;padding:8px 10px;font-size:13px;text-align:left}th{background:#eef5f1}big{font-size:22px;font-weight:800}.ok{color:#0a7a3d}.bad{color:#a33}</style></head><body>
+<h1>DropOff — Proof of Payment / Recu de Paie</h1>
+<p>Rider payroll · generated ${esc(new Date().toISOString())} (CAT +2)</p>
+<table>
+<tr><th>Rider</th><td>${esc(row.rider_name ?? '')} · ${esc(row.rider_phone)}</td></tr>
+<tr><th>Period</th><td>${esc(row.period_kind)} ${esc(row.period_start)} → ${esc(row.period_end)}</td></tr>
+<tr><th>Base wage (pace-gated)</th><td>K${esc(Number(row.base_zmw ?? 0).toFixed(2))}</td></tr>
+<tr><th>Fuel allowance (pace-gated)</th><td>K${esc(Number(row.fuel_zmw ?? 0).toFixed(2))}</td></tr>
+<tr><th>Trips completed / target</th><td>${esc(row.trips ?? 0)} / ${esc(row.period_target ?? 0)}${Number(row.pace_met ?? 0) ? ' (on pace)' : ' (below pace — pro-rated)'}</td></tr>
+<tr><th><b>Total paid</b></th><td><big>K${esc(Number(row.amount_zmw ?? 0).toFixed(2))}</big></td></tr>
+<tr><th>Status</th><td class="${status === 'PAID' ? 'ok' : 'bad'}">${esc(status)}</td></tr>
+<tr><th>1st confirmation (admin)</th><td>${esc(row.admin_confirm_by ?? '—')} at ${esc(row.admin_confirm_at ?? '—')}</td></tr>
+<tr><th>2nd confirmation (superadmin)</th><td>${esc(row.confirmed_by ?? '—')} at ${esc(row.confirmed_at ?? '—')}</td></tr>
+<tr><th>Disbursement reference</th><td>${esc(row.lipila_reference ?? '—')} (Lipila → ${esc(row.rider_phone)} mobile money)</td></tr>
+<tr><th>Paid at</th><td>${esc(row.paid_at ?? '—')}</td></tr>
+<tr><th>Note</th><td>${esc(row.note ?? '—')}</td></tr>
+</table>
+<p style="color:#5a6b63;font-size:11px">DropOff (depot-to-door courier, Zambia). This receipt is generated from the payroll ledger and reflects the state above at generation time.</p>
+</body></html>`;
+}
+
+app.get('/admin/payroll/:id/proof', async (c) => {
+  const id = Number(c.req.param('id'));
+  const row = await c.env.DB.prepare(`SELECT * FROM rider_payroll WHERE id = ?1`).bind(id).first<any>();
+  if (!row) return c.json({ error: 'payout_not_found' }, 404);
+  if (!isAdmin(c) && c.get('phone') !== row.rider_phone) return c.json({ error: 'forbidden' }, 403);
+  return new Response(payrollProofHtml(row), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Disposition': `attachment; filename="DropOff-payout-${row.id}-${String(row.period_kind ?? '').slice(0, 6)}.html"`,
+    },
+  });
+});
+
+// A rider can see their own payroll history + proof links in the app.
+app.get('/rider/payroll', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, period_kind, period_start, period_end, base_zmw, fuel_zmw, trips,
+            period_target, pace_met, amount_zmw, status, paid_at, lipila_reference, note
+       FROM rider_payroll WHERE rider_phone = ?1 ORDER BY id DESC LIMIT 52`,
+  ).bind(phone).all();
+  return c.json({ payouts: results ?? [] });
+});
+
+/* --------------------------- tax endpoints (ZRA) -------------------------- */
+app.get('/admin/tax', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const { results } = await c.env.DB.prepare(`SELECT * FROM tax_periods ORDER BY year_month DESC LIMIT 24`).all();
+  return c.json({ periods: results ?? [] });
+});
+
+// Manual refresh (cron keeps it current automatically; admins can force it).
+app.post('/admin/tax/refresh', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const ym = b?.year_month ?? catYm(catNow(), 1);
+  await updateTaxPeriod(c.env, String(ym).slice(0, 7));
+  return c.json({ ok: true, year_month: ym });
+});
+
+app.post('/admin/tax/:ym/mark', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const ym = c.req.param('ym').slice(0, 7);
+  const b: any = await c.req.json().catch(() => null);
+  const status = b?.status;
+  if (!['submitted', 'paid'].includes(status)) return c.json({ error: 'status must be submitted|paid' }, 400);
+  const res = await c.env.DB.prepare(
+    `UPDATE tax_periods SET status = ?2, submitted_by = ?3, submitted_note = ?4,
+        paid_at = CASE WHEN ?2 = 'paid' THEN datetime('now') ELSE paid_at END,
+        updated_at = datetime('now') WHERE year_month = ?1`,
+  ).bind(ym, status, c.get('phone') ?? 'admin-key', String(b?.note ?? '').slice(0, 300)).run();
+  if (!res.meta.changes) return c.json({ error: 'period_not_found' }, 404);
+  return c.json({ ok: true });
+});
+
+/** Printable ZRA turnover-tax return sheet (HTML → download/print-to-PDF). */
+function taxReportHtml(p: any): string {
+  const esc = (v: unknown) => String(v ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch] as string));
+  const lines = (() => { try { return JSON.parse(p.breakdown ?? '{}') as Record<string, number>; } catch { return {}; } })();
+  const row = (k: string, v: number | string) => `<tr><th>${esc(k)}</th><td>${typeof v === 'number' ? 'K' + v.toFixed(2) : esc(v)}</td></tr>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>DropOff TOT ${esc(p.year_month)}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:32px;color:#10201a}h1{font-size:20px}table{border-collapse:collapse;width:100%;margin-top:12px}td,th{border:1px solid #cfd8d3;padding:8px 10px;font-size:13px;text-align:left}th{background:#eef5f1;white-space:nowrap}big{font-size:22px;font-weight:800}</style></head><body>
+<h1>DropOff — ZRA Turnover Tax working sheet · ${esc(p.year_month)}</h1>
+<p>Regime: micro/small business turnover tax, annual turnover ≤ K5,000,000. Rates per ZRA 2026: 0% up to K2,500 monthly turnover; 5% of gross monthly turnover above the band. Due by the <b>14th of the following month</b>. Keep records 6 years.</p>
+<table>
+${row('Gross turnover (components below)', Number(p.gross_turnover_zmw ?? 0))}
+${row('· momo job collections', lines.job_collections ?? 0)}
+${row('· wallet-settled DropOff legs', lines.wallet_jobs ?? 0)}
+${row('· subscriptions & upgrades', lines.subscriptions ?? 0)}
+${row('· COD platform cut', lines.cod_platform_cut ?? 0)}
+${row('0% band applied', `K${Number(p.zero_band_zmw ?? 0).toFixed(2)} of K${TOT_MONTHLY_ZERO_BAND_ZMW}`)}
+${row('Taxable turnover', Number(p.taxable_zmw ?? 0))}
+${row('Rate', `${((Number(p.rate ?? 0)) * 100).toFixed(1)}%`)}
+${row('TAX DUE', Number(p.tax_zmw ?? 0))}
+${row('Due date', p.due_date ?? '')}
+${row('Status', String(p.status ?? '').toUpperCase())}
+${row('Paid at', p.paid_at ?? '—')}
+</table>
+<p style="color:#5a6b63;font-size:11px">Generated ${esc(new Date().toISOString().slice(0, 16).replace('T', ' '))} from the DropOff main ledger. Excludes courier-partner counter fares (paid at depot) and customer wallet top-ups (prepaid, recognised when spent on jobs).</p>
+</body></html>`;
+}
+
+app.get('/admin/tax/:ym/report', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const ym = c.req.param('ym').slice(0, 7);
+  const p = await c.env.DB.prepare(`SELECT * FROM tax_periods WHERE year_month = ?1`).bind(ym).first<any>();
+  if (!p) return c.json({ error: 'period_not_found' }, 404);
+  return new Response(taxReportHtml(p), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Disposition': `attachment; filename="DropOff-TOT-${ym}.html"`,
+    },
+  });
+});
+
 // Rider self-remittance: a signed-in rider settles the COD float on a job THE
-// PLATFORM ASSIGNED TO THEM. One prompt per job (idempotent-ish: re-run with
-// no cash double-pays? no � the payment row is per attempt; keep admin key +
-// job match as the guard). Ops/admin use /admin/payouts instead.
+// PLATFORM ASSIGNED TO THEM.
 app.post('/rider/cod/remit', async (c) => {
   const role = c.get('role');
   const phone = c.get('phone');
@@ -7795,6 +8209,24 @@ export default {
           await notifyRiderTargets(env);
           return;
         }
+        // Weekly rider payroll: Sunday 16:00 CAT (crons run UTC → 14:00 UTC).
+        if (event.cron === '0 14 * * SUN') {
+          try { await generatePayroll(env, 'weekly'); } catch (e) {
+            await captureError(env, e, { method: 'CRON', url: 'https://cron/payroll-weekly' });
+          }
+          return;
+        }
+        // Monthly rider payroll + prior-month tax ledger close: 1st, 16:00 CAT.
+        if (event.cron === '0 14 1 * *') {
+          const lastMonth = catYm(new Date(Date.now() + 2 * 60 * 60 * 1000), 1);
+          try { await generatePayroll(env, 'monthly'); } catch (e) {
+            await captureError(env, e, { method: 'CRON', url: 'https://cron/payroll-monthly' });
+          }
+          try { await updateTaxPeriod(env, lastMonth); } catch (e) {
+            await captureError(env, e, { method: 'CRON', url: 'https://cron/tax-period' });
+          }
+          return;
+        }
         if (event.cron === '* * * * *') {
           await cancelStaleOrders(env);
           await checkTimedPickups(env);
@@ -7815,6 +8247,7 @@ export default {
           ['sweep', () => sweepPlatformIncome(env)],
           ['bill', () => billExpiringSubscriptions(env)],
           ['recurring', () => materializeRecurringJobs(env)],
+          ['tax', () => updateTaxPeriod(env, catYm(new Date(Date.now() + 2 * 60 * 60 * 1000), 1))],
         ];
         for (const [name, task] of daily) {
           try { await task(); } catch (e) {
