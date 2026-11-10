@@ -326,7 +326,7 @@ class OperationsScreen extends StatelessWidget {
           Row(children: [
             Expanded(child: _Metric(value: '${store.bookings.length}', label: 'Bookings on device', icon: Icons.inventory_2_outlined)),
             const SizedBox(width: 12),
-            Expanded(child: _Metric(value: '$activeRiders', label: 'Team size', icon: Icons.groups_outlined)),
+            Expanded(child: _TeamSizeChip(fallback: activeRiders)),
           ]),
           const SizedBox(height: 16),
           // Verification first: a new rider can't be assigned jobs until their
@@ -335,7 +335,6 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 12),
           _TaskQueueCard(),
           const SizedBox(height: 12),
-          const _RiderCashCard(),
           const SizedBox(height: 12),
           const _RiderReviewsCard(),
           const SizedBox(height: 12),
@@ -500,7 +499,7 @@ class OperationsScreen extends StatelessWidget {
           const Card(child: Padding(padding: EdgeInsets.all(18), child: Column(children: [
             _RevenueRow(number: '01', title: 'Pay-as-you-go pickup', text: 'K45 per pickup, the DropOff leg accrues 100% to DropOff — riders are salaried (K3,000/mo incl. K300/wk fuel), pace-gated by delivery, never paid per parcel.'),
             _RevenueRow(number: '02', title: 'Subscription plans: Silver / Gold / Platinum', text: 'K250 / K500 / K750 per 30-day cycle for 10 / 25 / 50 parcels (plus Daily Rider K49/day and Weekly K399). Every parcel counts as one — even in the same trip.'),
-            _RevenueRow(number: '03', title: 'Waiting & COD float', text: 'Waiting over 10 min bills K2/min (K50 cap) — paid to the driver in full. COD cash floats with the rider/driver — sender paid via momo disbursement minus our 2%.'),
+            _RevenueRow(number: '03', title: 'Waiting & no-COD', text: 'Waiting over 10 min bills K2/min (K50 cap) — accrues to DropOff, never to the rider. There is no COD; recipients never pay cash, so riders never carry cash.'),
             _RevenueRow(number: '04', title: 'Door delivery & subscription plans', text: 'Last-mile door delivery priced like first-mile pay-as-you-go (recipient-city distance + vehicle). Plan parcels bundle the rider inside the monthly fee.'),
           ]))),
         ],
@@ -573,20 +572,19 @@ class _Metric extends StatelessWidget {
   ])));
 }
 
-/// COD cash the signed-in rider is still floating: collected at the door for
-/// sellers, not yet remitted. One tap pushes it to the seller's momo (minus the
-/// platform cut) — the same settlement admin/payouts performs.
-class _RiderCashCard extends StatefulWidget {
-  const _RiderCashCard();
+/// Live team size — synced from the server roster (`GET /team`) so it's the
+/// same on every device and only counts verified+active riders. Falls back to
+/// the device-cached count when the network is down.
+class _TeamSizeChip extends StatefulWidget {
+  const _TeamSizeChip({required this.fallback});
+  final int fallback;
 
   @override
-  State<_RiderCashCard> createState() => _RiderCashCardState();
+  State<_TeamSizeChip> createState() => _TeamSizeChipState();
 }
 
-class _RiderCashCardState extends State<_RiderCashCard> {
-  Map<String, dynamic>? _data;
-  bool _loading = true;
-  String? _busyRef;
+class _TeamSizeChipState extends State<_TeamSizeChip> {
+  int? _size;
 
   @override
   void initState() {
@@ -595,93 +593,18 @@ class _RiderCashCardState extends State<_RiderCashCard> {
   }
 
   Future<void> _load() async {
-    if (!DropOffApi.enabled) {
-      if (mounted) setState(() => _loading = false);
-      return;
-    }
-    final data = await DropOffApi.riderCod();
+    final data = await DropOffApi.teamRoster();
     if (!mounted) return;
-    setState(() {
-      _data = data;
-      _loading = false;
-    });
-  }
-
-  Future<void> _remit(Map<String, dynamic> job) async {
-    final ref = '${job['ref'] ?? ''}';
-    final cod = (job['cod_collected_zmw'] as num?)?.toDouble() ?? 0;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Remit this COD?'),
-        content: Text('K${cod.toStringAsFixed(2)} collected on $ref will be pushed to the seller\'s mobile money (platform keeps its cut). This moves money — cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remit')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    setState(() => _busyRef = ref);
-    final res = await DropOffApi.riderCodRemit(ref);
-    if (!mounted) return;
-    setState(() => _busyRef = null);
-    final error = res.error ?? (res.ok ? null : 'Remittance failed.');
-    if (error == null) {
-      AppToast.success(context, 'Remitted — seller notified, K${((res.body['credited_zmw'] as num?) ?? 0).toStringAsFixed(2)} sent.');
-    } else {
-      AppToast.error(context, error);
-    }
-    if (error == null) _load();
+    final total = (data?['total'] as num?)?.toInt();
+    if (total != null) setState(() => _size = total);
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (!DropOffApi.enabled || _loading) {
-      return const Card(child: Padding(padding: EdgeInsets.all(16), child: Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))));
-    }
-    final jobs = ((_data?['jobs'] as List?) ?? const []).cast<Map<String, dynamic>>();
-    final open = jobs.where((j) => ((j['remitted'] as num?)?.toInt() ?? 0) == 0).toList();
-    final total = ((_data?['total_unremitted_zmw'] as num?)?.toDouble()) ?? 0;
-    final cut = ((_data?['platform_cut_pct'] as num?)?.toInt()) ?? 0;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.account_balance_wallet_outlined, color: AppColors.forest),
-            const SizedBox(width: 10),
-            const Expanded(child: Text('Cash in your float', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
-            Text('K${total.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.forest)),
-          ]),
-          const SizedBox(height: 6),
-          Text(
-            open.isEmpty
-                ? 'All settled — nothing waiting. COD you collect at the door shows here until you remit it.'
-                : 'Collected at the door for sellers. Remitting pushes it straight to their mobile money${cut > 0 ? ' (platform keeps $cut%)' : ''}.',
-            style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
-          ),
-          ...open.take(4).map((job) => Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Row(children: [
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('${job['ref'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
-                      Text('K${((job['cod_collected_zmw'] as num?) ?? 0).toStringAsFixed(2)} · ${job['recipient_name'] ?? 'recipient'}',
-                          style: const TextStyle(color: AppColors.muted, fontSize: 11)),
-                    ]),
-                  ),
-                  FilledButton.tonal(
-                    style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, minimumSize: const Size(0, 34)),
-                    onPressed: _busyRef == null ? () => _remit(job) : null,
-                    child: Text(_busyRef == '${job['ref']}' ? 'Sending…' : 'Remit'),
-                  ),
-                ]),
-              )),
-        ]),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _Metric(
+        value: '${_size ?? widget.fallback}',
+        label: 'Team size',
+        icon: Icons.groups_outlined,
+      );
 }
 
 /// The rider's own reputation: average stars + latest written reviews.

@@ -1107,7 +1107,7 @@ class _BookingScreenState extends State<BookingScreen> {
               _priceLine('Charged on your DropOff order', kwacha(_dropOffDue), bold: true),
               const SizedBox(height: 4),
               const Text(
-                'You never pay the rider\u2019s payout fees or see driver earnings â€” that is between DropOff and the driver.',
+                'You never pay the rider payout — that is settled between DropOff and the rider, not added to your fare.',
                 style: TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.4),
               ),
           ]);

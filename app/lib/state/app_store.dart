@@ -68,7 +68,7 @@ class AppStore extends ChangeNotifier {
   /// rider. Admin/ops unlock the Team tab and the admin console; rider unlocks
   /// a personal rider view (their queue + GPS) via phone-OTP login.
   String? get role => _role;
-  bool get isStaff => _role == 'admin' || _role == 'ops';
+  bool get isStaff => _role == 'admin' || _role == 'ops' || _role == 'cfo';
   bool get isRider => _role == 'rider';
   bool get isTeam => isStaff || isRider;
 

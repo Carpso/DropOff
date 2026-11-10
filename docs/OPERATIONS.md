@@ -184,11 +184,10 @@ clean drill. Insert order is parent-first; delete order is reverse.
   `period_end`. If no prompt is outstanding, `notifyExpiryNudges` SMSes the
   seller once per cycle; lapsed plans get a grace warning until the 7-day
   lapse sweep. Dedupe column: `subscriptions.expiry_nudge_period`.
-- **Rider COD self-remittance**: `GET /rider/cod` lists the signed-in rider's
-  floated COD (`jobs.rider_id`, `cod_collected_zmw`, remitted flag);
-  `POST /rider/cod/remit {job_ref}` settles it via Lipila disbursement to the
-  sender's momo — only for jobs assigned to that rider. Admins still use
-  `/admin/payouts` (`kind=cod_remit`); both share one code path.
+- **COD remittance: REMOVED 2026-11-10.** No recipient cash, no rider float. `GET /rider/cod`
+  and `POST /rider/cod/remit` are deleted, `cod_remit` no longer exists as a payout kind, the
+  app cash card is gone, and any legacy COD event is logged as a rejection.
+  See `docs/PAYMENT_COMPLIANCE.md` and TODOS.md.
 - **Rider reputation**: `GET /rider/reviews` returns the rider's verified
   rating average/count + five latest comments; the Team tab shows it.
 - **Delivery IQ cold start**: when a courier has no measured pickup→depot

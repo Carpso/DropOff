@@ -19,6 +19,7 @@ class AdminScreen extends StatefulWidget {
 
 class _AdminScreenState extends State<AdminScreen> {
   Map<String, dynamic>? _stats;
+  Map<String, dynamic>? _runrate;
   List<Map<String, dynamic>> _alerts = const [];
   List<Map<String, dynamic>> _flags = const [];
   List<Map<String, dynamic>> _chatReports = const [];
@@ -31,6 +32,8 @@ class _AdminScreenState extends State<AdminScreen> {
   bool _loading = true;
   bool _authorized = false;
   bool _superadmin = false;
+  String _role = 'admin';
+  bool get _financeOnly => _role == 'cfo';
 
   final _smsPhone = TextEditingController();
   final _smsBody = TextEditingController();
@@ -63,10 +66,13 @@ class _AdminScreenState extends State<AdminScreen> {
     final moderation = await DropOffApi.chatReports();
     final payroll = await DropOffApi.adminPayroll();
     final tax = await DropOffApi.adminTax();
+    final runrate = await DropOffApi.adminPayrollRunrate();
     if (!mounted) return;
     setState(() {
       _authorized = true;
       _superadmin = me?['superadmin'] == true;
+      _role = role;
+      _runrate = runrate;
       _stats = stats;
       _alerts = ((alerts?['alerts'] as List?) ?? const []).cast<Map<String, dynamic>>();
       _flags = ((flags?['flags'] as List?) ?? const []).cast<Map<String, dynamic>>();
@@ -119,7 +125,7 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 16),
               const Text('Staff access only', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              const Text('The admin console is reserved for DropOff admins and ops. Sign in with a staff account to continue.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const Text('This console is reserved for DropOff staff — admins, ops and the CFO. Sign in with a staff account to continue.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
               const SizedBox(height: 20),
               FilledButton.icon(
                 onPressed: () => Navigator.of(context).pop(),
@@ -133,8 +139,23 @@ class _AdminScreenState extends State<AdminScreen> {
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Admin console', style: TextStyle(fontWeight: FontWeight.w900)),
+        title: Text(_financeOnly ? 'Finance console' : 'Admin console', style: const TextStyle(fontWeight: FontWeight.w900)),
         actions: [
+          if (_role == 'cfo')
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E4F6E).withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF1E4F6E).withValues(alpha: 0.6)),
+              ),
+              child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.account_balance, size: 12, color: Color(0xFF1E4F6E)),
+                SizedBox(width: 4),
+                Text('CFO', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.9, color: Color(0xFF1E4F6E))),
+              ]),
+            ),
           if (_superadmin)
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
@@ -170,45 +191,54 @@ class _AdminScreenState extends State<AdminScreen> {
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: AppColors.forest.withValues(alpha: 0.25)),
               ),
-              child: const Row(children: [
-                Icon(Icons.admin_panel_settings_outlined, color: AppColors.forest),
+              child: Row(children: [
+                Icon(_financeOnly ? Icons.account_balance : Icons.admin_panel_settings_outlined, color: AppColors.forest),
                 SizedBox(width: 12),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Operations overview', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forest)),
+                  Text(_financeOnly ? 'Finance (CFO)' : 'Operations overview', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forest)),
                   SizedBox(height: 2),
-                  Text('Live stats, security, fraud, depot branches and messaging.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+                  Text(_financeOnly
+                      ? 'Salaries, turnover, payroll run-rate and ZRA filings. Two signatures release money.'
+                      : 'Live stats, security, fraud, depot branches and messaging.',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
                 ])),
               ]),
             ),
             const SizedBox(height: 16),
-            _statsCard(),
+            _salaryCard(),
             const SizedBox(height: 18),
-            const _AnalyticsKpiCard(),
-            const SizedBox(height: 18),
-            const _DemandForecastCard(),
-            const SizedBox(height: 18),
-            _alertsCard(),
-            const SizedBox(height: 18),
-            _fraudCard(),
-            const SizedBox(height: 18),
-            _chatReportsCard(),
-            const SizedBox(height: 18),
-            _payrollCard(),
+            if (!_financeOnly) ...[
+              _statsCard(),
+              const SizedBox(height: 18),
+              const _AnalyticsKpiCard(),
+              const SizedBox(height: 18),
+              const _DemandForecastCard(),
+              const SizedBox(height: 18),
+              _alertsCard(),
+              const SizedBox(height: 18),
+              _fraudCard(),
+              const SizedBox(height: 18),
+              _chatReportsCard(),
+              const SizedBox(height: 18),
+            ],
+            _payrollCard(financeOnly: _financeOnly),
             const SizedBox(height: 18),
             _taxCard(),
-            const _SupportInboxCard(),
-            if (_superadmin) ...[
+            if (!_financeOnly) ...[
+              const _SupportInboxCard(),
+              if (_superadmin) ...[
+                const SizedBox(height: 18),
+                const _UsersCard(),
+              ],
               const SizedBox(height: 18),
-              const _UsersCard(),
+              const _PackCodesCard(),
+              const SizedBox(height: 18),
+              const _RiderVerificationAdminCard(),
+              const SizedBox(height: 18),
+              const _BranchManagerCard(),
+              const SizedBox(height: 18),
+              _smsCard(),
             ],
-            const SizedBox(height: 18),
-            const _PackCodesCard(),
-            const SizedBox(height: 18),
-            const _RiderVerificationAdminCard(),
-            const SizedBox(height: 18),
-            const _BranchManagerCard(),
-            const SizedBox(height: 18),
-            _smsCard(),
           ],
         ),
       ),
@@ -378,8 +408,91 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  /// Salaries run-rate — the same ZRA-ready view of the payroll budget the
+  /// owner uses to decide headcount as the business grows. All figures come
+  /// from the live ledger (/admin/payroll/runrate); scenario buttons project
+  /// headcount + required monthly turnover at a 25% payroll-share ceiling.
+  Widget _salaryCard() {
+    final r = _runrate;
+    final riders = (r?['verified_active_riders'] as num?)?.toInt() ?? 0;
+    final monthlyOut = (r?['monthly_out_zmw'] as num?)?.toDouble() ?? riders * 3000;
+    final weeklyOut = (r?['weekly_out_zmw'] as num?)?.toDouble() ?? (riders * 750);
+    final annualOut = (r?['annual_out_zmw'] as num?)?.toDouble() ?? monthlyOut * 12;
+    final pending = (r?['pending_payroll_zmw'] as num?)?.toDouble() ?? 0;
+    final avgTurn = (r?['avg_monthly_turnover_zmw'] as num?)?.toDouble() ?? 0;
+    final share = r?['payroll_share_of_turnover_pct'] as num?;
+    final sustain = (r?['self_sustain_trips_per_rider_day'] as num?)?.toInt() ?? 3;
+    final growth = ((r?['growth_planner'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.payments_outlined, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Salaries — as the business grows', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          ]),
+          const SizedBox(height: 6),
+          Text('K3,000/rider/month incl. K300/week fuel (K1,800 base), weekly K750 per Light cycle. Pace-gated by delivery. This is the real cost of your roster.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+          const SizedBox(height: 10),
+          Wrap(spacing: 10, runSpacing: 10, children: [
+            _metricTile('Riders on books', '$riders', 'verified, active', Icons.groups),
+            _metricTile('Week outflow', _kwacha(weeklyOut), 'weekly cycle', Icons.calendar_view_week_outlined),
+            _metricTile('Month outflow', _kwacha(monthlyOut), 'full payroll', Icons.calendar_month_outlined),
+            _metricTile('Annual run-rate', _kwacha(annualOut), 'year projection', Icons.trending_up_rounded),
+            _metricTile('Awaiting signatures', _kwacha(pending), 'pending payout funds', Icons.pending_actions),
+          ]),
+          const SizedBox(height: 10),
+          if (avgTurn > 0) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('ATO turnover (3-mo avg): ${_kwacha(avgTurn)} · payroll = ${share?.toStringAsFixed(1) ?? '?'}% of it',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: (share ?? 0) <= 25 ? AppColors.forest : (share ?? 100) <= 50 ? const Color(0xFF8A5A00) : const Color(0xFFB3261E))),
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text('A full-time rider pays for themselves at ~$sustain PAYG trips/day (K45 each). Plans speed up the cash equation — but trips, not promos, measure pace.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
+          if (growth.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text("What's next — headcount headache kept simple", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+            const SizedBox(height: 6),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              for (final g in growth)
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  backgroundColor: const Color(0xFF10301E).withValues(alpha: 0.06),
+                  label: Text('+${g['add']} riders → ${_kwacha(num.tryParse('${g['monthly_payroll_zmw']}'))}/mo'
+                      '${(g['payroll_share_pct'] != null) ? ' · ${(num.tryParse('${g['payroll_share_pct']}') ?? 0).toStringAsFixed(0)}% of turnover' : ''}'
+                      ' · needs ${_kwacha(num.tryParse('${g['needed_turnover_zmw']}'))}/mo (≤25%)',
+                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700)),
+                ),
+            ]),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _metricTile(String label, String value, String sub, IconData icon) => Container(
+        constraints: const BoxConstraints(minWidth: 108),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.forest.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.forest.withValues(alpha: 0.22)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [Icon(icon, size: 13, color: AppColors.forest), const SizedBox(width: 4), Expanded(child: Text(label, style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: AppColors.muted)))]),
+          const SizedBox(height: 4),
+          Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: AppColors.forest)),
+          Text(sub, style: const TextStyle(fontSize: 9, color: AppColors.muted)),
+        ]),
+      );
+
   /// Every payout row's money moves only after admin intent → superadmin release.
-  Widget _payrollCard() => Card(
+  Widget _payrollCard({bool financeOnly = false}) => Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -387,6 +500,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const Icon(Icons.badge_outlined, color: AppColors.forest),
               const SizedBox(width: 8),
               const Expanded(child: Text('Rider payroll (K3,000/mo)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+              if (financeOnly)
+                Chip(visualDensity: VisualDensity.compact, label: const Text('CFO view', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
             ]),
             const SizedBox(height: 6),
             Text('Auto-generated: weekly Sun 16:00 CAT, monthly on the 1st. Two signatures release the money.',
@@ -431,36 +546,39 @@ class _AdminScreenState extends State<AdminScreen> {
                       style: const TextStyle(color: AppColors.muted, fontSize: 11.5),
                     ),
                   ])),
-                  ..._payrollRowActions(p),
+                  ..._payrollRowActions(p, financeOnly: financeOnly),
                 ]),
               ),
           ]),
         ),
       );
 
-  List<Widget> _payrollRowActions(Map<String, dynamic> p) {
+  List<Widget> _payrollRowActions(Map<String, dynamic> p, {bool financeOnly = false}) {
     final id = (p['id'] as num).toInt();
     final status = '${p['status']}';
+    final proof = TextButton(onPressed: () async {
+      final bytes = await DropOffApi.adminPayrollProof(id);
+      if (!mounted) return;
+      if (bytes == null) {
+        AppToast.show(context, 'Proof unavailable — try again.');
+        return;
+      }
+      await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-payout-$id.html')], subject: 'DropOff payout proof #$id');
+    }, child: const Text('Proof', style: TextStyle(fontSize: 12)));
+    if (financeOnly) {
+      // CFO can see the proof of payment but money never moves from here.
+      return [proof];
+    }
     if (status == 'pending') {
       return [
         TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Confirmation 1 (admin)', () => DropOffApi.adminPayrollConfirm(id)), child: const Text('Confirm', style: TextStyle(fontSize: 12))),
-        TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Proof', () async {
-          final bytes = await DropOffApi.adminPayrollProof(id);
-          if (bytes == null) return const ApiResponse(error: 'unavailable');
-          await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-payout-$id.html')], subject: 'DropOff payout proof #$id');
-          return const ApiResponse(ok: true);
-        }, reload: false), child: const Text('Proof', style: TextStyle(fontSize: 12))),
+        proof,
       ];
     }
     if (status == 'admin_confirmed') {
       return [
         TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Release payment', () => DropOffApi.adminPayrollConfirm(id)), child: const Text('Release pay', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900))),
-        TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Proof', () async {
-          final bytes = await DropOffApi.adminPayrollProof(id);
-          if (bytes == null) return const ApiResponse(error: 'unavailable');
-          await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-payout-$id.html')], subject: 'DropOff payout proof #$id');
-          return const ApiResponse(ok: true);
-        }, reload: false), child: const Text('Proof', style: TextStyle(fontSize: 12))),
+        proof,
       ];
     }
     if (status == 'failed') {
@@ -471,17 +589,7 @@ class _AdminScreenState extends State<AdminScreen> {
       ];
     }
     if (status == 'paid') {
-      return [
-        TextButton(onPressed: () async {
-          final bytes = await DropOffApi.adminPayrollProof(id);
-          if (!mounted) return;
-          if (bytes == null) {
-            AppToast.show(context, 'Proof unavailable — try again.');
-            return;
-          }
-          await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-payout-$id.html')], subject: 'DropOff payout proof #$id');
-        }, child: const Text('Proof of payment', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900))),
-      ];
+      return [proof];
     }
     return const [];
   }
@@ -1147,7 +1255,7 @@ class _UsersCardState extends State<_UsersCard> {
             IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
           const SizedBox(height: 4),
-          const Text('As the owner you decide who is who. Roles you can grant: customer (regular sender/seller), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves).',
+          const Text('As the owner you decide who is who. Roles you can grant: customer (regular sender/seller), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves), cfo (finances only — payroll, turnover tax and filings; never moves money on their own).',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
           const SizedBox(height: 8),
           if (_loading)
@@ -1195,6 +1303,7 @@ class _UsersCardState extends State<_UsersCard> {
                         PopupMenuItem(value: 'partner', child: Text('partner — courier depot console')),
                         PopupMenuItem(value: 'ops', child: Text('ops — dispatch tools (fleet-wide)')),
                         PopupMenuItem(value: 'admin', child: Text('admin — admin console (no role minting)')),
+                        PopupMenuItem(value: 'cfo', child: Text('cfo — finances (payroll, tax, books; no money moves)')),
                       ],
                       child: Chip(
                         visualDensity: VisualDensity.compact,
@@ -1747,7 +1856,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
           Row(children: [
             const Icon(Icons.verified_user_outlined, color: AppColors.forest),
             const SizedBox(width: 10),
-            const Expanded(child: Text('Driver verification & targets', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            const Expanded(child: Text('Rider verification & targets', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             IconButton(visualDensity: VisualDensity.compact, onPressed: _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
           Text('$pending pending review - $verified verified. Daily target is 30 parcels; month pace carries any missed day.',

@@ -222,6 +222,8 @@ class _ChatScreenState extends State<ChatScreen> {
         'rider' => 'Rider',
         'courier' => 'Courier',
         'ops' => 'DropOff',
+        'admin' => 'DropOff',
+        'cfo' => 'Finance',
         _ => 'User',
       };
 

@@ -9,7 +9,7 @@ All figures in Zambian Kwacha (ZMW ≈ K). Rider = person doing the pickup run. 
 | Rider fee (customer) | K45 | rider: **K40.50** (90%), DropOff: **K4.50** (10%) |
 | Platform processing fee on the DropOff leg (customer) | max(1% × leg, K3.00) + K0.48 → **min K3.48** | DropOff (on leg ≈ K45 → K3.48 wins) |
 | Lipila mobile-money leg (customer) | K2.50 | Lipila (zero margin pass-through) |
-| COD processing (cash at door) — platform cut | 2% of collected amount | DropOff |
+| COD processing — REMOVED 2026-11-10 (owner directive: riders never carry recipient cash) | — | — |
 | Waiting bill, K2/min after 10 min free, K50 cap | K0–K50 | Driver (full) |
 | Depot door delivery (placement city) | Pay-as-you-go by recipient-city distance bands × vehicle multiplier (from K45) + processing | DropOff (rider works door for the same job; no second split) |
 | Wallet top-up (riders only) | 1% + K0.48, min K3.48 + K2.50 | DropOff collects on float |
@@ -53,7 +53,7 @@ Example: 32 stops across Kabulonga/Northmead/Kanyama/Chilenje → 2 routes: 22 s
 ## 5. Payout path (when there are riders other than the founder)
 
 - Fixed part: K5/parcel (plan) or 90% (paygo)
-- Float handling: COD collected is re-issued to the sender by **Lipila disbursement** minus our 2% — DropOff never holds seller money at rest
+- Float handling: COD is REMOVED — DropOff never handles recipient cash; parcels are prepaid at booking.
 - Rider payouts: `/admin/payouts kind=rider_payout` (momo) or batch remit Fridays, ≤ K5,000/day cap
 
 ## 5b. Daily Rider (K49/day, 2 parcels)
@@ -72,4 +72,4 @@ On-demand "Yango-style" usage, priced for impulse buys, not subscriptions:
 - Customers pay: rider fee + DropOff processing + Lipila momo + plan price
 - Couriers keep 100% of counter fares
 - Riders keep 90% paygo / K5 plan parcel
-- DropOff keeps: 10% of rider fees + processing fees + COD 2% + waiting/wail fees − rider wages on plans − momo legs − rider disbursement fees (absorbed in 10%)
+- DropOff keeps: rider-fee legs + processing fees + waiting fees − payroll (salaried riders) − momo legs − rider disbursement fees

@@ -15,9 +15,8 @@ home/shop and run it to the depot of a courier of the sender's choice. We are
 |------|-----|-----|
 | Book pickup + pay DropOff leg | Customer | App: K45 rider fee + platform processing (customer covers momo prompt fee) |
 | Receive parcel at depot | Courier partner | Customer walks in / rider drops off; **the customer pays the counter fare directly to the partner** |
-| Money DropOff holds | **None — never partner money** | We collect our leg + COD float cut (2%) only |
+| Money DropOff holds | **None — never partner money** | We collect only our own leg; COD removed 2026-11-10 |
 | Tracking | DropOff | Ends at **"Dropped at depot"** — partner owns the intercity leg |
-| COD float | DropOff rider/driver | Cash floats with the rider; remitted → sender wallet credited net of 2% (admin `cod_remit`) |
 
 ## 3. What the partner gets (without paying us a kwacha)
 
@@ -80,7 +79,7 @@ DropOff is driver+rider ourselves for the first months, then we push one rider p
   Never fixed salary until route density justifies it.
 - **Kit**: branded reflector vest + courier bag + DropOff receipts book + depot drop stamp sheet.
 - **Device**: rider app is the same Flutter app (role=ops JWT; assign rides from the console).
-- **Rules**: no carrier rides without waybill; COD float remitted every Friday or the account
+- **Rules**: COD is removed entirely — riders never collect or float cash. Any parcel's payment is collected in advance via momo at booking. No bypass.
   freezes until reconciled; customer first, no heroics, report damage at counter.
 - **Pipeline**: applicant → interview at the depot → one escorted trial sweep → solo access after
   50 clean parcels or 2 weeks. Recruited every Friday via the depot noticeboard + Facebook

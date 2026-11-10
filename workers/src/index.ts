@@ -117,13 +117,14 @@ const DRIVER_MONTHLY_PAY_ZMW = 3000;  // inclusive of the fuel allowance below
 const DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW = 300;
 const DRIVER_FUEL_MONTHLY_ZMW = DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW * 4; // 1200
 const DRIVER_BASE_MONTHLY_ZMW = DRIVER_MONTHLY_PAY_ZMW - DRIVER_FUEL_MONTHLY_ZMW; // 1800
+const DRIVER_WEEKLY_PAY_ZMW = DRIVER_MONTHLY_PAY_ZMW / 4; // K750/week — weekly-paid riders get this per week
 const DRIVER_DAILY_TARGET = 30;       // parcels/day each rider is expected to sweep
 const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
 // Business day = Central Africa Time (UTC+2). D1's 'localtime' is UTC, so every
 // daily-cap / sweep query must use this explicit offset or the day rolls over
 // at 02:00 CAT instead of midnight.
 const CAT_OFFSET = '+2 hours';
-const COD_FEE = 0.02;                 // platform cut on cash-on-delivery receipts
+const COD_FEE = 0.02;                 // LEGACY: COD is removed; retained only to read historical ledger rows
 const WALLET_TOPUP_CAP_ZMW = 5000;
 
 // Payment fees: the customer pays the DropOff leg + platform fee + Lipila legs.
@@ -343,8 +344,8 @@ app.use('*', async (c, next) => {
       // The app owner's phone is always admin (OWNER_PHONE secret) — covers
       // OTP-only sign-ins that have no auth_users row, and any user a
       // superadmin has promoted via /admin/users/role ('partner', 'rider',
-      // 'ops' or 'admin').
-      let role = ['partner', 'admin', 'rider', 'ops'].includes(user?.role ?? '') ? user.role
+      // 'ops', 'admin' or 'cfo').
+      let role = ['partner', 'admin', 'rider', 'ops', 'cfo'].includes(user?.role ?? '') ? user.role
         : claims.phone === ownerPhone(c.env) ? 'admin' : null;
       // Rider identity: an accepted DB role also binds the rider's roster row if
       // one exists (not required - role='rider' is usable without a roster row).
@@ -380,6 +381,16 @@ const isAdmin = (c: { env: Env; req: { header: (k: string) => string | undefined
   c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY
   || (typeof c.get === 'function' && c.get('role') === 'admin')
   || (typeof c.get === 'function' && c.get('phone') === ownerPhone(c.env));
+
+// CFO = finance executive. Same visibility as admin/ops on the payroll/tax/stats
+// ledger surfaces (they are in charge of the audited books), but NOTHING that
+// mints roles, edits passengers/riders, broadcasts SMS, moves money without the
+// two-signature chain, or touches ops dispatch. Money moves only by the
+// admin/superadmin chain — a CFO admin never disburses or voids.
+const isFinanceExec = (c: { env?: Env; req: { header: (k: string) => string | undefined }; get?: (k: string) => unknown }) => {
+  const role = typeof c.get === 'function' ? String(c.get('role') ?? '') : '';
+  return role === 'cfo' || role === 'ops' || isAdmin(c as any);
+};
 
 const isOwner = (c: { env: Env; get?: (k: string) => unknown }) =>
   Boolean(typeof c.get === 'function' && c.get('phone') && c.get('phone') === ownerPhone(c.env));
@@ -2316,32 +2327,19 @@ app.post('/jobs/:ref/events', async (c) => {
     ).bind(job.id, minutes, waitFee, totals.total_zmw));
     dbStatements.push(c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note, lat, lng) VALUES (?1,'waiting',?2,?3,?4)`,
-    ).bind(job.id, b.note ?? `Waited ${minutes} min (first ${WAIT_FREE_MINUTES} free = K${waitFee} � paid to the driver)`, b.lat ?? null, b.lng ?? null));
-    // The waiting bill belongs to the DRIVER, not the platform: credit the
-    // increase over what was already recorded as driver earnings.
-    const delta = round2(Math.max(0, waitFee - Number(job.wait_fee_zmw ?? 0)));
-    if (delta > 0 && job.rider_phone) {
-      dbStatements.push(c.env.DB.prepare(
-        `INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)`,
-      ).bind(job.rider_phone));
-      dbStatements.push(c.env.DB.prepare(
-        `INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'wait_fee', ?3)`,
-      ).bind(job.rider_phone, delta, job.id));
-    }
+    ).bind(job.id, b.note ?? `Waited ${minutes} min. K${waitFee} waiting fee billed to the sender — DropOff revenue, never the rider`, b.lat ?? null, b.lng ?? null));
+    // The waiting bill belongs to DropOff, not the rider: no per-job credit
+    // to any rider. The wait-fee accrues in the job total (DropOff funds
+    // include it) and flows into TOT turnover via the ledger.
   }
 
-  // COD collection at the door (leg-2 / partner COD): the cash FLOATS with the
-  // rider/driver — the sender's wallet is credited only after remittance.
+  // CASH POLICY (owner directive): no COD, no cash at the door — the rider
+  // NEVER takes cash from a recipient. Any caller that still logs a COD amount
+  // gets the event stripped from the ledger instead of being booked.
   if (b.cod_collected_zmw !== undefined) {
-    const cod = Math.max(0, Number(b.cod_collected_zmw) || 0);
-    if (cod > 0) {
-      dbStatements.push(c.env.DB.prepare(
-        `UPDATE jobs SET cod_collected_zmw = ?2 WHERE id = ?1`,
-      ).bind(job.id, cod));
-      dbStatements.push(c.env.DB.prepare(
-        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_collected', ?2)`,
-      ).bind(job.id, b.note ?? `K${cod} collected at the door — cash floats with rider/driver until remittance (platform keeps ${Math.round(COD_FEE * 100)}%)`));
-    }
+    dbStatements.push(c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'prepaid_required', ?2)`,
+    ).bind(job.id, 'COD at the door is rejected — recipients pay via momo at booking or nothing is due. Riders never carry cash.'));
   }
 
   // DropOff NEVER holds partner money: the customer pays us only the DropOff
@@ -3668,8 +3666,8 @@ app.post('/admin/users/role', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const email = String(b?.email ?? '').trim().toLowerCase();
   const role = String(b?.role ?? '');
-  if (!email || !['customer', 'admin', 'partner', 'rider', 'ops'].includes(role)) {
-    return c.json({ error: 'email and role (customer|admin|partner|rider|ops) required' }, 400);
+  if (!email || !['customer', 'admin', 'partner', 'rider', 'ops', 'cfo'].includes(role)) {
+    return c.json({ error: 'email and role (customer|admin|partner|rider|ops|cfo) required' }, 400);
   }
   const user = await c.env.DB.prepare(
     'SELECT email, phone, role FROM auth_users WHERE email = ?1',
@@ -5819,7 +5817,9 @@ export async function generatePayroll(env: Env, kind: 'weekly' | 'monthly'): Pro
 //   2. delivery-credit-settled DropOff legs (jobs paid & settled from the
 //      sender's prepayment)
 //   3. subscription / upgrade payments
-//   4. platform cut on door cash-on-delivery remittances (COD_FEE)
+//   4. platform cut on legacy door cash-on-delivery remittances (historical
+//      rows only — COD is removed by policy; historical entries still count
+//      as platform revenue recognised when settled).
 export async function updateTaxPeriod(env: Env, ym: string): Promise<void> {
   const start = `${ym}-01`;
   const nextYm = catYm(new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 1)), 0);
@@ -5879,40 +5879,10 @@ export async function updateTaxPeriod(env: Env, ym: string): Promise<void> {
 }
 
 /* ------------------------ payroll + tax endpoints ------------------------- */
-// Rider earnings/cash-out + COD remittance (float settlement is admin-controlled).
-// kind='cod_remit' settles cash the rider/driver floated from a job's door collection:
-// the sender's wallet gets the COD amount net of the platform's COD cut.
-
-// Shared by /admin/payouts and /rider/cod/remit: push the COD float to the
-// sender's momo (Lipila disbursement), log the payment + job event.
-async function remitJobCod(c: any, job_ref: string): Promise<Response> {
-  const job = await c.env.DB.prepare(
-    'SELECT id, ref, sender_phone, cod_collected_zmw FROM jobs WHERE ref = ?1').bind(job_ref).first() as any;
-  if (!job) return c.json({ error: 'job not found' }, 404);
-  if (!job.cod_collected_zmw) return c.json({ error: 'no cash collected on this job' }, 409);
-  const cod = Number(job.cod_collected_zmw);
-  const net = Math.round(cod * (1 - COD_FEE) * 100) / 100;
-  // Customers/sellers have NO wallet � settle COD straight to their momo.
-  const ref = `cod-${job.ref}-${Date.now().toString(36)}`;
-  const disb = await lipilaDisburse(c.env, job.sender_phone, net, ref, `DropOff COD remit ${job.ref}`);
-  if (!disb.ok) return c.json({ error: 'lipila disbursement failed', detail: disb.raw ?? null }, 502);
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status, channel, kind)
-       VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, 'pending', 'merchant', 'cod_remit')`,
-    ).bind(job.id, job.sender_phone, providerFromPhone(job.sender_phone), net, disb.lipilaReference ?? ref),
-    c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_remit_initiated', ?2)`)
-      .bind(job.id, `COD K${cod} remitted via momo � sender gets K${net} (platform keeps K${(cod - net).toFixed(2)}). Ref ${disb.lipilaReference ?? ref}`),
-  ]);
-  return c.json({ ok: true, job_ref: job.ref, credited_zmw: net, platform_kept_zmw: round2(cod - net), lipila_reference: disb.lipilaReference ?? ref, settlement: 'momo_disbursement' });
-}
 
 app.post('/admin/payouts', async (c) => {
   const b: any = await c.req.json().catch(() => null);
-  const kind: string = ['rider_earning', 'rider_payout', 'cod_remit'].includes(b?.kind) ? b.kind : 'rider_earning';
-  if (kind === 'cod_remit') {
-    return remitJobCod(c, b?.job_ref ?? '');
-  }
+  const kind: string = ['rider_earning', 'rider_payout'].includes(b?.kind) ? b.kind : 'rider_earning';
   const phone = normalizeZmPhone(b?.phone ?? '');
   const amount = Math.round(Math.abs(Number(b?.amount_zmw) || 0) * 100) / 100;
   if (!phone || amount <= 0) return c.json({ error: 'phone and positive amount required' }, 400);
@@ -5920,9 +5890,30 @@ app.post('/admin/payouts', async (c) => {
   return c.json({ ok: true });
 });
 
+/* ------------- public team roster — verified riders only ------------------- */
+// Any signed-in member can see who is on the verified team (name/vehicle
+// only — no phones, docs, or payment data). Riders sync it live from any
+// account, which is why the app counts stale local entries no longer.
+app.get('/team', async (c) => {
+  const role = String(c.get('role') ?? '');
+  if (role === 'customer') return c.json({ error: 'account_required' }, 403);
+  const rows = await c.env.DB.prepare(
+    `SELECT id, full_name, vehicle, vehicle_class, pay_cycle, status FROM riders
+      WHERE active = 1 AND verification_status = 'verified'
+      ORDER BY full_name COLLATE NOCASE`,
+  ).all<any>();
+  return c.json({
+    riders: (rows.results ?? []).map((r: any) => ({
+      id: r.id, full_name: r.full_name, vehicle: r.vehicle, vehicle_class: r.vehicle_class,
+      pay_cycle: r.pay_cycle ?? 'weekly',
+    })),
+    total: (rows.results ?? []).length,
+  });
+});
+
 /* ---------------- payroll (admin/superadmin confirmation chain) ------------ */
 app.get('/admin/payroll', async (c) => {
-  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   const status = String(c.req.query('status') ?? '').trim();
   const kind = String(c.req.query('kind') ?? '').trim();
   let sql = `SELECT * FROM rider_payroll`;
@@ -5939,9 +5930,53 @@ app.get('/admin/payroll', async (c) => {
   return c.json({ payouts: results ?? [], summary: sums.results ?? [] });
 });
 
+// Salaries run-rate — the CFO/ops view of the payroll cost as the business
+// grows. All numbers derive from live D1 rows (verified roster, tax ledger).
+app.get('/admin/payroll/runrate', async (c) => {
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
+  const ry = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM riders WHERE active = 1 AND verification_status = 'verified'`,
+  ).first<any>();
+  const riders = Number(ry?.n ?? 0);
+  const pending = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(amount_zmw), 0) AS t, COUNT(*) AS n FROM rider_payroll
+       WHERE status IN ('pending', 'admin_confirmed')`,
+  ).first<any>();
+  const periods = await c.env.DB.prepare(
+    `SELECT gross_turnover_zmw FROM tax_periods ORDER BY year_month DESC LIMIT 3`,
+  ).all<any>();
+  const turns = (periods.results ?? []).map((r: any) => Number(r.gross_turnover_zmw ?? 0));
+  const avgTurn = turns.length ? round2(turns.reduce((a, b) => a + b, 0) / turns.length) : 0;
+  const weeklyOut = round2(riders * DRIVER_WEEKLY_PAY_ZMW);   // K750/rider/week
+  const monthlyOut = round2(riders * DRIVER_MONTHLY_PAY_ZMW); // K3,000/rider/month
+  const annualOut = round2(monthlyOut * 12);
+  const monthlyTarget = riders * DRIVER_DAILY_TARGET * 30;    // pace-gated needed trips
+  const payableForRiderPerDay = DRIVER_MONTHLY_PAY_ZMW / 30;  // K100/rider/day cost
+  const selfSustainTrips = Math.ceil(payableForRiderPerDay / 45); // PAYG legs at K45
+  const growth = [10, 25, 50, 100].map((add) => {
+    const cost = round2((riders + add) * DRIVER_MONTHLY_PAY_ZMW);
+    const share = avgTurn > 0 ? round2((cost / avgTurn) * 100) : null;
+    return { riders: riders + add, add, monthly_payroll_zmw: cost, payroll_share_pct: share, needed_turnover_zmw: round2(cost / 0.25) };
+  });
+  return c.json({
+    verified_active_riders: riders,
+    pending_payroll_n: Number(pending?.n ?? 0),
+    pending_payroll_zmw: round2(Number(pending?.t ?? 0)),
+    weekly_out_zmw: weeklyOut,
+    monthly_out_zmw: monthlyOut,
+    annual_out_zmw: annualOut,
+    monthly_trip_target: monthlyTarget,
+    avg_monthly_turnover_zmw: avgTurn,
+    payroll_share_of_turnover_pct: avgTurn > 0 ? round2((monthlyOut / avgTurn) * 100) : null,
+    self_sustain_trips_per_rider_day: selfSustainTrips,
+    constants: { monthly_pay_zmw: DRIVER_MONTHLY_PAY_ZMW, base_pay_zmw: DRIVER_BASE_MONTHLY_ZMW, fuel_weekly_zmw: DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW, daily_target: DRIVER_DAILY_TARGET, weekly_pay_zmw: DRIVER_WEEKLY_PAY_ZMW },
+    growth_planner: growth,
+  });
+});
+
 // Manual generation trigger (cron auto-runs it; admins can also force it).
 app.post('/admin/payroll/generate', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   const b: any = await c.req.json().catch(() => null);
   const kind = b?.kind === 'monthly' ? 'monthly' : 'weekly';
   await generatePayroll(c.env, kind);
@@ -6036,7 +6071,7 @@ app.get('/admin/payroll/:id/proof', async (c) => {
   const id = Number(c.req.param('id'));
   const row = await c.env.DB.prepare(`SELECT * FROM rider_payroll WHERE id = ?1`).bind(id).first<any>();
   if (!row) return c.json({ error: 'payout_not_found' }, 404);
-  if (!isAdmin(c) && c.get('phone') !== row.rider_phone) return c.json({ error: 'forbidden' }, 403);
+  if (!isFinanceExec(c) && c.get('phone') !== row.rider_phone) return c.json({ error: 'forbidden' }, 403);
   return new Response(payrollProofHtml(row), {
     status: 200,
     headers: {
@@ -6060,14 +6095,14 @@ app.get('/rider/payroll', async (c) => {
 
 /* --------------------------- tax endpoints (ZRA) -------------------------- */
 app.get('/admin/tax', async (c) => {
-  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   const { results } = await c.env.DB.prepare(`SELECT * FROM tax_periods ORDER BY year_month DESC LIMIT 24`).all();
   return c.json({ periods: results ?? [] });
 });
 
 // Manual refresh (cron keeps it current automatically; admins can force it).
 app.post('/admin/tax/refresh', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   const b: any = await c.req.json().catch(() => null);
   const ym = b?.year_month ?? catYm(catNow(), 1);
   await updateTaxPeriod(c.env, String(ym).slice(0, 7));
@@ -6075,7 +6110,7 @@ app.post('/admin/tax/refresh', async (c) => {
 });
 
 app.post('/admin/tax/:ym/mark', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   const ym = c.req.param('ym').slice(0, 7);
   const b: any = await c.req.json().catch(() => null);
   const status = b?.status;
@@ -6103,7 +6138,7 @@ ${row('Gross turnover (components below)', Number(p.gross_turnover_zmw ?? 0))}
 ${row('· momo job collections', lines.job_collections ?? 0)}
 ${row('· delivery-credit-settled DropOff legs', lines.wallet_jobs ?? 0)}
 ${row('· subscriptions & upgrades', lines.subscriptions ?? 0)}
-${row('· COD platform cut', lines.cod_platform_cut ?? 0)}
+${row('· reward/legacy COD cut (historical)', lines.cod_platform_cut ?? 0)}
 ${row('0% band applied', `K${Number(p.zero_band_zmw ?? 0).toFixed(2)} of K${TOT_MONTHLY_ZERO_BAND_ZMW}`)}
 ${row('Taxable turnover', Number(p.taxable_zmw ?? 0))}
 ${row('Rate', `${((Number(p.rate ?? 0)) * 100).toFixed(1)}%`)}
@@ -6117,7 +6152,7 @@ ${row('Paid at', p.paid_at ?? '—')}
 }
 
 app.get('/admin/tax/:ym/report', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   const ym = c.req.param('ym').slice(0, 7);
   const p = await c.env.DB.prepare(`SELECT * FROM tax_periods WHERE year_month = ?1`).bind(ym).first<any>();
   if (!p) return c.json({ error: 'period_not_found' }, 404);
@@ -6128,27 +6163,6 @@ app.get('/admin/tax/:ym/report', async (c) => {
       'Content-Disposition': `attachment; filename="DropOff-TOT-${ym}.html"`,
     },
   });
-});
-
-// Rider self-remittance: a signed-in rider settles the COD float on a job THE
-// PLATFORM ASSIGNED TO THEM.
-app.post('/rider/cod/remit', async (c) => {
-  const role = c.get('role');
-  const phone = c.get('phone');
-  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
-  if (role === 'rider') {
-    const b: any = await c.req.json().catch(() => null) ?? {};
-    const ref = String(b?.job_ref ?? '');
-    if (!ref) return c.json({ error: 'job_ref required' }, 400);
-    const rider = await c.env.DB.prepare(
-      'SELECT id FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>() as any;
-    if (!rider) return c.json({ error: 'rider_not_found' }, 404);
-    const job = await c.env.DB.prepare('SELECT rider_id FROM jobs WHERE ref = ?1').bind(ref).first<any>() as any;
-    if (!job) return c.json({ error: 'job not found' }, 404);
-    if (Number(job.rider_id) !== Number(rider.id)) return c.json({ error: 'not_assigned_to_you' }, 403);
-    return remitJobCod(c, ref);
-  }
-  return c.json({ error: 'forbidden' }, 403);
 });
 
 /* ------------------------ rider docs: uploads + media ---------------------- */
@@ -7584,32 +7598,6 @@ app.post('/ai/receipt/:ref', async (c) => {
     `INSERT INTO job_events (job_id, status, note) VALUES (?1,'receipt_ai_check',?2)`,
   ).bind(job.id, JSON.stringify(result)).run().catch(() => {});
   return c.json({ ok: true, ref, ...result });
-});
-
-// Rider cash float: COD still sitting with the rider (collected, not yet remitted).
-app.get('/rider/cod', async (c) => {
-  const phone = c.get('phone');
-  const role = c.get('role');
-  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
-  if (role !== 'rider' && !isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
-  const rider = await c.env.DB.prepare(
-    'SELECT id FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>() as any;
-  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
-  const { results } = await c.env.DB.prepare(
-    `SELECT j.ref, j.recipient_name, j.cod_collected_zmw, j.created_at,
-            (SELECT COUNT(*) FROM payments p WHERE p.job_id = j.id AND p.kind = 'cod_remit') AS remitted
-       FROM jobs j
-      WHERE j.rider_id = ?1 AND j.cod_collected_zmw > 0
-      ORDER BY j.id DESC LIMIT 50`,
-  ).bind(rider.id).all<any>();
-  const jobs = (results ?? []) as any[];
-  const open = jobs.filter((j) => Number(j.remitted ?? 0) === 0);
-  const total = open.reduce((s, j) => s + Number(j.cod_collected_zmw ?? 0), 0);
-  return c.json({
-    jobs,
-    total_unremitted_zmw: Math.round(total * 100) / 100,
-    platform_cut_pct: Math.round(COD_FEE * 100),
-  });
 });
 
 // Rider reputation: the rider's own rating summary + latest reviews.

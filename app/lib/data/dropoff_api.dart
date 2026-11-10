@@ -465,10 +465,10 @@ class DropOffApi {
         if (lng != null) 'lng': lng,
       });
 
-  /// Rider log: status movement or COD collected at the door. For door
-  /// deliveries the server REQUIRES [otp] — the recipient's 4-digit DropOff
-  /// code — so a parcel cannot be "delivered" into thin air. [stage]
-  /// ('pickup' | 'delivery') files the proof photo against the right leg.
+  /// Rider log: status movement for a job. For door deliveries the server
+  /// REQUIRES [otp] — the recipient's 4-digit DropOff code — so a parcel
+  /// cannot be "delivered" into thin air. [stage] ('pickup' | 'delivery')
+  /// files the proof photo against the right leg.
   static Future<ApiResponse> jobEvent({
     required String jobRef,
     String? status,
@@ -477,7 +477,6 @@ class DropOffApi {
     String? photoUrl,
     String? stage,
     String? otp,
-    double? codCollectedZmw,
     double? lat,
     double? lng,
   }) =>
@@ -488,7 +487,6 @@ class DropOffApi {
         if (photoUrl != null) 'photo_url': photoUrl,
         if (stage != null) 'stage': stage,
         if (otp != null) 'otp': otp,
-        if (codCollectedZmw != null) 'cod_collected_zmw': codCollectedZmw,
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,
       });
@@ -842,6 +840,12 @@ class DropOffApi {
     }
   }
 
+  /// Salaries run-rate / payroll cost as the business grows (CFO + owner view).
+  static Future<Map<String, dynamic>?> adminPayrollRunrate() => getAdmin('/admin/payroll/runrate');
+
+  /// Public verified team roster — name/vehicle only, no PII or money data.
+  static Future<Map<String, dynamic>?> teamRoster() => get('/team');
+
   /// ZRA turnover-tax ledger ({periods}) — 0% ≤ K2,500 monthly, 5% above,
   /// due by the 14th of the following month; auto-computed by cron.
   static Future<Map<String, dynamic>?> adminTax() => getAdmin('/admin/tax');
@@ -873,17 +877,14 @@ class DropOffApi {
     return get('/rider/queue$q');
   }
 
-  /// Rider self-remit: settle the COD float on a job assigned to the signed-in
-  /// rider. Pushes the cash (minus the platform cut) to the sender's momo.
-  static Future<ApiResponse> riderCodRemit(String jobRef) =>
-      post('/rider/cod/remit', {'job_ref': jobRef});
+  /// Rider self-remit and the rider "cash float" list were removed with the
+  /// no-COD policy: riders never collect cash at the door. Senders pay in
+  /// advance via momo; recipients pay nothing in cash, so the float is gone.
 
   /// {rider, n, average, reviews: [...]} — the signed-in rider's rating summary.
   static Future<Map<String, dynamic>?> riderReviews() => get('/rider/reviews');
 
-  /// {jobs, total_unremitted_zmw, platform_cut_pct} — COD cash still floated by
-  /// the signed-in rider (collected at the door, not yet pushed to sellers).
-  static Future<Map<String, dynamic>?> riderCod() => get('/rider/cod');
+  /// {rider, n, average, reviews: [...]} — see above.
 
   /// Start a Lipila mobile-money collect for a job against the server total.
   static Future<ApiResponse> pay({

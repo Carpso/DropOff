@@ -1444,7 +1444,7 @@ class _AdminGateState extends State<_AdminGate> {
     final me = await DropOffApi.me();
     if (!mounted) return;
     final role = '${me?['role'] ?? ''}';
-    setState(() => _isAdmin = role == 'admin' || role == 'ops');
+    setState(() => _isAdmin = role == 'admin' || role == 'ops' || role == 'cfo');
   }
 
   @override
@@ -1464,7 +1464,7 @@ class _AdminGateState extends State<_AdminGate> {
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Admin console', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
                 SizedBox(height: 2),
-                Text('Stats, security alerts, fraud queue and SMS broadcasts.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.3)),
+                Text('Payroll, turnover tax, riders, depot branches, moderation and SMS.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.3)),
               ])),
               Icon(Icons.chevron_right, color: AppColors.muted),
             ]),
