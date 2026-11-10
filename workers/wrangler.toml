@@ -87,8 +87,9 @@ migrations_dir = "migrations"
 #   4. Seed chargebook with X-Admin-Key: POST /admin/couriers, POST /admin/quotes
 #   5. Go-live checklist:
 #      - LIPILA_BASE_URL -> https://blz.lipila.io + live secret key
-#      - whitelist the disbursement IP (Lipila dashboard) — Workers egress IPs
-#        are shared; prefer dashboard-initiated payouts until Lipila whitelists them
+#      - Payout destinations need NO registration (riders and the platform momo
+#        main number only receive). Confirm disbursements succeed from the live
+#        pool; on failure the Lipila error text is logged and surfaced to ops.
 #      - npx wrangler email sending enable <domain verified in this account>
 #      - AUTH_DEV_MODE stays "0" once SMS secrets are in
 # HUGGINGFACE_TOKEN - optional free HF inference fallback (mistralai/Mistral-7B-Instruct-v0.3); set with: npx wrangler secret put HUGGINGFACE_TOKEN

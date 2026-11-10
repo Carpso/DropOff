@@ -46,7 +46,7 @@ export interface Env {
 //   Production base: https://blz.lipila.io
 //   Auth header:    x-api-key (NOT Bearer)
 //   Collect:        POST /api/v1/collections/mobile-money
-//   Payout:         POST /api/v1/disbursements/mobile-money  (needs IP whitelisting!)
+//   Payout:         POST /api/v1/disbursements/mobile-money  (payout destinations only RECEIVE — no registration required)
 //   Status checks:  GET  /api/v1/collections/check-status?referenceId=…
 //                   GET  /api/v1/disbursements/check-status?referenceId=…
 // All phone numbers normalized to 260XXXXXXXXX (Airtel 097/077, MTN 096/076, Zamtel 095/075).
@@ -138,13 +138,12 @@ export async function lipilaCollect(
   return { ok: res.ok, status: res.status, lipilaReference: ref ? String(ref) : undefined, raw: text };
 }
 
-/** Rider/partner payout. Lipila's disbursements endpoint does NOT require
- *  server-IP whitelisting; the whitelist the docs refer to is the payout
- *  rail's DESTINATION-ACCOUNT whitelist (which momo numbers you may pay
- *  to), configured in the Lipila merchant dashboard. ChurchOnApp disburses
- *  via Supabase edge functions with the same pattern and no IP whitelist
- *  code at all — the account whitelist is the only gate, so add
- *  BUSINESS_PHONE there. */
+/** Rider/partner payout. The momo numbers being paid only RECEIVE — they do
+ *  not need to be registered/added in the Lipila dashboard (owner confirmed
+ *  with Lipila: payout destinations require no prior registration; the same
+ *  holds for our own platform momo main number which only receives the sweep
+ *  of platform income). Sandbox funding must have disbursement float or
+ *  payouts fail cleanly (ok=false) and are surfaced to ops. */
 export async function lipilaDisburse(
   env: Env,
   phoneZm: string,

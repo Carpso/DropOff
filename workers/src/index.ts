@@ -1514,7 +1514,7 @@ app.post('/jobs', async (c) => {
     if (b.pay_method === 'cash' && !staffEyes) {
       return c.json({
         error: 'prepaid_required',
-        detail: 'DropOff collects every parcel in advance at booking. Pay by mobile money (or top up your wallet) — the rider never handles your cash.',
+        detail: 'DropOff collects every parcel in advance at booking — a prepayment for your parcel delivery (trip price + processing fee), paid by mobile money. The rider never handles your cash. No cash option, no stored credit: you only ever pay what this delivery costs.',
       }, 400);
     }
     const payMethod: string = ['mobile_money', 'cash'].includes(b.pay_method)
@@ -1845,6 +1845,11 @@ app.post('/jobs', async (c) => {
     let depositRequired = false;
     let depositAmount = 0;
     let depositRef: string | null = null;
+    // PREPAID CAP (compliance): the customer prompt is the server-computed
+    // quote for THIS parcel only — trip price + processing + momo legs. It can
+    // never exceed what the delivery costs, there is no free-form top-up for
+    // customers, and these balances pay for DropOff's own service only — never
+    // cash-out, never third-party acceptance. See docs/PAYMENT_COMPLIANCE.md.
     if (!staffEyes && packInclusion !== 'pack' && payMethod === 'mobile_money') {
       depositRequired = true;
       depositAmount = feeBase.prompt_total_zmw; // full DropOff leg + processing + momo leg
@@ -1870,7 +1875,7 @@ app.post('/jobs', async (c) => {
         'Advance payment prompt sent at booking — the FULL DropOff leg. The rider is dispatched the moment it is approved; no pay-at-pickup, no rider cash handling.').run();
       c.executionCtx.waitUntil(
         sendSms(c.env, senderPhone,
-        `DropOff: approve the K${depositAmount.toFixed(2)} advance prompt for ${ref}. It is payment for YOUR parcel — it loads to your DropOff wallet and pays this delivery at pickup. Paid in advance at booking; your rider never handles cash.`).catch(() => {}),
+        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`).catch(() => {}),
       );
     }
 
@@ -2101,7 +2106,7 @@ app.post('/collections', async (c) => {
       ).bind(meta.last_row_id, 'advance_pending',
         'Advance payment prompt sent at booking — the FULL DropOff leg for this collection. The rider is dispatched the moment it is approved.').run();
       await sendSms(c.env, phone,
-        `DropOff: approve the K${depositAmount.toFixed(2)} advance prompt for ${ref}. It is payment for YOUR parcel — it loads to your DropOff wallet and pays this delivery at pickup. Paid in advance; your rider never handles cash.`).catch(() => {});
+        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`).catch(() => {});
     } else {
       // deposit failed to init — same as /jobs: proceed, fee still owed on prompt
     }
@@ -4067,8 +4072,9 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       body: `Your wallet balance is updated.`,
     });
   } else if (pay.kind === 'booking_deposit' && pay.job_id) {
-    // Ghost-booking guard resolved: the deposit landed → credit the sender's
-    // wallet (it pays their next prompt) and dispatch the pending booking now.
+    // Prepayment resolved: the momo money (exactly the quote for this parcel —
+    // trip price + processing + momo legs, never more) lands as the sender's
+    // delivery credit and dispatches the pending booking now.
     const job = await env.DB.prepare(
       'SELECT id, ref, sender_phone, pickup_lat, pickup_lng FROM jobs WHERE id = ?1',
     ).bind(pay.job_id).first<any>();
@@ -4078,7 +4084,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
         .bind(pay.phone, pay.amount_zmw, pay.job_id),
       env.DB.prepare('UPDATE wallets SET balance_zmw = balance_zmw + ?2 WHERE phone = ?1').bind(pay.phone, pay.amount_zmw),
       env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'deposit_paid', ?2)`)
-        .bind(pay.job_id, 'Deposit approved — rider dispatch in flight.'),
+        .bind(pay.job_id, 'Prepayment approved — rider dispatch in flight.'),
     ]);
     if (job?.pickup_lat != null && job?.pickup_lng != null) {
       try {
@@ -4094,8 +4100,8 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
             ).bind(pick.rider.id),
           ]);
           await sendToPhone(env, job.sender_phone, {
-            title: 'Rider assigned',
-            body: `Deposit confirmed — rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup.`,
+            title: 'Prepayment received',
+            body: `Confirmed — rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup.`,
             data: { job_ref: job.ref ?? '', kind: 'rider_assigned' },
           });
         }
@@ -5788,7 +5794,8 @@ export async function generatePayroll(env: Env, kind: 'weekly' | 'monthly'): Pro
 // Turnover lines (DropOff's own charged income — never the partner's counter
 // fare, which is paid at the depot):
 //   1. momo job collections (payments kind='job')
-//   2. wallet-settled DropOff legs (jobs paid & settled from wallet)
+//   2. delivery-credit-settled DropOff legs (jobs paid & settled from the
+//      sender's prepayment)
 //   3. subscription / upgrade payments
 //   4. platform cut on door cash-on-delivery remittances (COD_FEE)
 export async function updateTaxPeriod(env: Env, ym: string): Promise<void> {
@@ -6072,7 +6079,7 @@ function taxReportHtml(p: any): string {
 <table>
 ${row('Gross turnover (components below)', Number(p.gross_turnover_zmw ?? 0))}
 ${row('· momo job collections', lines.job_collections ?? 0)}
-${row('· wallet-settled DropOff legs', lines.wallet_jobs ?? 0)}
+${row('· delivery-credit-settled DropOff legs', lines.wallet_jobs ?? 0)}
 ${row('· subscriptions & upgrades', lines.subscriptions ?? 0)}
 ${row('· COD platform cut', lines.cod_platform_cut ?? 0)}
 ${row('0% band applied', `K${Number(p.zero_band_zmw ?? 0).toFixed(2)} of K${TOT_MONTHLY_ZERO_BAND_ZMW}`)}
@@ -6083,7 +6090,7 @@ ${row('Due date', p.due_date ?? '')}
 ${row('Status', String(p.status ?? '').toUpperCase())}
 ${row('Paid at', p.paid_at ?? '—')}
 </table>
-<p style="color:#5a6b63;font-size:11px">Generated ${esc(new Date().toISOString().slice(0, 16).replace('T', ' '))} from the DropOff main ledger. Excludes courier-partner counter fares (paid at depot) and customer wallet top-ups (prepaid, recognised when spent on jobs).</p>
+<p style="color:#5a6b63;font-size:11px">Generated ${esc(new Date().toISOString().slice(0, 16).replace('T', ' '))} from the DropOff main ledger. Excludes courier-partner counter fares (paid at depot) and customer prepayments (single-purpose delivery credit, recognised when spent on jobs per docs/PAYMENT_COMPLIANCE.md).</p>
 </body></html>`;
 }
 
@@ -7944,11 +7951,66 @@ app.get('/admin/backup-now', async (c) => {
   return c.json({ ...res, ok: true, bucket: 'dropoff-backups' });
 });
 
+/* ------- prepaid refunds: canceled-before-pickup → back to source momo ----- */
+// Single-purpose compliance guard: a sender's prepayment is pinned to exactly
+// one parcel. When that booking dies before pickup, whatever part was never
+// spent on the delivery goes back to the sender's original momo number via
+// Lipila — DropOff does not keep it, and no generic stored credit grows. If
+// Lipila cannot pay out (insufficient disbursement float, receiver off), the credit stays
+// untouched and the event row tells ops to use /admin/payments/:id/refund.
+async function refundUnspentPrepaid(
+  env: Env,
+  job: { id: number; ref: string | null; sender_phone: string },
+): Promise<void> {
+  const dep = await env.DB.prepare(
+    `SELECT COALESCE(SUM(amount_zmw), 0) AS n, MIN(id) AS first_id FROM payments
+      WHERE job_id = ?1 AND kind = 'booking_deposit' AND status = 'success'`,
+  ).bind(job.id).first<any>();
+  const prepaid = round2(Number(dep?.n ?? 0));
+  if (prepaid <= 0) return; // charge-on-pickup or wallet sender — nothing to return
+  const spent = round2(Number((await env.DB.prepare(
+    `SELECT COALESCE(SUM(-amount_zmw), 0) AS n FROM wallet_ledger
+       WHERE job_id = ?1 AND kind = 'job_charge'`,
+  ).bind(job.id).first<any>())?.n ?? 0));
+  const wallet = await env.DB.prepare(
+    'SELECT balance_zmw FROM wallets WHERE phone = ?1').bind(job.sender_phone).first<any>();
+  const unspent = round2(Math.min(prepaid - Math.max(0, spent), Math.max(0, wallet?.balance_zmw ?? 0)));
+  if (unspent < 0.5) return; // fully spent or sub-cent residue — nothing to return
+  const ref = `prepay_refund-${job.id}-${Date.now().toString(36)}`;
+  const disb = await lipilaDisburse(env, job.sender_phone, unspent, ref,
+    `DropOff unspent prepayment ${job.ref ?? job.id}`.replace(/[^A-Za-z0-9 ]/g, ' '));
+  if (!disb.ok) {
+    // keep the credit exactly as it is; ops refunds it manually (admin refund
+    // endpoint pays the sender's momo). Flag it on the job so it can't rot.
+    await env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'prepaid_refund_failed', ?2)`,
+    ).bind(job.id, `Auto-cancel: unspent prepayment K${unspent.toFixed(2)} could not be paid back to momo (Lipila payout failed — e.g. insufficient disbursement float or receiver off) — refund manually via /admin/payments/:id/refund.`).run();
+    return;
+  }
+  // Take the credit out of the delivery credit (ledger leaves an audit row) and
+  // record the momo refund exactly like the admin refund path does.
+  await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(job.sender_phone),
+    env.DB.prepare(`INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'prepaid_refund', ?3)`)
+      .bind(job.sender_phone, -unspent, job.id),
+    env.DB.prepare('UPDATE wallets SET balance_zmw = balance_zmw - ?2 WHERE phone = ?1 AND balance_zmw >= ?2')
+      .bind(job.sender_phone, unspent),
+    env.DB.prepare(
+      `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
+         lipila_fee_zmw, lipila_reference, status, channel, kind, refund_of_payment_id, refunded_at)
+       VALUES (?1,?2,?3,?4,0,0,0,?5,'pending','merchant','refund',?6,datetime('now'))`,
+    ).bind(job.id, job.sender_phone, 'lipila', unspent, ref, dep?.first_id ?? null),
+  ]);
+  await sendSms(env, job.sender_phone,
+    `DropOff: ${job.ref ?? ''} was canceled before pickup. Your unspent prepayment of K${unspent.toFixed(2)} has been returned to your momo.`).catch(() => {});
+}
+
 /* ------------------- cron: no-show auto-cancel + strikes ------------------ */
 // Ghost bookings die on their own: a pickup that sits past its window (or an
 // assignment that never moved) is auto-canceled, a strike lands on the
 // sender's phone, and 3 strikes inside 14 days park new bookings for ops.
-// Subscribers and deposit payers keep their wallet credit regardless.
+// Prepaid senders get their unspent prepayment returned to their momo
+// automatically — no money of theirs ever stays behind.
 async function addStrike(env: Env, phone: string, jobId: number, reason: string): Promise<void> {
   if (!phone) return;
   try {
@@ -7980,6 +8042,7 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
       await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
       await sendSms(env, job.sender_phone,
         `DropOff: ${job.ref} was auto-canceled because the parcel wasn't handed over in time (no-show). Repeated missed pickups can pause new bookings.`).catch(() => {});
+      await refundUnspentPrepaid(env, job).catch(() => { /* refund bookkeeping never breaks the cron */ });
       canceled++;
     } catch { /* never break the minute cron */ }
   }
@@ -8003,6 +8066,7 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
       await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
       await sendSms(env, job.sender_phone,
         `DropOff: ${job.ref} was auto-canceled after its slot window (no-show). Repeated missed pickups can pause new bookings.`).catch(() => {});
+      await refundUnspentPrepaid(env, job).catch(() => { /* refund bookkeeping never breaks the cron */ });
       canceled++;
     } catch { /* never break the minute cron */ }
   }
