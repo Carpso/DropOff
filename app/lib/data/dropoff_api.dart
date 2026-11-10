@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -806,6 +807,64 @@ class DropOffApi {
 
   static Future<ApiResponse> adminBroadcast({required String audience, required String message}) =>
       post('/admin/sms/broadcast', {'audience': audience, 'message': message}, admin: true);
+
+  // ---- Rider payroll + ZRA turnover tax (admin console) ----------------------
+
+  /// Payroll rows ({summary, payouts}) — pending/confirmed/paid salary payouts.
+  static Future<Map<String, dynamic>?> adminPayroll({String? status, String? kind}) {
+    final params = <String>['limit=100', if (status != null && status.isNotEmpty) 'status=$status', if (kind != null && kind.isNotEmpty) 'kind=$kind'];
+    return getAdmin('/admin/payroll?${params.join('&')}');
+  }
+
+  /// Cron runs this automatically; admins can also trigger it manually.
+  static Future<ApiResponse> adminPayrollGenerate({required String kind}) =>
+      post('/admin/payroll/generate', {'kind': kind}, admin: true);
+
+  /// Two-signature release: admin confirms intent, superadmin second-click
+  /// disburses via Lipila (the owner may collapse both steps in one go).
+  static Future<ApiResponse> adminPayrollConfirm(int id) =>
+      post('/admin/payroll/$id/confirm', const {}, admin: true);
+
+  static Future<ApiResponse> adminPayrollVoid(int id) =>
+      post('/admin/payroll/$id/void', const {}, admin: true);
+
+  /// Raw proof-of-payment HTML for a payout (share as file / print to PDF).
+  static Future<Uint8List?> adminPayrollProof(int id) async {
+    if (!enabled) return null;
+    try {
+      final res = await http
+          .get(_uri('/admin/payroll/$id/proof'), headers: adminEnabled ? _adminHeaders : _headers)
+          .timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      return res.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// ZRA turnover-tax ledger ({periods}) — 0% ≤ K2,500 monthly, 5% above,
+  /// due by the 14th of the following month; auto-computed by cron.
+  static Future<Map<String, dynamic>?> adminTax() => getAdmin('/admin/tax');
+
+  static Future<ApiResponse> adminTaxRefresh({String? yearMonth}) =>
+      post('/admin/tax/refresh', yearMonth == null ? const {} : {'year_month': yearMonth}, admin: true);
+
+  static Future<ApiResponse> adminTaxMark(String yearMonth, {required String status, String? note}) =>
+      post('/admin/tax/$yearMonth/mark', {'status': status, if (note != null) 'note': note}, admin: true);
+
+  /// Printable ZRA working sheet (HTML) for the 14th submission.
+  static Future<Uint8List?> adminTaxReport(String yearMonth) async {
+    if (!enabled) return null;
+    try {
+      final res = await http
+          .get(_uri('/admin/tax/$yearMonth/report'), headers: adminEnabled ? _adminHeaders : _headers)
+          .timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      return res.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// The linked rider's day as slot-batched task queues (stops, ETAs, totals,
   /// destination branch, target drop-off time).

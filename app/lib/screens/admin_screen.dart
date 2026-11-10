@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
@@ -21,6 +22,11 @@ class _AdminScreenState extends State<AdminScreen> {
   List<Map<String, dynamic>> _flags = const [];
   List<Map<String, dynamic>> _chatReports = const [];
   List<Map<String, dynamic>> _chatStrikes = const [];
+  List<Map<String, dynamic>> _payroll = const [];
+  List<Map<String, dynamic>> _payrollSummary = const [];
+  List<Map<String, dynamic>> _tax = const [];
+  bool _payrollBusy = false;
+  bool _taxBusy = false;
   bool _loading = true;
   bool _authorized = false;
   bool _superadmin = false;
@@ -54,6 +60,8 @@ class _AdminScreenState extends State<AdminScreen> {
     final alerts = await DropOffApi.securityAlerts();
     final flags = await DropOffApi.fraudFlags();
     final moderation = await DropOffApi.chatReports();
+    final payroll = await DropOffApi.adminPayroll();
+    final tax = await DropOffApi.adminTax();
     if (!mounted) return;
     setState(() {
       _authorized = true;
@@ -63,6 +71,9 @@ class _AdminScreenState extends State<AdminScreen> {
       _flags = ((flags?['flags'] as List?) ?? const []).cast<Map<String, dynamic>>();
       _chatReports = ((moderation?['reports'] as List?) ?? const []).cast<Map<String, dynamic>>();
       _chatStrikes = ((moderation?['strikes'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _payroll = ((payroll?['payouts'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _payrollSummary = ((payroll?['summary'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _tax = ((tax?['periods'] as List?) ?? const []).cast<Map<String, dynamic>>();
       _loading = false;
     });
   }
@@ -180,6 +191,10 @@ class _AdminScreenState extends State<AdminScreen> {
             _fraudCard(),
             const SizedBox(height: 18),
             _chatReportsCard(),
+            const SizedBox(height: 18),
+            _payrollCard(),
+            const SizedBox(height: 18),
+            _taxCard(),
             const _SupportInboxCard(),
             if (_superadmin) ...[
               const SizedBox(height: 18),
@@ -339,6 +354,211 @@ class _AdminScreenState extends State<AdminScreen> {
   /// first and track the action like every other admin surface does.
   static String _maskAdminPhone(String phone) =>
       phone.length >= 4 ? '••• ${phone.substring(phone.length - 4)}' : phone;
+
+  // ---- Rider payroll + ZRA turnover tax -------------------------------------
+
+  String _kwacha(num? v) => 'K${(v ?? 0).toStringAsFixed(v == null || v == v.roundToDouble() ? 0 : 2)}';
+
+  Future<void> _payrollAction(String label, Future<ApiResponse> Function() run, {bool reload = true}) async {
+    if (_payrollBusy) return;
+    setState(() { _payrollBusy = true; });
+    final res = await run();
+    if (!mounted) return;
+    setState(() { _payrollBusy = false; });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+      res.ok ? '$label done.' : '$label failed: ${res.error ?? 'try again'}')));
+    if (res.ok && reload) {
+      final p = await DropOffApi.adminPayroll();
+      if (mounted) {
+        setState(() {
+          _payroll = ((p?['payouts'] as List?) ?? const []).cast<Map<String, dynamic>>();
+          _payrollSummary = ((p?['summary'] as List?) ?? const []).cast<Map<String, dynamic>>();
+        });
+      }
+    }
+  }
+
+  /// Every payout row's money moves only after admin intent → superadmin release.
+  Widget _payrollCard() => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.badge_outlined, color: AppColors.forest),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Rider payroll (K3,000/mo)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            ]),
+            const SizedBox(height: 6),
+            Text('Auto-generated: weekly Sun 16:00 CAT, monthly on the 1st. Two signatures release the money.',
+                style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              for (final s in _payrollSummary)
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text('${s['status']}: ${s['n']} · ${_kwacha(num.tryParse('${s['total']}'))}',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
+                ),
+            ]),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, children: [
+              TextButton.icon(
+                onPressed: _payrollBusy ? null : () => _payrollAction('Generate weekly', () => DropOffApi.adminPayrollGenerate(kind: 'weekly')),
+                icon: const Icon(Icons.play_arrow, size: 16), label: const Text('Generate weekly', style: TextStyle(fontSize: 12)),
+              ),
+              TextButton.icon(
+                onPressed: _payrollBusy ? null : () => _payrollAction('Generate monthly', () => DropOffApi.adminPayrollGenerate(kind: 'monthly')),
+                icon: const Icon(Icons.play_arrow, size: 16), label: const Text('Generate monthly', style: TextStyle(fontSize: 12)),
+              ),
+            ]),
+            if (_payroll.isEmpty)
+              const Text('No payroll rows yet. Verify riders first; rows appear Sunday 16:00 CAT / 1st of the month.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            for (final p in _payroll.take(10))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(
+                      '#${p['id']} ${p['rider_name'] ?? ''} · ${p['period_kind'] == 'monthly_balance' ? 'month balance' : '${p['period_kind']}'} ${'${p['period_start']}'.split('T').first}',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${_kwacha(num.tryParse('${p['amount_zmw']}'))} · ${p['trips'] ?? 0}/${p['period_target'] ?? 0} trips'
+                      ' · ${_payrollStatusText('${p['status']}')}'
+                      '${((p['note'] ?? '') as String).isNotEmpty ? ' · ${p['note']}' : ''}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 11.5),
+                    ),
+                  ])),
+                  ..._payrollRowActions(p),
+                ]),
+              ),
+          ]),
+        ),
+      );
+
+  List<Widget> _payrollRowActions(Map<String, dynamic> p) {
+    final id = (p['id'] as num).toInt();
+    final status = '${p['status']}';
+    if (status == 'pending') {
+      return [
+        TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Confirmation 1 (admin)', () => DropOffApi.adminPayrollConfirm(id)), child: const Text('Confirm', style: TextStyle(fontSize: 12))),
+        TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Proof', () async {
+          final bytes = await DropOffApi.adminPayrollProof(id);
+          if (bytes == null) return const ApiResponse(error: 'unavailable');
+          await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-payout-$id.html')], subject: 'DropOff payout proof #$id');
+          return const ApiResponse(ok: true);
+        }, reload: false), child: const Text('Proof', style: TextStyle(fontSize: 12))),
+      ];
+    }
+    if (status == 'admin_confirmed') {
+      return [
+        TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Release payment', () => DropOffApi.adminPayrollConfirm(id)), child: const Text('Release pay', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900))),
+        TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Proof', () async {
+          final bytes = await DropOffApi.adminPayrollProof(id);
+          if (bytes == null) return const ApiResponse(error: 'unavailable');
+          await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-payout-$id.html')], subject: 'DropOff payout proof #$id');
+          return const ApiResponse(ok: true);
+        }, reload: false), child: const Text('Proof', style: TextStyle(fontSize: 12))),
+      ];
+    }
+    if (status == 'failed') {
+      return [
+        TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Retry release', () => DropOffApi.adminPayrollConfirm(id)), child: const Text('Retry', style: TextStyle(fontSize: 12))),
+        if (_superadmin)
+          TextButton(onPressed: _payrollBusy ? null : () => _payrollAction('Void', () => DropOffApi.adminPayrollVoid(id)), child: const Text('Void', style: TextStyle(fontSize: 12))),
+      ];
+    }
+    if (status == 'paid') {
+      return [
+        TextButton(onPressed: () async {
+          final bytes = await DropOffApi.adminPayrollProof(id);
+          if (!mounted) return;
+          if (bytes == null) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Proof unavailable — try again.')));
+            return;
+          }
+          await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-payout-$id.html')], subject: 'DropOff payout proof #$id');
+        }, child: const Text('Proof of payment', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900))),
+      ];
+    }
+    return const [];
+  }
+
+  String _payrollStatusText(String status) {
+    switch (status) {
+      case 'pending': return 'awaiting admin';
+      case 'admin_confirmed': return 'awaiting superadmin';
+      case 'paid': return 'paid ✓';
+      case 'failed': return 'Lipila failed';
+      default: return status;
+    }
+  }
+
+  Future<void> _taxAction(String label, Future<ApiResponse> Function() run) async {
+    if (_taxBusy) return;
+    setState(() { _taxBusy = true; });
+    final res = await run();
+    if (!mounted) return;
+    setState(() { _taxBusy = false; });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+      res.ok ? '$label recorded.' : '$label failed: ${res.error ?? 'try again'}')));
+    if (res.ok) {
+      final t = await DropOffApi.adminTax();
+      if (mounted) setState(() { _tax = ((t?['periods'] as List?) ?? const []).cast<Map<String, dynamic>>(); });
+    }
+  }
+
+  /// ZRA turnover tax: 0% ≤ K2,500 monthly turnover; 5% above; due the 14th.
+  Widget _taxCard() => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.account_balance_outlined, color: AppColors.forest),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('ZRA turnover tax', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+              TextButton(onPressed: _taxBusy ? null : () => _taxAction('Refresh', () => DropOffApi.adminTaxRefresh()), child: const Text('Refresh', style: TextStyle(fontSize: 12))),
+            ]),
+            Text('Turnover = DropOff income only (jobs + wallet legs + plans + COD cut). 0% up to K2,500/month, 5% above. File by the 14th of the next month.',
+                style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+            const SizedBox(height: 8),
+            if (_tax.isEmpty)
+              const Text('No tax periods yet — the ledger fills as payments land.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            for (final t in _tax.take(8))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(
+                      '${t['year_month']} · turnover ${_kwacha(num.tryParse('${t['gross_turnover_zmw']}'))} → due ${t['due_date']}',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Tax: ${_kwacha(num.tryParse('${t['tax_zmw']}'))} · status ${'${t['status']}'.toUpperCase()}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 11.5),
+                    ),
+                  ])),
+                  TextButton(onPressed: () async {
+                    final bytes = await DropOffApi.adminTaxReport('${t['year_month']}');
+                    if (!mounted) return;
+                    if (bytes == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report unavailable.')));
+                      return;
+                    }
+                    await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-TOT-${t['year_month']}.html')], subject: 'DropOff TOT ${t['year_month']}');
+                  }, child: const Text('Sheet', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900))),
+                  if ('${t['status']}' == 'open')
+                    TextButton(onPressed: _taxBusy ? null : () => _taxAction('Submitted', () => DropOffApi.adminTaxMark('${t['year_month']}', status: 'submitted')), child: const Text('Mark filed', style: TextStyle(fontSize: 12))),
+                  if ('${t['status']}' == 'submitted')
+                    TextButton(onPressed: _taxBusy ? null : () => _taxAction('Paid', () => DropOffApi.adminTaxMark('${t['year_month']}', status: 'paid')), child: const Text('Mark paid', style: TextStyle(fontSize: 12))),
+                ]),
+              ),
+          ]),
+        ),
+      );
 
   Widget _chatReportsCard() => Card(
         child: Padding(
