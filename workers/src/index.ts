@@ -1881,29 +1881,14 @@ app.post('/jobs', async (c) => {
     }
 
     // Smart auto-assign: bookings get a rider immediately unless a deposit is
-    // waiting or the caller opts out.
+    // waiting (momo) or the caller opts out. Coords are optional — dispatch
+    // falls back to the Lusaka centre when the sender typed an address only.
     let autoAssigned: { rider_id: number; rider: string; photo_url: string | null; eta_minutes: number; km: number } | null = null;
-    if (!depositRequired && b.auto_assign !== false && Number.isFinite(b.pickup_lat ?? 0) && Number.isFinite(b.pickup_lng ?? 0)) {
-      try {
-        const pick = await nearestAvailableRider(c.env, b.pickup_lat, b.pickup_lng);
-        if (pick) {
-          const etaMin = Math.round((pick.km / 22) * 60 + 4);
-          await c.env.DB.batch([
-            c.env.DB.prepare(
-              `UPDATE jobs SET rider_id = ?1, status = 'rider_assigned', assigned_at = datetime('now'), eta_minutes = ?2 WHERE ref = ?3`,
-            ).bind(pick.rider.id, etaMin, ref),
-            c.env.DB.prepare(
-              `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
-            ).bind(pick.rider.id),
-          ]);
-          autoAssigned = { rider_id: pick.rider.id, rider: pick.rider.full_name, photo_url: pick.rider.photo_url ?? null, eta_minutes: etaMin, km: pick.km };
-          await sendToPhone(c.env, senderPhone, {
-            title: 'Rider assigned',
-            body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup — track them live in Bookings.`,
-            data: { job_ref: ref, kind: 'rider_assigned' },
-          });
-        }
-      } catch { /* auto-assign is best-effort — the batch sweep picks it up next */ }
+    if (!depositRequired && b.auto_assign !== false) {
+      const pick = await dispatchToNearestRider(c.env, ref);
+      if (pick) {
+        autoAssigned = { rider_id: pick.rider.id, rider: pick.rider.full_name, photo_url: pick.rider.photo_url ?? null, eta_minutes: pick.eta_minutes, km: pick.km };
+      }
     }
 
     const payload = {
@@ -2407,6 +2392,16 @@ app.post('/jobs/:ref/events', async (c) => {
       `UPDATE jobs SET ${sets.join(', ')} WHERE id = ?1`).bind(...vals));
   }
   if (dbStatements.length) await c.env.DB.batch(dbStatements);
+
+  // Free the rider's load slot and flip them back to available — without this,
+  // riders stay 'on_route' and accumulate current_load forever, eventually
+  // reaching capacity and never receiving another dispatch.
+  if (status === 'delivered' || status === 'ready_for_collection' || status === 'collected') {
+    await c.env.DB.prepare(
+      `UPDATE riders SET current_load = MAX(0, current_load - 1), status = 'available', route_updated_at = datetime('now')
+       WHERE id = (SELECT rider_id FROM jobs WHERE id = ?1)`,
+    ).bind(job.id).run().catch(() => { /* dispatch hygiene must never break delivery events */ });
+  }
 
   const updated = await c.env.DB.prepare(
     `SELECT ref, status, paid, counter_price_zmw, rider_fee_zmw, leg2_fee_zmw,
@@ -4097,9 +4092,10 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
   } else if (pay.kind === 'booking_deposit' && pay.job_id) {
     // Prepayment resolved: the momo money (exactly the quote for this parcel —
     // trip price + processing + momo legs, never more) lands as the sender's
-    // delivery credit and dispatches the pending booking now.
+    // delivery credit and dispatches the pending booking now. Coords are
+    // optional; jobs from typed addresses fall back to the city anchor.
     const job = await env.DB.prepare(
-      'SELECT id, ref, sender_phone, pickup_lat, pickup_lng FROM jobs WHERE id = ?1',
+      'SELECT id, ref, sender_phone FROM jobs WHERE id = ?1',
     ).bind(pay.job_id).first<any>();
     await env.DB.batch([
       env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(pay.phone),
@@ -4109,26 +4105,8 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'deposit_paid', ?2)`)
         .bind(pay.job_id, 'Prepayment approved — rider dispatch in flight.'),
     ]);
-    if (job?.pickup_lat != null && job?.pickup_lng != null) {
-      try {
-        const pick = await nearestAvailableRider(env, Number(job.pickup_lat), Number(job.pickup_lng));
-        if (pick) {
-          const etaMin = Math.round((pick.km / 22) * 60 + 4);
-          await env.DB.batch([
-            env.DB.prepare(
-              `UPDATE jobs SET rider_id = ?1, status = 'rider_assigned', assigned_at = datetime('now'), eta_minutes = ?2 WHERE id = ?3`,
-            ).bind(pick.rider.id, etaMin, pay.job_id),
-            env.DB.prepare(
-              `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
-            ).bind(pick.rider.id),
-          ]);
-          await sendToPhone(env, job.sender_phone, {
-            title: 'Prepayment received',
-            body: `Confirmed — rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup.`,
-            data: { job_ref: job.ref ?? '', kind: 'rider_assigned' },
-          });
-        }
-      } catch { /* sweep assigns next */ }
+    if (job) {
+      await dispatchToNearestRider(env, job.ref);
     }
   } else if (pay.kind === 'cod_remit' && pay.job_id) {
     await env.DB.prepare(
@@ -4755,6 +4733,49 @@ function buildRoute(stops: { ref: string; address: string; lat: number; lng: num
 /* ------------------ smart rider auto-assign + dynamic re-optimization ----- */
 // Nearest available rider with free capacity gets the job; ties broken by
 // current load (emptiest rider first) so work spreads evenly.
+/** Dispatch a job to the nearest verified+available rider and notify BOTH
+ *  sides. Sender coords win; when they're missing we fall back to the Lusaka
+ *  centre anchor (the city's working assumption) — we NEVER skip dispatch
+ *  for lack of coordinates, because bookings made from typed addresses have
+ *  none. Returns the assignment or null when no verified rider exists. */
+async function dispatchToNearestRider(
+  env: Env,
+  ref: string,
+): Promise<{ rider: any; eta_minutes: number; km: number; fallback: boolean } | null> {
+  try {
+    const job = await env.DB.prepare(
+      'SELECT id, ref, sender_phone, pickup_address, pickup_lat, pickup_lng FROM jobs WHERE ref = ?1').bind(ref).first<any>();
+    if (!job) return null;
+    const fallback = !(Number.isFinite(Number(job.pickup_lat)) && Number.isFinite(Number(job.pickup_lng)));
+    const lat = fallback ? -15.4255 : Number(job.pickup_lat);
+    const lng = fallback ? 28.2805 : Number(job.pickup_lng);
+    const pick = await nearestAvailableRider(env, lat, lng);
+    if (!pick) return null;
+    const etaMin = Math.round((pick.km / 22) * 60 + 4);
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE jobs SET rider_id = ?1, status = 'rider_assigned', assigned_at = datetime('now'), eta_minutes = ?2 WHERE id = ?3 AND status != 'delivered'`,
+      ).bind(pick.rider.id, etaMin, job.id),
+      env.DB.prepare(
+        `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
+      ).bind(pick.rider.id),
+    ]);
+    await sendToPhone(env, job.sender_phone, {
+      title: 'Rider assigned',
+      body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup — track live in Bookings.`,
+      data: { job_ref: job.ref, kind: 'rider_assigned' },
+    });
+    await sendToPhone(env, pick.rider.phone, {
+      title: 'New delivery assigned',
+      body: `Job ${job.ref} — pickup at ${job?.pickup_address ?? 'sender address'}. Open the Team tab for details.`,
+      data: { job_ref: job.ref, kind: 'rider_assigned' },
+    });
+    return { rider: pick.rider, eta_minutes: etaMin, km: pick.km, fallback };
+  } catch {
+    return null;
+  }
+}
+
 async function nearestAvailableRider(env: Env, lat: number, lng: number): Promise<{ rider: any; km: number } | null> {
   const riders = await env.DB.prepare(
     `SELECT id, phone, full_name, vehicle, last_lat, last_lng, status, active, capacity, current_load, photo_url
@@ -4781,34 +4802,12 @@ app.post('/jobs/:ref/auto-assign', async (c) => {
   ).bind(ref).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
   if (job.rider_id) return c.json({ error: 'already assigned', rider_id: job.rider_id }, 409);
-  if (!Number.isFinite(job.pickup_lat) || !Number.isFinite(job.pickup_lng)) {
-    return c.json({ error: 'job has no pickup coordinates' }, 400);
-  }
-  const pick = await nearestAvailableRider(c.env, job.pickup_lat, job.pickup_lng);
-  if (!pick) return c.json({ error: 'no rider with capacity near pickup' }, 404);
-  const etaMin = Math.round((pick.km / 22) * 60 + 4); // ~22 km/h city + 4 min stop
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `UPDATE jobs SET rider_id = ?1, status = 'rider_assigned', assigned_at = datetime('now'), eta_minutes = ?2 WHERE ref = ?3`,
-    ).bind(pick.rider.id, etaMin, ref),
-    c.env.DB.prepare(
-      `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
-    ).bind(pick.rider.id),
-  ]);
-  // notify the rider + sender that a rider was assigned
-  await sendToPhone(c.env, job.sender_phone, {
-    title: 'Rider assigned',
-    body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup — track them live in Bookings.`,
-    data: { job_ref: ref, kind: 'rider_assigned' },
-  });
-  if (pick.rider.phone !== job.sender_phone) {
-    await sendToPhone(c.env, pick.rider.phone, {
-      title: 'New pickup assigned',
-      body: `Job ${ref} — ${job.pickup_address}, ETA ~${etaMin} min.`,
-      data: { job_ref: ref, kind: 'job_assigned' },
-    });
-  }
-  return c.json({ ok: true, ref, rider_id: pick.rider.id, rider: pick.rider.full_name, photo_url: pick.rider.photo_url ?? null, eta_minutes: etaMin, km: round2(pick.km) });
+  const result = await dispatchToNearestRider(c.env, ref);
+  if (!result) return c.json({ error: 'no verified rider available right now' }, 404);
+  const pick = result.rider;
+  const etaMin = result.eta_minutes;
+  const km = result.km;
+  return c.json({ ok: true, ref, rider_id: pick.id, rider: pick.full_name, photo_url: pick.photo_url ?? null, eta_minutes: etaMin, km: round2(km) });
 });
 
 // Re-optimize ONE rider's route from their live location, optionally inserting
