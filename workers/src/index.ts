@@ -1506,7 +1506,17 @@ app.post('/jobs', async (c) => {
       }
     }
 
-    // customer wallets are disabled — riders keep float, sellers pay momo/cash
+    // PREPAID POLICY (owner directive): every parcel is paid IN ADVANCE at
+    // booking — no cash option, no pay-at-pickup. Momo senders get the full
+    // prompt at booking; wallet payments draw pre-funded balance; plans are
+    // prepaid by their subscription. Riders never handle ride money.
+    const staffEyes = c.get('role') === 'ops' || isAdmin(c);
+    if (b.pay_method === 'cash' && !staffEyes) {
+      return c.json({
+        error: 'prepaid_required',
+        detail: 'DropOff collects every parcel in advance at booking. Pay by mobile money (or top up your wallet) — the rider never handles your cash.',
+      }, 400);
+    }
     const payMethod: string = ['mobile_money', 'cash'].includes(b.pay_method)
       ? b.pay_method : 'mobile_money';
     // Every parcel rides on a SLOT — no untimed jobs. 'now' (instant) is a
@@ -1827,51 +1837,40 @@ app.post('/jobs', async (c) => {
     // promo math happens on the DropOff leg ONLY — the partner fare is theirs.
     const feeBase = collectionFees(dropOffLeg, packInclusion === 'pack' ? null : riderFee);
 
-    // GHOST-BOOKING GUARD (pay-as-you-go only): a seller with ZERO completed
-    // deliveries must pre-approve a small momo deposit (the processing fee)
-    // before a rider is dispatched — approvals cost the pranker real money.
-    // Subscribers already carry the plan's processing fee, so they skip this.
+    // ADVANCE-PAYMENT GATE (owner directive): pay-as-you-go momo senders pay
+    // the FULL DropOff leg prompt at booking — rider dispatch waits for the
+    // approval. Plan members already paid via their subscription (skip);
+    // wallet bookings draw their pre-funded balance at pickup (the wallet was
+    // itself topped up in advance), and ops/superadmin bookings ride free.
     let depositRequired = false;
     let depositAmount = 0;
     let depositRef: string | null = null;
-    if (c.get('role') !== 'ops' && packInclusion !== 'pack') {
-      // Waive the pay-as-you-go deposit if this seller was referred by an
-      // existing user — referral enrollment replaces the anti-ghost gate.
-      const referred = await c.env.DB.prepare(
-        'SELECT referrer_phone FROM referrals WHERE referred_phone = ?1 LIMIT 1',
-      ).bind(senderPhone).first<any>();
-      if (!referred) {
-        const done = (await c.env.DB.prepare(
-          `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
-        ).bind(senderPhone).first<any>())?.n ?? 0;
-        if (done === 0) {
-          depositRequired = true;
-          depositAmount = round2(platformFee(riderFee) + MOMO_COLLECTION_FEE);
-          depositRef = `dep-${ref}`;
-          const init = await lipilaCollect(c.env, senderPhone, depositAmount, depositRef,
-            `DropOff deposit ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
-        if (init.ok) {
-          await c.env.DB.prepare(
-            `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-               lipila_fee_zmw, lipila_reference, status, channel, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 'merchant', 'booking_deposit')`,
-          ).bind(meta.last_row_id, senderPhone, providerFromPhone(senderPhone), depositAmount,
-            depositAmount, round2(platformFee(riderFee)), MOMO_COLLECTION_FEE,
-            init.lipilaReference ?? depositRef).run();
-        } else {
-          depositRequired = false; // Lipila down — let the sweep assign a rider, fee still owed
-        }
-      }
+    if (!staffEyes && packInclusion !== 'pack' && payMethod === 'mobile_money') {
+      depositRequired = true;
+      depositAmount = feeBase.prompt_total_zmw; // full DropOff leg + processing + momo leg
+      depositRef = `adv-${ref}`;
+      const init = await lipilaCollect(c.env, senderPhone, depositAmount, depositRef,
+        `DropOff advance ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+      if (init.ok) {
+        await c.env.DB.prepare(
+          `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
+             lipila_fee_zmw, lipila_reference, status, channel, kind)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 'merchant', 'booking_deposit')`,
+        ).bind(meta.last_row_id, senderPhone, providerFromPhone(senderPhone), depositAmount,
+          depositAmount, round2(platformFee(dropOffLeg)), MOMO_COLLECTION_FEE,
+          init.lipilaReference ?? depositRef).run();
+      } else {
+        depositRequired = false; // Lipila down — let the sweep assign a rider, fee still owed
       }
     }
     if (depositRequired) {
       await c.env.DB.prepare(
         'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
-      ).bind(meta.last_row_id, 'deposit_pending',
-        'Pay-as-you-go first booking: deposit prompt sent at booking. A rider is dispatched the moment it is approved.').run();
+      ).bind(meta.last_row_id, 'advance_pending',
+        'Advance payment prompt sent at booking — the FULL DropOff leg. The rider is dispatched the moment it is approved; no pay-at-pickup, no rider cash handling.').run();
       c.executionCtx.waitUntil(
         sendSms(c.env, senderPhone,
-        `DropOff: approve the K${depositAmount.toFixed(2)} booking deposit prompt for ${ref} to dispatch your rider. The money stays on your DropOff wallet.`).catch(() => {}),
+        `DropOff: approve the K${depositAmount.toFixed(2)} advance prompt for ${ref}. It is payment for YOUR parcel — it loads to your DropOff wallet and pays this delivery at pickup. Paid in advance at booking; your rider never handles cash.`).catch(() => {}),
       );
     }
 
@@ -1978,7 +1977,16 @@ app.post('/collections', async (c) => {
   }
   const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class) ? b.vehicle_class : 'motorcycle';
   const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, VEHICLE_MAX_PARCELS[vehicleClass]));
+  // PREPAID POLICY (owner directive): no cash — everything is paid in advance
+  // at booking by momo; plans ride prepaid via their subscription.
   const payMethod = b.pay_method === 'cash' ? 'cash' : 'mobile_money';
+  const staffEyes = c.get('role') === 'ops' || isAdmin(c);
+  if (payMethod === 'cash' && !staffEyes) {
+    return c.json({
+      error: 'prepaid_required',
+      detail: 'DropOff collects every parcel in advance at booking. Pay by mobile money — the rider never handles your cash.',
+    }, 400);
+  }
 
   // Plan inclusion: every parcel counts as one plan slot (two parcels in one
   // trip = two slots). A trip rides free (rider fee K0) while it fits the cap.
@@ -2033,12 +2041,15 @@ app.post('/collections', async (c) => {
   const coverStatus = !coverOptIn ? 'none' : (declaredValueZmw > 0 ? 'quoted' : 'declined');
   if (coverOptIn && declaredValueZmw <= 0) return c.json({ error: 'declared_value_required_for_cover' }, 400);
   if (coverOptIn && !coverTosAccepted) return c.json({ error: 'cover_tos_required', detail: 'Accept the parcel cover terms (quoted protection, not insurance) before opting in.' }, 400);
-  // Ghost-booking guard for collections too (pay-as-you-go, zero deliveries done).
+  // ADVANCE-PAYMENT GATE (owner directive): every momo collection is paid IN
+  // ADVANCE at booking — full rider leg + processing + momo leg. Plan members
+  // (in-cap, rider fee K0) ride their prepaid subscription. Deposit settles
+  // into the sender's wallet and dispatches the rider on approval.
   const completedEver = (await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
   ).bind(phone).first<any>())?.n ?? 0;
-  const depositRequired = c.get('role') !== 'ops' && activeSub == null && completedEver === 0;
-  let depositAmount = round2(platformFee(riderFee) + MOMO_COLLECTION_FEE);
+  const depositRequired = !staffEyes && planInclusion !== 'pack' && completedEver >= 0 && riderFee > 0;
+  const depositAmount = round2(riderFee + round2(platformFee(riderFee)) + MOMO_COLLECTION_FEE);
   let depositRef: string | null = null;
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
@@ -2087,10 +2098,10 @@ app.post('/collections', async (c) => {
         round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, depInit.lipilaReference ?? depositRef).run();
       await c.env.DB.prepare(
         'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
-      ).bind(meta.last_row_id, 'deposit_pending',
-        'Pay-as-you-go first booking: deposit prompt sent. A rider is dispatched the moment it is approved.').run();
+      ).bind(meta.last_row_id, 'advance_pending',
+        'Advance payment prompt sent at booking — the FULL DropOff leg for this collection. The rider is dispatched the moment it is approved.').run();
       await sendSms(c.env, phone,
-        `DropOff: approve the K${depositAmount.toFixed(2)} booking deposit prompt to dispatch your rider for ${ref}. The money stays on your DropOff wallet.`).catch(() => {});
+        `DropOff: approve the K${depositAmount.toFixed(2)} advance prompt for ${ref}. It is payment for YOUR parcel — it loads to your DropOff wallet and pays this delivery at pickup. Paid in advance; your rider never handles cash.`).catch(() => {});
     } else {
       // deposit failed to init — same as /jobs: proceed, fee still owed on prompt
     }
