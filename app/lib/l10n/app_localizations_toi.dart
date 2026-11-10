@@ -44,11 +44,11 @@ class AppLocalizationsToi extends AppLocalizations {
       'Kuphonya kwakunembo kwayimikizya kubbukka kupya. Amwaambe ku DropOff support naa ops.';
 
   @override
-  String get depositRequiredTitle => 'Deposit ilayandika rider katana kutumwa';
+  String get depositRequiredTitle => 'Amupile parcel yanu pangu pa booking';
 
   @override
   String get depositRequiredBody =>
-      'Bakubbukka ciindi cakusaanguna (pay-as-you-go) balayandika kuzumina deposit niini rider katana kutumwa. Bapulani tabayandiki. Deposit inookkala mu wallet yanu ya DropOff.';
+      'Cintu acimwi cipilikwa advance pa booking. App ilatumya prepayment prompt ya ulendo ooyo (trip price + processing fee) ucintu nitachitalatumwa rider, alimwi rider tachiimwe ca cash yanu. Mwekuti iko cancel before pickup, ndalama zitalibwi zibweleka ku momo yanu.';
 
   @override
   String get slotRequiredTitle => 'Amusale ciindi cakubwezegwa';

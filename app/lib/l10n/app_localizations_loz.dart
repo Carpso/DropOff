@@ -44,12 +44,11 @@ class AppLocalizationsLoz extends AppLocalizations {
       'Mi phonyeho ya kwa nyuma i yemisize ku beela kusha. Amu bulelisane ni DropOff support kapa ops.';
 
   @override
-  String get depositRequiredTitle =>
-      'Deposit i ya tokwa pili rider a sika ku romelwa';
+  String get depositRequiredTitle => 'Kafate sika sa hae mwa booking';
 
   @override
   String get depositRequiredBody =>
-      'Babeela lwa pili (pay-as-you-go) ba tokwa ku lumela deposit ye nyinyani pili rider a sika ku romelwa. Ba plan ha ba tokwi. Deposit i sala mwa wallet ya mina ya DropOff.';
+      'Bakafatete ka moka ba kafwa advance mwa booking. App i romela prepayment prompt ya safari ye (trip price + processing fee) pili rider a sa romelwe, mina rider ha a nga cash ya mina. Ha booking i ka cancelwa pili pickup, chelete ye salilwe i buswa ku momo ya mina.';
 
   @override
   String get slotRequiredTitle => 'Amu kete nako ya kunangwa';

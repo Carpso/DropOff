@@ -44,11 +44,11 @@ class AppLocalizationsBem extends AppLocalizations {
       'Ukuphonya ukwakunuma kwalesha ukubukisha ukupya. Landa na DropOff support nangu ops.';
 
   @override
-  String get depositRequiredTitle => 'Deposit ilefwaikwa ilyo rider talatumwa';
+  String get depositRequiredTitle => 'Lipeni parcel pari kusule na booking';
 
   @override
   String get depositRequiredBody =>
-      'Ababukisha umuku wa kubalilapo (pay-as-you-go) balefwaikwa ukusuminisha deposit inono ilyo rider talatumwa. Abakwata plan tabafwaikwa. Deposit ikala mu wallet yenu iya DropOff.';
+      'Cila cipe cilipilwa advance pe booking. App ituma prepayment prompt ya ulendo uyu (trip price + processing fee) ilyo rider talatumwa, kabili rider takwata cash yenu. Nga booking yaleshiwa ilyo shipping naitwalwa, indalama mishikile isubila ku momo yenu.';
 
   @override
   String get slotRequiredTitle => 'Saleni inshita ya kupokwa';

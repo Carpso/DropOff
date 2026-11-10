@@ -521,7 +521,7 @@ class _AdminScreenState extends State<AdminScreen> {
               const Expanded(child: Text('ZRA turnover tax', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
               TextButton(onPressed: _taxBusy ? null : () => _taxAction('Refresh', () => DropOffApi.adminTaxRefresh()), child: const Text('Refresh', style: TextStyle(fontSize: 12))),
             ]),
-            Text('Turnover = DropOff income only (jobs + wallet legs + plans + COD cut). 0% up to K2,500/month, 5% above. File by the 14th of the next month.',
+            Text('Turnover = DropOff income only (jobs + prepaid delivery legs + plans + COD cut). 0% up to K2,500/month, 5% above. File by the 14th of the next month.',
                 style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
             const SizedBox(height: 8),
             if (_tax.isEmpty)

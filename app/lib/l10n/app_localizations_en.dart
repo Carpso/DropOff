@@ -44,11 +44,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'Recent missed pickups put new bookings on hold. Contact DropOff support or ask ops to review your account.';
 
   @override
-  String get depositRequiredTitle => 'Deposit required before dispatch';
+  String get depositRequiredTitle => 'Prepay for your parcel at booking';
 
   @override
   String get depositRequiredBody =>
-      'First-time pay-as-you-go bookings need a small deposit approval before a rider is dispatched. Subscribers are exempt. The deposit stays on your DropOff wallet.';
+      'Every parcel is paid in advance at booking. The app sends you a prepayment prompt for exactly this delivery (trip price + processing fee) before your rider is dispatched, and no rider ever handles your cash. If the booking is canceled before pickup, the unspent prepayment is automatically returned to your momo.';
 
   @override
   String get slotRequiredTitle => 'Choose a pickup slot';

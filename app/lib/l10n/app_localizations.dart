@@ -173,13 +173,13 @@ abstract class AppLocalizations {
   /// No description provided for @depositRequiredTitle.
   ///
   /// In en, this message translates to:
-  /// **'Deposit required before dispatch'**
+  /// **'Prepay for your parcel at booking'**
   String get depositRequiredTitle;
 
   /// No description provided for @depositRequiredBody.
   ///
   /// In en, this message translates to:
-  /// **'First-time pay-as-you-go bookings need a small deposit approval before a rider is dispatched. Subscribers are exempt. The deposit stays on your DropOff wallet.'**
+  /// **'Every parcel is paid in advance at booking. The app sends you a prepayment prompt for exactly this delivery (trip price + processing fee) before your rider is dispatched, and no rider ever handles your cash. If the booking is canceled before pickup, the unspent prepayment is automatically returned to your momo.'**
   String get depositRequiredBody;
 
   /// No description provided for @slotRequiredTitle.

@@ -44,11 +44,11 @@ class AppLocalizationsNy extends AppLocalizations {
       'Maulendo ophonya posachedwa ayimitsa kubukitsa kwatsopano. Lumikizanani ndi DropOff support kapena ops.';
 
   @override
-  String get depositRequiredTitle => 'Deposit ikufunika musanatumizidwe rider';
+  String get depositRequiredTitle => 'Lipirani parcel yanu poyamba (advance)';
 
   @override
   String get depositRequiredBody =>
-      'Obukitsa koyamba (pay-as-you-go) amafunika kuvomereza deposit yaing\'ono musanatumizidwe rider. Olembetsa satenga mbali. Deposit imakhala mu wallet yanu ya DropOff.';
+      'Parcel iliyonse imalipiridwa in advance pa book. App imatumiza prepayment prompt ya ulendo uu (trip price + processing fee) musanatumizidwe rider, ndipo rider asan\'akhudze ndi cash yanu. Ngati ulendo uthathetsedwa musanadze kulandidwa, ndalama yotsalayo ibwezeredwa ku momo yanu.';
 
   @override
   String get slotRequiredTitle => 'Sankhani nthawi yolandidwira';

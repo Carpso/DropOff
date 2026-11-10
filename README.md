@@ -116,7 +116,7 @@ Notes: prices are from Lusaka only; large parcels start at the shown amount; han
 6. **Business packs (Silver K350 / Gold K700 / Platinum K1,500 per month)** — see §3.1; auto-renewed via Lipila by the daily cron (renewal prompts also carry the +K2.50 customer-side fee).
 7. **Surge / VIP** — express <30-min pickups, after-hours, weekend.
 8. **Waiting / queue time** — rider logs minutes (sender not ready, depot counter queue): first 10 min free, K2/min, K50 cap, appended to the server-computed total.
-9. **Wallet float (fee-amortiser)** — senders pre-load wallets via Lipila (`kind='topup'`, K10–K5,000): the K2.50 prompt fee is paid **once per deposit**, not per parcel. Wallet-method jobs charge the **DropOff leg only** (+ its platform fee) on pickup; every kwacha moves through `wallet_ledger` (single audit trail).
+9. **Prepayment for parcel delivery (single-purpose)** — the momo prompt at booking covers exactly the delivery's cost (DropOff leg + processing + momo fee). Approval pins that prepayment to the one parcel; the DropOff leg (+ its platform separation) is charged on pickup. No free-form sender top-up exists — cancel before pickup automatically returns the unspent prepayment to the sender's momo (`refundUnspentPrepaid`). Every kwacha moves through `wallet_ledger` (single audit trail). Riders hold zero cash — riders are salaried (K3,000/mo incl. fuel, pace-gated).
 
 > **Never compete on the courier ticket itself.** DropOff is a *value-add* to Platinum / Mercury / One World —
 > that positioning makes depot partnerships win-wins instead of defensive.
@@ -320,7 +320,7 @@ The `partner` role (courier shop console) is minted only by `POST /admin/partner
 ### Still yours to do
 1. **Email sending:** wrangler v4 → `wrangler email sending enable churchonapp.com`; until then reset/verify links return `mail_error` (dev links with `AUTH_DEV_MODE=1`).
 2. **SMS OTP:** confirm `SMS_*` secrets are set (`wrangler secret list`); until production SMS is live, rider device-link codes can be watched with `AUTH_DEV_MODE=1` only on a local/dev deployment — never in production.
-3. **Lipila live:** `LIPILA_BASE_URL=https://blz.lipila.io` + live key; disbursements need IP whitelisting.
+3. **Lipila live:** `LIPILA_BASE_URL=https://blz.lipila.io` + live key. Rider/customer payout destinations only RECEIVE — no per-number registration/whitelist required; the platform momo main number likewise needs none. The only operational requirement is disbursement float in the Lipila disbursement pool; if payouts fail, Lipila error text is logged and surfaced to ops.
 4. **Keystore backup:** `app/android/app/upload-keystore.jks` + password backup — losing it = new app signing on Play.
 
 ## 9. Marketing kit (this repo)
