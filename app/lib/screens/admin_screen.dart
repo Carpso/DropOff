@@ -1,3 +1,4 @@
+import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -87,9 +88,9 @@ class _AdminScreenState extends State<AdminScreen> {
         : await DropOffApi.adminSms(phone: _smsPhone.text.trim(), message: body);
     if (!mounted) return;
     setState(() => _sending = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
+    AppToast.show(context, res.ok
         ? (broadcast ? 'Broadcast queued — sends run in the background.' : 'SMS sent.')
-        : 'Send failed: ${res.error}')));
+        : 'Send failed: ${res.error}');
     if (res.ok) {
       _smsBody.clear();
       AnalyticsService.instance.track(
@@ -365,8 +366,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final res = await run();
     if (!mounted) return;
     setState(() { _payrollBusy = false; });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-      res.ok ? '$label done.' : '$label failed: ${res.error ?? 'try again'}')));
+    AppToast.show(context, res.ok ? '$label done.' : '$label failed: ${res.error ?? 'try again'}');
     if (res.ok && reload) {
       final p = await DropOffApi.adminPayroll();
       if (mounted) {
@@ -476,7 +476,7 @@ class _AdminScreenState extends State<AdminScreen> {
           final bytes = await DropOffApi.adminPayrollProof(id);
           if (!mounted) return;
           if (bytes == null) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Proof unavailable — try again.')));
+            AppToast.show(context, 'Proof unavailable — try again.');
             return;
           }
           await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-payout-$id.html')], subject: 'DropOff payout proof #$id');
@@ -502,8 +502,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final res = await run();
     if (!mounted) return;
     setState(() { _taxBusy = false; });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-      res.ok ? '$label recorded.' : '$label failed: ${res.error ?? 'try again'}')));
+    AppToast.show(context, res.ok ? '$label recorded.' : '$label failed: ${res.error ?? 'try again'}');
     if (res.ok) {
       final t = await DropOffApi.adminTax();
       if (mounted) setState(() { _tax = ((t?['periods'] as List?) ?? const []).cast<Map<String, dynamic>>(); });
@@ -545,7 +544,7 @@ class _AdminScreenState extends State<AdminScreen> {
                     final bytes = await DropOffApi.adminTaxReport('${t['year_month']}');
                     if (!mounted) return;
                     if (bytes == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report unavailable.')));
+                      AppToast.show(context, 'Report unavailable.');
                       return;
                     }
                     await Share.shareXFiles([XFile.fromData(bytes, mimeType: 'text/html', name: 'DropOff-TOT-${t['year_month']}.html')], subject: 'DropOff TOT ${t['year_month']}');
@@ -728,10 +727,9 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
   }
 
   Future<void> _open(Map<String, dynamic> thread) async {
-    final messenger = ScaffoldMessenger.of(context);
     final id = (thread['id'] as num?)?.toInt();
     if (id == null) {
-      messenger.showSnackBar(const SnackBar(content: Text('Ticket is missing its id — pull to refresh and try again.')));
+      AppToast.show(context, 'Ticket is missing its id — pull to refresh and try again.');
       return;
     }
     try {
@@ -747,7 +745,7 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
         ),
       );
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Could not open ticket #$id: $e')));
+      AppToast.show(context, 'Could not open ticket #$id: $e');
       return;
     }
     if (mounted) _load();
@@ -902,7 +900,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
     if (!mounted) return;
     setState(() => _sending = false);
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Reply failed: ${res.error}')));
+      AppToast.show(context, 'Reply failed: ${res.error}');
       return;
     }
     await _load();
@@ -917,9 +915,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
     setState(() => _drafting = false);
     final draft = '${res.body['draft'] ?? ''}'.trim();
     if (!res.ok || draft.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(res.ok ? 'AI returned an empty draft — write the reply yourself.' : 'AI draft unavailable: ${res.error ?? 'try again'}'),
-      ));
+      AppToast.show(context, res.ok ? 'AI returned an empty draft — write the reply yourself.' : 'AI draft unavailable: ${res.error ?? 'try again'}');
       return;
     }
     setState(() { _reply.text = draft; });
@@ -976,7 +972,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
 
   void _copyPhone() {
     Clipboard.setData(ClipboardData(text: widget.phone));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Copied ${widget.phone}')));
+    AppToast.show(context, 'Copied ${widget.phone}');
   }
 
   @override
@@ -1126,9 +1122,9 @@ class _UsersCardState extends State<_UsersCard> {
     if (email.isEmpty || role == '${user['role'] ?? ''}') return;
     final res = await DropOffApi.adminSetUserRole(email, role);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
+    AppToast.show(context, res.ok
         ? '$email is now $role.'
-        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'the owner account cannot be demoted' : res.error == 'superadmin_required' ? 'only the owner can change roles' : res.error}')));
+        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'the owner account cannot be demoted' : res.error == 'superadmin_required' ? 'only the owner can change roles' : res.error}');
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(
@@ -1151,7 +1147,7 @@ class _UsersCardState extends State<_UsersCard> {
             IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
           const SizedBox(height: 4),
-          const Text('As the owner you decide who is admin (e.g. your spouse to run support). Admins cannot invite more admins.',
+          const Text('As the owner you decide who is who. Roles you can grant: customer (regular sender/seller), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves).',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
           const SizedBox(height: 8),
           if (_loading)
@@ -1194,9 +1190,11 @@ class _UsersCardState extends State<_UsersCard> {
                       initialValue: role,
                       onSelected: (r) => _setRole(u, r),
                       itemBuilder: (context) => const [
-                        PopupMenuItem(value: 'customer', child: Text('customer')),
-                        PopupMenuItem(value: 'admin', child: Text('admin')),
-                        PopupMenuItem(value: 'partner', child: Text('partner')),
+                        PopupMenuItem(value: 'customer', child: Text('customer — regular sender/seller')),
+                        PopupMenuItem(value: 'rider', child: Text('rider — team member (salary)')),
+                        PopupMenuItem(value: 'partner', child: Text('partner — courier depot console')),
+                        PopupMenuItem(value: 'ops', child: Text('ops — dispatch tools (fleet-wide)')),
+                        PopupMenuItem(value: 'admin', child: Text('admin — admin console (no role minting)')),
                       ],
                       child: Chip(
                         visualDensity: VisualDensity.compact,
@@ -1275,7 +1273,7 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
     });
     if (!mounted) return;
     setState(() => _saving = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok ? 'Branch added.' : 'Failed: ${res.error}')));
+    AppToast.show(context, res.ok ? 'Branch added.' : 'Failed: ${res.error}');
     if (res.ok) {
       _name.clear(); _address.clear(); _lat.clear(); _lng.clear(); _phone.clear(); _loadBranches();
       AnalyticsService.instance.track(
@@ -1401,7 +1399,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
 
   void _copy(String code) {
     Clipboard.setData(ClipboardData(text: code));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$code copied.')));
+    AppToast.show(context, '$code copied.');
   }
 
   Future<void> _generate() async {
@@ -1410,7 +1408,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not generate codes (${res.error}).')));
+      AppToast.show(context, 'Could not generate codes (${res.error}).');
       return;
     }
     final codes = ((res.body['codes'] as List?) ?? const []).map((c) => '$c').toList();
@@ -1424,9 +1422,9 @@ class _PackCodesCardState extends State<_PackCodesCard> {
       meta: {'tier': _tier, 'count': codes.length},
     );
     if (codes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No codes generated - try again.')));
+      AppToast.show(context, 'No codes generated - try again.');
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${codes.length} code${codes.length == 1 ? '' : 's'} generated.')));
+      AppToast.show(context, '${codes.length} code${codes.length == 1 ? '' : 's'} generated.');
     }
     await _loadHistory();
   }
@@ -1434,7 +1432,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
   void _copyAll() {
     if (_codes.isEmpty) return;
     Clipboard.setData(ClipboardData(text: _codes.join('\n')));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${_codes.length} code${_codes.length == 1 ? '' : 's'} copied.')));
+    AppToast.show(context, '${_codes.length} code${_codes.length == 1 ? '' : 's'} copied.');
   }
 
   @override
@@ -1622,7 +1620,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
       if (ok != true) return;
       note = controller.text.trim();
       if (note.isEmpty) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('A rejection reason is required.')));
+        if (mounted) AppToast.show(context, 'A rejection reason is required.');
         return;
       }
     }
@@ -1630,9 +1628,9 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     final res = await DropOffApi.adminVerifyRider(id, status: status, note: note);
     if (!mounted) return;
     setState(() => _busy = null);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.ok
+    AppToast.show(context, res.ok
         ? (status == 'verified' ? 'Driver verified.' : 'Driver rejected.')
-        : 'Could not update (${res.error}).')));
+        : 'Could not update (${res.error}).');
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(
@@ -1650,7 +1648,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     if (!mounted) return;
     setState(() => _busy = null);
     if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('AI check failed (${res.error}).')));
+      AppToast.show(context, 'AI check failed (${res.error}).');
       return;
     }
     AnalyticsService.instance.track(

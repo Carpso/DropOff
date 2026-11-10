@@ -340,21 +340,22 @@ app.use('*', async (c, next) => {
           try { await noteDevice(c.env.DB, claims.phone, claims.did, clientIp(c), userAgent(c)); } catch { /* best-effort */ }
         }
       }
-      // The app owner's phone is always admin (OWNER_PHONE secret) � covers
-      // OTP-only sign-ins that have no auth_users row.
-      let role = user?.role === 'partner' || user?.role === 'admin' ? user.role
+      // The app owner's phone is always admin (OWNER_PHONE secret) — covers
+      // OTP-only sign-ins that have no auth_users row, and any user a
+      // superadmin has promoted via /admin/users/role ('partner', 'rider',
+      // 'ops' or 'admin').
+      let role = ['partner', 'admin', 'rider', 'ops'].includes(user?.role ?? '') ? user.role
         : claims.phone === ownerPhone(c.env) ? 'admin' : null;
-      if (!role) {
-        // Rider sign-in: a phone that ops registered on a rider resolves to
-        // role='rider' � the same app then shows the Team/Rider tab with ONLY
-        // that rider's jobs, route and COD (all keyed off callers' phone).
+      // Rider identity: an accepted DB role also binds the rider's roster row if
+      // one exists (not required - role='rider' is usable without a roster row).
+      if (role === 'rider' || !role) {
         const rider = await c.env.DB.prepare(
           'SELECT id FROM riders WHERE phone = ?1 AND active = 1',
         ).bind(claims.phone).first<{ id: number }>();
         if (rider) {
-          role = 'rider';
           c.set('riderId', rider.id);
         }
+        if (!role && rider) role = 'rider';
       }
       c.set('role', role ?? 'customer');
       if (user?.courier_id) c.set('courierId', user.courier_id);
@@ -3672,8 +3673,8 @@ app.post('/admin/users/role', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const email = String(b?.email ?? '').trim().toLowerCase();
   const role = String(b?.role ?? '');
-  if (!email || !['customer', 'admin', 'partner'].includes(role)) {
-    return c.json({ error: 'email and role (customer|admin|partner) required' }, 400);
+  if (!email || !['customer', 'admin', 'partner', 'rider', 'ops'].includes(role)) {
+    return c.json({ error: 'email and role (customer|admin|partner|rider|ops) required' }, 400);
   }
   const user = await c.env.DB.prepare(
     'SELECT email, phone, role FROM auth_users WHERE email = ?1',
@@ -3906,6 +3907,28 @@ app.post('/payments', async (c) => {
     }
     phone = c.get('role') === 'ops' && b.phone ? normalizeZmPhone(b.phone) : c.get('phone')!;
     if (!phone) return c.json({ error: 'missing phone' }, 400);
+    // IDEMPOTENCY: the advance-payment gate already sent the sender's momo
+    // prompt for this exact parcel at booking. If it is pending OR already
+    // settled it IS this job's payment — never issue a second prompt for the
+    // same delivery.
+    const pendingAdvance = await c.env.DB.prepare(
+      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status FROM payments
+        WHERE job_id = ?1 AND kind = 'booking_deposit' AND status IN ('pending','success')
+        ORDER BY id DESC LIMIT 1`,
+    ).bind(job.id).first<any>();
+    if (pendingAdvance) {
+      const reused = {
+        ok: true,
+        payment_id: pendingAdvance.id,
+        lipila_reference: pendingAdvance.lipila_reference ?? null,
+        amount_zmw: pendingAdvance.amount_zmw,
+        platform_fee_zmw: pendingAdvance.platform_fee_zmw ?? 0,
+        lipila_fee_zmw: pendingAdvance.lipila_fee_zmw ?? 0,
+        reused_advance_prompt: true,
+      };
+      await saveIdempotent(c.env, idemKey, 'payment', phone, 200, reused);
+      return c.json(reused);
+    }
     // DropOff NEVER holds partner money: charge ONLY the DropOff leg
     // (rider fee + door leg + its processing) and platform processing fees.
     // The courier counter fare is paid directly at the depot. Counter fare is
