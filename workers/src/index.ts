@@ -3046,26 +3046,55 @@ app.get('/predict/seller', async (c) => {
       GROUP BY wd ORDER BY n DESC LIMIT 1`,
   ).bind(phone).first<any>())?.wd ?? null;
 
-  // Plan pick: cheapest paid monthly/weekly plan fully covering the forecast.
+  // Plan pick: economic comparison across every paid tier — pick the plan with
+  // the MAXIMUM estimated savings (tie-break: cheaper fee), never a first-match
+  // scan. The old loop always pitched the first plan in the list (Weekly
+  // Sprint K399), so a seller with a 1-parcel forecast was shown "save K-315".
+  // A plan that costs more than pay-as-you-go is NOT a recommendation.
   const catalogue = await plans(db);
   const paid = ['weekly', 'silver', 'gold', 'platinum'] as const;
+  const tierLabel: Record<string, string> = { weekly: 'Weekly Sprint', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' };
   let best: any = null;
-  for (const tier of paid) {
-    const p = catalogue[tier];
-    if (blended > 0 && p.parcels_per_month >= blended) {
-      best = {
-        tier, tag: p.tag ?? null, fee_zmw: p.fee_zmw, parcels_per_month: p.parcels_per_month,
-        est_savings_zmw: Math.round(Math.min(blended, p.parcels_per_month) * avgFee - p.fee_zmw),
-      };
-      break;
+  if (blended > 0) {
+    for (const tier of paid) {
+      const p = catalogue[tier];
+      const est = Math.round(Math.min(blended, p.parcels_per_month) * avgFee - p.fee_zmw);
+      if (est < 0) continue; // losing deal — never recommend
+      if (!best || est > best.est_savings_zmw || (est === best.est_savings_zmw && p.fee_zmw < best.fee_zmw)) {
+        best = { tier, tag: p.tag ?? tierLabel[tier], fee_zmw: p.fee_zmw, parcels_per_month: p.parcels_per_month, est_savings_zmw: est };
+      }
     }
   }
+  // Break-even teaser (honest ladder): the cheapest plan that can actually pay
+  // for itself at this seller's average fee, and the parcel count where it
+  // flips positive. Injected into daily_option.note so it renders on every
+  // installed app without a client update.
+  let planTeaser: string | null = null;
+  if (blended > 0 && !best) {
+    let teaser: { tier: PlanTier; label: string; parcels: number } | null = null;
+    for (const tier of paid) {
+      const p = catalogue[tier];
+      const need = Math.ceil(p.fee_zmw / Math.max(1, avgFee));
+      if (need <= p.parcels_per_month && (!teaser || need < teaser.parcels || (need === teaser.parcels && p.fee_zmw < catalogue[teaser.tier].fee_zmw))) {
+        teaser = { tier, label: tierLabel[tier], parcels: need };
+      }
+    }
+    if (teaser) planTeaser = `Ship ~${teaser.parcels} parcels this month and ${teaser.label} (K${catalogue[teaser.tier].fee_zmw}) pays for itself.`;
+  }
   const dailyDays = Math.min(30, Math.ceil(blended / 2));
+  const paygCost = Math.round(blended * avgFee);
+  const dailyCost = dailyDays * catalogue.rider_daily.fee_zmw;
+  let dailyNote = 'On-demand days - activate only the days you ship. 24h validity, 2 parcels included per day.';
+  if (blended > 0 && dailyDays > 0) {
+    dailyNote += ` Up to 4 parcels a week cheaper than pay-as-you-go.`;
+    dailyNote += ` At your volume: ~${dailyDays} active days × K${catalogue.rider_daily.fee_zmw} ≈ K${dailyCost} vs ≈ K${paygCost} pay-as-you-go.`;
+    if (planTeaser) dailyNote += ` ${planTeaser}`;
+  }
   const dailyOption = blended > 0 && dailyDays <= 30
     ? {
       days_needed: dailyDays,
-      cost_zmw: dailyDays * catalogue.rider_daily.fee_zmw,
-      note: 'On-demand days - activate only the days you ship. 24h validity, 2 parcels included per day.',
+      cost_zmw: dailyCost,
+      note: dailyNote,
     }
     : null;
   const confidence = sample >= 60 ? 'high' : sample >= 15 ? 'medium' : 'low';
@@ -3079,6 +3108,7 @@ app.get('/predict/seller', async (c) => {
     trend_parcels_per_month: Math.round(slope * 10) / 10,
     avg_rider_fee_zmw: Math.round(avgFee * 100) / 100,
     recommended_plan: best,
+    plan_teaser: planTeaser,
     daily_option: dailyOption,
     confidence,
     basis: 'least-squares over the last 6 CAT months, blended 50/50 with the trailing 3-month average',
