@@ -134,6 +134,17 @@ This makes the plan-push strategy — and the 100→5,000 subscriber ladder in `
 
 Payroll mechanics (live): auto rows generated Sunday 16:00 CAT (weekly) / 1st 16:00 CAT (monthly + K3,000-minus-weeks balance reconciliation); pace-gated amounts; admin → superadmin two-signature confirmation; Lipila disbursement to the rider's momo; downloadable proof per payout. Rider's own app endpoint: `/rider/payroll`.
 
+### Operating standard (owner-approved, 2026-11-10) — rider payment policy
+
+> **No rider is ever paid per parcel, per trip, or out of any plan.** Riders are salaried: **K3,000/month inclusive of the K300/week fuel allowance** (paid weekly every Sunday 16:00 CAT or monthly on the 1st, 16:00 CAT, pace-gated). Any per-parcel rate (~K20–25) proposed in this audit is **rejected and not policy**.
+
+**Pay-as-you-go rides (the owner's question: what happens with those?):** with salaried riders, the PAYG rider fee charged to the sender (K55/K75/K95 bands) **stays with DropOff as revenue** — nothing is paid out to the rider per trip. So every completed PAYG job is now essentially full-margin (~K70 fee + ~K3.48 platform take ≈ **K73 gross per job**, minus the salary already counted as fixed cost). Concretely:
+
+1. **Keep PAYG pricing exactly as-is** — customer-facing price doesn't change; what changes is that the collected rider fee is no longer APAs "pass-through" money. It is platform income on the main ledger and in the TOT base.
+2. **PAYG bookings count toward the rider's sweep targets** just like plan bookings (already true — targets count completion events, not payment method). The 30 trips/day target is what the rider is paid to deliver; which customer type the trip came for is irrelevant to their pay.
+3. **Never record per-trip `rider_earning` wallet credits for salaried riders.** The only rider money movements are their salary payouts through `/admin/payroll` (two-signature, proof generated). The dormant per-trip division in `fees.ts` (90% share / `payoutNet`) stays unused unless a future marketplace (non-salaried) rider mode is launched.
+4. **Fairness guard:** the pace gate is a production incentive, not a wage trap — operations must keep targets attainable (30/day with real dispatch density) and review any rider behind pace two weeks running (existing policy). Pay the salary honestly when the target is met; pro-rate only when genuinely behind (`docs/PLAY_BOOK.md` likewise).
+
 **ZRA turnover tax now recorded automatically** on the main ledger (`/admin/tax`): monthly turnover = DropOff's own charged income (momo job collections + wallet-settled DropOff legs + subscriptions/upgrades + COD platform cut; excludes partner counter fares and wallet top-ups until spent). Rates per ZRA 2026: **0% up to K2,500/month, 5% of gross above the band**, return + payment due **by the 14th of the following month** — printable sheet at `/admin/tax/:ym/report` for your submission. Refreshed daily by cron; closed at month end. (Reminder: Turnover Tax has no expense deductions — salaries and fuel are NOT set against it; confirm treatment with ZRA/your accountant once turnover is established.)
 
 ## 10. Signs to re-run this audit

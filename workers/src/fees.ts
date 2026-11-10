@@ -1,12 +1,22 @@
 // DropOff fee engine — kwacha (ZMW), 2-decimal money.
 //
-// MODEL (per owner instruction):
-//   • The customer pays the base + a single "processing fee"
-//     (platform cut + Lipila mobile-money collection leg). The customer NEVER
-//     pays for the rider's payout/settlement.
-//   • The rider keeps 90% of the rider fee MINUS the transaction costs of
-//     receiving the payout (Lipila disbursement leg + its platform cut).
-//     DropOff absorbs the payout disbursement cost out of its 10% take.
+// MODEL (per owner instruction — OPERATING STANDARD, approved 2026-11-10):
+//   • Riders are SALARIED. No rider is ever paid per parcel, per trip, or out
+//     of a plan. Sweep riders are paid the fixed K3,000/month package
+//     INCLUSIVE of the K300/week fuel allowance (base wage K1,800), pace-gated
+//     — see rider_payroll in index.ts (auto-generated, admin→superadmin
+//     confirmed, proof-of-payment per payout).
+//   • Because the rider cost is the fixed salary, the CONFIRMED rider-fee
+//     policy on pay-as-you-go jobs is: the rider fee charged to the seller
+//     stays with DropOff as revenue (nothing is paid out per trip to salaried
+//     riders). PAYG/plan bookings alike count toward the rider's sweep
+//     targets, which are the pace gate on the salary.
+//   • The customer still pays the base + a single "processing fee" (platform
+//     cut + Lipila mobile-money collection leg) and NEVER pays for any rider
+//     settlement.
+//   • The per-trip division below (90% share / payoutNet) is kept ONLY as
+//     dormant pricing machinery for a future non-salaried (marketplace)
+//     rider mode. It must NOT be used to credit salaried sweep riders.
 
 export const PLATFORM_FEE_PCT = 1.0;     // 1% of the customer base
 export const PLATFORM_FIXED_FEE = 0.48;  // + K0.48 per collection
