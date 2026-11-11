@@ -1661,11 +1661,11 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Row(children: [
-            Icon(Icons.menu_book_outlined, size: 18, color: AppColors.forest),
-            SizedBox(width: 8),
+          Row(children: [
+            const Icon(Icons.menu_book_outlined, size: 18, color: AppColors.forest),
+            const SizedBox(width: 8),
             Expanded(child: Text('Chargebook — counter quotes ($coverage on file)',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
           ]),
           const SizedBox(height: 6),
           const Text(
