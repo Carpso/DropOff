@@ -22,7 +22,7 @@ class BookingScreen extends StatefulWidget {
   const BookingScreen({super.key, this.initialCourierId});
 
   /// Repeat-last-booking hook: BusinessScreen stores a snapshot of the job to
-  /// clone (from / to / branch / courier / recipientsâ€¦) here before pushing;
+  /// clone (from / to / branch / courier / recipients…) here before pushing;
   /// initState consumes it once and clears it.
   static Map<String, dynamic>? prefill;
 
@@ -45,9 +45,9 @@ class _BookingScreenState extends State<BookingScreen> {
   /// Seller-facing slot copy: arrival RANGE + benefit + booking cutoff (CAT).
   /// Closed slots stay visible (list-only) and auto-roll forward.
   static const Map<String, ({String title, String benefit, String cutoff})> slotCopy = {
-    '06:00': (title: '6:00 â€“ 7:30 AM window', benefit: 'Catches early outbound buses', cutoff: '05:30'),
-    '10:00': (title: '10:00 â€“ 11:30 AM window', benefit: 'Catches midday courier express', cutoff: '09:30'),
-    '14:00': (title: '2:00 â€“ 3:30 PM window', benefit: 'Catches final evening transit', cutoff: '13:30'),
+    '06:00': (title: '6:00 “ 7:30 AM window', benefit: 'Catches early outbound buses', cutoff: '05:30'),
+    '10:00': (title: '10:00 “ 11:30 AM window', benefit: 'Catches midday courier express', cutoff: '09:30'),
+    '14:00': (title: '2:00 “ 3:30 PM window', benefit: 'Catches final evening transit', cutoff: '13:30'),
   };
   bool _tomorrowMorning = false;
 
@@ -196,7 +196,7 @@ class _BookingScreenState extends State<BookingScreen> {
       setState(() => _packActive = true);
       final tier = '${res.body['tier'] ?? 'plan'}';
       final end = '${res.body['period_end'] ?? ''}'.split(' ').first;
-      _message('$tier plan activated${end.isEmpty ? '' : ' until $end'} â€” rider fee covered on this booking.');
+      _message('$tier plan activated${end.isEmpty ? '' : ' until $end'} ” rider fee covered on this booking.');
     } else {
       _message(res.error == 'code_not_found'
           ? 'That plan code was not recognised.'
@@ -218,7 +218,7 @@ class _BookingScreenState extends State<BookingScreen> {
         _promoPct = (res['discount_pct'] as num?)?.toDouble();
         _promoNote = res['note'] as String? ?? 'Applied at dispatch.';
       });
-      if (mounted) AppToast.show(context, 'Promo $code applied â€” ${_promoPct!.toStringAsFixed(0)}% off your DropOff charge.');
+      if (mounted) AppToast.show(context, 'Promo $code applied ” ${_promoPct!.toStringAsFixed(0)}% off your DropOff charge.');
     } else {
       setState(() {
         _promoPct = null;
@@ -245,7 +245,7 @@ class _BookingScreenState extends State<BookingScreen> {
     if (from == to) return null;
     final est = interTownEstimateZmw(from, to);
     if (est == null) return 'Indicative DropOff delivery ($from â†’ $to): quote at the depot counter.';
-    return 'Indicative DropOff delivery ($from â†’ $to): K${est.toStringAsFixed(0)} rider leg â€¢ depot fare quoted at counter.';
+    return 'Indicative DropOff delivery ($from â†’ $to): K${est.toStringAsFixed(0)} rider leg • depot fare quoted at counter.';
   }
   List<CourierInfo> get _filteredCouriers => smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size);
 
@@ -279,7 +279,7 @@ class _BookingScreenState extends State<BookingScreen> {
       _parcelPhotoUploading = false;
       if (res.ok && res.body['url'] is String) _parcelPhotoUrl = res.body['url'] as String;
     });
-    _message(res.ok ? 'Parcel photo attached â€” protects you if the parcel is disputed.' : 'Photo upload failed. You can still book.');
+    _message(res.ok ? 'Parcel photo attached ” protects you if the parcel is disputed.' : 'Photo upload failed. You can still book.');
   }
 
   /// AI tidy-up of the free-text pickup address (best-effort; never blocks).
@@ -356,7 +356,7 @@ class _BookingScreenState extends State<BookingScreen> {
             Text(l10n.savedRecipients, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
             const SizedBox(height: 8),
             if (list.isEmpty)
-              const Padding(padding: EdgeInsets.symmetric(vertical: 18), child: Text('No saved recipients yet. Fill in a recipient and tap â€œSave this recipientâ€.', style: TextStyle(color: AppColors.muted)))
+              const Padding(padding: EdgeInsets.symmetric(vertical: 18), child: Text('No saved recipients yet. Fill in a recipient and tap —œSave this recipient".', style: TextStyle(color: AppColors.muted)))
             else
               Flexible(child: ListView.separated(
                 shrinkWrap: true,
@@ -366,7 +366,7 @@ class _BookingScreenState extends State<BookingScreen> {
                   final r = list[i];
                   final name = '${r['name'] ?? ''}';
                   final phone = '${r['phone'] ?? ''}';
-                  final meta = [if ('${r['city'] ?? ''}'.isNotEmpty) r['city'], if ('${r['address'] ?? ''}'.isNotEmpty) r['address']].whereType<Object>().join(' Â· ');
+                  final meta = [if ('${r['city'] ?? ''}'.isNotEmpty) r['city'], if ('${r['address'] ?? ''}'.isNotEmpty) r['address']].whereType<Object>().join(' · ');
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -485,14 +485,14 @@ class _BookingScreenState extends State<BookingScreen> {
       return;
     }
     if (store.lastBookingWindowRolled != null) {
-      _message('The ${store.lastBookingWindowRolled} window had closed â€” your booking moved to the next open slot automatically.');
+      _message('The ${store.lastBookingWindowRolled} window had closed ” your booking moved to the next open slot automatically.');
     } else if (_tomorrowMorning) {
-      _message('You booked the TOMORROW 6:00 â€“ 7:30 AM early sweep â€” the rider collects in the morning.');
+      _message('You booked the TOMORROW 6:00 “ 7:30 AM early sweep ” the rider collects in the morning.');
     }
 
     // Live Lipila collect for mobile-money jobs; the Worker responds with the
     // payment id and the client polls GET /payments/:id/status every 2s.
-    // Plan-covered trips skip payment entirely â€” the subscription already paid
+    // Plan-covered trips skip payment entirely ” the subscription already paid
     // for the rider leg, and the parcels were deducted server-side.
     final inclusion = store.lastBookingPlanInclusion;
     final due = store.lastBookingDueZmw;
@@ -504,15 +504,15 @@ class _BookingScreenState extends State<BookingScreen> {
         final remaining = (used != null && cap != null) ? cap - used : null;
         _message(
           remaining != null && remaining >= 0
-              ? 'Covered by your plan â€” $justParcels parcel${justParcels == 1 ? '' : 's'} deducted ($remaining left on your plan). No payment due.'
-              : 'Covered by your plan â€” $justParcels parcel${justParcels == 1 ? '' : 's'} deducted. No payment due.',
+              ? 'Covered by your plan ” $justParcels parcel${justParcels == 1 ? '' : 's'} deducted ($remaining left on your plan). No payment due.'
+              : 'Covered by your plan ” $justParcels parcel${justParcels == 1 ? '' : 's'} deducted. No payment due.',
         );
       }
     } else if (booking.dispatched && inclusion == 'payg' && used != null && cap != null && used >= cap) {
-      // Plan cap reached: tier overage applied server-side â€” still collect.
+      // Plan cap reached: tier overage applied server-side ” still collect.
       if (_payment == 'Mobile money' && DropOffApi.enabled && store.linked && due != null && due > 0) {
         if (mounted) {
-          _message('Your plan cap is reached â€” this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.');
+          _message('Your plan cap is reached ” this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.');
         }
         final res = await DropOffApi.pay(
           jobRef: booking.serverRef!,
@@ -529,20 +529,20 @@ class _BookingScreenState extends State<BookingScreen> {
           if (!mounted) return;
           final msg = switch (status) {
             'success' => 'Lipila payment received. Your rider is being dispatched.',
-            'failed' => 'The mobile-money request was rejected â€” check your momo balance and try again, or contact DropOff support.',
-            _ => 'Payment still pending â€” the rider sweep confirms when your money lands.',
+            'failed' => 'The mobile-money request was rejected ” check your momo balance and try again, or contact DropOff support.',
+            _ => 'Payment still pending ” the rider sweep confirms when your money lands.',
           };
           _message(msg);
         } else if (mounted) {
-          _message('Payment could not start now (${res.error}); the booking is saved â€” approve the momo prompt or ask DropOff support to resend it.');
+          _message('Payment could not start now (${res.error}); the booking is saved ” approve the momo prompt or ask DropOff support to resend it.');
         }
       } else if (mounted) {
         _message(due != null && due > 0
-            ? 'Your plan cap is reached â€” approve the momo prompt for K${due.toStringAsFixed(2)} to pay this leg and dispatch your rider.'
-            : 'Plan cap reached â€” approve the momo prompt to dispatch your rider (tier discount applied to this leg).');
+            ? 'Your plan cap is reached ” approve the momo prompt for K${due.toStringAsFixed(2)} to pay this leg and dispatch your rider.'
+            : 'Plan cap reached ” approve the momo prompt to dispatch your rider (tier discount applied to this leg).');
       }
     } else if (booking.dispatched && DropOffApi.enabled && _payment == 'Mobile money' && store.linked) {
-      _message('Sending a Lipila prompt${due != null ? ' for K${due.toStringAsFixed(2)}' : ''} to ${_senderPhone.text}â€¦\nYou pay DropOff only â€” the courier counter fare stays with the depot.');
+      _message('Sending a Lipila prompt${due != null ? ' for K${due.toStringAsFixed(2)}' : ''} to ${_senderPhone.text}…\nYou pay DropOff only ” the courier counter fare stays with the depot.');
       final res = await DropOffApi.pay(
         jobRef: booking.serverRef!,
         phone: _senderPhone.text,
@@ -558,17 +558,17 @@ class _BookingScreenState extends State<BookingScreen> {
         if (!mounted) return;
         final msg = switch (status) {
           'success' => 'Lipila payment received. Your rider is being dispatched.',
-          'failed' => 'The mobile-money request was rejected â€” check your momo balance and try again, or contact DropOff support.',
-          _ => 'Payment still pending â€” the rider sweep confirms when your money lands.',
+          'failed' => 'The mobile-money request was rejected ” check your momo balance and try again, or contact DropOff support.',
+          _ => 'Payment still pending ” the rider sweep confirms when your money lands.',
         };
         _message(msg);
       } else if (mounted) {
-        _message('Payment could not start now (${res.error}); the booking is saved â€” settle at pickup or try again.');
+        _message('Payment could not start now (${res.error}); the booking is saved ” settle at pickup or try again.');
       }
     } else if (booking.dispatched && due != null && due > 0 && mounted) {
       // Covered by the advance prompt (or offline mode): the sender
       // approves the momo prompt that was sent at booking time.
-      _message('DropOff leg: K${due.toStringAsFixed(2)} â€” approve the prepayment prompt sent to your momo at booking; your rider dispatches on approval. Courier counter fare is separate.');
+      _message('DropOff leg: K${due.toStringAsFixed(2)} ” approve the prepayment prompt sent to your momo at booking; your rider dispatches on approval. Courier counter fare is separate.');
     }
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => BookingSuccessScreen(bookingId: booking.id)));
@@ -595,7 +595,7 @@ class _BookingScreenState extends State<BookingScreen> {
     final store = AppScope.of(context);
     if (!store.linked) {
       // Booking requires an identity (pricing, plan deduction and payment all
-      // hang off the account) â€” show the sign-up door instead of the form.
+      // hang off the account) ” show the sign-up door instead of the form.
       return Scaffold(
         appBar: AppBar(title: const Text('Book a pickup', style: TextStyle(fontWeight: FontWeight.w900))),
         body: Center(
@@ -635,7 +635,7 @@ class _BookingScreenState extends State<BookingScreen> {
               ],
             ]),
             const SizedBox(height: 10),
-            Align(alignment: Alignment.centerLeft, child: Text('STEP ${_step + 1} OF 3  â€¢  ${['ROUTE', 'PARCEL & COURIER', 'DETAILS & REVIEW'][_step]}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8, color: AppColors.muted))),
+            Align(alignment: Alignment.centerLeft, child: Text('STEP ${_step + 1} OF 3  •  ${['ROUTE', 'PARCEL & COURIER', 'DETAILS & REVIEW'][_step]}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8, color: AppColors.muted))),
           ]),
         ),
         Expanded(
@@ -687,7 +687,7 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 10),
         _cityDropdown('Depot destination (receipt)', _to, (value) => setState(() => _to = value)),
         const SizedBox(height: 8),
-        const InfoPill(icon: Icons.receipt_long, label: 'Your parcel is dropped at the courier depot. The destination above is for your receipt only â€” it is not the actual door drop-off.', color: AppColors.amber),
+        const InfoPill(icon: Icons.receipt_long, label: 'Your parcel is dropped at the courier depot. The destination above is for your receipt only ” it is not the actual door drop-off.', color: AppColors.amber),
         const SizedBox(height: 18),
               TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _aiTidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
         if (_pickupLat != null && _pickupLng != null) ...[
@@ -701,7 +701,7 @@ class _BookingScreenState extends State<BookingScreen> {
           tileColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15), side: const BorderSide(color: AppColors.line)),
           title: const Text('Round trip', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-          subtitle: const Text('If it can\'t travel on, the rider returns the parcel from the depot back to your door â€” no re-booking'),
+          subtitle: const Text('If it can\'t travel on, the rider returns the parcel from the depot back to your door ” no re-booking'),
           value: _roundTrip,
           onChanged: (value) => setState(() => _roundTrip = value),
         ),
@@ -709,7 +709,7 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 10),
           _cityDropdown('Return city', _returnCity, (value) => setState(() => _returnCity = value)),
           const SizedBox(height: 10),
-          TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Your door â€” where the parcel comes back', prefixIcon: Icon(Icons.house_outlined))),
+          TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Your door ” where the parcel comes back', prefixIcon: Icon(Icons.house_outlined))),
           const SizedBox(height: 6),
           const Text('The return ride (depot â†’ your door) is confirmed at the counter before the return starts.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
         ],
@@ -795,7 +795,7 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 26),
         Text('Choose the courier', style: TextStyle(fontSize: scaleText(context, 18), fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
-        const Text('Your rider takes the parcel to this companyâ€™s depot.', style: TextStyle(color: AppColors.muted, fontSize: 13)),
+        const Text('Your rider takes the parcel to this company—™s depot.', style: TextStyle(color: AppColors.muted, fontSize: 13)),
         const SizedBox(height: 12),
         const Text('Search couriers', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.muted)),
         const SizedBox(height: 6),
@@ -807,8 +807,8 @@ class _BookingScreenState extends State<BookingScreen> {
             prefixIcon: const Icon(Icons.search),
             isDense: true,
             helperText: (_from == 'Lusaka' && _to.isNotEmpty)
-                ? 'Depot fare quoted at counter â€” search inter-town routes (e.g. Lusaka â†’ Ndola).'
-                : 'Try: â€œ$_searchHintâ€',
+                ? 'Depot fare quoted at counter ” search inter-town routes (e.g. Lusaka â†’ Ndola).'
+                : 'Try: —œ$_searchHint"',
           ),
         ),
         if (_queryEstimate != null) ...[
@@ -837,11 +837,11 @@ class _BookingScreenState extends State<BookingScreen> {
                 Row(children: [
                   Icon(Icons.schedule, size: 18, color: AppColors.muted),
                   SizedBox(width: 10),
-                  Expanded(child: Text('Coming soon â€” courier coverage outside Lusaka', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+                  Expanded(child: Text('Coming soon ” courier coverage outside Lusaka', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
                 ]),
                 SizedBox(height: 8),
                 Text(
-                  'DropOffâ€™s partner depot network is live in Lusaka. Nationwide courier coverage launches shortly â€” your city will appear here once it does.',
+                  'DropOff—™s partner depot network is live in Lusaka. Nationwide courier coverage launches shortly ” your city will appear here once it does.',
                   style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
                 ),
               ]),
@@ -886,14 +886,14 @@ class _BookingScreenState extends State<BookingScreen> {
             SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Your rider takes the parcel to the nearest depot of the courier you choose â€” no branch to pick.',
+                'Your rider takes the parcel to the nearest depot of the courier you choose ” no branch to pick.',
                 style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
               ),
             ),
           ]),
         ),
         if (selected.hasVerifiedRates && _from != 'Lusaka')
-          const Text('Platinumâ€™s captured tariff starts from Lusaka. This reverse/other route needs a counter quote.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+          const Text('Platinum—™s captured tariff starts from Lusaka. This reverse/other route needs a counter quote.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
       ];
 
   List<Widget> _detailsStep(CourierInfo courier) => [
@@ -925,10 +925,10 @@ class _BookingScreenState extends State<BookingScreen> {
           textCapitalization: TextCapitalization.characters,
           decoration: InputDecoration(
             labelText: 'Promo code (optional)',
-            hintText: 'SELLER20 Â· FIRSTM10 Â· LOYAL5',
+            hintText: 'SELLER20 · FIRSTM10 · LOYAL5',
             prefixIcon: const Icon(Icons.local_offer_outlined),
             suffixIcon: TextButton(onPressed: _checkPromo, child: const Text('Apply')),
-            helperText: _promoPct != null ? '-${_promoPct!.toStringAsFixed(0)}% â€” $_promoNote' : null,
+            helperText: _promoPct != null ? '-${_promoPct!.toStringAsFixed(0)}% ” $_promoNote' : null,
           ),
         ),
         const SizedBox(height: 12),
@@ -942,7 +942,7 @@ class _BookingScreenState extends State<BookingScreen> {
             prefixIcon: const Icon(Icons.card_membership_outlined),
             suffixIcon: TextButton(onPressed: _packActive ? null : _applyPack, child: const Text('Apply')),
             helperText: _packActive
-                ? 'Plan active â€” this booking needs no rider-payment prompt.'
+                ? 'Plan active ” this booking needs no rider-payment prompt.'
                 : 'Bought a plan offline? Enter its code to activate it on your number.',
           ),
         ),
@@ -991,8 +991,8 @@ class _BookingScreenState extends State<BookingScreen> {
           ListTile(
             tileColor: const Color(0xFFE9F0EB),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: AppColors.forest)),
-            title: const Text('Tomorrow 6:00 â€“ 7:30 AM', style: TextStyle(fontWeight: FontWeight.w800)),
-            subtitle: const Text('Picked up tomorrow morning â€” after todayâ€™s late afternoon window has closed.'),
+            title: const Text('Tomorrow 6:00 “ 7:30 AM', style: TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: const Text('Picked up tomorrow morning ” after today—™s late afternoon window has closed.'),
             trailing: const Icon(Icons.event, color: AppColors.forest),
           ),
         ] else
@@ -1003,7 +1003,7 @@ class _BookingScreenState extends State<BookingScreen> {
               borderRadius: BorderRadius.circular(14),
               onTap: () {
                 if (_slotClosed(entry.key)) {
-                  AppToast.show(context, 'The ${slotCopy[entry.key]!.title} closed (book by ${slotCopy[entry.key]!.cutoff}). Pick another slot â€” late bookings auto-roll to the next open window.');
+                  AppToast.show(context, 'The ${slotCopy[entry.key]!.title} closed (book by ${slotCopy[entry.key]!.cutoff}). Pick another slot ” late bookings auto-roll to the next open window.');
                   return;
                 }
                 setState(() => _pickupWindow = entry.key);
@@ -1025,15 +1025,15 @@ class _BookingScreenState extends State<BookingScreen> {
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(
                       _slotClosed(entry.key)
-                          ? '${slotCopy[entry.key]!.title} â€” closed'
+                          ? '${slotCopy[entry.key]!.title} ” closed'
                           : slotCopy[entry.key]!.title,
                       style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: _slotClosed(entry.key) ? AppColors.muted : AppColors.ink),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       _slotClosed(entry.key)
-                          ? 'Book by ${slotCopy[entry.key]!.cutoff} passed â€” next window still available'
-                          : '${slotCopy[entry.key]!.benefit} Â· Book by ${slotCopy[entry.key]!.cutoff}',
+                          ? 'Book by ${slotCopy[entry.key]!.cutoff} passed ” next window still available'
+                          : '${slotCopy[entry.key]!.benefit} · Book by ${slotCopy[entry.key]!.cutoff}',
                       style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.3),
                     ),
                   ])),
@@ -1060,7 +1060,7 @@ class _BookingScreenState extends State<BookingScreen> {
           tileColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15), side: const BorderSide(color: AppColors.line)),
           title: const Text('Door delivery at destination', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-          subtitle: const Text('Optional last-mile add-on â€¢ from K45 (pay-as-you-go by location)'),
+          subtitle: const Text('Optional last-mile add-on • from K45 (pay-as-you-go by location)'),
           value: _lastMile,
           onChanged: (value) => setState(() => _lastMile = value),
         ),
@@ -1079,7 +1079,7 @@ class _BookingScreenState extends State<BookingScreen> {
             Icon(Icons.phone_android, color: AppColors.forest),
             SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Mobile money â€” prepayment at booking', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+              Text('Mobile money ” prepayment at booking', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
               SizedBox(height: 2),
               Text('The prompt pays for your parcel delivery (trip price + processing fee) and dispatches your rider on approval. No cash; riders never handle money.',
                   style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
@@ -1092,12 +1092,12 @@ class _BookingScreenState extends State<BookingScreen> {
         Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('$_from â†’ $_to', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
           const SizedBox(height: 4),
-          Text('${courier.name} â€¢ ${_size.label} parcel â€¢ ${pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+          Text('${courier.name} • ${_size.label} parcel • ${pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.muted, fontSize: 13)),
           const Divider(height: 28),
           _priceLine('DropOff rider fee', kwacha(riderFee)),
           if (_lastMile) ...[
             _priceLine('Destination door delivery', kwacha(lastMilePrice)),
-            _priceLine('Processing fee (door leg â€” platform + mobile money)', kwacha(DropOffApi.platformFee(lastMilePrice))),
+            _priceLine('Processing fee (door leg ” platform + mobile money)', kwacha(DropOffApi.platformFee(lastMilePrice))),
           ],
           if (_payment == 'Mobile money') Builder(builder: (context) {
             final fees = DropOffApi.collectionFees(DropOffApi.round2(_dropOffLeg), riderFee: riderFee);
@@ -1114,7 +1114,7 @@ class _BookingScreenState extends State<BookingScreen> {
           }),
           const Divider(height: 24),
           _priceLine('DropOff charge est. now', kwacha(_dropOffDue), bold: true),
-          const Padding(padding: EdgeInsets.only(top: 8), child: Text('The depot counter fare is confirmed and paid at the counter â€” never collected by DropOff.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
+          const Padding(padding: EdgeInsets.only(top: 8), child: Text('The depot counter fare is confirmed and paid at the counter ” never collected by DropOff.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
         ]))),
         ];
 
@@ -1170,7 +1170,7 @@ class BookingSuccessScreen extends StatelessWidget {
             const SizedBox(height: 10),
             Text('Reference ${booking.reference}\n${booking.fromCity} â†’ ${booking.toCity}', textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.6)),
             const SizedBox(height: 18),
-            InfoPill(icon: Icons.route_rounded, label: 'DropOff rides to the courier â€” reference ${booking.reference}'),
+            InfoPill(icon: Icons.route_rounded, label: 'DropOff rides to the courier ” reference ${booking.reference}'),
             const Spacer(),
             FilledButton.tonalIcon(
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => WaybillScreen(bookingId: booking.id))),
@@ -1191,7 +1191,7 @@ class BookingSuccessScreen extends StatelessWidget {
 
 
 /// Shows the signed-in seller which plan is active and how this trip deducts
-/// from it â€” no more guessing between plan parcels and pay-as-you-go.
+/// from it ” no more guessing between plan parcels and pay-as-you-go.
 class _PlanBanner extends StatefulWidget {
   final int parcels;
   const _PlanBanner({required this.parcels});
@@ -1201,7 +1201,7 @@ class _PlanBanner extends StatefulWidget {
 }
 
 class _PlanBannerState extends State<_PlanBanner> {
-  // Cached so the subscription is fetched ONCE â€” not on every rebuild/keystroke.
+  // Cached so the subscription is fetched ONCE ” not on every rebuild/keystroke.
   late final Future<Map<String, dynamic>?> _future = DropOffApi.subscription();
 
   @override
@@ -1217,7 +1217,7 @@ class _PlanBannerState extends State<_PlanBanner> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
             child: const Text(
-              'Pay-as-you-go â€” rider fee per trip. The Daily Rider pass (K49/day, 2 parcels) bundles the rider fee into plan parcels.',
+              'Pay-as-you-go ” rider fee per trip. The Daily Rider pass (K49/day, 2 parcels) bundles the rider fee into plan parcels.',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
             ),
           );
@@ -1236,13 +1236,13 @@ class _PlanBannerState extends State<_PlanBanner> {
             Row(children: [
               const Icon(Icons.card_membership, size: 17, color: AppColors.forest),
               const SizedBox(width: 8),
-              Expanded(child: Text('$tier plan active â€” $used of $cap parcels used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest))),
+              Expanded(child: Text('$tier plan active ” $used of $cap parcels used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest))),
             ]),
             const SizedBox(height: 5),
             Text(
               covered
-                  ? 'This trip deducts ${widget.parcels} parcel${widget.parcels == 1 ? '' : 's'} â€” $remaining left. Renews $renews.'
-                  : 'Only $remaining left on your $tier plan â€” this trip pays your tier discount ($pct% off pay-as-you-go). Renews $renews.',
+                  ? 'This trip deducts ${widget.parcels} parcel${widget.parcels == 1 ? '' : 's'} ” $remaining left. Renews $renews.'
+                  : 'Only $remaining left on your $tier plan ” this trip pays your tier discount ($pct% off pay-as-you-go). Renews $renews.',
               style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
             ),
           ]),
@@ -1255,20 +1255,20 @@ class _PlanBannerState extends State<_PlanBanner> {
 /// Depot-branch picker for the selected courier: server branches (admin-
 /// managed) with the catalog fallback. The seller says exactly which branch
 /// the rider hands the parcel to.
-/// Catalog ids ('platinum', 'mercury'â€¦) map onto the live chargebook ids.
+/// Catalog ids ('platinum', 'mercury'…) map onto the live chargebook ids.
 const Map<String, int> kCourierServerIds = {
   'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4,
 };
 int courierServerIdOf(String catalogId) => kCourierServerIds[catalogId] ?? 1;
 
 /// Inverse of courierServerIdOf: turn a live chargebook id back into the
-/// catalog name the booking UI tracks ('dhl', 'mercury'â€¦).
+/// catalog name the booking UI tracks ('dhl', 'mercury'…).
 String courierCatalogForServerId(int serverId) =>
     (kCourierServerIds.entries.firstWhere((e) => e.value == serverId,
             orElse: () => const MapEntry('platinum', 1)))
         .key;
 
-/// Delivery IQ â€” how fast this courier's depot actually receives parcels:
+/// Delivery IQ ” how fast this courier's depot actually receives parcels:
 /// the typical (and slow-day) pickupâ†’depot minutes from the last 90 days of
 /// real job events, shown right where the pickup window is picked.
 class _DeliveryIqCard extends StatefulWidget {
@@ -1298,7 +1298,7 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
 
   void _load() {
     if (!DropOffApi.enabled) return;
-    // 'now' is a UI-only slot â€” the IQ window filter wants a real slot or none.
+    // 'now' is a UI-only slot ” the IQ window filter wants a real slot or none.
     final w = widget.window == 'now' ? '' : widget.window;
     _future = DropOffApi.iqEta(courierServerIdOf(widget.courierCatalogId), w);
   }
@@ -1311,7 +1311,7 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
       builder: (context, snap) {
         final data = snap.data;
         final p50 = (data?['minutes_p50'] as num?)?.toInt();
-        if (p50 == null) return const SizedBox.shrink(); // no data yet â€” stay quiet
+        if (p50 == null) return const SizedBox.shrink(); // no data yet ” stay quiet
         final p90 = ((data?['minutes_p90'] as num?)?.toInt() ?? p50).toString();
         final n = (data?['sample_count'] as num?)?.toInt() ?? 0;
         final fallback = data?['fallback'] == true;

@@ -117,9 +117,24 @@ Future<void> main() async {
   // outbox and on a timer.
   final initFuture = Future.wait([store.initialize(), AnalyticsService.instance.init()]);
   PushService.init();
-  PushService.onPayloadTap.stream.listen((data) {
+  void handleTap(Map<String, dynamic>? data) {
+    // If the navigator isn't mounted yet (cold start), retry every 300 ms —
+    // a tapped notification from a killed app must never be silently dropped.
     final ctx = navigatorKey.currentContext;
-    if (ctx == null || !ctx.mounted) return;
+    if (ctx == null || !ctx.mounted) {
+      var tries = 0;
+      Timer.periodic(const Duration(milliseconds: 300), (t) {
+        tries++;
+        final c = navigatorKey.currentContext;
+        if (c != null && c.mounted) {
+          t.cancel();
+          handleTap(data);
+        } else if (tries > 25) {
+          t.cancel();
+        }
+      });
+      return;
+    }
     final jobRef = data?['job_ref']?.toString();
     final kind = '${data?['kind'] ?? ''}'.toLowerCase();
     AnalyticsService.instance.track(feature: 'push', action: 'tap', context: kind.isEmpty ? 'unknown' : kind);
@@ -149,7 +164,8 @@ Future<void> main() async {
       return;
     }
     Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingsScreen()));
-  });
+  }
+  PushService.onPayloadTap.stream.listen(handleTap);
   final appLinks = AppLinks();
   appLinks.uriLinkStream.listen((uri) => _handleDeepLink(store, uri));
   appLinks.getInitialLink().then((uri) {

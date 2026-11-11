@@ -11,7 +11,7 @@ import 'account_screen.dart';
 import 'booking_screen.dart';
 
 /// Collect a parcel from a courier's point in Lusaka and deliver it to the
-/// recipient's door. No counter fare and no branch picking â€” the parcel is
+/// recipient's door. No counter fare and no branch picking ” the parcel is
 /// already at the courier depot; a DropOff rider runs the last mile.
 class CollectionsScreen extends StatefulWidget {
   const CollectionsScreen({super.key});
@@ -55,9 +55,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   static const Map<String, String> _windows = {
-    '06:00': '6:00 â€“ 7:30 AM',
-    '10:00': '10:00 â€“ 11:30 AM',
-    '14:00': '2:00 â€“ 3:30 PM',
+    '06:00': '6:00 “ 7:30 AM',
+    '10:00': '10:00 “ 11:30 AM',
+    '14:00': '2:00 “ 3:30 PM',
   };
   static const Map<String, String> _cutoffs = {'06:00': '05:30', '10:00': '09:30', '14:00': '13:30'};
   static const Map<String, int> _maxParcels = {'motorcycle': 3, 'car': 6, 'van': 10, 'truck': 15};
@@ -102,7 +102,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       try {
         final red = await DropOffApi.redeemPackCode(promo);
         if (!red.ok) {
-          _message('Plan code not recognised â€” continuing as pay-as-you-go.');
+          _message('Plan code not recognised ” continuing as pay-as-you-go.');
         }
       } catch (_) { /* best-effort */ }
     }
@@ -142,15 +142,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         }
         if (!mounted) return;
         _message(switch (status) {
-          'success' => 'Paid â€” a rider will collect from $_courierId point.',
-          'failed' => 'The mobile-money prompt was rejected â€” check your momo balance and try again, or contact DropOff support.',
-          _ => 'Payment still pending â€” the rider sweep confirms when your money lands.',
+          'success' => 'Paid ” a rider will collect from $_courierId point.',
+          'failed' => 'The mobile-money prompt was rejected ” check your momo balance and try again, or contact DropOff support.',
+          _ => 'Payment still pending ” the rider sweep confirms when your money lands.',
         });
       }
     } else {
       _message(due > 0
-          ? 'Collection $ref booked â€” approve the prepayment prompt sent to this number.'
-          : 'Collection $ref booked â€” your plan covers the DropOff leg.');
+          ? 'Collection $ref booked ” approve the prepayment prompt sent to this number.'
+          : 'Collection $ref booked ” your plan covers the DropOff leg.');
     }
     if (!mounted) return;
     Navigator.of(context).pop();
@@ -200,7 +200,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       body: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
         const Text('Where is the parcel waiting?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.4)),
         const SizedBox(height: 4),
-        const Text('Your parcel already arrived at the courier in Lusaka. A rider picks it up and brings it to your recipientâ€™s door.', style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4)),
+        const Text('Your parcel already arrived at the courier in Lusaka. A rider picks it up and brings it to your recipient—™s door.', style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4)),
         const SizedBox(height: 16),
         const Text('Courier', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
@@ -235,7 +235,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             labelText: 'Collection point',
             hintText: points.isEmpty ? 'e.g. Longacres counter' : points.first,
             prefixIcon: const Icon(Icons.location_on_outlined),
-            helperText: points.isEmpty ? 'Ask the courier which counter holds it.' : 'Popular: ${points.take(2).join(' Â· ')}',
+            helperText: points.isEmpty ? 'Ask the courier which counter holds it.' : 'Popular: ${points.take(2).join(' · ')}',
             suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_point), child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')),
           ),
         ),
@@ -278,7 +278,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             child: InkWell(
               borderRadius: BorderRadius.circular(13),
               onTap: () {
-                if (_slotClosed(entry.key)) return _message('${entry.value} closed â€” the counter canâ€™t hand over in time. Pick another window.');
+                if (_slotClosed(entry.key)) return _message('${entry.value} closed ” the counter can—™t hand over in time. Pick another window.');
                 setState(() => _window = entry.key);
               },
               child: Container(
@@ -291,7 +291,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                 child: Row(children: [
                   Icon(_slotClosed(entry.key) ? Icons.lock_outline : Icons.schedule_rounded, size: 18, color: AppColors.muted),
                   const SizedBox(width: 10),
-                  Expanded(child: Text(_slotClosed(entry.key) ? '${entry.value} â€” closed' : entry.value, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _slotClosed(entry.key) ? AppColors.muted : AppColors.ink))),
+                  Expanded(child: Text(_slotClosed(entry.key) ? '${entry.value} ” closed' : entry.value, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _slotClosed(entry.key) ? AppColors.muted : AppColors.ink))),
                   if (_window == entry.key && !_slotClosed(entry.key)) const Icon(Icons.check_circle, size: 18, color: AppColors.forest),
                 ]),
               ),
@@ -313,7 +313,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               child: Row(children: [
                 const Icon(Icons.event_repeat_rounded, size: 18, color: AppColors.muted),
                 const SizedBox(width: 10),
-                Expanded(child: Text('Tomorrow 6:00 â€“ 7:30 AM', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _window == 'tomorrow:06:00' ? AppColors.forest : AppColors.ink))),
+                Expanded(child: Text('Tomorrow 6:00 “ 7:30 AM', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _window == 'tomorrow:06:00' ? AppColors.forest : AppColors.ink))),
                 if (_window == 'tomorrow:06:00') const Icon(Icons.check_circle, size: 18, color: AppColors.forest),
               ]),
             ),
@@ -347,7 +347,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               Row(children: [
                 Icon(Icons.phone_android, color: AppColors.forest, size: 18),
                 SizedBox(width: 8),
-                Expanded(child: Text('Mobile money â€” prepayment at booking', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
+                Expanded(child: Text('Mobile money ” prepayment at booking', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
               ]),
               SizedBox(height: 3),
               Text('Approve the momo prompt on this number and a rider collects for you; no cash, riders never handle the money.',
@@ -356,7 +356,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           );
         }),
         const SizedBox(height: 6),
-        const Text('Rider fee from K45 Â· processing fee added. The courierâ€™s own charges are paid to them directly â€” we only run the local collection.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+        const Text('Rider fee from K45 · processing fee added. The courier—™s own charges are paid to them directly ” we only run the local collection.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
         const SizedBox(height: 18),
         FilledButton(
           onPressed: _saving ? null : _submit,
