@@ -106,4 +106,43 @@ class AppLocalizationsLoz extends AppLocalizations {
   @override
   String get coverDisclaimer =>
       'Sikwalikanyi ki sika sa ku keta. Milao ni mikwakwa i sebeza; ha si inshuwalansi kono ha i sa tii ku lumelwa.';
+
+  @override
+  String get riderStopTitle => 'Ki sina sipakete silela kae?';
+
+  @override
+  String get riderPickedUp => 'Sipakete sitohwa kwa muntu lutela';
+
+  @override
+  String get riderPickedUpSub => 'Libika pe';
+
+  @override
+  String get riderDepotDrop => 'Sipakete seka tokwa kwa depot branch';
+
+  @override
+  String get riderDepotDropSub =>
+      'Sifano sa camera sesi ulusa — hakuna ku ngola teko';
+
+  @override
+  String get riderDoorDrop => 'Sipakete seja kwa muntu muamuheli (munzi)';
+
+  @override
+  String get riderDoorDropSub => 'Ku batala 4-digit DropOff code';
+
+  @override
+  String get riderNotYet => 'Batali — uta';
+
+  @override
+  String get riderPhotoRequired =>
+      'Sifano sa camera sa sipakete si batala — ku tata kusisoa kwa camera.';
+
+  @override
+  String get riderDoorPhotoAdd => 'Buyisa sifano sa camera (si batala)';
+
+  @override
+  String get riderDoorPhotoAttached => 'Sifano sa camera silekwe ✓';
+
+  @override
+  String get riderDoorPhotoRequired =>
+      'Pelaanga sifano sa camera kuti mu shaeeze.';
 }

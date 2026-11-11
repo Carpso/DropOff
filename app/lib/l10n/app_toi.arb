@@ -29,5 +29,17 @@
   "quickRebook": "Amubbukke alimwi cakufwambaana",
   "declaredValue": "Muulo waambidwe (ZMW)",
   "parcelCover": "Cikwabilizyo cacintu (kusala)",
-  "coverDisclaimer": "Cikwabilizyo ncintu cakusala. Milawo amipimo ilabeleka; tacinshuwalansi pe kusikila cazuminwa."
+  "coverDisclaimer": "Cikwabilizyo ncintu cakusala. Milawo amipimo ilabeleka; tacinshuwalansi pe kusikila cazuminwa.",
+  "riderStopTitle": "Kodi cipakete caa endede zyuli?",
+  "riderPickedUp": "Cpackete ca telwa kuli muntu uutuma",
+  "riderPickedUpSub": "Lemba apo uli",
+  "riderDepotDrop": "Cpackete ca siwa pa depot branch",
+  "riderDepotDropSub": "Ciphongolo ca camera cisaamuna ku lata — takwaba ku nsonga zya muulo",
+  "riderDoorDrop": "Cpackete ca peswa kuli muntu uwazula (munzi)",
+  "riderDoorDropSub": "Kusyowa 4-digit DropOff code",
+  "riderNotYet": "Pebe — weza",
+  "riderPhotoRequired": "Ciphongolo ca camera ca cipakete cijisi — kufuma kwasya kuti kasamunwa a camera.",
+  "riderDoorPhotoAdd": "Wongeya ciphongolo ca camera (cijisi)",
+  "riderDoorPhotoAttached": "Ciphongolo ca camera cacizumwa ✓",
+  "riderDoorPhotoRequired": "Kalipanze ciphongolo ca camera kuti azumiswe."
 }

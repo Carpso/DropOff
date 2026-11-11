@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/analytics_service.dart';
 import '../data/catalog.dart';
+import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
@@ -170,6 +171,8 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 14),
+          const _FareChecker(),
           const SizedBox(height: 18),
           const Row(children: [
             Expanded(child: _TrustItem(icon: Icons.schedule, title: 'Pickup that fits', subtitle: 'From your doorstep')),
@@ -286,6 +289,134 @@ class _Step extends StatelessWidget {
           )),
         ]),
       );
+}
+
+/// Enhancement: "Check a fare" right on the home screen — turns price-
+/// shoppers into bookings. Shows ONLY our own side of the money (the DropOff
+/// rider leg) and states the one policy truth sellers need: the courier fare
+/// is heard at the counter. No counter prices ever, no estimates, no
+/// "published rates" — and it books with one tap.
+class _FareChecker extends StatefulWidget {
+  const _FareChecker();
+
+  @override
+  State<_FareChecker> createState() => _FareCheckerState();
+}
+
+class _FareCheckerState extends State<_FareChecker> {
+  String _from = 'Lusaka';
+  String _to = 'Ndola';
+  String _weight = '0-5kg';
+  bool _loading = false;
+  bool _checked = false;
+  double? _riderLeg;
+  List<String> _serving = const [];
+
+  static const _weights = ['0-5kg', '5-15kg', '15kg+'];
+
+  Future<void> _check() async {
+    if (_from == _to) return;
+    setState(() => _loading = true);
+    final rows = await DropOffApi.quotes(from: _from, to: _to).catchError((_) => <Map<String, dynamic>>[]);
+    if (!mounted) return;
+    final riderLeg = rows.isNotEmpty ? (rows.first['rider_fee_zmw'] as num?)?.toDouble() : null;
+    final names = rows.map((r) => '${r['courier_name'] ?? ''}').where((n) => n.isNotEmpty).toSet().toList()..sort();
+    setState(() { _riderLeg = riderLeg; _serving = names; _loading = false; _checked = true; });
+  }
+
+  void _book() {
+    BookingScreen.prefill = {'from': _from, 'to': _to};
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.calculate_outlined, size: 18, color: AppColors.forest),
+            SizedBox(width: 8),
+            Expanded(child: Text('Check the rider fee', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          ]),
+          const SizedBox(height: 4),
+          const Text('Our leg is shown up front. Courier fares are heard at the counter — never published here.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: DropdownButtonFormField<String>(
+              initialValue: _from,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'From', isDense: true),
+              items: [for (final t in cities) DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis))],
+              onChanged: (v) => setState(() { _from = v ?? _from; _checked = false; }),
+            )),
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 6), child: Icon(Icons.arrow_forward, size: 16, color: AppColors.muted)),
+            Expanded(child: DropdownButtonFormField<String>(
+              initialValue: _to,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'To', isDense: true),
+              items: [for (final t in cities) DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis))],
+              onChanged: (v) => setState(() { _to = v ?? _to; _checked = false; }),
+            )),
+          ]),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            initialValue: _weight,
+            decoration: const InputDecoration(labelText: 'Weight', isDense: true),
+            items: const [
+              DropdownMenuItem(value: '0-5kg', child: Text('Up to 5kg')),
+              DropdownMenuItem(value: '5-15kg', child: Text('5–15kg')),
+              DropdownMenuItem(value: '15kg+', child: Text('Over 15kg')),
+            ],
+            onChanged: (v) => setState(() { _weight = v ?? _weight; _checked = false; }),
+          ),
+          if (_from == _to) ...[
+            const SizedBox(height: 8),
+            const Text('Pick two different towns.', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+          ],
+          const SizedBox(height: 12),
+          if (!_checked)
+            FilledButton.icon(
+              onPressed: (_loading || _from == _to) ? null : _check,
+              icon: _loading
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.search),
+              label: Text(_loading ? 'Checking…' : 'Check'),
+            )
+          else ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  _riderLeg != null
+                      ? 'DropOff rider leg: K${_riderLeg!.toStringAsFixed(0)} — payable at booking (momo), nothing at the door'
+                      : 'DropOff rider leg: shown in full when you book (momo prepaid)',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                ),
+                const SizedBox(height: 4),
+                const Text('Courier fare: heard at the counter on drop-off.',
+                    style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                if (_serving.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text('Serving this route: ${_serving.join(', ')}',
+                      style: const TextStyle(color: AppColors.forest, fontSize: 11, fontWeight: FontWeight.w700)),
+                ],
+              ]),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _book,
+              icon: const Icon(Icons.two_wheeler, size: 18),
+              label: const Text('Book this route'),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
 }
 
 

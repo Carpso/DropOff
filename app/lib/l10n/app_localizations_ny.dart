@@ -106,4 +106,43 @@ class AppLocalizationsNy extends AppLocalizations {
   @override
   String get coverDisclaimer =>
       'Chitetezo ndi chinthu chosankha. Malamulo ndi malire amagwira ntchito; si inshuwalansi yokha mpaka itatsimikizidwa.';
+
+  @override
+  String get riderStopTitle => 'Kodi katundu anapitira bwanji?';
+
+  @override
+  String get riderPickedUp => 'Watengedwa kwa wotumiza';
+
+  @override
+  String get riderPickedUpSub => 'Lemba musanachoke pompano';
+
+  @override
+  String get riderDepotDrop => 'Wasiyidwa pa depot branch';
+
+  @override
+  String get riderDepotDropSub =>
+      'Chithunzi cha kamera chimasonyeza kusamutsidwa — palibe cha mtengo cholemba';
+
+  @override
+  String get riderDoorDrop => 'Waperekedwa kwa wolandira (pakhomo)';
+
+  @override
+  String get riderDoorDropSub => 'Amafunikira DropOff code ya manambala 4';
+
+  @override
+  String get riderNotYet => 'Ayi pano — bwererani';
+
+  @override
+  String get riderPhotoRequired =>
+      'Chithunzi cha kamera cha katundu chikufunika — kusamutsidwa kumawonetsedwa ndi kamera.';
+
+  @override
+  String get riderDoorPhotoAdd => 'Yikani chithunzi cha umboni (chofunikira)';
+
+  @override
+  String get riderDoorPhotoAttached => 'Chithunzi cha umboni chayikidwa ✓';
+
+  @override
+  String get riderDoorPhotoRequired =>
+      'Yikani chithunzi cha kamera cha kusamutsidwa kuti mutsimikizire.';
 }

@@ -1392,10 +1392,23 @@ app.get('/couriers/:id/profile', async (c) => {
        FROM couriers WHERE id = ?1 AND active = 1`,
   ).bind(id).first();
   if (!courier) return c.json({ error: 'not found' }, 404);
-  const { results: rates } = await c.env.DB.prepare(
-    `SELECT from_city, to_city, weight_class, service, counter_price_zmw, updated_at
-       FROM quotes WHERE courier_id = ?1 ORDER BY from_city, to_city, service`,
-  ).bind(id).all();
+  // NO-QUOTING POLICY (owner directive): the chargebook is internal. The
+  // seller-facing profile carries coverage counts and freshness only — never a
+  // counter fare. Ops/admin keys may still read the rates for reconciliation.
+  const staff = isAdmin(c) || c.get('role') === 'ops';
+  let rates: any[] = [];
+  if (staff) {
+    ({ results: rates } = await c.env.DB.prepare(
+      `SELECT from_city, to_city, weight_class, service, counter_price_zmw, updated_at
+         FROM quotes WHERE courier_id = ?1 ORDER BY from_city, to_city, service`,
+    ).bind(id).all());
+  } else {
+    ({ results: rates } = await c.env.DB.prepare(
+      `SELECT from_city, to_city, weight_class, service, updated_at,
+              CASE WHEN updated_at >= datetime('now', '-90 days') THEN 1 ELSE 0 END AS fresh
+         FROM quotes WHERE courier_id = ?1 ORDER BY from_city, to_city, service`,
+    ).bind(id).all());
+  }
   const rating = await c.env.DB.prepare(
     `SELECT COUNT(*) AS count, ROUND(AVG(stars), 2) AS average
        FROM ratings WHERE target_type = 'courier' AND target_key = ?1`,
@@ -1425,10 +1438,13 @@ app.get('/quotes', async (c) => {
   const destLng = Number(c.req.query('dest_lng') ?? '0');
   if (!toCity) return c.json({ error: 'missing "to"' }, 400);
 
+  // Stale-quote decay: rows not reconfirmed in 90+ days no longer count as
+  // on-file coverage (depots change tariffs; a rotted rate must never surface).
   const { results } = await c.env.DB.prepare(
     `SELECT q.*, co.id AS courier_id, co.name AS courier_name, co.depot_name
        FROM quotes q JOIN couriers co ON co.id = q.courier_id
-      WHERE q.from_city = ?1 AND q.to_city = ?2 AND q.service = ?3`,
+      WHERE q.from_city = ?1 AND q.to_city = ?2 AND q.service = ?3
+        AND q.updated_at >= datetime('now', '-90 days')`,
   ).bind(fromCity, toCity, service).all();
 
   const riderFee = baseRiderFee(fromCity, destLat, destLng);
@@ -1437,22 +1453,27 @@ app.get('/quotes', async (c) => {
   // city (distance bands + vehicle multiplier), never a flat fee.
   const leg2Fee = leg2 ? baseRiderFee(toCity, 0, 0, 'motorcycle') : 0;
   const leg2Processing = leg2 ? platformFee(leg2Fee) : 0;
+  // NO-QUOTING POLICY (owner directive): sellers are NEVER shown a counter
+  // fare — not a number, not a "published rate". Every courier, Platinum
+  // included, is "heard at the counter". Only ops/admin keys may read the
+  // internal counter price (reconciliation); seller payloads carry our leg
+  // pricing only.
+  const staff = isAdmin(c) || c.get('role') === 'ops';
     const quotes = (results as any[]).map((r) => {
     const base = r.counter_price_zmw + riderFee;
     const fees = collectionFees(base, riderFee);
-    return {
+    const shared = {
       courier_id: r.courier_id,
       courier_name: r.courier_name,
       depot_name: r.depot_name,
       service: r.service,
       weight_class: r.weight_class,
-      counter_price_zmw: r.counter_price_zmw,
+      counter_fare: 'heard at the courier counter',
       rider_fee_zmw: riderFee,
       // rider payout stays between DropOff and the driver — never quoted to sellers
       leg2_fee_zmw: leg2Fee,
       leg2_processing_fee_zmw: leg2Processing,
-      // DropOff NEVER holds partner money — split the fare explicitly.
-      counter_fare_zmw: r.counter_price_zmw,       // partner's; paid at the depot
+      // DropOff NEVER holds partner money — the partner fare is theirs, at the counter.
       dropoff_leg_zmw: round2(riderFee + leg2Fee + leg2Processing), // ours
       dropoff_due_zmw: collectionFees(
         round2(riderFee + leg2Fee + leg2Processing),
@@ -1460,6 +1481,11 @@ app.get('/quotes', async (c) => {
       ).prompt_total_zmw,
       // ONE customer-visible fee line: "processing fee" (platform + momo collect).
       processing_fee_zmw: fees.processing_fee_zmw,
+    };
+    if (!staff) return shared;
+    return {
+      ...shared,
+      counter_price_zmw: r.counter_price_zmw,
       total_pickup_zmw: base,
       total_pickup_fees_zmw: fees.processing_fee_zmw,
       total_pickup_prompt_zmw: fees.prompt_total_zmw,
@@ -1572,13 +1598,15 @@ app.post('/jobs', async (c) => {
     const weightClass = b.weight_class ?? '0-5kg';
     const service = b.service ?? 'standard';
 
-    // Server-side pricing: quotes table = preferred source of truth; absent a
-    // verified quote the first-mile leg books anyway and the counter fare is
-    // marked "quoted at counter" — NEVER fabricate an intercity fare.
+    // Server-side pricing: quotes table = preferred source of truth — but a
+    // quote no one reconfirmed in 90+ days is STALE (depots change tariffs) and
+    // is ignored: the first-mile leg books anyway and the fare is heard at the
+    // counter. NEVER fabricate or serve a stale intercity fare.
     const quote = await c.env.DB.prepare(
       `SELECT counter_price_zmw FROM quotes
         WHERE courier_id = ?1 AND from_city = ?2 AND to_city = ?3
-          AND weight_class = ?4 AND service = ?5`,
+          AND weight_class = ?4 AND service = ?5
+          AND updated_at >= datetime('now', '-90 days')`,
     ).bind(b.courier_id, fromCity, b.dest_city, weightClass, service).first<any>();
     const counterPrice = quote ? Number(quote.counter_price_zmw) : 0;
 
@@ -2191,10 +2219,14 @@ app.get('/jobs/:ref', async (c) => {
   if (!isStaff) {
     // internal fields no seller or recipient should ever read
     for (const k of ['fraud_score', 'review_required']) delete payload[k];
+    // NO-QUOTING POLICY (owner directive): the counter fare is the depot's
+    // business, transacted at the counter — a seller never reads any number
+    // for it, and `total_zmw` includes it, so both stay staff-only.
+    for (const k of ['counter_price_zmw', 'total_zmw']) delete payload[k];
     if (phone === job.recipient_phone && phone !== job.sender_phone) {
       // recipient sees delivery status only — never the sender's money side
-      for (const k of ['counter_price_zmw', 'rider_fee_zmw', 'leg2_fee_zmw',
-        'leg2_processing_fee_zmw', 'total_zmw', 'promo_code', 'promo_discount_zmw',
+      for (const k of ['rider_fee_zmw', 'leg2_fee_zmw',
+        'leg2_processing_fee_zmw', 'promo_code', 'promo_discount_zmw',
         'paid', 'pay_method', 'sender_name', 'sender_phone', 'pickup_address']) {
         delete payload[k];
       }
@@ -2342,40 +2374,60 @@ app.post('/jobs/:ref/events', async (c) => {
     ).bind(job.id, 'COD at the door is rejected — recipients pay via momo at booking or nothing is due. Riders never carry cash.'));
   }
 
-  // SELF-LEARNING CHARGEBOOK: when the rider hands the parcel over at the depot
-  // counter they can record the fare the depot actually charged. That recorded
-  // actual (a) updates the job's counter price for reconciliation and (b)
-  // upserts the quotes chargebook as a verified rate — DropOff never INVENTS a
-  // fare, it only records what the counter charged. Accepted only for depot
-  // handoff statuses, only from the assigned rider / ops / admin, and only for
-  // a sane positive amount.
+  // NO-QUOTING POLICY (owner directive): the counter fare lives at the depot
+  // counter — RIDERS NEVER RECORD OR REPORT PRICES. Only ops/admin keys may
+  // record a counter price (internal reconciliation), and doing so upserts
+  // the chargebook as a verified rate. DropOff never INVENTS a fare; ops
+  // records only what the counter actually charged.
   if (b.counter_price_zmw !== undefined && (status === 'at_depot' || status === 'delivered')) {
-    const recorded = Math.round(Number(b.counter_price_zmw) * 100) / 100;
-    if (Number.isFinite(recorded) && recorded > 0 && recorded <= 20000) {
-      dbStatements.push(c.env.DB.prepare(
-        `UPDATE jobs SET counter_price_zmw = ?2 WHERE id = ?1`,
-      ).bind(job.id, recorded));
-      if (job.courier_id && job.from_city && job.dest_city && job.weight_class) {
-        const svc = job.service || 'standard';
-        const q = await c.env.DB.prepare(
-          `SELECT id FROM quotes WHERE courier_id = ?1 AND from_city = ?2 AND to_city = ?3
-             AND weight_class = ?4 AND service = ?5`,
-        ).bind(job.courier_id, job.from_city, job.dest_city, job.weight_class, svc).first<any>();
-        if (q) {
-          dbStatements.push(c.env.DB.prepare(
-            `UPDATE quotes SET counter_price_zmw = ?2, source = 'recorded', updated_at = datetime('now') WHERE id = ?1`,
-          ).bind(q.id, recorded));
-        } else {
-          dbStatements.push(c.env.DB.prepare(
-            `INSERT INTO quotes (courier_id, from_city, to_city, weight_class, service, counter_price_zmw, source)
-             VALUES (?1,?2,?3,?4,?5,?6,'recorded')`,
-          ).bind(job.courier_id, job.from_city, job.dest_city, job.weight_class, svc, recorded));
-        }
+    if (!isAdminKey && !isOpsKey) {
+      delete b.counter_price_zmw; // riders cannot touch money they never collect
+    } else {
+      const recorded = Math.round(Number(b.counter_price_zmw) * 100) / 100;
+      if (Number.isFinite(recorded) && recorded > 0 && recorded <= 20000) {
         dbStatements.push(c.env.DB.prepare(
-          `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_recorded', ?2)`,
-        ).bind(job.id, `Counter fare K${recorded} recorded at the depot — chargebook updated for ${job.from_city} → ${job.dest_city} (${job.weight_class}, ${svc}).`));
+          `UPDATE jobs SET counter_price_zmw = ?2 WHERE id = ?1`,
+        ).bind(job.id, recorded));
+        if (job.courier_id && job.from_city && job.dest_city && job.weight_class) {
+          const svc = job.service || 'standard';
+          const q = await c.env.DB.prepare(
+            `SELECT id FROM quotes WHERE courier_id = ?1 AND from_city = ?2 AND to_city = ?3
+               AND weight_class = ?4 AND service = ?5`,
+          ).bind(job.courier_id, job.from_city, job.dest_city, job.weight_class, svc).first<any>();
+          if (q) {
+            dbStatements.push(c.env.DB.prepare(
+              `UPDATE quotes SET counter_price_zmw = ?2, source = 'recorded', updated_at = datetime('now') WHERE id = ?1`,
+            ).bind(q.id, recorded));
+          } else {
+            dbStatements.push(c.env.DB.prepare(
+              `INSERT INTO quotes (courier_id, from_city, to_city, weight_class, service, counter_price_zmw, source)
+               VALUES (?1,?2,?3,?4,?5,?6,'recorded')`,
+            ).bind(job.courier_id, job.from_city, job.dest_city, job.weight_class, svc, recorded));
+          }
+          dbStatements.push(c.env.DB.prepare(
+            `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_recorded', ?2)`,
+          ).bind(job.id, `Counter fare K${recorded} recorded at the depot — chargebook updated for ${job.from_city} → ${job.dest_city} (${job.weight_class}, ${svc}).`));
+        }
       }
     }
+  }
+
+  // CAMERA-CAPTURE INTEGRITY (owner directive): a parcel is marked delivered
+  // by camera capture, never by price entry. The assigned rider MUST attach a
+  // proof photo to any 'delivered' event — depot handoff or door delivery.
+  // Ops/admin bypasses only for depot-side reconciliation, and even then the
+  // photoless drop is flagged for review.
+  if (status === 'delivered' && !b.photo_url) {
+    if (!isAdminKey && !isOpsKey) {
+      return c.json({ error: 'photo_required', detail: 'Mark the delivery with a camera photo of the parcel — a delivery without proof is not a delivery.' }, 400);
+    }
+    dbStatements.push(c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'photo_missing', ?2)`,
+    ).bind(job.id, 'Delivered by ops without a proof photo — flagged for review. Delivery is marked by camera capture.'));
+    try {
+      await raiseAlert(c.env.DB, ownerPhone(c.env) ?? job.sender_phone, 'delivery_photo_missing', 'medium',
+        `${job.ref} was marked delivered without a camera photo (ops/admin reconciliation drop) — review the handoff.`);
+    } catch { /* alerting must never block the event */ }
   }
 
   // DropOff NEVER holds partner money: the customer pays us only the DropOff
@@ -5758,7 +5810,8 @@ app.get('/admin/quotes', async (c) => {
   const courierId = Number(c.req.query('courier_id') ?? '0');
   const { results } = await c.env.DB.prepare(
     `SELECT q.id, q.courier_id, co.name AS courier_name, q.from_city, q.to_city,
-            q.weight_class, q.service, q.counter_price_zmw, q.source, q.updated_at
+            q.weight_class, q.service, q.counter_price_zmw, q.source, q.updated_at,
+            CASE WHEN q.updated_at < datetime('now', '-90 days') THEN 1 ELSE 0 END AS stale
        FROM quotes q JOIN couriers co ON co.id = q.courier_id
       WHERE (?1 = 0 OR q.courier_id = ?1)
       ORDER BY q.updated_at DESC, co.name, q.from_city, q.to_city LIMIT 500`,
@@ -7988,6 +8041,48 @@ async function notifyExpiryNudges(env: Env): Promise<void> {
 // Daily 19:00 CAT: any verified driver under 30 parcels gets one SMS with the
 // day's remaining, month pace and deficit; the owner gets a compact shortfall
 // list so gaps are caught before month-end rather than after.
+/* ----------------------- cron: weekly ops digest (Mon) ---------------------- */
+// Monday-morning digest for admins/ops/owner: parcels this week, deliveries,
+// chargebook routes learned, and stale counter-fare rows to reconfirm. Push to
+// every staff phone with a registered token; SMS fallback to the owner.
+async function weeklyOpsDigest(env: Env): Promise<void> {
+  try {
+    const one = async (sql: string) => Number((await env.DB.prepare(sql).first<any>())?.n ?? 0);
+    const [created, delivered, learned, stale] = await Promise.all([
+      one(`SELECT COUNT(*) AS n FROM jobs WHERE created_at >= datetime('now', '-7 days')`),
+      one(`SELECT COUNT(*) AS n FROM job_events je WHERE je.status = 'delivered'
+             AND je.created_at >= datetime('now', '-7 days')`),
+      one(`SELECT COUNT(*) AS n FROM quotes WHERE source = 'recorded'
+             AND updated_at >= datetime('now', '-7 days')`),
+      one(`SELECT COUNT(*) AS n FROM quotes WHERE updated_at < datetime('now', '-90 days')`),
+    ]);
+    const title = 'DropOff weekly digest';
+    const body = 'Week: ' +
+      `${created} parcel${created === 1 ? '' : 's'} booked, ${delivered} delivered. ` +
+      `Chargebook: ${learned} counter fare${learned === 1 ? '' : 's'} newly recorded. ` +
+      (stale > 0 ? `${stale} rate${stale === 1 ? '' : 's'} stale (>90 days) — reconfirm at the counter.` : 'All rates fresh.');
+    // Recipients: owner + every admin/ops/cfo account with a phone on file.
+    const owner = ownerPhone(env);
+    const staff = await env.DB.prepare(
+      `SELECT phone FROM auth_users WHERE role IN ('admin', 'ops', 'cfo') AND phone IS NOT NULL AND phone <> ''`,
+    ).all<any>();
+    const phones = new Set<string>();
+    if (owner) phones.add(owner);
+    for (const r of (staff.results ?? []) as any[]) phones.add(String(r.phone).trim());
+    phones.delete('');
+    let pushed = 0;
+    for (const p of phones) {
+      try {
+        await sendToPhone(env, p, { title, body, data: { kind: 'ops_digest' } });
+        pushed++;
+      } catch { /* keep going — one dead token must not stop the digest */ }
+    }
+    if (pushed === 0 && owner) {
+      await sendSms(env, owner, `DropOff weekly: ${body}`);
+    }
+  } catch { /* digest is best-effort — never break the cron */ }
+}
+
 async function notifyRiderTargets(env: Env): Promise<void> {
   try {
     const { results } = await env.DB.prepare(
@@ -8356,9 +8451,12 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
         Number(plan.weekday) === dow && Math.floor(isoWeek / 4) % 2 === Math.abs(plan.id) % 2;
       if (!due) continue;
       const fromCity = plan.from_city ?? 'Lusaka';
+      // Stale-quote decay: quotes untouched for 90+ days are ignored — the
+      // standing order skips this cycle rather than price from a rotted rate.
       const quote = await env.DB.prepare(
         `SELECT counter_price_zmw FROM quotes
-          WHERE courier_id = ?1 AND from_city = ?2 AND to_city = ?3 AND weight_class = ?4 AND service = 'standard'`,
+          WHERE courier_id = ?1 AND from_city = ?2 AND to_city = ?3 AND weight_class = ?4 AND service = 'standard'
+            AND updated_at >= datetime('now', '-90 days')`,
       ).bind(plan.courier_id, fromCity, plan.dest_city, plan.weight_class ?? '0-5kg').first<any>();
       if (!quote) { skipped++; continue; }
       const totals = computeJobTotals({
@@ -8453,6 +8551,12 @@ export default {
       try {
         if (event.cron === '0 19 * * *') {
           await notifyRiderTargets(env);
+          return;
+        }
+        // Weekly ops digest: Monday 08:00 CAT (06:00 UTC) — parcels,
+        // deliveries, chargebook growth, stale rates to reconfirm.
+        if (event.cron === '0 6 * * MON') {
+          await weeklyOpsDigest(env);
           return;
         }
         // Weekly rider payroll: Sunday 16:00 CAT (crons run UTC → 14:00 UTC).

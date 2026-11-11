@@ -356,7 +356,6 @@ class CourierDetailScreen extends StatelessWidget {
             label: Text('Book a rider to ${courier.name.split(' ').first}'),
           ),
           const SizedBox(height: 22),
-          _CounterRatesSection(courierName: courier.name),
           if (courier.receiptAssets.isNotEmpty) ...[
             const SizedBox(height: 22),
             const SectionTitle('Receipt / waybill samples'),
@@ -487,9 +486,12 @@ class CourierDetailScreen extends StatelessWidget {
 }
 
 /// Search-answer banner (enhancement): when the query asks about a fare or a
-/// route ("how much to Ndola", "price", "K40"), answer straight from the
-/// chargebook — only fares DropOff actually recorded at a courier counter.
-/// No query intent, or an unresolvable route, renders nothing at all.
+/// route ("how much to Ndola", "price", "charge"), answer with the ONE truth
+/// DropOff can state — the courier fare is HEARD AT THE COUNTER, never in the
+/// app. Sellers never see a counter price here, only which couriers serve the
+/// route, a reminder that their DropOff rider leg is shown before they book,
+/// and a Book button. No query intent, or an unresolvable route, renders
+/// nothing at all.
 class _QuoteAnswer extends StatefulWidget {
   final String query;
   const _QuoteAnswer({required this.query});
@@ -502,8 +504,7 @@ class _QuoteAnswerState extends State<_QuoteAnswer> {
   String _lastQuery = '';
   String? _from;
   String? _to;
-  List<Map<String, dynamic>> _quotes = const [];
-  bool _loading = false;
+  List<String> _serving = const [];
 
   @override
   void didUpdateWidget(covariant _QuoteAnswer old) {
@@ -516,7 +517,7 @@ class _QuoteAnswerState extends State<_QuoteAnswer> {
 
   void _resolve() {
     final q = widget.query.trim().toLowerCase();
-    final wantsPrice = q.contains('price') || q.contains('fare') || q.contains('how much') ||
+    final wantsFare = q.contains('price') || q.contains('fare') || q.contains('how much') ||
         q.contains('cost') || q.contains('charge') || q.contains('quote') ||
         q.contains('rate') || RegExp(r'\bk\s?\d+').hasMatch(q);
     // Resolve route towns from the query (same behaviour as courier search).
@@ -535,54 +536,27 @@ class _QuoteAnswerState extends State<_QuoteAnswer> {
     final found = q.split(RegExp(r'[^a-z0-9]+')).where((t) => t.isNotEmpty).map(cityMatch).whereType<String>().toSet().toList();
     final from = found.isNotEmpty ? found.first : null;
     final to = found.length > 1 ? found.last : null;
-    if (!wantsPrice || from == null || to == null || from == to) {
-      if (_quotes.isNotEmpty || _from != null) {
-        setState(() { _quotes = const []; _from = null; _to = null; });
+    if (!wantsFare || from == null || to == null || from == to) {
+      if (_from != null || _serving.isNotEmpty) {
+        setState(() { _from = null; _to = null; _serving = const []; });
       }
       return;
     }
     _from = from; _to = to;
-    _loading = true;
     DropOffApi.quotes(from: _from!, to: _to!).then((rows) {
       if (!mounted) return;
-      setState(() { _quotes = rows; _loading = false; });
-    });
+      setState(() {
+        _serving = rows.map((r) => '${r['courier_name'] ?? 'Courier'}').toSet().toList()..sort();
+      });
+    }).catchError((_) { /* coverage lookup is best-effort — the banner stands alone */ });
   }
 
   @override
   Widget build(BuildContext context) {
     final from = _from, to = _to;
     if (from == null || to == null) return const SizedBox.shrink();
-    if (_loading) {
-      return const Padding(
-        padding: EdgeInsets.only(bottom: 14),
-        child: Text('Checking recorded counter fares…', style: TextStyle(color: AppColors.muted, fontSize: 12)),
-      );
-    }
-    if (_quotes.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 14),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
-          child: Text(
-            '$from → $to: no recorded counter fare yet for this route — the depot will quote you at the counter, and DropOff records it once your parcel is dropped.',
-            style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
-          ),
-        ),
-      );
-    }
-    // Group by courier: name → rows sorted by weight class.
-    final byCourier = <String, List<Map<String, dynamic>>>{};
-    for (final q in _quotes) {
-      byCourier.putIfAbsent('${q['courier_name'] ?? 'Courier'}', () => []).add(q);
-    }
-    String weightLabel(String w) => switch (w) {
-          '0-5kg' => 'up to 5kg',
-          '5-15kg' => '5–15kg',
-          '15kg+' => 'over 15kg',
-          _ => w,
-        };
+    String pretty(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+    final fromLabel = pretty(from), toLabel = pretty(to);
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Container(
@@ -590,129 +564,40 @@ class _QuoteAnswerState extends State<_QuoteAnswer> {
         decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.forest.withValues(alpha: 0.25))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            const Icon(Icons.receipt_long_outlined, size: 16, color: AppColors.forest),
+            const Icon(Icons.hearing_outlined, size: 16, color: AppColors.forest),
             const SizedBox(width: 8),
             Expanded(
-              child: Text('Recorded counter fares — $from → $to',
+              child: Text('$fromLabel → $toLabel — heard at the counter',
                   style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest)),
             ),
           ]),
           const SizedBox(height: 8),
-          for (final entry in byCourier.entries) ...[
-            Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
-            const SizedBox(height: 2),
-            for (final q in entry.value)
-              Padding(
-                padding: const EdgeInsets.only(left: 10, bottom: 2),
-                child: Text(
-                  '${weightLabel('${q['weight_class']}')}: K${q['counter_price_zmw']}'
-                  '${q['service'] != 'standard' ? ' · ${q['service']}' : ''}',
-                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
-                ),
-              ),
+          Text(
+            'The courier fare is heard at the counter when your parcel arrives — it is the depot’s charge, never published in this app. '
+            'Your DropOff rider leg is shown before you book, and the counter never touches your money.',
+            style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.45),
+          ),
+          if (_serving.isNotEmpty) ...[
             const SizedBox(height: 6),
+            Text(
+              'Couriers serving this route: ${_serving.join(', ')}',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.forest),
+            ),
           ],
-          const Text(
-            'Fares DropOff staff or riders recorded at the depot counter — never estimates. The courier confirms the final charge at drop-off, and your DropOff rider leg is shown before you book.',
-            style: TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.4),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: () {
+              BookingScreen.prefill = {'from': fromLabel, 'to': toLabel};
+              Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
+            },
+            icon: const Icon(Icons.two_wheeler, size: 18),
+            label: Text('Book a DropOff rider to ${toLabel}'),
           ),
         ]),
       ),
     );
   }
 }
-
-/// Verified counter fares recorded in the chargebook, shown on the courier's
-/// detail page — labelled exactly as what they are: recorded at the counter,
-/// never published rate cards and never estimates.
-class _CounterRatesSection extends StatefulWidget {
-  final String courierName;
-  const _CounterRatesSection({required this.courierName});
-
-  @override
-  State<_CounterRatesSection> createState() => _CounterRatesSectionState();
-}
-
-class _CounterRatesSectionState extends State<_CounterRatesSection> {
-  Future<(String, List<Map<String, dynamic>>)?>? _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _load();
-  }
-
-  Future<(String, List<Map<String, dynamic>>)?> _load() async {
-    final list = await DropOffApi.couriers();
-    Map<String, dynamic>? match;
-    for (final c in list) {
-      final a = '${c['name'] ?? ''}'.trim().toLowerCase();
-      final b = widget.courierName.trim().toLowerCase();
-      if (a == b || a.contains(b) || b.contains(a)) { match = c; break; }
-    }
-    final id = (match?['id'] as num?)?.toInt();
-    if (id == null) return null;
-    final profile = await DropOffApi.courierProfile(id);
-    final rates = (profile?['rates'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
-    if (rates.isEmpty) return null;
-    return ('${match?['name'] ?? widget.courierName}', rates);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<(String, List<Map<String, dynamic>>)?>(
-      future: _future,
-      builder: (context, snap) {
-        final data = snap.data;
-        if (snap.connectionState != ConnectionState.done || data == null) return const SizedBox.shrink();
-        final (_, rates) = data;
-        // Group by route for a compact table.
-        final byRoute = <String, List<Map<String, dynamic>>>{};
-        for (final r in rates) {
-          byRoute.putIfAbsent('${r['from_city']} → ${r['to_city']}', () => []).add(r);
-        }
-        final routes = byRoute.keys.toList()..sort();
-        String weightLabel(String w) => switch (w) {
-              '0-5kg' => 'up to 5kg',
-              '5-15kg' => '5–15kg',
-              '15kg+' => 'over 15kg',
-              _ => w,
-            };
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SectionTitle('Counter fares recorded at the depot'),
-          const Text(
-            'Fares DropOff recorded at the counter — by staff checks or riders at drop-off. The depot confirms the final charge when your parcel arrives.',
-            style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.45),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                for (final route in routes) ...[
-                  Text(route, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  const SizedBox(height: 4),
-                  for (final r in (byRoute[route]!..sort((a, b) => '${a['weight_class']}'.compareTo('${b['weight_class']}'))))
-                    Padding(
-                      padding: const EdgeInsets.only(left: 10, bottom: 2),
-                      child: Text(
-                        '${weightLabel('${r['weight_class']}')} · ${r['service'] == 'standard' ? 'standard' : r['service']} · K${r['counter_price_zmw']}'
-                        ' · recorded ${'${r['updated_at'] ?? ''}'.split(' ').first}',
-                        style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                ],
-              ]),
-            ),
-          ),
-          const SizedBox(height: 6),
-        ]);
-      },
-    );
-  }
-}
-
 
 class ReceiptViewer extends StatelessWidget {
   final String asset;

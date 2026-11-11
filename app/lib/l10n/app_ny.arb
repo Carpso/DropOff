@@ -29,5 +29,17 @@
   "quickRebook": "Bukitsaninso mwachangu",
   "declaredValue": "Mtengo wolengezedwa (ZMW)",
   "parcelCover": "Chitetezo cha katundu (posankha)",
-  "coverDisclaimer": "Chitetezo ndi chinthu chosankha. Malamulo ndi malire amagwira ntchito; si inshuwalansi yokha mpaka itatsimikizidwa."
+  "coverDisclaimer": "Chitetezo ndi chinthu chosankha. Malamulo ndi malire amagwira ntchito; si inshuwalansi yokha mpaka itatsimikizidwa.",
+  "riderStopTitle": "Kodi katundu anapitira bwanji?",
+  "riderPickedUp": "Watengedwa kwa wotumiza",
+  "riderPickedUpSub": "Lemba musanachoke pompano",
+  "riderDepotDrop": "Wasiyidwa pa depot branch",
+  "riderDepotDropSub": "Chithunzi cha kamera chimasonyeza kusamutsidwa — palibe cha mtengo cholemba",
+  "riderDoorDrop": "Waperekedwa kwa wolandira (pakhomo)",
+  "riderDoorDropSub": "Amafunikira DropOff code ya manambala 4",
+  "riderNotYet": "Ayi pano — bwererani",
+  "riderPhotoRequired": "Chithunzi cha kamera cha katundu chikufunika — kusamutsidwa kumawonetsedwa ndi kamera.",
+  "riderDoorPhotoAdd": "Yikani chithunzi cha umboni (chofunikira)",
+  "riderDoorPhotoAttached": "Chithunzi cha umboni chayikidwa ✓",
+  "riderDoorPhotoRequired": "Yikani chithunzi cha kamera cha kusamutsidwa kuti mutsimikizire."
 }

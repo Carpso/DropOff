@@ -354,29 +354,57 @@ class BookingDetailScreen extends StatelessWidget {
         ]),
         const SizedBox(height: 8),
         Center(
-          child: TextButton.icon(
-            icon: const Icon(Icons.replay_outlined),
-            label: Text(AppLocalizations.of(context).quickRebook),
-            onPressed: () {
-              BookingScreen.prefill = {
-                'from': booking.fromCity,
-                'to': booking.toCity,
-                'pickup': booking.pickupAddress,
-                'description': booking.description,
-                'sender_name': booking.senderName,
-                'sender_phone': booking.senderPhone,
-                'recipient_name': booking.recipientName,
-                'recipient_phone': booking.recipientPhone,
-                'size': booking.parcelSize.name,
-                'courier_catalog_id': booking.courierId,
-                'parcels': booking.parcels,
-                'vehicle_class': booking.vehicleClass,
-                'pickup_window': booking.pickupWindow,
-                if (booking.branch != null && booking.branch!.isNotEmpty) 'branch': booking.branch,
-              };
-              Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
-            },
-          ),
+          child: Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
+            TextButton.icon(
+              icon: const Icon(Icons.replay_outlined),
+              label: Text(AppLocalizations.of(context).quickRebook),
+              onPressed: () {
+                BookingScreen.prefill = {
+                  'from': booking.fromCity,
+                  'to': booking.toCity,
+                  'pickup': booking.pickupAddress,
+                  'description': booking.description,
+                  'sender_name': booking.senderName,
+                  'sender_phone': booking.senderPhone,
+                  'recipient_name': booking.recipientName,
+                  'recipient_phone': booking.recipientPhone,
+                  'size': booking.parcelSize.name,
+                  'courier_catalog_id': booking.courierId,
+                  'parcels': booking.parcels,
+                  'vehicle_class': booking.vehicleClass,
+                  'pickup_window': booking.pickupWindow,
+                  if (booking.branch != null && booking.branch!.isNotEmpty) 'branch': booking.branch,
+                };
+                Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
+              },
+            ),
+            // One-tap RETURN: only when this booking was booked as a round
+            // trip — swaps cities/parties and prefills the return pickup,
+            // so a seller never re-types a route they already ran.
+            if (booking.roundTrip && (booking.returnCity?.isNotEmpty ?? false))
+              TextButton.icon(
+                icon: const Icon(Icons.keyboard_return_outlined),
+                label: const Text('Book the return'),
+                onPressed: () {
+                  BookingScreen.prefill = {
+                    'from': booking.returnCity ?? booking.toCity,
+                    'to': booking.fromCity,
+                    'pickup': booking.returnAddress ?? '',
+                    'description': booking.description,
+                    'sender_name': booking.recipientName,
+                    'sender_phone': booking.recipientPhone,
+                    'recipient_name': booking.senderName,
+                    'recipient_phone': booking.senderPhone,
+                    'size': booking.parcelSize.name,
+                    'courier_catalog_id': booking.courierId,
+                    'parcels': booking.parcels,
+                    'vehicle_class': booking.vehicleClass,
+                    'pickup_window': booking.pickupWindow,
+                  };
+                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
+                },
+              ),
+          ]),
         ),
         const SizedBox(height: 12),
         const Text('Rider controls update this device. Photo proof, courier waybill upload and seller notifications run through the linked backend.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),

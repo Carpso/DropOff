@@ -106,4 +106,43 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get coverDisclaimer =>
       'Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed.';
+
+  @override
+  String get riderStopTitle => 'How did the parcel move on?';
+
+  @override
+  String get riderPickedUp => 'Picked up from the seller';
+
+  @override
+  String get riderPickedUpSub => 'File it before leaving the stop';
+
+  @override
+  String get riderDepotDrop => 'Dropped at the depot branch';
+
+  @override
+  String get riderDepotDropSub =>
+      'Camera photo marks the handover — no fare to enter';
+
+  @override
+  String get riderDoorDrop => 'Handed to the recipient (door)';
+
+  @override
+  String get riderDoorDropSub => 'Requires their 4-digit DropOff code';
+
+  @override
+  String get riderNotYet => 'Not yet — go back';
+
+  @override
+  String get riderPhotoRequired =>
+      'A camera photo of the parcel is required — delivery is marked by camera capture.';
+
+  @override
+  String get riderDoorPhotoAdd => 'Add proof photo (required)';
+
+  @override
+  String get riderDoorPhotoAttached => 'Proof photo attached ✓';
+
+  @override
+  String get riderDoorPhotoRequired =>
+      'Attach the camera photo of the handover to confirm.';
 }

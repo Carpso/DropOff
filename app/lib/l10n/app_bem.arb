@@ -29,5 +29,17 @@
   "quickRebook": "Bukisheni bwangu na kabili",
   "declaredValue": "Umutengo uwalumbulwa (ZMW)",
   "parcelCover": "Ubuchingo bwa cipe (ukusalapo)",
-  "coverDisclaimer": "Ubuchingo bupepala ubwakusalapo. Amafunde na mipaka filabomba; te inshuwalansi iyine mpaka yashininkishiwa."
+  "coverDisclaimer": "Ubuchingo bupepala ubwakusalapo. Amafunde na mipaka filabomba; te inshuwalansi iyine mpaka yashininkishiwa.",
+  "riderStopTitle": "Bushe parcel yaendeke shani?",
+  "riderPickedUp": "Parcel yatwalwa kuli mupelela",
+  "riderPickedUpSub": "Lemba apo uli ukabe",
+  "riderDepotDrop": "Parcel yashiywa pa depot branch",
+  "riderDepotDropSub": "Ifikopulo fya camera filebulwa — tapali umulilo wa ku lembelela",
+  "riderDoorDrop": "Parcel kwa muntu uwa pokola (ku chikowe)",
+  "riderDoorDropSub": "Kufwaya 4-digit DropOff code",
+  "riderNotYet": "Takai — bwela",
+  "riderPhotoRequired": "Ifikopulo fya camera fya parcel fyafulwa — ubwito filebulwa nefikopulo.",
+  "riderDoorPhotoAdd": "Kabibele ifikopulo fya camera (fikwete)",
+  "riderDoorPhotoAttached": "Ifikopulo fya camera filebulwa ✓",
+  "riderDoorPhotoRequired": "Kabibele ifikopulo fya camera filebulwa kuti upalile."
 }

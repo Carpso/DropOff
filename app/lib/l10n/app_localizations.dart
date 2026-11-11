@@ -283,6 +283,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed.'**
   String get coverDisclaimer;
+
+  /// No description provided for @riderStopTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How did the parcel move on?'**
+  String get riderStopTitle;
+
+  /// No description provided for @riderPickedUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Picked up from the seller'**
+  String get riderPickedUp;
+
+  /// No description provided for @riderPickedUpSub.
+  ///
+  /// In en, this message translates to:
+  /// **'File it before leaving the stop'**
+  String get riderPickedUpSub;
+
+  /// No description provided for @riderDepotDrop.
+  ///
+  /// In en, this message translates to:
+  /// **'Dropped at the depot branch'**
+  String get riderDepotDrop;
+
+  /// No description provided for @riderDepotDropSub.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera photo marks the handover — no fare to enter'**
+  String get riderDepotDropSub;
+
+  /// No description provided for @riderDoorDrop.
+  ///
+  /// In en, this message translates to:
+  /// **'Handed to the recipient (door)'**
+  String get riderDoorDrop;
+
+  /// No description provided for @riderDoorDropSub.
+  ///
+  /// In en, this message translates to:
+  /// **'Requires their 4-digit DropOff code'**
+  String get riderDoorDropSub;
+
+  /// No description provided for @riderNotYet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not yet — go back'**
+  String get riderNotYet;
+
+  /// No description provided for @riderPhotoRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'A camera photo of the parcel is required — delivery is marked by camera capture.'**
+  String get riderPhotoRequired;
+
+  /// No description provided for @riderDoorPhotoAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add proof photo (required)'**
+  String get riderDoorPhotoAdd;
+
+  /// No description provided for @riderDoorPhotoAttached.
+  ///
+  /// In en, this message translates to:
+  /// **'Proof photo attached ✓'**
+  String get riderDoorPhotoAttached;
+
+  /// No description provided for @riderDoorPhotoRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Attach the camera photo of the handover to confirm.'**
+  String get riderDoorPhotoRequired;
 }
 
 class _AppLocalizationsDelegate

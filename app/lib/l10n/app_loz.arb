@@ -29,5 +29,17 @@
   "quickRebook": "Beela hape ka kapili",
   "declaredValue": "Teko ye bizizwe (ZMW)",
   "parcelCover": "Sikwalikanyi sa sika (ku keta)",
-  "coverDisclaimer": "Sikwalikanyi ki sika sa ku keta. Milao ni mikwakwa i sebeza; ha si inshuwalansi kono ha i sa tii ku lumelwa."
+  "coverDisclaimer": "Sikwalikanyi ki sika sa ku keta. Milao ni mikwakwa i sebeza; ha si inshuwalansi kono ha i sa tii ku lumelwa.",
+  "riderStopTitle": "Ki sina sipakete silela kae?",
+  "riderPickedUp": "Sipakete sitohwa kwa muntu lutela",
+  "riderPickedUpSub": "Libika pe",
+  "riderDepotDrop": "Sipakete seka tokwa kwa depot branch",
+  "riderDepotDropSub": "Sifano sa camera sesi ulusa — hakuna ku ngola teko",
+  "riderDoorDrop": "Sipakete seja kwa muntu muamuheli (munzi)",
+  "riderDoorDropSub": "Ku batala 4-digit DropOff code",
+  "riderNotYet": "Batali — uta",
+  "riderPhotoRequired": "Sifano sa camera sa sipakete si batala — ku tata kusisoa kwa camera.",
+  "riderDoorPhotoAdd": "Buyisa sifano sa camera (si batala)",
+  "riderDoorPhotoAttached": "Sifano sa camera silekwe ✓",
+  "riderDoorPhotoRequired": "Pelaanga sifano sa camera kuti mu shaeeze."
 }

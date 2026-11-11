@@ -29,5 +29,17 @@
   "quickRebook": "Quick rebook",
   "declaredValue": "Declared value (ZMW)",
   "parcelCover": "Parcel cover (optional)",
-  "coverDisclaimer": "Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed."
+  "coverDisclaimer": "Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed.",
+  "riderStopTitle": "How did the parcel move on?",
+  "riderPickedUp": "Picked up from the seller",
+  "riderPickedUpSub": "File it before leaving the stop",
+  "riderDepotDrop": "Dropped at the depot branch",
+  "riderDepotDropSub": "Camera photo marks the handover — no fare to enter",
+  "riderDoorDrop": "Handed to the recipient (door)",
+  "riderDoorDropSub": "Requires their 4-digit DropOff code",
+  "riderNotYet": "Not yet — go back",
+  "riderPhotoRequired": "A camera photo of the parcel is required — delivery is marked by camera capture.",
+  "riderDoorPhotoAdd": "Add proof photo (required)",
+  "riderDoorPhotoAttached": "Proof photo attached ✓",
+  "riderDoorPhotoRequired": "Attach the camera photo of the handover to confirm."
 }

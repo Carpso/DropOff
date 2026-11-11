@@ -106,4 +106,43 @@ class AppLocalizationsToi extends AppLocalizations {
   @override
   String get coverDisclaimer =>
       'Cikwabilizyo ncintu cakusala. Milawo amipimo ilabeleka; tacinshuwalansi pe kusikila cazuminwa.';
+
+  @override
+  String get riderStopTitle => 'Kodi cipakete caa endede zyuli?';
+
+  @override
+  String get riderPickedUp => 'Cpackete ca telwa kuli muntu uutuma';
+
+  @override
+  String get riderPickedUpSub => 'Lemba apo uli';
+
+  @override
+  String get riderDepotDrop => 'Cpackete ca siwa pa depot branch';
+
+  @override
+  String get riderDepotDropSub =>
+      'Ciphongolo ca camera cisaamuna ku lata — takwaba ku nsonga zya muulo';
+
+  @override
+  String get riderDoorDrop => 'Cpackete ca peswa kuli muntu uwazula (munzi)';
+
+  @override
+  String get riderDoorDropSub => 'Kusyowa 4-digit DropOff code';
+
+  @override
+  String get riderNotYet => 'Pebe — weza';
+
+  @override
+  String get riderPhotoRequired =>
+      'Ciphongolo ca camera ca cipakete cijisi — kufuma kwasya kuti kasamunwa a camera.';
+
+  @override
+  String get riderDoorPhotoAdd => 'Wongeya ciphongolo ca camera (cijisi)';
+
+  @override
+  String get riderDoorPhotoAttached => 'Ciphongolo ca camera cacizumwa ✓';
+
+  @override
+  String get riderDoorPhotoRequired =>
+      'Kalipanze ciphongolo ca camera kuti azumiswe.';
 }

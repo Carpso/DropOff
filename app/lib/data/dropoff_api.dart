@@ -465,12 +465,13 @@ class DropOffApi {
         if (lng != null) 'lng': lng,
       });
 
-  /// Rider log: status movement for a job. For door deliveries the server
-  /// REQUIRES [otp] — the recipient's 4-digit DropOff code — so a parcel
-  /// cannot be "delivered" into thin air. [stage] ('pickup' | 'delivery')
-  /// files the proof photo against the right leg. [counterPriceZmw] is the
-  /// fare the depot counter actually charged (depot handoff only) — the
-  /// server records it on the job AND learns it into the chargebook.
+  /// Rider log: status movement for a job. Deliveries are marked by CAMERA
+  /// CAPTURE — the server rejects a rider 'delivered' event without a proof
+  /// photo (depot drop or door alike). For door deliveries the server also
+  /// REQUIRES [otp] — the recipient's 4-digit DropOff code. [stage]
+  /// ('pickup' | 'delivery') files the proof photo against the right leg.
+  /// NO-QUOTING POLICY: riders never send counter fares — that field is
+  /// ops/admin-only on the server and no rider UI offers it.
   static Future<ApiResponse> jobEvent({
     required String jobRef,
     String? status,
@@ -481,7 +482,6 @@ class DropOffApi {
     String? otp,
     double? lat,
     double? lng,
-    double? counterPriceZmw,
   }) =>
       post('/jobs/$jobRef/events', {
         if (status != null) 'status': status,
@@ -492,7 +492,6 @@ class DropOffApi {
         if (otp != null) 'otp': otp,
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,
-        if (counterPriceZmw != null) 'counter_price_zmw': counterPriceZmw,
       });
 
   /// AI parcel photo check: compares the seller's booking capture against the

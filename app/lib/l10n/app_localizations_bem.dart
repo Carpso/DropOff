@@ -106,4 +106,43 @@ class AppLocalizationsBem extends AppLocalizations {
   @override
   String get coverDisclaimer =>
       'Ubuchingo bupepala ubwakusalapo. Amafunde na mipaka filabomba; te inshuwalansi iyine mpaka yashininkishiwa.';
+
+  @override
+  String get riderStopTitle => 'Bushe parcel yaendeke shani?';
+
+  @override
+  String get riderPickedUp => 'Parcel yatwalwa kuli mupelela';
+
+  @override
+  String get riderPickedUpSub => 'Lemba apo uli ukabe';
+
+  @override
+  String get riderDepotDrop => 'Parcel yashiywa pa depot branch';
+
+  @override
+  String get riderDepotDropSub =>
+      'Ifikopulo fya camera filebulwa — tapali umulilo wa ku lembelela';
+
+  @override
+  String get riderDoorDrop => 'Parcel kwa muntu uwa pokola (ku chikowe)';
+
+  @override
+  String get riderDoorDropSub => 'Kufwaya 4-digit DropOff code';
+
+  @override
+  String get riderNotYet => 'Takai — bwela';
+
+  @override
+  String get riderPhotoRequired =>
+      'Ifikopulo fya camera fya parcel fyafulwa — ubwito filebulwa nefikopulo.';
+
+  @override
+  String get riderDoorPhotoAdd => 'Kabibele ifikopulo fya camera (fikwete)';
+
+  @override
+  String get riderDoorPhotoAttached => 'Ifikopulo fya camera filebulwa ✓';
+
+  @override
+  String get riderDoorPhotoRequired =>
+      'Kabibele ifikopulo fya camera filebulwa kuti upalile.';
 }

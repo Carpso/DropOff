@@ -1737,11 +1737,24 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
               const SizedBox(height: 6),
               ..._quotes.take(5).map((q) => Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  '${q['courier_name']} · ${q['from_city']} → ${q['to_city']} · ${q['weight_class']} · K${q['counter_price_zmw']}'
-                  ' · ${q['source'] == 'recorded' ? 'recorded at counter' : 'ops'}',
-                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
-                ),
+                child: Row(children: [
+                  if (q['stale'] == 1)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 4),
+                      child: Icon(Icons.warning_amber_rounded, size: 13, color: Colors.orangeAccent),
+                    ),
+                  Expanded(
+                    child: Text(
+                      '${q['courier_name']} · ${q['from_city']} → ${q['to_city']} · ${q['weight_class']} · K${q['counter_price_zmw']}'
+                      ' · ${q['source'] == 'recorded' ? 'recorded at counter' : 'ops'}'
+                      "${q['stale'] == 1 ? ' · STALE — reconfirm at the counter' : ''}",
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: q['stale'] == 1 ? Colors.orangeAccent.shade700 : AppColors.muted,
+                      ),
+                    ),
+                  ),
+                ]),
               )),
             ],
           ],
