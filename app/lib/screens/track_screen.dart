@@ -11,9 +11,9 @@ import '../screens/account_screen.dart';
 
 /// Recipient parcel tracking — the same view the SMS link opens, reachable
 /// in-app. Paste the tracking link or the token. The SERVER decides who sees
-/// parcel data: the sender/recipient phone (signed-in or phone-verified) or
-/// staff keys. Everyone else gets a phone-verification gate — the link alone
-/// proves nothing.
+/// parcel data: a signed-in DropOff account whose phone is the sender's or
+/// recipient's, or staff keys. EVERYONE ELSE gets an account gate —
+/// no account, no parcel data. Not phone-OTP, not grants: an account.
 class TrackScreen extends StatefulWidget {
   const TrackScreen({super.key, this.initialToken});
 
@@ -26,14 +26,10 @@ class TrackScreen extends StatefulWidget {
 
 class _TrackScreenState extends State<TrackScreen> {
   final _input = TextEditingController();
-  final _phoneCtrl = TextEditingController();
-  bool _phonePrefilled = false;
   Map<String, dynamic>? _data;
   String? _resolvedToken;
   bool _loading = false;
   String? _error;
-  bool _verifying = false;
-  String? _verifyError;
 
   @override
   void initState() {
@@ -45,25 +41,15 @@ class _TrackScreenState extends State<TrackScreen> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_phonePrefilled) return;
-    final store = AppScope.of(context);
-    if (store.linkedPhone != null) _phoneCtrl.text = store.linkedPhone!;
-    _phonePrefilled = true;
-  }
-
-  @override
   void dispose() {
     _input.dispose();
-    _phoneCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _lookup() async {
     final token = _input.text.trim();
     if (token.isEmpty) return;
-    setState(() { _loading = true; _error = null; _verifyError = null; });
+    setState(() { _loading = true; _error = null; });
     final data = await DropOffApi.trackByToken(token);
     if (!mounted) return;
     setState(() {
@@ -74,25 +60,17 @@ class _TrackScreenState extends State<TrackScreen> {
     });
   }
 
-  Future<void> _verify() async {
-    final token = _resolvedToken;
-    final phone = _phoneCtrl.text.trim();
-    if (token == null || phone.isEmpty) return;
-    setState(() { _verifying = true; _verifyError = null; });
-    final res = await DropOffApi.verifyTrack(token, phone);
+  /// Open the account flow, then retry the lookup with the fresh session.
+  Future<void> _openAccount() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
     if (!mounted) return;
-    if (res == null) {
-      setState(() { _verifying = false; _verifyError = "That number isn't on this parcel — only the sender's or recipient's number can open it."; });
-      return;
-    }
-    setState(() { _verifying = false; });
-    await _lookup();
+    if (AppScope.of(context).linked) await _lookup();
   }
 
   @override
   Widget build(BuildContext context) {
     AnalyticsService.instance.trackScreenView('track');
-    final gated = _data?['requires_verification'] == true;
+    final gated = _data?['requires_account'] == true;
     return Scaffold(
       appBar: AppBar(title: const Text('Track a parcel', style: TextStyle(fontWeight: FontWeight.w900))),
       body: ListView(
@@ -113,14 +91,10 @@ class _TrackScreenState extends State<TrackScreen> {
           if (_loading) const Center(child: Padding(padding: EdgeInsets.all(22), child: CircularProgressIndicator())),
           if (_error != null)
             Text(_error!, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
-          if (gated) _verifyCard(),
+          if (gated) _accountCard(),
           if (_data != null && !gated) ...[
             _statusHeader(_data!),
             const SizedBox(height: 14),
-            if (_claimCard(_data!) != null) ...[
-              _claimCard(_data!)!,
-              const SizedBox(height: 14),
-            ],
             FilledButton.tonalIcon(
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
                 builder: (_) => ChatScreen.token(_resolvedToken!),
@@ -158,111 +132,47 @@ class _TrackScreenState extends State<TrackScreen> {
     );
   }
 
-  /// Phone-verification gate — shown when the server says the viewer isn't
-  /// proven yet (requires_verification). Only the sender's or recipient's
-  /// number unlocks tracking; no account needed, just ownership of the number.
-  Widget _verifyCard() {
+  /// Account gate — shown when the server says the viewer has no account-backed
+  /// access (requires_account). Only a signed-in account whose phone is the
+  /// sender's or recipient's can open the parcel; the link alone proves nothing.
+  Widget _accountCard() {
     final hint = '${_data?['hint_phone'] ?? ''}';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Row(children: [
-            Icon(Icons.phonelink_lock, color: AppColors.forest),
+            Icon(Icons.lock_outline, color: AppColors.forest),
             SizedBox(width: 10),
-            Expanded(child: Text('Who is this parcel for?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16))),
+            Expanded(child: Text('An account is needed', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16))),
           ]),
           const SizedBox(height: 8),
           Text(
             hint.isEmpty
-                ? 'Tracking opens only from the phone this parcel was addressed to (or the sender\u2019s). Enter that number to continue.'
-                : 'Tracking opens only from the phone this parcel was addressed to (or the sender\u2019s). Try the number ending in $hint.',
+                ? 'This parcel opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Sign in or create your account, then open the link again.'
+                : 'This parcel opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Try the number ending $hint.',
             style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: _phoneCtrl,
-            keyboardType: TextInputType.phone,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _verify(),
-            decoration: const InputDecoration(
-              labelText: 'Mobile number',
-              hintText: 'e.g. 0977 123 456',
-              prefixIcon: Icon(Icons.phone_android),
-            ),
-          ),
-          if (_verifyError != null) ...[
-            const SizedBox(height: 10),
-            Text(_verifyError!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12.5, fontWeight: FontWeight.w700)),
-          ],
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _verifying ? null : _verify,
-              icon: _verifying ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.verified_user),
-              label: Text(_verifying ? 'Checking…' : 'Verify & track'),
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Divider(height: 1),
-          const SizedBox(height: 12),
-          const Text(
-            'Parcels are tagged to the number they were sent to. Create your own DropOff account with that number and every parcel addressed to you appears here automatically.',
-            style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
-          ),
-          const SizedBox(height: 8),
           Row(children: [
             Expanded(
-              child: OutlinedButton(
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+              child: FilledButton(
+                onPressed: _openAccount,
                 child: const Text('Create account', maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: TextButton(
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
+              child: OutlinedButton(
+                onPressed: _openAccount,
                 child: const Text('Sign in', maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ),
           ]),
-        ]),
-      ),
-    );
-  }
-
-  /// Recipient-only nudge: claim this parcel (and every future one sent to the
-  /// same number) by creating a DropOff account. Hidden when the viewer is the
-  /// signed-in parcel owner (the phone match already tags it to them).
-  Widget? _claimCard(Map<String, dynamic> d) {
-    if (d['you_are'] != 'recipient') return null;
-    final store = AppScope.of(context);
-    if (store.linked) return null;
-    return Card(
-      color: AppColors.amber.withValues(alpha: 0.08),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: AppColors.amber.withValues(alpha: 0.35)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(children: [
-          const Icon(Icons.inbox_rounded, color: AppColors.amber, size: 26),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('This parcel is addressed to you', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-              SizedBox(height: 3),
-              Text('Create your account and it stays here forever — along with everything sent to your number.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
-            ]),
-          ),
-          const SizedBox(width: 8),
-          FilledButton(
-            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
-            child: const Text('Claim'),
+          const SizedBox(height: 10),
+          const Text(
+            'Create your account with the number the parcel was sent to and every parcel addressed to you appears here automatically.',
+            style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
           ),
         ]),
       ),

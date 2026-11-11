@@ -12,7 +12,7 @@ import 'track_screen.dart';
 
 /// One chat, three doors:
 ///  - job thread   (seller, rider, depot partner, ops — via job ref)
-///  - token thread (recipient — via the SMS tracking token, no account)
+///  - token thread (signed-in recipient addressed to the parcel — via the SMS tracking token)
 ///  - support      (anyone signed in <-> ops)
 /// Realtime via a per-thread Durable Object WebSocket; the 4 s poll stays as a
 /// safety net until the socket is confirmed open (then relaxes to 15 s), and
@@ -164,8 +164,8 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       if (data == null && !_isRecipient) return;
       if (data == null) {
-        // Token chat without a phone-verification grant (fresh app run): the
-        // TrackScreen verify flow mints the X-Track-Grant — route the user there.
+        // Token chat without a signed-in account (401): the account gate in
+        // TrackScreen handles it — route there.
         setState(() { _loading = false; _needsVerify = true; });
         _poll?.cancel();
         return;
@@ -358,19 +358,19 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(32),
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      const Icon(Icons.phonelink_lock, size: 44, color: AppColors.muted),
+                      const Icon(Icons.lock_outline, size: 48, color: AppColors.muted),
                       const SizedBox(height: 16),
-                      const Text('Verify your number first', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+                      const Text('An account is needed', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
                       const SizedBox(height: 8),
-                      const Text('Only the parcel\u2019s sender or recipient can open this chat. Verify the phone it was addressed to, then come back.',
+                      const Text('Only the parcel’s sender or recipient — signed in to DropOff with the phone it was addressed to — can open this chat.',
                           textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.5)),
                       const SizedBox(height: 20),
                       FilledButton.icon(
                         onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
                           builder: (_) => TrackScreen(initialToken: widget.token),
                         )),
-                        icon: const Icon(Icons.verified_user),
-                        label: const Text('Verify & track'),
+                        icon: const Icon(Icons.person),
+                        label: const Text('Go to tracking'),
                       ),
                     ]),
                   ),

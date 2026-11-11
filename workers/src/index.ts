@@ -309,8 +309,10 @@ app.use('*', async (c, next) => {
   const p = c.req.path;
   if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/') || p.startsWith('/.well-known/') || p.startsWith('/delete-data')) return next();
   // '/track/incoming' is the signed-in recipient's parcel list - it needs the
-  // JWT identity, so it does NOT get the public token-credential bypass.
-  if (p.startsWith('/track/') && p !== '/track/incoming') return next(); // token IS the credential (GET page + token chat)
+  // JWT identity, so it does NOT get the public bypass.
+  // All other '/track/*' routes do their own account check in trackAccess —
+  // the link alone is never a credential (no account ⇒ no data).
+  if (p.startsWith('/track/') && p !== '/track/incoming') return next();
   const isPublicGet = c.req.method === 'GET' && (PUBLIC_GETS.has(p) || /^\/couriers\/\d+\/profile$/.test(p));
   if (isPublicGet) return next();
 
@@ -517,20 +519,12 @@ async function senderProfileName(db: D1Database, phone: string): Promise<string 
 }
 
 /* ------------------------ tracking access control ------------------------- */
-// The link ALONE is no longer enough: every /track/:token route requires one of
-//   (a) a JWT whose phone is the sender or recipient of that job (the app's
-//       signed-in participant — recipients verify by signing up),
-//   (b) a valid X-Track-Grant minted by POST /track/:token/verify for a
-//       participant phone (phone number = proof the link belongs to you), or
-//   (c) staff keys (X-Admin-Key / X-Api-Key).
-// Anyone else with the link only learns the last 4 digits of the phone to
-// verify with — never parcel data, rider location or events.
-async function trackGrantFor(env: Env, token: string, phone: string): Promise<string> {
-  const data = new TextEncoder().encode(`${env.JWT_SECRET}:track:${token}:${phone}`);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, '0')).join('');
-}
-
+// ACCOUNTS REQUIRED (owner directive — "no one without account"): a parcel can
+// ONLY be tracked by a signed-in user whose phone is the sender's or the
+// recipient's, or by staff keys. No phone-OTP grants, no anonymous link
+// access: the link itself proves nothing. Anyone else learns only the last 4
+// digits of the participant phone — never parcel data, rider location or
+// events — plus a pointer to the account flow.
 type TrackAccess = {
   granted: boolean;
   jobId: number | null;          // null => token unknown/expired (404)
@@ -566,16 +560,7 @@ async function trackAccess(c: any, token: string): Promise<TrackAccess> {
       return { granted: true, ...base, whoAmI: claims.phone === job.recipient_phone ? 'recipient' : 'sender' };
     }
   }
-  // Phone-verified grant minted by POST /track/:token/verify.
-  const grant = c.req.header('X-Track-Grant') ?? '';
-  if (grant && grant.length === 64) {
-    for (const p of [job.sender_phone, job.recipient_phone]) {
-      if (p && grant === (await trackGrantFor(c.env, token, p))) {
-        return { granted: true, ...base, whoAmI: p === job.recipient_phone ? 'recipient' : 'sender' };
-      }
-    }
-  }
-  return { granted: false, ...base }; // token valid, viewer unproven
+  return { granted: false, ...base }; // token valid, but no account → no data
 }
 
 const maskPhone = (p: string | null) => (p && p.length >= 4 ? `————${p.slice(-4)}` : null);
@@ -1830,7 +1815,7 @@ app.post('/jobs', async (c) => {
     const trackUrl = trackingUrl(c.env, trackingToken);
     c.executionCtx.waitUntil(
       sendSms(c.env, recipientPhone,
-      `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {}),
+      `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {}),
     );
 
     if (pickupAt) {
@@ -2745,12 +2730,12 @@ app.post('/admin/fraud/:id/review', async (c) => {
   return c.json({ ok: true, status });
 });
 
-/* --------------------------- public tracking page ------------------------- */
-// GET /track/:token — the token alone no longer opens the parcel: an
-// unverified viewer gets a phone-verification gate (last-4 hint only). See
-// trackAccess() for the three grant paths (JWT participant, X-Track-Grant,
-// staff keys). Verified viewers get status + live rider location; never
-// prices, sender phone or payment data.
+/* ------------------------- account-gated tracking page ----------------------- */
+// GET /track/:token — the link NEVER opens a parcel by itself. Only a signed-in
+// account whose phone is the sender's or recipient's (or staff) gets data;
+// anyone else gets requires_account + a last-4 hint. See trackAccess().
+// Granted viewers get status + live rider location; never prices, sender
+// phone or payment data.
 app.get('/track/:token', async (c) => {
   const token = c.req.param('token');
   const wantsHtml = c.req.header('accept')?.includes('text/html') ?? false;
@@ -2758,18 +2743,18 @@ app.get('/track/:token', async (c) => {
     return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DropOff</title></head>
 <body style="font-family:system-ui;margin:0;background:#123C32;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px">
 <div style="max-width:420px"><h1 style="margin:0 0 8px">Open in DropOff</h1>
-<p style="opacity:.9">Tap below to open this tracking link in the app. The app uses your phone number to show the parcel.</p>
-<a href="dropoff://track/${encodeURIComponent(token)}" style="display:inline-block;margin-top:18px;background:#F6B73C;color:#123C32;font-weight:800;text-decoration:none;padding:14px 28px;border-radius:12px">Open DropOff</a>
-<p style="margin-top:16px;font-size:12px;opacity:.7">If the app says "not found" or "not authorized", the phone used to address the parcel may not match this device.</p>
+<p style="opacity:.9">Tap below to open this link in the DropOff app. Tracking requires an account: sign in (or create one) with the phone this parcel was addressed to.</p>
+<a href="dropoff://track/${encodeURIComponent(token)}" style="display:inline-block;margin-top:18px;background:#F6B73C;color:#123C32;font-weight:800;text-decoration:none;padding:14px 28px;border-radius:12px">Open in DropOff</a>
+<p style="margin-top:16px;font-size:12px;opacity:.7">No account, no parcel details — the link only works signed-in with the sender's or recipient's number.</p>
 </div></body></html>`);
   }
   const access = await trackAccess(c, token);
   if (!access.jobId) return c.json({ error: 'not found' }, 404);
   if (!access.granted) {
     return c.json({
-      requires_verification: true,
+      requires_account: true,
       hint_phone: maskPhone(access.recipientPhone),
-      hint: 'This parcel can only be tracked from the phone it was addressed to (or the sender\'s phone). Sign up / sign in with that number to follow it.',
+      hint: 'Tracking opens only in a DropOff account signed in with the phone this parcel was addressed to (or the sender\'s phone). Create your account or sign in, then open the link again.',
     });
   }
   const row = await c.env.DB.prepare(
@@ -2819,90 +2804,19 @@ app.get('/track/:token', async (c) => {
       ? { lat: row.last_lat, lng: row.last_lng, seen_at: row.last_seen_at }
       : null,
     events,
-    // "belongs to" proof shown by the app after a successful grant.
+    // "belongs to" proof — shown only after the account gate passes.
     verified: true,
     you_are: access.whoAmI ?? null,
     verified_for: access.recipientName ?? null,
   });
 });
 
-// POST /track/:token/verify {phone} — proves the caller owns a participant
-// phone (the recipient's or the sender's) and mints an X-Track-Grant.
-// Rate-limited so the gate cannot be brute-forced.
-// Short vanity path used in shares/SMS — same behaviour as /track/:token.
+// Vanity short path for SMS/shares — redirects to /track/:token, which is
+// account-gated like everything else.
 app.get('/t/:token', (c) => c.redirect(`/track/${c.req.param('token')}`, 302));
 
-app.post('/track/:token/verify', async (c) => {
-  if (await rateLimited(c, 'track_verify', 15)) return c.json({ error: 'too_many_requests' }, 429);
-  // Per-token throttle too: 10 attempts / hour against ONE link, even from
-  // rotating IPs, so the 30-digit phone hint can't be brute-forced.
-  if (await rateLimited(c, `track_verify_token:${c.req.param('token')}`, 10)) {
-    return c.json({ error: 'too_many_requests' }, 429);
-  }
-  const b: any = await c.req.json().catch(() => null);
-  let phone = '';
-  try { phone = normalizeZmPhone(String(b?.phone ?? '')); } catch { return c.json({ error: 'invalid_phone' }, 400); }
-  const token = c.req.param('token');
-  const job = await c.env.DB.prepare(
-    `SELECT j.sender_phone, j.recipient_phone, j.recipient_name, j.ref
-       FROM tracking_tokens t JOIN jobs j ON j.id = t.job_id
-      WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
-  ).bind(token).first<any>();
-  if (!job) return c.json({ error: 'not found' }, 404);
-  if (phone !== job.sender_phone && phone !== job.recipient_phone) {
-    return c.json({ error: 'phone_does_not_match' }, 403);
-  }
-  // KNOWING THE NUMBER IS NOT PROOF OF OWNERSHIP. Every grant requires an SMS
-  // code delivered to that phone: step 1 requests it, step 2 redeems it.
-  const code = String(b?.code ?? '').trim();
-  if (!code) {
-    if (await rateLimited(c, 'track_otp', 30)) return c.json({ error: 'too_many_requests' }, 429);
-    const recent = await c.env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM otp_codes WHERE phone = ?1 AND created_at > datetime('now', '-1 hour')`,
-    ).bind(phone).first<any>();
-    if ((recent?.n ?? 0) >= 5) return c.json({ error: 'too_many_codes_wait_an_hour' }, 429);
-    const otp = generateOtp();
-    const hash = await hashOtp(otp, c.env.JWT_SECRET);
-    await c.env.DB.batch([
-      c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE phone = ?1 AND used = 0').bind(phone),
-      c.env.DB.prepare(
-        `INSERT INTO otp_codes (phone, code_hash, expires_at) VALUES (?1, ?2, datetime('now', '+10 minutes'))`,
-      ).bind(phone, hash),
-    ]);
-    const sms = await sendSms(c.env, phone,
-      `DropOff: your parcel ${job.ref} tracking code is ${otp}. It expires in 10 minutes. Never share it — only the parcel's owner should have it.`).catch(() => ({ sent: false }));
-    return c.json({
-      ok: true, sent: sms.sent, ...('error' in sms && sms.error ? { sms_error: sms.error } : {}),
-      step: 'enter_the_code', ref: job.ref,
-      ...(devModeOn(c.env) ? { dev_code: otp } : {}),
-    });
-  }
-  if (await rateLimited(c, 'track_verify', 30)) return c.json({ error: 'too_many_requests' }, 429);
-  const row = await c.env.DB.prepare(
-    `SELECT id, code_hash, attempts FROM otp_codes
-      WHERE phone = ?1 AND used = 0 AND expires_at > datetime('now')
-      ORDER BY id DESC LIMIT 1`,
-  ).bind(phone).first<any>();
-  if (!row) return c.json({ error: 'code_expired_or_missing' }, 401);
-  if (Number(row.attempts ?? 0) >= 5) {
-    await c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id).run();
-    return c.json({ error: 'code_expired_or_missing' }, 401);
-  }
-  const hash = await hashOtp(code, c.env.JWT_SECRET);
-  if (hash !== row.code_hash) {
-    await c.env.DB.prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?1').bind(row.id).run();
-    return c.json({ error: 'wrong_code' }, 401);
-  }
-  await c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id).run();
-  const grant = await trackGrantFor(c.env, token, phone);
-  return c.json({
-    ok: true, grant,
-    ref: job.ref,
-    recipient_name: job.recipient_name,
-    verified_phone: phone,
-    is_sender: phone === job.sender_phone,
-  });
-});
+// (Removed: POST /track/:token/verify — the phone-OTP "grant" that let
+// non-account holders track with a link. Accounts are required now.)
 
 // Recipient inbox: every live parcel addressed to the signed-in caller's phone,
 // newest first - a recipient who creates a DropOff account gets their parcels
@@ -3470,7 +3384,8 @@ app.post('/jobs/:ref/chat', async (c) => {
   return c.json({ ok: true, id: meta.last_row_id });
 });
 
-// Recipient chat via the tracking token — same grant gate as GET /track/:token.
+// Recipient chat via the tracking token — same ACCOUNT gate as GET /track/:token.
+// Signed-in participant phone only; the link alone never opens a thread.
 app.get('/track/:token/chat', async (c) => {
   const access = await trackAccess(c, c.req.param('token'));
   if (!access.jobId) return c.json({ error: 'not found' }, 404);

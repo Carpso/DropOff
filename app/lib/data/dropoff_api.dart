@@ -627,30 +627,24 @@ class DropOffApi {
 
   // ---- recipient tracking (verification-gated) ----
   // The shared link alone never opens the parcel: the Worker answers with
-  // requires_verification + a last-4 phone hint until the viewer proves a
-  // participant phone. Signed-in users (sender/recipient) pass via their JWT
-  // automatically (in _headers); phone-verified viewers pass via the
-  // X-Track-Grant minted by verifyTrack() below.
-
-  /// Grants per token (in-memory only — a fresh app run simply re-verifies).
-  static final Map<String, String> _trackGrants = {};
+  // ACCOUNTS REQUIRED (owner directive): a parcel can only be tracked by a
+  // signed-in account whose phone is the sender's or recipient's — the link
+  // proves nothing by itself. Signed-in users pass via their JWT (in
+  // _headers); everyone else gets requires_account + a last-4 hint. There is
+  // deliberately NO phone-OTP / anonymous grant path.
 
   static String _trackTokenOf(String input) {
     final raw = input.trim();
     return RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw)?.group(1) ?? raw;
   }
 
-  static Map<String, String> _trackHeaders(String token) => {
-        if (_trackGrants[token] != null) 'X-Track-Grant': _trackGrants[token]!,
-      };
-
-  /// Live (never cached) tracking fetch — gate vs granted responses must not
-  /// be served from a stale snapshot.
+  /// Live (never cached) tracking fetch — the gate response must not be
+  /// served from a stale snapshot. Signed-in viewers pass via JWT.
   static Future<Map<String, dynamic>?> _trackGet(String path, String token) async {
     if (!enabled) return null;
     try {
       final res = await http
-          .get(_uri(path), headers: {..._headers, ..._trackHeaders(token)})
+          .get(_uri(path), headers: _headers)
           .timeout(_timeout);
       if (res.statusCode >= 200 && res.statusCode < 300) {
         return jsonDecode(res.body) as Map<String, dynamic>;
@@ -661,21 +655,11 @@ class DropOffApi {
     }
   }
 
-  /// Recipient tracking — accepts the SMS link or the bare token. Callers
-  /// must treat `requires_verification: true` as "show the phone gate".
+  /// Track by SMS link or bare token. Callers must treat `requires_account`
+  /// as "show the account gate". Signed-in participant phones pass via JWT.
   static Future<Map<String, dynamic>?> trackByToken(String input) {
     final token = _trackTokenOf(input);
     return _trackGet('/track/$token', token);
-  }
-
-  /// Phone-verification gate: succeeds only for the sender's or recipient's
-  /// phone; stores the returned grant for every subsequent /track/* call.
-  static Future<Map<String, dynamic>?> verifyTrack(String tokenOrUrl, String phone) async {
-    final token = _trackTokenOf(tokenOrUrl);
-    final res = await post('/track/$token/verify', {'phone': phone});
-    final grant = res.ok ? res.body['grant'] as String? : null;
-    if (grant != null) _trackGrants[token] = grant;
-    return res.ok ? res.body : null;
   }
 
   // ---- chat (job thread / recipient-token thread / support thread) ----
@@ -692,7 +676,7 @@ class DropOffApi {
 
   static Future<ApiResponse> sendTrackChat(String tokenOrUrl, String body) {
     final token = _trackTokenOf(tokenOrUrl);
-    return post('/track/$token/chat', {'body': body}, extraHeaders: _trackHeaders(token));
+    return post('/track/$token/chat', {'body': body});
   }
 
   /// Open (or create) the support thread; a non-empty [body] is sent as the
