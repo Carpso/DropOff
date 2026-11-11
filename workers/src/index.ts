@@ -1568,20 +1568,15 @@ app.post('/jobs', async (c) => {
     const weightClass = b.weight_class ?? '0-5kg';
     const service = b.service ?? 'standard';
 
-    // Server-side pricing: quotes table = single source of truth. Missing
-    // verified quote -> 422 quote_needed, never an invented fare.
+    // Server-side pricing: quotes table = preferred source of truth; absent a
+    // verified quote the first-mile leg books anyway and the counter fare is
+    // marked "quoted at counter" — NEVER fabricate an intercity fare.
     const quote = await c.env.DB.prepare(
       `SELECT counter_price_zmw FROM quotes
         WHERE courier_id = ?1 AND from_city = ?2 AND to_city = ?3
           AND weight_class = ?4 AND service = ?5`,
     ).bind(b.courier_id, fromCity, b.dest_city, weightClass, service).first<any>();
-    if (!quote) {
-      return c.json({
-        error: 'quote_needed',
-        detail: 'No verified counter price for this route/weight yet — capture it at the counter first.',
-      }, 422);
-    }
-    const counterPrice = Number(quote.counter_price_zmw);
+    const counterPrice = quote ? Number(quote.counter_price_zmw) : 0;
 
     // Pack inclusion: EVERY PARCEL counts as one plan slot � two parcels in
     // one trip to the same receiver = two parcels. Cycle = 30 days from
