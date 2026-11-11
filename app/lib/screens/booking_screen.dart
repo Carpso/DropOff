@@ -892,8 +892,10 @@ class _BookingScreenState extends State<BookingScreen> {
             ),
           ]),
         ),
-        if (selected.hasVerifiedRates && _from != 'Lusaka')
-          const Text('Platinum’s captured tariff starts from Lusaka. This reverse/other route needs a counter quote.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text('The courier fare is heard at the counter — the same conversation for every route, Lusaka or elsewhere.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+        ),
       ];
 
   List<Widget> _detailsStep(CourierInfo courier) => [

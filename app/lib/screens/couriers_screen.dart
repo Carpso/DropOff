@@ -126,9 +126,11 @@ class _CouriersScreenState extends State<CouriersScreen> {
                             const SizedBox(width: 4),
                             const Expanded(child: Text('COMING SOON', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.6, color: AppColors.muted))),
                           ] else ...[
-                            Icon(courier.hasVerifiedRates ? Icons.verified : Icons.request_quote_outlined, size: 15, color: courier.hasVerifiedRates ? AppColors.forest : AppColors.muted),
+                            // UNIFORM POLICY: every courier reads the same —
+                            // the fare is heard at the counter, full stop.
+                            const Icon(Icons.request_quote_outlined, size: 15, color: AppColors.muted),
                             const SizedBox(width: 4),
-                            Expanded(child: Text('Quoted at counter', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted))),
+                            const Expanded(child: Text('Quoted at counter', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted))),
                           ],
                         ]),
                       ])),
