@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../data/dropoff_api.dart';
+import '../data/analytics_service.dart';
 import '../l10n/app_localizations.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
@@ -30,6 +31,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.trackScreenView('rider_queue');
     _load();
   }
 
@@ -97,7 +99,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
               setState(() => _busyRef = null);
               Navigator.pop(ctx);
               await _snack(res.ok ? '$ref ✓ ${l10n.riderPickedUp}' : 'Could not update (${res.error})');
-              if (res.ok) _load();
+              if (res.ok) {
+                AnalyticsService.instance.track(feature: 'rider', action: 'picked_up', context: 'depot_stop');
+                _load();
+              }
             },
           ),
           // NO-QUOTING POLICY (owner directive): there is NO fare entry here —
@@ -123,6 +128,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
               Navigator.pop(ctx);
               await _snack(res.ok ? '$ref ✓ ${l10n.riderDepotDrop}' : 'Could not update (${res.error})');
               if (res.ok) {
+                AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
                 // Best-effort: compare seller's booking photo vs this drop photo.
                 final chk = await DropOffApi.parcelCheck(ref);
                 if (!mounted) return;

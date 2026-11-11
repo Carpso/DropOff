@@ -7542,6 +7542,65 @@ app.get('/admin/analytics/kpi', async (c) => {
   });
 });
 
+// Operational KPIs — the fundamental "how is the business really working"
+// view, computed from the operational tables (NOT from app telemetry, which
+// is lossy by design). Admin/ops only; no PII beyond aggregates.
+app.get('/admin/analytics/ops', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const days = Math.min(Math.max(Number(c.req.query('days') ?? '30'), 1), 90);
+  const since = `datetime('now', '-${days} days')`;
+  const todayCAT = `date('now', '+2 hours')`;
+  const one = async (sql: string) => Number((await c.env.DB.prepare(sql).first<any>())?.n ?? 0);
+  const money = async (sql: string) => Math.round(Number((await c.env.DB.prepare(sql).first<any>())?.n ?? 0) * 100) / 100;
+
+  const [
+    booked, bookedToday, parcels, delivered, pickups, deliveredToday,
+    activeSellers, activeRiders, paygZmw, paygSuccess, paygFailed,
+    walletCharges, walletChargesCount, subsActive, routesLearned,
+  ] = await Promise.all([
+    one(`SELECT COUNT(*) AS n FROM jobs WHERE created_at >= ${since}`),
+    one(`SELECT COUNT(*) AS n FROM jobs WHERE date(created_at, '+2 hours') = ${todayCAT}`),
+    one(`SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs WHERE created_at >= ${since}`),
+    one(`SELECT COUNT(DISTINCT job_id) AS n FROM job_events WHERE status = 'delivered' AND created_at >= ${since}`),
+    one(`SELECT COUNT(DISTINCT job_id) AS n FROM job_events WHERE status = 'picked_up' AND created_at >= ${since}`),
+    one(`SELECT COUNT(DISTINCT job_id) AS n FROM job_events WHERE status = 'delivered' AND date(created_at, '+2 hours') = ${todayCAT}`),
+    one(`SELECT COUNT(DISTINCT sender_phone) AS n FROM jobs WHERE created_at >= ${since}`),
+    one(`SELECT COUNT(DISTINCT rider_id) AS n FROM jobs WHERE rider_id IS NOT NULL AND created_at >= ${since}`),
+    money(`SELECT COALESCE(SUM(amount_zmw), 0) AS n FROM payments WHERE status = 'success' AND kind = 'job' AND created_at >= ${since}`),
+    one(`SELECT COUNT(*) AS n FROM payments WHERE status = 'success' AND kind = 'job' AND created_at >= ${since}`),
+    one(`SELECT COUNT(*) AS n FROM payments WHERE status = 'failed' AND kind = 'job' AND created_at >= ${since}`),
+    money(`SELECT COALESCE(SUM(-amount_zmw), 0) AS n FROM wallet_ledger WHERE amount_zmw < 0 AND kind IN ('job_charge', 'job_payment') AND created_at >= ${since}`),
+    one(`SELECT COUNT(*) AS n FROM wallet_ledger WHERE amount_zmw < 0 AND kind IN ('job_charge', 'job_payment') AND created_at >= ${since}`),
+    one(`SELECT COUNT(*) AS n FROM subscriptions WHERE status = 'active' AND (period_end IS NULL OR period_end > datetime('now'))`),
+    one(`SELECT COUNT(*) AS n FROM quotes WHERE source = 'recorded' AND updated_at >= ${since}`),
+  ]);
+
+  const momoAttempts = paygSuccess + paygFailed;
+  const momoSuccessPct = momoAttempts > 0 ? Math.round((1000 * paygSuccess) / momoAttempts) / 10 : null;
+  const deliveryRatePct = booked > 0 ? Math.round((1000 * delivered) / booked) / 10 : null;
+
+  return c.json({
+    days,
+    parcels_booked: booked,
+    parcels_booked_today: bookedToday,
+    parcels_shipped: parcels,
+    deliveries: delivered,
+    deliveries_today: deliveredToday,
+    pickups,
+    delivery_rate_pct: deliveryRatePct,
+    active_sellers: activeSellers,
+    active_riders: activeRiders,
+    payg_collected_zmw: paygZmw,
+    payg_success: paygSuccess,
+    payg_failed: paygFailed,
+    momo_success_pct: momoSuccessPct,
+    wallet_charges_zmw: walletCharges,
+    wallet_charge_jobs: walletChargesCount,
+    subscriptions_active: subsActive,
+    chargebook_routes_learned: routesLearned,
+  });
+});
+
 /* Analytics KPI page (HTML) — server-rendered view of the same aggregation. */
 app.get('/dashboard/analytics', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);

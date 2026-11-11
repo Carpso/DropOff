@@ -139,6 +139,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AnalyticsService.instance.trackScreenView('admin_console');
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Admin console', style: TextStyle(fontWeight: FontWeight.w900))),
@@ -2289,9 +2290,13 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
   }
 }
 
-/// Feature usage / click KPI for the admin console — which app features are
-/// used frequently (superadmin and admin). Reads the aggregated analytics
-/// from GET /admin/analytics/kpi.
+/// High-value KPI for the admin console, in two layers:
+///  A) OPERATIONAL — GET /admin/analytics/ops: the real work, computed from
+///     the operational tables (jobs/events/payments/wallet/subscriptions):
+///     parcels booked/delivered today & 30d, active sellers/riders, PAYG vs
+///     wallet money, MoMo success rate. Always real, never telemetry-fuzzy.
+///  B) APP USAGE — GET /admin/analytics/kpi: telemetry (screens, features,
+///     funnel, DAU) — as good as the outbox; kept secondary on purpose.
 class _AnalyticsKpiCard extends StatefulWidget {
   const _AnalyticsKpiCard();
 
@@ -2300,7 +2305,8 @@ class _AnalyticsKpiCard extends StatefulWidget {
 }
 
 class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
-  Map<String, dynamic>? _kpi;
+  Map<String, dynamic>? _ops;
+  Map<String, dynamic>? _usage;
   bool _loading = true;
 
   @override
@@ -2310,10 +2316,14 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
   }
 
   Future<void> _load() async {
-    final data = await DropOffApi.getAdmin('/admin/analytics/kpi?days=30');
+    final results = await Future.wait([
+      DropOffApi.getAdmin('/admin/analytics/ops?days=30'),
+      DropOffApi.getAdmin('/admin/analytics/kpi?days=30'),
+    ]);
     if (!mounted) return;
     setState(() {
-      _kpi = data;
+      _ops = results[0];
+      _usage = results[1];
       _loading = false;
     });
   }
@@ -2348,7 +2358,8 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
 
   @override
   Widget build(BuildContext context) {
-    final kpi = _kpi;
+    final ops = _ops;
+    final kpi = _usage;
     final total = kpi?['total_events'] as num? ?? 0;
     final features = ((kpi?['top_features'] as List?) ?? const [])
         .cast<Map<String, dynamic>>();
@@ -2359,6 +2370,12 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
     final screens = ((kpi?['top_screens'] as List?) ?? const [])
         .cast<Map<String, dynamic>>();
     final roles = _roleEntries(kpi?['by_role']);
+    String zmw(num? v) {
+      final d = (v ?? 0).toDouble();
+      return 'K${d.toStringAsFixed(d == d.roundToDouble() ? 0 : 2)}';
+    }
+    String pct(num? v) => v == null ? '—' : '${v.toStringAsFixed(1)}%';
+    final deliveryPct = ops?['delivery_rate_pct'] as num?;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -2366,73 +2383,114 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
           Row(children: [
             const Icon(Icons.insights_outlined, color: AppColors.forest),
             const SizedBox(width: 8),
-            const Expanded(child: Text('App usage KPI (30 days)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            const Expanded(child: Text('KPI — last 30 days', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             TextButton.icon(
               style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 10)),
               onPressed: _loading ? null : _load,
               icon: const Icon(Icons.refresh, size: 17),
-              // persistent, clearly-labelled refresh — the card owns its reload
-              label: const Text('Refresh KPIs', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+              label: const Text('Refresh', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
             ),
-          ]),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: _KpiMetric('Events', '$total', Icons.event_note)),
-            Expanded(child: _KpiMetric('Features', '${features.length}', Icons.apps)),
-            Expanded(child: _KpiMetric('Active days', '${dau.length}', Icons.today)),
           ]),
           const SizedBox(height: 12),
           if (_loading)
             const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
           else ...[
-            const Text('Most used features', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+            const Text('Operations — the real work (live data)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
             const SizedBox(height: 6),
-            ...features.take(8).map((f) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(children: [
-                Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12.5), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                Text('${f['n']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.forest)),
-                const SizedBox(width: 6),
-                Text('${f['users']} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+            if (ops == null)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 6),
+                child: Text('Could not load operational KPIs — worker endpoint /admin/analytics/ops may not be deployed yet.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+              )
+            else ...[
+              Row(children: [
+                Expanded(child: _KpiMetric('Booked', '${ops['parcels_booked'] ?? 0} · ${ops['parcels_booked_today'] ?? 0} today', Icons.inventory_2_outlined)),
+                const SizedBox(width: 8),
+                Expanded(child: _KpiMetric('Delivered', '${ops['deliveries'] ?? 0} · ${ops['deliveries_today'] ?? 0} today', Icons.local_shipping_outlined)),
               ]),
-            )),
-            const SizedBox(height: 10),
-            const Text('Most visited screens (30d)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _KpiMetric('Active sellers', '${ops['active_sellers'] ?? 0}', Icons.storefront_outlined)),
+                const SizedBox(width: 8),
+                Expanded(child: _KpiMetric('Active riders', '${ops['active_riders'] ?? 0}', Icons.two_wheeler)),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _KpiMetric('PAYG collected', zmw(ops['payg_collected_zmw'] as num?), Icons.payments_outlined)),
+                const SizedBox(width: 8),
+                Expanded(child: _KpiMetric('Wallet charges', zmw(ops['wallet_charges_zmw'] as num?), Icons.account_balance_wallet_outlined)),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: _KpiMetric('MoMo success', pct(ops['momo_success_pct'] as num?), Icons.phone_android_outlined)),
+                const SizedBox(width: 8),
+                Expanded(child: _KpiMetric('Subs active', '${ops['subscriptions_active'] ?? 0}', Icons.workspace_premium_outlined)),
+              ]),
+              const SizedBox(height: 6),
+              Text('Delivery rate ${deliveryPct == null ? '—' : '${deliveryPct.toStringAsFixed(1)}%'} · Pickups ${ops['pickups'] ?? 0} · Parcels shipped ${ops['parcels_shipped'] ?? 0} · Chargebook routes learned ${ops['chargebook_routes_learned'] ?? 0} · Wallet jobs ${ops['wallet_charge_jobs'] ?? 0}',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+            ],
+            const SizedBox(height: 14),
+            const Text('App usage — telemetry', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
             const SizedBox(height: 6),
-            if (screens.isEmpty)
-              const Text('No screen views recorded yet.', style: TextStyle(color: AppColors.muted, fontSize: 12))
-            else
-              ...screens.take(8).map((s) => Padding(
+            if (kpi == null)
+              const Text('Could not load usage telemetry (GET /admin/analytics/kpi).', style: TextStyle(color: AppColors.muted, fontSize: 12))
+            else if (total == 0 && features.isEmpty)
+              const Text('No usage events yet — they flush every 5 minutes while the app is open. Check back after the next use.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
+            else ...[
+              Row(children: [
+                Expanded(child: _KpiMetric('Events', '$total', Icons.event_note)),
+                Expanded(child: _KpiMetric('Features', '${features.length}', Icons.apps)),
+                Expanded(child: _KpiMetric('Active days', '${dau.length}', Icons.today)),
+              ]),
+              const SizedBox(height: 10),
+              const Text('Most used features', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              const SizedBox(height: 6),
+              ...features.take(6).map((f) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(children: [
-                  Expanded(child: Text('${s['screen'] ?? 'unknown'}', style: const TextStyle(fontSize: 12.5), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  Text('${s['n'] ?? 0}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.forest)),
+                  Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  Text('${f['n']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: AppColors.forest)),
                   const SizedBox(width: 6),
-                  Text('${s['users'] ?? 0} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                  Text('${f['users']} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
                 ]),
               )),
-            if (roles.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              const Text('Role usage', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+              const SizedBox(height: 8),
+              const Text('Most visited screens', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
               const SizedBox(height: 6),
-              Wrap(spacing: 8, runSpacing: 6, children: [
-                for (final r in roles.take(6))
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text('${r.key} · ${_fmtCount(r.value)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                  ),
-              ]),
+              if (screens.isEmpty)
+                const Text('No screen views recorded yet.', style: TextStyle(color: AppColors.muted, fontSize: 12))
+              else
+                ...screens.take(6).map((s) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(children: [
+                    Expanded(child: Text('${s['screen'] ?? 'unknown'}', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    Text('${s['n'] ?? 0}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: AppColors.forest)),
+                    const SizedBox(width: 6),
+                    Text('${s['users'] ?? 0} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                  ]),
+                )),
+              if (roles.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 6, children: [
+                  for (final r in roles.take(6))
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text('${r.key} · ${_fmtCount(r.value)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                    ),
+                ]),
+              ],
+              const SizedBox(height: 8),
+              const Text('Conversion funnel (unique users)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              const SizedBox(height: 6),
+              ...funnel.take(5).map((f) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  Text('${f['users']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: AppColors.forest)),
+                ]),
+              )),
             ],
-            const SizedBox(height: 10),
-            const Text('Conversion funnel (unique users)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
-            const SizedBox(height: 6),
-            ...funnel.take(5).map((f) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(children: [
-                Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12.5), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                Text('${f['users']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.forest)),
-              ]),
-            )),
           ],
         ]),
       ),

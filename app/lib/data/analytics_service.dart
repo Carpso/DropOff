@@ -47,18 +47,20 @@ class AnalyticsService {
       // best-effort; start empty
     }
     _ready = true;
-    // Auto-flush on a timer so events don't sit forever.
-    _scheduleTimer();
+    _scheduleTimerInternal();
+    // Ship any backlog from the previous session immediately.
+    if (_pending.isNotEmpty) unawaited(flush());
   }
 
-  void _scheduleTimer() {
-    _scheduleTimerInternal();
-  }
+  void _scheduleTimer() => _scheduleTimerInternal();
 
   void _scheduleTimerInternal() {
-    // Avoid importing timer machinery twice in tests; a simple periodic flush
-    // is triggered from flush() callers (AppStore) and on app resume via
-    // [maybeFlush]. Keep this lightweight.
+    // HOLD FIX: this used to be an empty no-op AND flush only happened at 10
+    // pending events (or 5-minute maybeFlush, which nothing ever called), so
+    // most screen views sat in the outbox forever and the KPI looked empty.
+    // Now the outbox ships every few minutes while the app is alive, and the
+    // 10-event threshold still triggers an early flush.
+    Timer.periodic(_flushInterval, (_) => maybeFlush());
   }
 
   /// Log a feature usage / click event.
