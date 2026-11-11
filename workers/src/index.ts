@@ -1432,7 +1432,12 @@ app.get('/quotes', async (c) => {
         AND q.updated_at >= datetime('now', '-90 days')`,
   ).bind(fromCity, toCity, service).all();
 
-  const riderFee = baseRiderFee(fromCity, destLat, destLng);
+  // No pickup coords (e.g. the home fare-checker): anchor Lusaka to the depot
+  // (0 km → K55 first-mile) instead of falling through to the K70 non-Lusaka
+  // default, which under-quoted Lusaka bookings.
+  const la = Number.isFinite(destLat) && destLat !== 0 ? destLat : (fromCity === 'Lusaka' ? -15.4255 : 0);
+  const ln = Number.isFinite(destLng) && destLng !== 0 ? destLng : (fromCity === 'Lusaka' ? 28.2805 : 0);
+  const riderFee = baseRiderFee(fromCity, la, ln);
   const leg2 = c.req.query('leg2') === '1';
   // Last-mile door delivery is priced like first-mile PAYG in the recipient
   // city (distance bands + vehicle multiplier), never a flat fee.

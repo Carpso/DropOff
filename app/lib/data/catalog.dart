@@ -2,6 +2,27 @@ import 'dart:math';
 
 import '../models/booking.dart';
 
+/// Catalog → live chargebook (server) courier ids. The booking API stores
+/// jobs.courier_id against couriers(id) — a catalog string like 'platinum'
+/// bound into that INTEGER FK fails the whole INSERT (SQLITE_CONSTRAINT).
+const Map<String, int> kCourierServerIds = {
+  'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4,
+};
+
+/// Catalog id ('platinum'…) or a raw server id → server courier id.
+/// Returns null only for an unmapped catalog id — callers must not silently
+/// book someone else's depot (fail loudly instead of booking the wrong
+/// courier).
+int? courierServerIdOf(String catalogId) =>
+    int.tryParse(catalogId) ?? kCourierServerIds[catalogId];
+
+/// Inverse of [courierServerIdOf]: turn a live chargebook id back into the
+/// catalog id the booking UI tracks.
+String courierCatalogForServerId(int serverId) =>
+    (kCourierServerIds.entries.firstWhere((e) => e.value == serverId,
+            orElse: () => const MapEntry('platinum', 1)))
+        .key;
+
 const cities = [
   'Lusaka', 'Ndola', 'Kitwe', 'Kabwe', 'Kapiri Mposhi', 'Livingstone',
   'Chingola', 'Choma', 'Chipata', 'Solwezi', 'Kasama', 'Mongu',

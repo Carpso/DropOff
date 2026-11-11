@@ -31,7 +31,10 @@ class BookingScreen extends StatefulWidget {
 }
 
 class _BookingScreenState extends State<BookingScreen> {
-  static const double riderFee = 45;
+  // First-mile rider fee estimate. MUST match the server's baseRiderFee for
+  // Lusaka pickups (K55 ≤ 5 km; K75 ≤ 12 km; K95 beyond) — it used to say K45,
+  // showing senders one number while the booking charged another.
+  static const double riderFee = 55;
   /// Last-mile door delivery: priced server-side like first-mile PAYG
   /// (recipient-city distance + vehicle). K45 is the default estimate shown
   /// before the server quote; the authoritative charge comes from the Worker.
@@ -424,6 +427,10 @@ class _BookingScreenState extends State<BookingScreen> {
 
   Future<void> _submit() async {
     final l10n = AppLocalizations.of(context);
+    final serverCourierId = courierServerIdOf(_courierId);
+    if (serverCourierId == null) {
+      return _message('That courier is not available for booking yet — pick Platinum, Mercury, DHL, One World, Rovert or Icypeed.');
+    }
     if (_senderName.text.trim().length < 2 || _recipientName.text.trim().length < 2) {
       return _message('Enter the sender and recipient names.');
     }
@@ -1254,21 +1261,8 @@ class _PlanBannerState extends State<_PlanBanner> {
   }
 }
 
-/// Depot-branch picker for the selected courier: server branches (admin-
-/// managed) with the catalog fallback. The seller says exactly which branch
-/// the rider hands the parcel to.
-/// Catalog ids ('platinum', 'mercury'…) map onto the live chargebook ids.
-const Map<String, int> kCourierServerIds = {
-  'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4,
-};
-int courierServerIdOf(String catalogId) => kCourierServerIds[catalogId] ?? 1;
-
-/// Inverse of courierServerIdOf: turn a live chargebook id back into the
-/// catalog name the booking UI tracks ('dhl', 'mercury'…).
-String courierCatalogForServerId(int serverId) =>
-    (kCourierServerIds.entries.firstWhere((e) => e.value == serverId,
-            orElse: () => const MapEntry('platinum', 1)))
-        .key;
+/// Catalog → live chargebook ids: see data/catalog.dart (kCourierServerIds,
+/// courierServerIdOf, courierCatalogForServerId) — single source of truth.
 
 /// Delivery IQ — how fast this courier's depot actually receives parcels:
 /// the typical (and slow-day) pickup→depot minutes from the last 90 days of
@@ -1302,7 +1296,7 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
     if (!DropOffApi.enabled) return;
     // 'now' is a UI-only slot — the IQ window filter wants a real slot or none.
     final w = widget.window == 'now' ? '' : widget.window;
-    _future = DropOffApi.iqEta(courierServerIdOf(widget.courierCatalogId), w);
+    _future = DropOffApi.iqEta(courierServerIdOf(widget.courierCatalogId) ?? 1, w);
   }
 
   @override

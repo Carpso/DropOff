@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../data/push_service.dart';
+import '../data/catalog.dart';
 import '../models/booking.dart';
 
 class AppStore extends ChangeNotifier {
@@ -555,7 +556,10 @@ class AppStore extends ChangeNotifier {
       if (pickupLat != null && pickupLng != null) 'pickup_lat': pickupLat,
       if (pickupLat != null && pickupLng != null) 'pickup_lng': pickupLng,
       'from_city': fromCity,
-      'courier_id': courierId,
+      // jobs.courier_id is an INTEGER FK → couriers(id). The UI tracks catalog
+      // ids ('platinum'…) — send the server id or the INSERT dies with a FK
+      // constraint failure (SQLITE_CONSTRAINT_FOREIGNKEY).
+      'courier_id': courierServerIdOf(courierId) ?? 1,
       'recipient_name': recipientName,
       'recipient_phone': recipientPhone,
       'dest_city': toCity,

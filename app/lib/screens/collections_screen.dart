@@ -87,6 +87,10 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
   Future<void> _submit() async {
     final store = AppScope.of(context);
+    final serverCourierId = courierServerIdOf(_courierId);
+    if (serverCourierId == null) {
+      return _message('That courier is not available for collection yet — pick Platinum, Mercury, DHL, One World, Rovert or Icypeed.');
+    }
     if (!_point.text.trim().isNotEmpty) {
       return _message('Enter the courier point where the parcel is waiting.');
     }
@@ -108,7 +112,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
     setState(() => _saving = true);
     final res = await DropOffApi.createCollection(
-      courierId: courierServerIdOf(_courierId),
+      courierId: serverCourierId,
       point: _point.text.trim(),
       recipientName: _recipientName.text.trim(),
       recipientPhone: _recipientPhone.text.trim(),
