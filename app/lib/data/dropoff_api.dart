@@ -468,7 +468,9 @@ class DropOffApi {
   /// Rider log: status movement for a job. For door deliveries the server
   /// REQUIRES [otp] — the recipient's 4-digit DropOff code — so a parcel
   /// cannot be "delivered" into thin air. [stage] ('pickup' | 'delivery')
-  /// files the proof photo against the right leg.
+  /// files the proof photo against the right leg. [counterPriceZmw] is the
+  /// fare the depot counter actually charged (depot handoff only) — the
+  /// server records it on the job AND learns it into the chargebook.
   static Future<ApiResponse> jobEvent({
     required String jobRef,
     String? status,
@@ -479,6 +481,7 @@ class DropOffApi {
     String? otp,
     double? lat,
     double? lng,
+    double? counterPriceZmw,
   }) =>
       post('/jobs/$jobRef/events', {
         if (status != null) 'status': status,
@@ -489,6 +492,7 @@ class DropOffApi {
         if (otp != null) 'otp': otp,
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,
+        if (counterPriceZmw != null) 'counter_price_zmw': counterPriceZmw,
       });
 
   /// AI parcel photo check: compares the seller's booking capture against the
@@ -1007,6 +1011,12 @@ class DropOffApi {
         'service': service,
         'counter_price_zmw': counterPriceZmw,
       }, admin: true);
+
+  /// Chargebook listing for the ops console (verified counter fares on file).
+  static Future<List<Map<String, dynamic>>> adminQuotes({int courierId = 0}) async {
+    final data = await getAdmin('/admin/quotes', {'courier_id': '$courierId'});
+    return (data?['quotes'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+  }
 
   static Future<ApiResponse> upsertRider({
     required String phone,

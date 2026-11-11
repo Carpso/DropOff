@@ -76,70 +76,98 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
   Future<void> _advanceStop(Map<String, dynamic> s) async {
     final String ref = '${s['ref']}';
     if (_busyRef != null) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Padding(padding: EdgeInsets.all(14), child: Text('How did the parcel move on?',
-            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
-          ListTile(
-            leading: const Icon(Icons.local_shipping_outlined),
-            title: const Text('Picked up from the seller'),
-            subtitle: const Text('File it before leaving the stop'),
-            trailing: _busyRef == ref ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
-            onTap: () async {
-              final photo = await _pickPodPhoto();
-              setState(() => _busyRef = ref);
-              final res = await DropOffApi.jobEvent(
-                jobRef: ref, status: 'picked_up', photoUrl: photo, stage: photo == null ? null : 'pickup');
-              if (!mounted) return;
-              setState(() => _busyRef = null);
-              Navigator.pop(ctx);
-              await _snack(res.ok ? '$ref — picked up ✓' : 'Could not update (${res.error})');
-              if (res.ok) _load();
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.inventory_2_outlined),
-            title: const Text('Dropped at the depot branch'),
-            subtitle: const Text('First-mile drop signed in'),
-            onTap: () async {
-              final photo = await _pickPodPhoto();
-              setState(() => _busyRef = ref);
-              final res = await DropOffApi.jobEvent(
-                jobRef: ref, status: 'delivered', photoUrl: photo, stage: photo == null ? null : 'delivery');
-              if (!mounted) return;
-              setState(() => _busyRef = null);
-              Navigator.pop(ctx);
-              await _snack(res.ok ? '$ref — depot drop ✓' : 'Could not update (${res.error})');
-              if (res.ok) {
-                // Best-effort: compare seller's booking photo vs this drop photo.
-                if (photo != null) {
-                  final chk = await DropOffApi.parcelCheck(ref);
-                  if (!mounted) return;
-                  if (chk.ok) {
-                    final verdict = chk.body['same_parcel'] ?? 'uncertain';
-                    final flagged = chk.body['flagged'] == true;
-                    await _snack(flagged
-                        ? '$ref parcel check: possible mismatch — ops flagged for review'
-                        : '$ref parcel check: $verdict');
-                  } else if (chk.status == 409) {
-                    await _snack('$ref parcel check skipped: ${chk.body['detail'] ?? chk.body['error'] ?? 'photo missing'}');
+    final priceCtl = TextEditingController();
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: StatefulBuilder(builder: (ctx, setSheet) => Column(mainAxisSize: MainAxisSize.min, children: [
+            const Padding(padding: EdgeInsets.all(14), child: Text('How did the parcel move on?',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            ListTile(
+              leading: const Icon(Icons.local_shipping_outlined),
+              title: const Text('Picked up from the seller'),
+              subtitle: const Text('File it before leaving the stop'),
+              trailing: _busyRef == ref ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
+              onTap: () async {
+                final photo = await _pickPodPhoto();
+                setState(() => _busyRef = ref);
+                final res = await DropOffApi.jobEvent(
+                  jobRef: ref, status: 'picked_up', photoUrl: photo, stage: photo == null ? null : 'pickup');
+                if (!mounted) return;
+                setState(() => _busyRef = null);
+                Navigator.pop(ctx);
+                await _snack(res.ok ? '$ref — picked up ✓' : 'Could not update (${res.error})');
+                if (res.ok) _load();
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+              child: TextField(
+                controller: priceCtl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Counter fare the depot charged (optional)',
+                  prefixText: 'K ',
+                  helperText: 'DropOff records it and learns the route’s verified chargebook rate — never an estimate.',
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.inventory_2_outlined),
+              title: const Text('Dropped at the depot branch'),
+              subtitle: const Text('First-mile drop signed in'),
+              onTap: () async {
+                final recordedPrice = double.tryParse(priceCtl.text.trim());
+                final photo = await _pickPodPhoto();
+                setState(() => _busyRef = ref);
+                final res = await DropOffApi.jobEvent(
+                  jobRef: ref, status: 'delivered', photoUrl: photo, stage: photo == null ? null : 'delivery',
+                  counterPriceZmw: (recordedPrice != null && recordedPrice > 0) ? recordedPrice : null);
+                if (!mounted) return;
+                setState(() => _busyRef = null);
+                Navigator.pop(ctx);
+                await _snack(res.ok
+                    ? (recordedPrice != null && recordedPrice > 0
+                        ? '$ref — depot drop ✓ · K${recordedPrice.toStringAsFixed(0)} counter fare saved to the chargebook'
+                        : '$ref — depot drop ✓')
+                    : 'Could not update (${res.error})');
+                if (res.ok) {
+                  // Best-effort: compare seller's booking photo vs this drop photo.
+                  if (photo != null) {
+                    final chk = await DropOffApi.parcelCheck(ref);
+                    if (!mounted) return;
+                    if (chk.ok) {
+                      final verdict = chk.body['same_parcel'] ?? 'uncertain';
+                      final flagged = chk.body['flagged'] == true;
+                      await _snack(flagged
+                          ? '$ref parcel check: possible mismatch — ops flagged for review'
+                          : '$ref parcel check: $verdict');
+                    } else if (chk.status == 409) {
+                      await _snack('$ref parcel check skipped: ${chk.body['detail'] ?? chk.body['error'] ?? 'photo missing'}');
+                    }
                   }
+                  _load();
                 }
-                _load();
-              }
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.home_outlined),
-            title: const Text('Handed to the recipient (door)'),
-            subtitle: const Text('Requires their 4-digit DropOff code'),
-            onTap: () => _deliverToDoor(ctx, ref),
-          ),
-        ]),
-      ),
-    );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.home_outlined),
+              title: const Text('Handed to the recipient (door)'),
+              subtitle: const Text('Requires their 4-digit DropOff code'),
+              onTap: () => _deliverToDoor(ctx, ref),
+            ),
+            ListTile(
+              leading: const Icon(Icons.close),
+              title: const Text('Not yet — go back'),
+              onTap: () => Navigator.pop(ctx),
+            ),
+          ])),
+        ),
+      );
+    } finally {
+      priceCtl.dispose();
+    }
   }
 
   /// Door delivery: the server enforces the recipient's 4-digit handover code.

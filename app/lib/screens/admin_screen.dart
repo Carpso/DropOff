@@ -268,6 +268,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _BranchManagerCard(),
               const SizedBox(height: 18),
+              const _CounterQuoteCard(),
+              const SizedBox(height: 18),
               _smsCard(),
               const SizedBox(height: 18),
               _marketingPushCard(),
@@ -1564,6 +1566,191 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
     );
   }
 }
+
+/// Ops counter-quote capture: the staff/ops side of the self-learning
+/// chargebook. Keys in fares verified by phone or depot visit; the rider
+/// app learns 'recorded' fares automatically at depot drop. Every entry here
+/// flips that courier's card badge and answers fare searches with REAL data.
+class _CounterQuoteCard extends StatefulWidget {
+  const _CounterQuoteCard();
+
+  @override
+  State<_CounterQuoteCard> createState() => _CounterQuoteCardState();
+}
+
+class _CounterQuoteCardState extends State<_CounterQuoteCard> {
+  List<Map<String, dynamic>> _couriers = const [];
+  List<Map<String, dynamic>> _quotes = const [];
+  int? _courierId;
+  String _from = 'Lusaka';
+  String _to = 'Ndola';
+  String _weight = '0-5kg';
+  String _service = 'standard';
+  final _price = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  static const _weights = ['0-5kg', '5-15kg', '15kg+'];
+  static const _services = ['standard', 'overnight', 'same_day'];
+  static const _towns = [
+    'Lusaka', 'Ndola', 'Kitwe', 'Kabwe', 'Kapiri Mposhi', 'Livingstone',
+    'Chingola', 'Choma', 'Chipata', 'Solwezi', 'Kasama', 'Mongu',
+    'Mufulira', 'Luanshya', 'Kalulushi', 'Chililabombwe', 'Kasumbalesa',
+    'Mpongwe', 'Mumbwa', 'Mkushi', 'Serenje', 'Kafue', 'Mazabuka',
+    'Monze', 'Chinsali', 'Nakonde', 'Mpika', 'Mansa', 'Samfya',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _price.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final couriers = await DropOffApi.couriers();
+    final quotes = await DropOffApi.adminQuotes();
+    if (!mounted) return;
+    setState(() {
+      _couriers = couriers;
+      _quotes = quotes;
+      if (_courierId == null && couriers.isNotEmpty) {
+        _courierId = (couriers.first['id'] as num?)?.toInt();
+      }
+    });
+  }
+
+  Future<void> _save() async {
+    final price = double.tryParse(_price.text.trim());
+    if (_courierId == null) return _msg('Pick a courier first.');
+    if (price == null || price <= 0) return _msg('Enter the counter fare in Kwacha, e.g. 40.');
+    setState(() { _busy = true; _error = null; });
+    final res = await DropOffApi.upsertQuote(
+      courierId: _courierId!,
+      fromCity: _from,
+      toCity: _to,
+      weightClass: _weight,
+      service: _service,
+      counterPriceZmw: price,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (!res.ok) {
+      _msg(res.body['detail']?.toString() ?? 'Could not save (${res.error ?? 'network'}).');
+      return;
+    }
+    _price.clear();
+    AppToast.show(context, 'Chargebook updated — $_from → $_to ($_weight) now shows a verified counter fare.');
+    await _load();
+  }
+
+  void _msg(String m) {
+    if (!mounted) return;
+    setState(() => _error = m);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final coverage = _quotes.length;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.menu_book_outlined, size: 18, color: AppColors.forest),
+            SizedBox(width: 8),
+            Expanded(child: Text('Chargebook — counter quotes ($coverage on file)',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          ]),
+          const SizedBox(height: 6),
+          const Text(
+            'Verified fares only — key in what a depot counter actually charges (phone check or depot visit). '
+            'Riders recording the counter fare at drop-off feed this automatically. Nothing is invented.',
+            style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          if (_couriers.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Loading couriers…', style: TextStyle(color: AppColors.muted, fontSize: 12)))
+          else ...[
+            DropdownButtonFormField<int>(
+              initialValue: _courierId,
+              decoration: const InputDecoration(labelText: 'Courier'),
+              items: [for (final c in _couriers)
+                DropdownMenuItem(value: (c['id'] as num?)?.toInt(), child: Text('${c['name']} — ${c['city'] ?? ''}'))],
+              onChanged: (v) => setState(() => _courierId = v),
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: DropdownButtonFormField<String>(
+                initialValue: _from,
+                decoration: const InputDecoration(labelText: 'From'),
+                items: [for (final t in _towns) DropdownMenuItem(value: t, child: Text(t))],
+                onChanged: (v) => setState(() => _from = v ?? _from),
+              )),
+              const Padding(padding: EdgeInsets.symmetric(horizontal: 6), child: Icon(Icons.arrow_forward, size: 16, color: AppColors.muted)),
+              Expanded(child: DropdownButtonFormField<String>(
+                initialValue: _to,
+                decoration: const InputDecoration(labelText: 'To'),
+                items: [for (final t in _towns) DropdownMenuItem(value: t, child: Text(t))],
+                onChanged: (v) => setState(() => _to = v ?? _to),
+              )),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: DropdownButtonFormField<String>(
+                initialValue: _weight,
+                decoration: const InputDecoration(labelText: 'Weight class'),
+                items: [for (final w in _weights) DropdownMenuItem(value: w, child: Text(w))],
+                onChanged: (v) => setState(() => _weight = v ?? _weight),
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: DropdownButtonFormField<String>(
+                initialValue: _service,
+                decoration: const InputDecoration(labelText: 'Service'),
+                items: [for (final s in _services) DropdownMenuItem(value: s, child: Text(s))],
+                onChanged: (v) => setState(() => _service = v ?? _service),
+              )),
+            ]),
+            const SizedBox(height: 10),
+            TextField(controller: _price, keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Counter fare (ZMW)', prefixText: 'K ', hintText: 'e.g. 40')),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+            ],
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _busy ? null : _save,
+              icon: _busy
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.save_outlined),
+              label: Text(_busy ? 'Saving…' : 'Save to chargebook'),
+            ),
+            if (_quotes.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text('Latest entries', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              const SizedBox(height: 6),
+              ..._quotes.take(5).map((q) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '${q['courier_name']} · ${q['from_city']} → ${q['to_city']} · ${q['weight_class']} · K${q['counter_price_zmw']}'
+                  ' · ${q['source'] == 'recorded' ? 'recorded at counter' : 'ops'}',
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+                ),
+              )),
+            ],
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
 
 /// Mint bulk plan codes for offline/agent sale. Codes activate a plan with no
 /// payment prompt when a seller redeems one on their own number.

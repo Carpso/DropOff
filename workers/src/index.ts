@@ -1735,18 +1735,18 @@ app.post('/jobs', async (c) => {
     const { meta } = await c.env.DB.prepare(
       `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, pickup_lat, pickup_lng,
          courier_id, recipient_name, recipient_phone, dest_city, dest_city_to_depot,
-         description, weight_class, counter_price_zmw, rider_fee_zmw, leg2_fee_zmw,
+         description, weight_class, service, counter_price_zmw, rider_fee_zmw, leg2_fee_zmw,
          leg2_processing_fee_zmw, total_zmw,
          promo_code, promo_discount_zmw,
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile,
          parcels, vehicle_class, branch, from_city, parcel_photo_url,
          declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41)`,
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42)`,
     ).bind(
       ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
-      b.description ?? '', weightClass, counterPrice, riderFee, leg2Fee, leg2Processing, total,
+      b.description ?? '', weightClass, service, counterPrice, riderFee, leg2Fee, leg2Processing, total,
       promoCode, promoDiscount,
       b.pickup_time ?? pickupWindow, pickupWindow, payMethod,
       isRoundTrip ? 1 : 0, b.return_city ?? null, b.return_address ?? null, returnLegFee,
@@ -2257,6 +2257,7 @@ app.post('/jobs/:ref/events', async (c) => {
     `SELECT j.id, j.ref, j.sender_phone, j.counter_price_zmw, j.rider_fee_zmw, j.leg2_fee_zmw,
             j.leg2_processing_fee_zmw, j.promo_discount_zmw,
             j.total_zmw, j.wait_minutes, j.wait_fee_zmw, j.pay_method, j.paid,
+            j.courier_id, j.from_city, j.dest_city, j.weight_class, j.service,
             r.phone AS rider_phone
        FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
       WHERE j.ref = ?1`,
@@ -2339,6 +2340,42 @@ app.post('/jobs/:ref/events', async (c) => {
     dbStatements.push(c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'prepaid_required', ?2)`,
     ).bind(job.id, 'COD at the door is rejected — recipients pay via momo at booking or nothing is due. Riders never carry cash.'));
+  }
+
+  // SELF-LEARNING CHARGEBOOK: when the rider hands the parcel over at the depot
+  // counter they can record the fare the depot actually charged. That recorded
+  // actual (a) updates the job's counter price for reconciliation and (b)
+  // upserts the quotes chargebook as a verified rate — DropOff never INVENTS a
+  // fare, it only records what the counter charged. Accepted only for depot
+  // handoff statuses, only from the assigned rider / ops / admin, and only for
+  // a sane positive amount.
+  if (b.counter_price_zmw !== undefined && (status === 'at_depot' || status === 'delivered')) {
+    const recorded = Math.round(Number(b.counter_price_zmw) * 100) / 100;
+    if (Number.isFinite(recorded) && recorded > 0 && recorded <= 20000) {
+      dbStatements.push(c.env.DB.prepare(
+        `UPDATE jobs SET counter_price_zmw = ?2 WHERE id = ?1`,
+      ).bind(job.id, recorded));
+      if (job.courier_id && job.from_city && job.dest_city && job.weight_class) {
+        const svc = job.service || 'standard';
+        const q = await c.env.DB.prepare(
+          `SELECT id FROM quotes WHERE courier_id = ?1 AND from_city = ?2 AND to_city = ?3
+             AND weight_class = ?4 AND service = ?5`,
+        ).bind(job.courier_id, job.from_city, job.dest_city, job.weight_class, svc).first<any>();
+        if (q) {
+          dbStatements.push(c.env.DB.prepare(
+            `UPDATE quotes SET counter_price_zmw = ?2, source = 'recorded', updated_at = datetime('now') WHERE id = ?1`,
+          ).bind(q.id, recorded));
+        } else {
+          dbStatements.push(c.env.DB.prepare(
+            `INSERT INTO quotes (courier_id, from_city, to_city, weight_class, service, counter_price_zmw, source)
+             VALUES (?1,?2,?3,?4,?5,?6,'recorded')`,
+          ).bind(job.courier_id, job.from_city, job.dest_city, job.weight_class, svc, recorded));
+        }
+        dbStatements.push(c.env.DB.prepare(
+          `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_recorded', ?2)`,
+        ).bind(job.id, `Counter fare K${recorded} recorded at the depot — chargebook updated for ${job.from_city} → ${job.dest_city} (${job.weight_class}, ${svc}).`));
+      }
+    }
   }
 
   // DropOff NEVER holds partner money: the customer pays us only the DropOff
@@ -5690,27 +5727,43 @@ app.post('/admin/couriers', async (c) => {
   return c.json({ ok: true, id: meta.last_row_id });
 });
 
-// Price-list entry (chargebook) — superadmin captures depot tariffs here
+// Price-list entry (chargebook) — superadmin captures depot tariffs here.
+// `source` is provenance only: 'ops' (keyed in by staff) or 'recorded'
+// (learned automatically from the rider's depot-counter reading).
 app.post('/admin/quotes', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const required = ['courier_id', 'from_city', 'to_city', 'weight_class', 'service', 'counter_price_zmw'];
   for (const k of required) if (b?.[k] === undefined) return c.json({ error: `${k} required` }, 400);
   if (b.counter_price_zmw <= 0) return c.json({ error: 'counter_price_zmw must be > 0' }, 400);
+  const source = ['ops', 'recorded'].includes(b.source) ? b.source : 'ops';
   const exists = await c.env.DB.prepare(
     `SELECT id FROM quotes WHERE courier_id = ?1 AND from_city = ?2 AND to_city = ?3
        AND weight_class = ?4 AND service = ?5`,
   ).bind(b.courier_id, b.from_city, b.to_city, b.weight_class, b.service).first<any>();
   if (exists) {
     await c.env.DB.prepare(
-      `UPDATE quotes SET counter_price_zmw = ?2, updated_at = datetime('now') WHERE id = ?1`,
-    ).bind(exists.id, b.counter_price_zmw).run();
+      `UPDATE quotes SET counter_price_zmw = ?2, source = ?3, updated_at = datetime('now') WHERE id = ?1`,
+    ).bind(exists.id, b.counter_price_zmw, source).run();
     return c.json({ ok: true, id: exists.id, updated: true });
   }
   const { meta } = await c.env.DB.prepare(
-    `INSERT INTO quotes (courier_id, from_city, to_city, weight_class, service, counter_price_zmw)
-     VALUES (?1,?2,?3,?4,?5,?6)`,
-  ).bind(b.courier_id, b.from_city, b.to_city, b.weight_class, b.service, b.counter_price_zmw).run();
+    `INSERT INTO quotes (courier_id, from_city, to_city, weight_class, service, counter_price_zmw, source)
+     VALUES (?1,?2,?3,?4,?5,?6,?7)`,
+  ).bind(b.courier_id, b.from_city, b.to_city, b.weight_class, b.service, b.counter_price_zmw, source).run();
   return c.json({ ok: true, id: meta.last_row_id });
+});
+
+// Chargebook listing for the ops console (coverage + freshness at a glance).
+app.get('/admin/quotes', async (c) => {
+  const courierId = Number(c.req.query('courier_id') ?? '0');
+  const { results } = await c.env.DB.prepare(
+    `SELECT q.id, q.courier_id, co.name AS courier_name, q.from_city, q.to_city,
+            q.weight_class, q.service, q.counter_price_zmw, q.source, q.updated_at
+       FROM quotes q JOIN couriers co ON co.id = q.courier_id
+      WHERE (?1 = 0 OR q.courier_id = ?1)
+      ORDER BY q.updated_at DESC, co.name, q.from_city, q.to_city LIMIT 500`,
+  ).bind(courierId).all();
+  return c.json({ quotes: results });
 });
 
 // Rider roster (rider identity lives here; rider apps log in by phone OTP)
