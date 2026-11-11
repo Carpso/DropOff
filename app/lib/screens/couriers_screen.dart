@@ -59,7 +59,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
               const SizedBox(height: 16),
               const Text('Sign up to see couriers', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              const Text('Create your free account to browse partner depots, published rates and book your first drop.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const Text('Create your free account to browse partner depots, counter quotes and book your first drop.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
               const SizedBox(height: 20),
               FilledButton.icon(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
@@ -87,13 +87,13 @@ class _CouriersScreenState extends State<CouriersScreen> {
               prefixIcon: const Icon(Icons.search),
               hintText: courierSearchSamples[_hintIdx % courierSearchSamples.length],
               labelText: 'Search courier, town or route price',
-              helperText: 'Search by destination (e.g. Ndola) or route price — published depot fares only.',
+              helperText: 'Search by destination (e.g. Ndola) or courier — fares are confirmed at the depot counter.',
             ),
           ),
           const SizedBox(height: 20),
           _LiveDepotsSection(query: _query),
           const SizedBox(height: 26),
-          const Text('FEATURED — published local rates', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.muted)),
+          const Text('FEATURED — partner depots', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.muted)),
           const SizedBox(height: 12),
           ...filtered.map((courier) {
             final live = courier.isLusakaLive;
@@ -127,7 +127,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
                           ] else ...[
                             Icon(courier.hasVerifiedRates ? Icons.verified : Icons.request_quote_outlined, size: 15, color: courier.hasVerifiedRates ? AppColors.forest : AppColors.muted),
                             const SizedBox(width: 4),
-                            Expanded(child: Text(courier.hasVerifiedRates ? 'Published Lusaka rates' : 'Quote at depot', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: courier.hasVerifiedRates ? AppColors.forest : AppColors.muted))),
+                            Expanded(child: Text(courier.hasVerifiedRates ? 'Counter rates on file' : 'Quoted at counter', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: courier.hasVerifiedRates ? AppColors.forest : AppColors.muted))),
                           ],
                         ]),
                       ])),
@@ -139,7 +139,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
             );
           }),
           const SizedBox(height: 8),
-          const Text('Rate information is dated and sourced. “Quote at depot” means no trustworthy public tariff was found — never an estimated courier fare.', style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.45)),
+          const Text('Rate information is dated and sourced. “Quoted at counter” means the fare is set at the depot counter — never an estimated or invented courier fare.', style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.45)),
         ],
       ),
     );
@@ -262,6 +262,31 @@ class _LiveDepotsSection extends StatelessWidget {
                             Text(
                               '${(c['rating_average'] as num?)?.toStringAsFixed(1) ?? '–'} (${c['rating_count']})',
                               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted),
+                            ),
+                          ]),
+                        ],
+                        // Counter-quote status straight from the chargebook:
+                        // verified depot fares on file, or "quoted at counter".
+                        ...[
+                          const SizedBox(height: 3),
+                          Row(children: [
+                            Icon(
+                              ((c['quotes_on_file'] as num?) ?? 0) > 0 ? Icons.verified : Icons.request_quote_outlined,
+                              size: 14,
+                              color: ((c['quotes_on_file'] as num?) ?? 0) > 0 ? AppColors.forest : AppColors.muted,
+                            ),
+                            const SizedBox(width: 3),
+                            Expanded(
+                              child: Text(
+                                ((c['quotes_on_file'] as num?) ?? 0) > 0
+                                    ? 'Counter rates on file · ${c['quote_routes'] ?? 0} route(s)'
+                                    : 'Quoted at the courier counter',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: ((c['quotes_on_file'] as num?) ?? 0) > 0 ? AppColors.forest : AppColors.muted,
+                                ),
+                              ),
                             ),
                           ]),
                         ],

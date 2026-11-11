@@ -1666,7 +1666,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
               TextButton(onPressed: _copyAll, child: const Text('Copy all')),
           ]),
           const SizedBox(height: 4),
-          const Text('Sell plans at the counter or to agents. The seller redeems the code in the app � no payment prompt, the plan goes live instantly.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          const Text('Sell plans at the counter or to agents. The seller redeems the code in the app — no payment prompt, the plan goes live instantly.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
@@ -1696,7 +1696,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
           FilledButton.icon(
             onPressed: _busy ? null : _generate,
             icon: const Icon(Icons.qr_code_2, size: 18),
-            label: Text(_busy ? 'Generating�' : 'Generate $_count ${_labels[_tier]} code${_count == 1 ? '' : 's'}'),
+            label: Text(_busy ? 'Generating…' : 'Generate $_count ${_labels[_tier]} code${_count == 1 ? '' : 's'}'),
           ),
           if (_codes.isNotEmpty) ...[
             const SizedBox(height: 14),

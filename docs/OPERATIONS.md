@@ -389,5 +389,5 @@ Four explainable surfaces — no opaque model, every number carries basis + samp
   booking form); `POST /admin/support/threads/:id/ai-draft` drafts support
   replies from ticket history; `POST /admin/riders/:id/ai-check` reads a
   driver's plate/NRC photo via Workers AI vision and compares it against what
-  the driver submitted (`plate_match`/`nrc_match`) � admins still click
+  the driver submitted (`plate_match`/`nrc_match`) — admins still click
   Approve/Reject themselves.
