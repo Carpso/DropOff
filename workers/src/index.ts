@@ -2191,6 +2191,16 @@ app.get('/jobs', async (c) => {
   ).bind(phone, afterBind, limit + 1).all();
   const hasMore = results.length > limit;
   const page = hasMore ? results.slice(0, -1) : results;
+  // NO-QUOTING POLICY: never ship counter-fare or full-total numbers to the
+  // job list — counter fare stays at the counter; total includes it.
+  const role2 = c.get('role');
+  if (role2 === 'customer' || role2 === 'partner' || role2 === 'rider') {
+    for (const j of page as any[]) {
+      delete j.counter_price_zmw;
+      delete j.total_zmw;
+      delete j.rider_payout_zmw;
+    }
+  }
   return c.json({
     jobs: page,
     next_after: hasMore ? Number(page[page.length - 1]?.id ?? 0) : undefined,
