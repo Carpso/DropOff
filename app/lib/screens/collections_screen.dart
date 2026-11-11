@@ -157,6 +157,8 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           : 'Collection $ref booked — your plan covers the DropOff leg.');
     }
     if (!mounted) return;
+    // Pull the new collection into the local bookings list immediately.
+    AppScope.of(context).syncJobsFromServer();
     Navigator.of(context).pop();
     AnalyticsService.instance.track(
       feature: 'collections', action: 'submit', context: 'collections_form',

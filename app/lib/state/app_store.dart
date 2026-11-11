@@ -788,6 +788,106 @@ class AppStore extends ChangeNotifier {
     return null;
   }
 
+  /// Merge server-side jobs (collections, standing orders, ops-created jobs,
+  /// anything this account can see via /jobs) into the local list so Bookings
+  /// is complete. Best-effort; runs on the Bookings tab open and app start.
+  Future<void> syncJobsFromServer() async {
+    if (!DropOffApi.enabled) return;
+    try {
+      final data = await DropOffApi.get('/jobs', {'limit': '100'});
+      final rows = (data?['jobs'] as List?)?.cast<Map<String, dynamic>>() ?? const <Map<String, dynamic>>[];
+      if (rows.isEmpty) return;
+      final refSet = _bookings.map((b) => b.serverRef).where((r) => r != null && r.isNotEmpty).toSet();
+      var dirty = false;
+      for (final j in rows) {
+        final ref = '${j['ref'] ?? ''}';
+        if (ref.isEmpty) continue;
+        final door = (j['last_mile'] ?? 0) == 1 || ((j['leg2_fee_zmw'] as num?) ?? 0) > 0;
+        final stage = _stageFromJobStatus('${j['status']}', door);
+        final existing = _bookings.where((b) => b.serverRef == ref).firstOrNull;
+        if (existing != null) {
+          if (existing.stage < stage) {
+            final i = _bookings.indexWhere((b) => b.id == existing.id);
+            if (i >= 0) _bookings[i] = _bookings[i].copyWith(stage: stage);
+            dirty = true;
+          }
+          continue;
+        }
+        if (refSet.contains(ref)) continue;
+        _bookings.insert(0, _bookingFromJob(j, stage));
+        refSet.add(ref);
+        dirty = true;
+      }
+      if (dirty) {
+        await _saveBookings();
+        notifyListeners();
+      }
+    } catch (_) {
+      // best-effort — never block the screen on a sync failure
+    }
+  }
+
+  static int _stageFromJobStatus(String status, bool door) => switch (status) {
+        'rider_assigned' || 'partner_confirmed' => 1,
+        'picked_up' => 2,
+        'at_depot' => door ? 4 : 3,
+        'departed' || 'arrived' => door ? 5 : 4,
+        'delivered' || 'ready_for_collection' => door ? 6 : 4,
+        _ => 0,
+      };
+
+  static DateTime _parseDbDate(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return DateTime.now();
+    final normalized = s.contains('T') ? s : s.replaceFirst(' ', 'T');
+    final withZone = normalized.endsWith('Z') || normalized.contains('+') ? normalized : '${normalized}Z';
+    return DateTime.tryParse(withZone) ?? DateTime.now();
+  }
+
+  Booking _bookingFromJob(Map<String, dynamic> j, int stage) {
+    final weight = '${j['weight_class'] ?? '0-5kg'}';
+    final size = switch (weight) {
+      '5-15kg' => ParcelSize.medium,
+      '15kg+' => ParcelSize.large,
+      _ => ParcelSize.small,
+    };
+    final door = (j['last_mile'] ?? 0) == 1 || ((j['leg2_fee_zmw'] as num?) ?? 0) > 0;
+    final timelineMax = door ? 6 : 4;
+    return Booking(
+      id: 'srv-${j['id']}',
+      reference: '${j['ref']}',
+      createdAt: _parseDbDate('${j['created_at'] ?? ''}'),
+      senderName: '${j['sender_name'] ?? 'You'}',
+      senderPhone: '${j['sender_phone'] ?? ''}',
+      pickupAddress: '${j['pickup_address'] ?? ''}',
+      fromCity: '${j['from_city'] ?? 'Lusaka'}',
+      toCity: '${j['dest_city'] ?? ''}',
+      courierId: courierCatalogForServerId((j['courier_id'] as num?)?.toInt() ?? 1),
+      parcelSize: size,
+      description: '${j['description'] ?? ''}',
+      recipientName: '${j['recipient_name'] ?? ''}',
+      recipientPhone: '${j['recipient_phone'] ?? ''}',
+      paymentMethod: '${j['pay_method'] ?? 'mobile_money'}',
+      riderFee: (j['rider_fee_zmw'] as num?)?.toDouble() ?? 0,
+      courierFare: null,
+      lastMileFee: (j['leg2_fee_zmw'] as num?)?.toDouble() ?? 0,
+      pickupWindow: '${j['pickup_window'] ?? 'now'}',
+      serverRef: '${j['ref']}',
+      stage: stage.clamp(0, timelineMax),
+      riderId: '',
+      parcels: (j['parcels'] as num?)?.toInt() ?? 1,
+      vehicleClass: '${j['vehicle_class'] ?? 'motorcycle'}',
+      branch: j['branch'] as String?,
+      pickupAt: j['pickup_at'] as String?,
+      roundTrip: (j['round_trip'] ?? 0) == 1,
+      returnCity: j['return_city'] as String?,
+      returnAddress: j['return_address'] as String?,
+      returnLegFee: (j['return_leg_fee_zmw'] as num?)?.toDouble() ?? 0,
+      promoCode: j['promo_code'] as String?,
+      promoDiscount: (j['promo_discount_zmw'] as num?)?.toDouble(),
+    );
+  }
+
   Future<void> _saveBookings() async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_bookingsKey, jsonEncode(_bookings.map((item) => item.toJson()).toList()));

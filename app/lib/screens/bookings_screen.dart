@@ -32,6 +32,12 @@ class _BookingsScreenState extends State<BookingsScreen> {
   void initState() {
     super.initState();
     AnalyticsService.instance.trackScreenView('bookings');
+    // Pull the account's server-side jobs (collections, standing orders,
+    // ops-created jobs) into the local list — they would otherwise never
+    // appear here, since the tab renders the local cache.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppScope.of(context).syncJobsFromServer();
+    });
     _refresh();
     _loadIncoming();
   }

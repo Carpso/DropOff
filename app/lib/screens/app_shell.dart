@@ -17,7 +17,12 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
 
-  void goTo(int index) => setState(() => _index = index);
+  void goTo(int index) {
+    // Bookings is a persistent tab — re-sync on every switch so collections
+    // and standing orders appear without an app restart.
+    if (index == 2) AppScope.of(context).syncJobsFromServer();
+    setState(() => _index = index);
+  }
 
   @override
   Widget build(BuildContext context) {
