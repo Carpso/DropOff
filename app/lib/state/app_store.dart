@@ -88,6 +88,25 @@ class AppStore extends ChangeNotifier {
   /// sign-in session can be listed and revoked individually.
   String get deviceId => _deviceId;
 
+  /// Server-active courier ids (DB). The owner can toggle couriers OFF in the
+  /// admin console; null until the first fetch succeeds — offline or unknown,
+  /// the full catalog shows so sellers are never bricked.
+  List<int>? _activeCourierIds;
+  List<int>? get activeCourierIds => _activeCourierIds;
+
+  Future<void> refreshCourierAvailability() async {
+    try {
+      final rows = await DropOffApi.couriers();
+      _activeCourierIds = [
+        for (final r in rows)
+          if ((r['id'] as num?) != null && (r['id'] as num).toInt() > 0) (r['id'] as num).toInt(),
+      ];
+    } catch (_) {
+      // Offline / API unavailable → keep null (full catalog).
+    }
+    notifyListeners();
+  }
+
   Future<void> setBiometricEnabled(bool on) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setBool(_biometricKey, on);
@@ -131,6 +150,7 @@ class AppStore extends ChangeNotifier {
     }
     _deviceId = dev;
     DropOffApi.installDeviceId(dev);
+    unawaited(refreshCourierAvailability());
     if (!remember) {
       // Session-only login: drop any persisted credential on cold start.
       await _secureStorage.delete(key: _secureTokenKey);

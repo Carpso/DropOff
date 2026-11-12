@@ -71,7 +71,9 @@ class _CouriersScreenState extends State<CouriersScreen> {
         ),
       );
     }
-    final filtered = smartCourierSearch(_query, fromCity: 'Lusaka', toCity: '', size: ParcelSize.small);
+    final activeIds = AppScope.of(context).activeCourierIds;
+    final filtered = smartCourierSearch(_query, fromCity: 'Lusaka', toCity: '', size: ParcelSize.small,
+        activeServerIds: activeIds);
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),

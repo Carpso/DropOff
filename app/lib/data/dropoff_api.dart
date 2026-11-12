@@ -988,6 +988,20 @@ class DropOffApi {
       post('/admin/pack-codes', {'tier': tier, 'count': count, if (note != null && note.isNotEmpty) 'note': note}, admin: true);
   static Future<Map<String, dynamic>?> packCodes() => getAdmin('/admin/pack-codes');
 
+  /// Admin plan catalogue (owner console): EVERY tier with its live on/off
+  /// state — hidden or not-for-sale packs are included.
+  static Future<Map<String, dynamic>?> adminTiers() => getAdmin('/admin/tiers');
+
+  /// Save a plan: full edit (all fields) or a bare {tier, active: 0/1} toggle
+  /// — the server keeps the rest of the config untouched on a toggle.
+  static Future<ApiResponse> adminSaveTier(Map<String, dynamic> tier) =>
+      post('/admin/tiers', tier, admin: true);
+
+  /// All couriers with availability flag (admin console on/off toggle).
+  static Future<Map<String, dynamic>?> adminCouriers() => getAdmin('/admin/couriers');
+  static Future<ApiResponse> adminCourierToggle(int id, bool active) =>
+      post('/admin/couriers', {'id': id, 'active': active ? 1 : 0}, admin: true);
+
   /// Collection from a courier point to the recipient's door (Lusaka). The
   /// parcel already arrived at the depot; a rider picks it up and runs the
   /// last mile. No counter fare, no branch choice.

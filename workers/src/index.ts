@@ -70,8 +70,14 @@ const PLANS: Record<PlanTier, PlanDef> = {
   platinum: { fee_zmw: 750, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 50, rider_fee_zmw: 0, overage_discount_pct: 35, cycle_days: 30 },
 };
 
-/** DB-backed catalogue (price, per-day cap, tag) — constants only as fallback. */
-async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
+/**
+ * DB-backed catalogue (price, per-day cap, tag) — constants only as fallback.
+ * A tier toggled OFF in the admin console is hidden from sales and listings
+ * entirely. Existing subscribers mid-cycle keep their benefit: the booking
+ * engine passes `forExistingSubscribers` so their pack still covers the
+ * rider leg even while the pack is not for sale.
+ */
+async function plans(db: D1Database, opts?: { forExistingSubscribers?: boolean }): Promise<Record<PlanTier, PlanDef>> {
   const merged: Record<PlanTier, PlanDef> = {
     rider_daily: { ...PLANS.rider_daily, tag: null },
     weekly: { ...PLANS.weekly, tag: null },
@@ -80,24 +86,33 @@ async function plans(db: D1Database): Promise<Record<PlanTier, PlanDef>> {
     platinum: { ...PLANS.platinum, tag: null },
   };
   try {
-  const { results } = await db.prepare('SELECT tier, fee_zmw, parcels_per_day, parcels_per_month, rider_fee_zmw, overage_discount_pct, cycle_days, tag FROM tiers WHERE active = 1').all();
+  // Do NOT filter active = 1 here — read ALL known rows so a tier toggled OFF
+  // can be excluded entirely (previously a deactivated pack still surfaced via
+  // the constants fallback). Unknown tiers in D1 are ignored.
+  const { results } = await db.prepare('SELECT tier, fee_zmw, parcels_per_day, parcels_per_month, rider_fee_zmw, overage_discount_pct, cycle_days, tag, active FROM tiers WHERE tier IN (\'rider_daily\',\'weekly\',\'silver\',\'gold\',\'platinum\')').all();
   for (const row of results as any[]) {
     const key = row.tier as PlanTier;
     // Daily Dash is removed - never surface it even if a stale row lingers in D1.
     if ((key as unknown) === 'daily') continue;
-    if (merged[key]) {
-      merged[key] = {
-        ...merged[key],
-        // || fallback guards NULL/legacy columns (fresh DBs pre-0035).
-        fee_zmw: Number(row.fee_zmw) || merged[key].fee_zmw,
-        parcels_per_day: Number(row.parcels_per_day) || merged[key].parcels_per_day,
-        parcels_per_month: Number(row.parcels_per_month) || merged[key].parcels_per_month,
-        rider_fee_zmw: Number(row.rider_fee_zmw) || merged[key].rider_fee_zmw,
-        overage_discount_pct: Number(row.overage_discount_pct) || merged[key].overage_discount_pct,
-        cycle_days: Number(row.cycle_days) || merged[key].cycle_days,
-        tag: row.tag ?? null,
-      };
+    if (!merged[key]) continue;
+    if (Number(row.active) !== 1) {
+      // Toggled OFF by the superadmin/admin — hide from sales completely, even
+      // the fallback. Existing subscribers mid-cycle keep their coverage
+      // (booking math passes forExistingSubscribers).
+      if (!opts?.forExistingSubscribers) delete merged[key];
+      continue;
     }
+    merged[key] = {
+      ...merged[key],
+      // || fallback guards NULL/legacy columns (fresh DBs pre-0035).
+      fee_zmw: Number(row.fee_zmw) || merged[key].fee_zmw,
+      parcels_per_day: Number(row.parcels_per_day) || merged[key].parcels_per_day,
+      parcels_per_month: Number(row.parcels_per_month) || merged[key].parcels_per_month,
+      rider_fee_zmw: Number(row.rider_fee_zmw) || merged[key].rider_fee_zmw,
+      overage_discount_pct: Number(row.overage_discount_pct) || merged[key].overage_discount_pct,
+      cycle_days: Number(row.cycle_days) || merged[key].cycle_days,
+      tag: row.tag ?? null,
+    };
   }
   } catch { /* tiers table not migrated yet — constants rule */ }
   return merged;
@@ -1672,7 +1687,7 @@ app.post('/jobs', async (c) => {
         AND period_end IS NOT NULL AND period_end > datetime('now')`,
     ).bind(senderPhone).first<any>();
     if (activeSub) {
-      const packs = await plans(c.env.DB);
+      const packs = await plans(c.env.DB, { forExistingSubscribers: true });
       const plan = packs[activeSub.tier as PlanTier];
       if (plan && activeSub.period_start && activeSub.period_end) {
         const used = await c.env.DB.prepare(
@@ -2093,7 +2108,7 @@ app.post('/collections', async (c) => {
   let planUsed = 0;
   let planCap = 0;
   if (activeSub) {
-    const planCatalogue = await plans(c.env.DB);
+    const planCatalogue = await plans(c.env.DB, { forExistingSubscribers: true });
     const plan = planCatalogue[activeSub.tier as PlanTier];
     if (plan && activeSub.period_start && activeSub.period_end) {
       const used = await c.env.DB.prepare(
@@ -4957,31 +4972,74 @@ app.post('/admin/partner-keys', async (c) => {
 });
 
 /* -------- tiers (seller packs — live editable) + promo codes ------------- */
+// List ALL known tiers including toggled-off ones (admin catalogue for the
+// console) — the sales catalogue hides inactive rows, the console must not.
 app.get('/admin/tiers', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
-  const packs = await plans(c.env.DB);
-  return c.json({ tiers: Object.entries(packs).map(([tier, v]) => ({ tier, ...v })) });
+  const known = ['rider_daily', 'weekly', 'silver', 'gold', 'platinum'];
+  const { results } = await c.env.DB.prepare(
+    `SELECT tier, fee_zmw, parcels_per_day, parcels_per_month, rider_fee_zmw,
+            overage_discount_pct, cycle_days, tag, active
+       FROM tiers WHERE tier IN ('rider_daily','weekly','silver','gold','platinum')`,
+  ).all();
+  const rows = new Map<string, any>();
+  for (const r of results as any[]) rows.set(r.tier, r);
+  const activeMap = await plans(c.env.DB, { forExistingSubscribers: true });
+  const tiers = known.map((tier) => {
+    const row = rows.get(tier);
+    const active = row ? Number(row.active) === 1 : true; // no row yet = seed default (on)
+    const def = activeMap[tier as PlanTier] ?? PLANS[tier as PlanTier];
+    return {
+      tier, active,
+      fee_zmw: row?.fee_zmw ?? def.fee_zmw,
+      parcels_per_day: row?.parcels_per_day ?? def.parcels_per_day,
+      parcels_per_month: row?.parcels_per_month ?? def.parcels_per_month,
+      rider_fee_zmw: row?.rider_fee_zmw ?? def.rider_fee_zmw,
+      overage_discount_pct: row?.overage_discount_pct ?? def.overage_discount_pct,
+      cycle_days: row?.cycle_days ?? def.cycle_days,
+      tag: row?.tag ?? def.tag ?? null,
+      windows: def.windows,
+    };
+  });
+  return c.json({ tiers });
 });
+// Full plan edit OR toggle: every field of a plan is editable here — the
+// same endpoint handles "set off" (active: 0) without wiping its config.
 app.post('/admin/tiers', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const b: any = await c.req.json().catch(() => null);
   const tier = String(b?.tier ?? '').trim().toLowerCase();
   if (!/^[a-z0-9_]{2,20}$/.test(tier)) return c.json({ error: 'tier id must be 2-20 lowercase letters/digits/_' }, 400);
-  const fee = Math.max(0, Number(b?.fee_zmw ?? 0));
-  const ppm = Math.max(0, Math.round(Number(b?.parcels_per_month ?? 0)));
-  const disc = Math.max(0, Math.min(100, Number(b?.overage_discount_pct ?? 0)));
-  const days = Math.max(1, Math.round(Number(b?.cycle_days ?? 30)));
-  const rider = Math.max(0, Number(b?.rider_fee_zmw ?? 0));
+  const seed = PLANS[tier as PlanTier];
+  if (!seed) return c.json({ error: `unknown tier ${tier}` }, 400);
+  const fee = Math.max(0, Number(b?.fee_zmw ?? seed.fee_zmw));
+  const ppd = Math.max(0, Math.round(Number(b?.parcels_per_day ?? seed.parcels_per_day)));
+  const ppm = Math.max(0, Math.round(Number(b?.parcels_per_month ?? seed.parcels_per_month)));
+  const disc = Math.max(0, Math.min(100, Number(b?.overage_discount_pct ?? seed.overage_discount_pct)));
+  const days = Math.max(1, Math.round(Number(b?.cycle_days ?? seed.cycle_days)));
+  const rider = Math.max(0, Number(b?.rider_fee_zmw ?? seed.rider_fee_zmw));
   const tag = b?.tag == null || String(b.tag).trim() === '' ? null : String(b.tag).trim().slice(0, 40);
+  // Partial toggle request ({tier, active:0/1}) keeps all other config untouched.
+  const toggleOnly = Object.keys(b ?? {}).every((k) => ['tier', 'active'].includes(k));
+  if (toggleOnly) {
+    await c.env.DB.prepare(
+      `INSERT INTO tiers (tier, fee_zmw, parcels_per_day, parcels_per_month, rider_fee_zmw, overage_discount_pct, cycle_days, tag, active)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+       ON CONFLICT(tier) DO UPDATE SET active=excluded.active`,
+    ).bind(tier, seed.fee_zmw, seed.parcels_per_day, seed.parcels_per_month, seed.rider_fee_zmw, seed.overage_discount_pct, seed.cycle_days, seed.tag ?? null, b?.active ? 1 : 0).run();
+    return c.json({ ok: true, tier, active: b?.active ? 1 : 0 });
+  }
+  const active = b?.active == null ? 1 : (b.active ? 1 : 0);
   await c.env.DB.prepare(
     `INSERT INTO tiers (tier, fee_zmw, parcels_per_day, parcels_per_month, rider_fee_zmw, overage_discount_pct, cycle_days, tag, active)
-     VALUES (?1, ?2, 0, ?3, ?4, ?5, ?6, ?7, 1)
-     ON CONFLICT(tier) DO UPDATE SET fee_zmw=excluded.fee_zmw, parcels_per_month=excluded.parcels_per_month,
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+     ON CONFLICT(tier) DO UPDATE SET fee_zmw=excluded.fee_zmw, parcels_per_day=excluded.parcels_per_day,
+       parcels_per_month=excluded.parcels_per_month,
        rider_fee_zmw=excluded.rider_fee_zmw, overage_discount_pct=excluded.overage_discount_pct,
-       cycle_days=excluded.cycle_days, tag=excluded.tag, active=1`,
-  ).bind(tier, fee, ppm, rider, disc, days, tag).run();
-  return c.json({ ok: true, tier, fee_zmw: fee, parcels_per_month: ppm, rider_fee_zmw: rider,
-    overage_discount_pct: disc, cycle_days: days, tag });
+       cycle_days=excluded.cycle_days, tag=excluded.tag, active=excluded.active`,
+  ).bind(tier, fee, ppd, ppm, rider, disc, days, tag, active).run();
+  return c.json({ ok: true, tier, fee_zmw: fee, parcels_per_day: ppd, parcels_per_month: ppm, rider_fee_zmw: rider,
+    overage_discount_pct: disc, cycle_days: days, tag, active });
 });
 
 app.get('/admin/promos', async (c) => {
@@ -5641,7 +5699,8 @@ const CONSOLE_CSS = `body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;m
 h1{font-size:20px} table{border-collapse:collapse;width:100%;margin:12px 0} td,th{padding:6px 10px;border-bottom:1px solid #dde6e2;text-align:left;font-size:14px}
 th{background:#eef4f1} .kpi{display:inline-block;background:#eef4f1;border-radius:10px;padding:10px 16px;margin:4px 8px 4px 0;font-size:13px}
 .kpi b{display:block;font-size:20px} input,button,select{padding:8px;border-radius:8px;border:1px solid #cfd8d4;font-size:14px}
-button{background:#17855f;color:#fff;border:0;font-weight:700}`;
+button{background:#17855f;color:#fff;border:0;font-weight:700}
+.toggle.on{background:#17855f;color:#fff} .toggle.off{background:#c0392b;color:#fff}`;
 
 /** Superadmin console — open as https://<worker>/console#key=<ADMIN_AUTH_KEY>
  *  The FRAGMENT form is preferred: fragments never reach the server, so the
@@ -5668,16 +5727,23 @@ app.get('/console', (c) => {
 <input id="pEmail" placeholder="partner@shop.co.zm"><input id="pCourier" type="number" placeholder="courier id">
 <button onclick="makePartner()">Promote to partner</button><span id="pMsg"></span>
 
-<h2>Tiers (pack prices — editable live)</h2>
-<table id="tiersTbl"><thead><tr><th>tier</th><th>fee K/mo</th><th>parcels/day</th><th>rider fee K</th><th>tag</th><th></th></tr></thead><tbody></tbody></table>
+<h2>Plans (seller packs — full edit + on/off)</h2>
+<p>Every field is live. A toggled-off plan disappears from sales and listings instantly; existing subscribers keep their cycle benefit.</p>
+<table id="tiersTbl"><thead><tr><th>tier</th><th>on/off</th><th>fee K</th><th>parcels/day</th><th>parcels/mo</th><th>overage %</th><th>cycle days</th><th>rider fee</th><th>tag</th></tr></thead><tbody></tbody></table>
 <div>
-<select id="tTier"><option>daily</option><option>weekly</option><option>silver</option><option>gold</option><option>platinum</option></select>
+<select id="tTier"><option>rider_daily</option><option>weekly</option><option>silver</option><option>gold</option><option>platinum</option></select>
 <input id="tFee" type="number" placeholder="fee ZMW" step="1">
 <input id="tPpd" type="number" placeholder="parcels/day" step="1">
+<input id="tPpm" type="number" placeholder="parcels/month" step="1">
 <input id="tRider" type="number" placeholder="rider fee (0 = bundled)" step="1">
+<input id="tDisc" type="number" placeholder="overage discount %" step="1">
+<input id="tDays" type="number" placeholder="cycle days" step="1">
 <input id="tTag" placeholder="tag e.g. Most popular / PROMO">
-<button onclick="saveTier()">Save tier</button><span id="tMsg"></span>
+<label style="font-size:12px"><input type="checkbox" id="tActive" checked> plan active</label>
+<button onclick="saveTier()">Save plan</button><span id="tMsg"></span>
 </div>
+<h2>Couriers — on/off (sellers never see an off courier)</h2>
+<table id="couriersTbl"><thead><tr><th>id</th><th>name</th><th>city</th><th>depot</th><th>on/off</th></tr></thead><tbody></tbody></table>
 
 <h2>Promo codes (sellers)</h2>
 <table id="promosTbl"><thead><tr><th>code</th><th>% off</th><th>uses left</th><th>expires</th><th>applies</th><th>note</th></tr></thead><tbody></tbody></table>
@@ -5735,13 +5801,39 @@ async function makePartner() {
 function esc(v) { return (v ?? '').toString().replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m])); }
 async function loadTiers() {
   const r = await fetch('/admin/tiers', { headers: H }); const j = await r.json(); const tb = document.querySelector('#tiersTbl tbody'); tb.innerHTML = '';
-  for (const t of j.tiers ?? []) tb.insertAdjacentHTML('beforeend', '<tr><td>' + esc(t.tier) + '</td><td>' + t.fee_zmw + '</td><td>' + t.parcels_per_day + '</td><td>' + t.rider_fee_zmw + '</td><td>' + esc(t.tag ?? '') + '</td><td><button style="background:#b6c4bd;color:#10312a" onclick="editTier(\'' + esc(t.tier) + '\',' + t.fee_zmw + ',' + t.parcels_per_day + ',' + t.rider_fee_zmw + ',\'' + esc(t.tag ?? '') + '\')">edit</button></td></tr>');
+  for (const t of j.tiers ?? []) {
+    tb.insertAdjacentHTML('beforeend', '<tr>' +
+      '<td>' + esc(t.tier) + '</td><td><button class="toggle ' + (t.active ? 'on' : 'off') + '" onclick="toggleTier(\'' + esc(t.tier) + '\',' + (t.active ? 0 : 1) + ')">' + (t.active ? 'ON' : 'OFF') + '</button></td>' +
+      '<td>' + t.fee_zmw + '</td><td>' + t.parcels_per_day + '</td><td>' + t.parcels_per_month + '</td><td>' + t.overage_discount_pct + '</td><td>' + t.cycle_days + '</td><td>' + t.rider_fee_zmw + '</td><td>' + esc(t.tag ?? '') + '</td></tr>' +
+      '<tr><td colspan="9" style="text-align:right"><button style="background:#b6c4bd;color:#10312a" onclick="editTier(\'' + esc(t.tier) + '\',' + t.fee_zmw + ',' + t.parcels_per_day + ',' + t.parcels_per_month + ',' + t.rider_fee_zmw + ',' + t.overage_discount_pct + ',' + t.cycle_days + ',\'' + esc(t.tag ?? '') + '\',' + (t.active ? 1 : 0) + ')">edit this plan</button></td></tr>');
+  }
 }
-function editTier(tier, fee, ppd, rider, tag) { tTier.value = tier; tFee.value = fee; tPpd.value = ppd; tRider.value = rider; tTag.value = tag; }
+function editTier(tier, fee, ppd, ppm, rider, disc, days, tag, active) {
+  tTier.value = tier; tFee.value = fee; tPpd.value = ppd; tPpm.value = ppm;
+  tRider.value = rider; tDisc.value = disc; tDays.value = days; tTag.value = tag; tActive.checked = !!active;
+}
 async function saveTier() {
-  const r = await fetch('/admin/tiers', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tier: tTier.value, fee_zmw: Number(tFee.value), parcels_per_day: Number(tPpd.value), rider_fee_zmw: Number(tRider.value), tag: tTag.value.trim() || null }) });
+  const b = { tier: tTier.value, fee_zmw: Number(tFee.value), parcels_per_day: Number(tPpd.value),
+    parcels_per_month: Number(tPpm.value), rider_fee_zmw: Number(tRider.value),
+    overage_discount_pct: Number(tDisc.value), cycle_days: Number(tDays.value),
+    tag: tTag.value.trim() || null, active: tActive.checked ? 1 : 0 };
+  const r = await fetch('/admin/tiers', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
   const j = await r.json(); tMsg.textContent = r.ok ? ' ✔ saved' : ' ✖ ' + esc(j.error || 'failed'); loadTiers();
+}
+async function toggleTier(tier, on) {
+  const r = await fetch('/admin/tiers', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tier, active: on }) });
+  if (r.ok) loadTiers();
+}
+async function loadCouriers() {
+  const r = await fetch('/admin/couriers', { headers: H }); const j = await r.json(); const tb = document.querySelector('#couriersTbl tbody'); tb.innerHTML = '';
+  for (const c of j.couriers ?? []) tb.insertAdjacentHTML('beforeend', '<tr><td>' + c.id + '</td><td>' + esc(c.name) + '</td><td>' + esc(c.city) + '</td><td>' + esc(c.depot_name) + '</td>' +
+    '<td><button class="toggle ' + (Number(c.active) === 1 ? 'on' : 'off') + '" onclick="toggleCourier(' + c.id + ',' + (Number(c.active) === 1 ? 0 : 1) + ')">' + (Number(c.active) === 1 ? 'ON' : 'OFF') + '</button></td></tr>');
+}
+async function toggleCourier(id, on) {
+  const r = await fetch('/admin/couriers', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, active: on }) });
+  if (r.ok) loadCouriers();
 }
 async function loadPromos() {
   const r = await fetch('/admin/promos', { headers: H }); const j = await r.json(); const tb = document.querySelector('#promosTbl tbody'); tb.innerHTML = '';
@@ -5761,7 +5853,7 @@ async function savePos() {
     body: JSON.stringify({ courier_id: Number(posCourier.value), rail: posRail.value, merchant_id: posMerchant.value.trim(), instructions: posInstructions.value.trim() }) });
   const j = await r.json(); posMsg.textContent = r.ok ? ' ✔ saved' : ' ✖ ' + esc(j.error || 'failed'); loadPos();
 }
-loadTiers(); loadPromos(); loadPos();
+loadTiers(); loadPromos(); loadPos(); loadCouriers();
 </script></body></html>`);
 });
 
@@ -5876,7 +5968,7 @@ app.get('/subscriptions/:phone?', async (c) => {
        FROM subscriptions WHERE phone = ?1`,
   ).bind(phone).first<any>();
   if (!sub) return c.json({ subscription: null });
-  const plan = (await plans(c.env.DB))[sub.tier as PlanTier] ?? null;
+  const plan = (await plans(c.env.DB, { forExistingSubscribers: true }))[sub.tier as PlanTier] ?? null;
   let usedThisPeriod = 0;
   let effectiveCap = plan?.parcels_per_month ?? 0;
   let rollover = 0;
@@ -6069,25 +6161,41 @@ app.use('/admin/*', async (c, next) => {
   return next();
 });
 
-// Upsert courier partner profile (the partner "page" sellers see in-app)
+// Upsert courier partner profile (the partner "page" sellers see in-app).
+// A bare {id, active} pair is the on/off TOGGLE — it flips availability
+// without touching the profile. Full bodies edit the profile too.
+app.get('/admin/couriers', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, name, city, depot_name, lat, lng, website, price_status, note, active
+       FROM couriers ORDER BY active DESC, name`,
+  ).all();
+  return c.json({ couriers: results });
+});
 app.post('/admin/couriers', async (c) => {
   const b: any = await c.req.json().catch(() => null);
+  // Toggle-only request: { id, active } — bare toggle, no full profile needed.
+  if (b?.id && b.name == null && b.active !== undefined) {
+    await c.env.DB.prepare('UPDATE couriers SET active = ?2 WHERE id = ?1')
+      .bind(Number(b.id), b.active ? 1 : 0).run();
+    return c.json({ ok: true, id: Number(b.id), active: b.active ? 1 : 0 });
+  }
   if (!b?.name || !b.city || !b.depot_name) return c.json({ error: 'name, city, depot_name required' }, 400);
+  const active = b.active == null ? 1 : (b.active ? 1 : 0);
   if (b.id) {
     await c.env.DB.prepare(
       `UPDATE couriers SET name = ?2, city = ?3, depot_name = ?4, lat = ?5, lng = ?6,
-         website = ?7, price_status = ?8, note = ?9, logo_url = ?10
+         website = ?7, price_status = ?8, note = ?9, logo_url = ?10, active = ?11
        WHERE id = ?1`,
     ).bind(b.id, b.name, b.city, b.depot_name, b.lat ?? null, b.lng ?? null,
-      b.website ?? null, b.price_status ?? null, b.note ?? null, b.logo_url ?? null).run();
-    return c.json({ ok: true, id: b.id });
+      b.website ?? null, b.price_status ?? null, b.note ?? null, b.logo_url ?? null, active).run();
+    return c.json({ ok: true, id: b.id, active });
   }
   const { meta } = await c.env.DB.prepare(
-    `INSERT INTO couriers (name, city, depot_name, lat, lng, website, price_status, note, logo_url)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`,
+    `INSERT INTO couriers (name, city, depot_name, lat, lng, website, price_status, note, logo_url, active)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`,
   ).bind(b.name, b.city, b.depot_name, b.lat ?? null, b.lng ?? null,
-    b.website ?? null, b.price_status ?? null, b.note ?? null, b.logo_url ?? null).run();
-  return c.json({ ok: true, id: meta.last_row_id });
+    b.website ?? null, b.price_status ?? null, b.note ?? null, b.logo_url ?? null, active).run();
+  return c.json({ ok: true, id: meta.last_row_id, active });
 });
 
 // Price-list entry (chargebook) — superadmin captures depot tariffs here.

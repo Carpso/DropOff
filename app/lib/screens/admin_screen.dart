@@ -265,6 +265,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _PackCodesCard(),
               const SizedBox(height: 18),
+              const _PlansAndCouriersCard(),
+              const SizedBox(height: 18),
               const _RiderVerificationAdminCard(),
               const SizedBox(height: 18),
               const _BranchManagerCard(),
@@ -2025,6 +2027,215 @@ class _PackCodesCardState extends State<_PackCodesCard> {
                   );
                 }).toList(),
               ),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Owner/admin console: full plans editor (duration, limits, price, discount,
+/// tag, active) + courier availability toggles. A hidden plan/courier stops
+/// showing up for sellers immediately; existing subscribers keep their cycle
+/// benefit (server-side). Nothing here holds money — it changes the offer.
+class _PlansAndCouriersCard extends StatefulWidget {
+  const _PlansAndCouriersCard();
+
+  @override
+  State<_PlansAndCouriersCard> createState() => _PlansAndCouriersCardState();
+}
+
+class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
+  bool _loading = false;
+  String? _error;
+  List<Map<String, dynamic>> _plans = const [];
+  List<Map<String, dynamic>> _couriers = const [];
+
+  static const _tierLabels = {
+    'rider_daily': 'Daily Rider',
+    'weekly': 'Weekly Sprint',
+    'silver': 'Silver',
+    'gold': 'Gold',
+    'platinum': 'Platinum',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final tiers = await DropOffApi.adminTiers();
+    final couriers = await DropOffApi.adminCouriers();
+    if (!mounted) return;
+    setState(() {
+      _plans = ((tiers?['tiers'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _couriers = ((couriers?['couriers'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _error = tiers == null ? 'Plans/courier catalogue needs an admin sign-in on this device.' : null;
+      _loading = false;
+    });
+  }
+
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _togglePlan(Map<String, dynamic> t, bool on) async {
+    final res = await DropOffApi.adminSaveTier({'tier': t['tier'], 'active': on ? 1 : 0});
+    if (!mounted) return;
+    _snack(res.ok ? 'Plan ${on ? 'ON' : 'OFF'} — ${_tierLabels['${t['tier']}'] ?? t['tier']}' : 'Could not toggle plan (${res.error ?? 'try again'})');
+    await _load();
+  }
+
+  Future<void> _toggleCourier(Map<String, dynamic> c, bool on) async {
+    final res = await DropOffApi.adminCourierToggle((c['id'] as num).toInt(), on);
+    if (!mounted) return;
+    _snack(res.ok ? 'Courier ${on ? 'ON' : 'OFF'} — ${c['name']}' : 'Could not toggle courier (${res.error ?? 'try again'})');
+    await _load();
+  }
+
+  String _planSubtitle(Map<String, dynamic> t) {
+    final ppd = (t['parcels_per_day'] as num?)?.toInt() ?? 0;
+    final ppm = (t['parcels_per_month'] as num?)?.toInt() ?? 0;
+    final cap = ppd > 0 ? '$ppd parcel${ppd == 1 ? '' : 's'}/day' : (ppm > 0 ? '$ppm parcels/month' : 'no cap');
+    final cycle = (t['cycle_days'] as num?)?.toInt() ?? 0;
+    final disc = (t['overage_discount_pct'] as num?)?.toDouble() ?? 0;
+    final fee = (t['fee_zmw'] as num?)?.toDouble() ?? 0;
+    return 'K${fee.toStringAsFixed(0)} • $cap • ${cycle}d cycle${disc > 0 ? ' • ${disc.toStringAsFixed(0)}% overage discount' : ''}';
+  }
+
+  Future<void> _editPlan(Map<String, dynamic> t) async {
+    final fee = TextEditingController(text: '${(t['fee_zmw'] as num?)?.toDouble() ?? 0}');
+    final ppd = TextEditingController(text: '${(t['parcels_per_day'] as num?)?.toInt() ?? 0}');
+    final ppm = TextEditingController(text: '${(t['parcels_per_month'] as num?)?.toInt() ?? 0}');
+    final rider = TextEditingController(text: '${(t['rider_fee_zmw'] as num?)?.toDouble() ?? 0}');
+    final disc = TextEditingController(text: '${(t['overage_discount_pct'] as num?)?.toDouble() ?? 0}');
+    final days = TextEditingController(text: '${(t['cycle_days'] as num?)?.toInt() ?? 30}');
+    final tag = TextEditingController(text: '${t['tag'] ?? ''}');
+    var active = (t['active'] == true || t['active'] == 1);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Edit plan — ${_tierLabels['${t['tier']}'] ?? t['tier']}',
+            style: const TextStyle(fontWeight: FontWeight.w900)),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: fee, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Fee per cycle (K)')),
+            TextField(controller: ppd, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Parcels per day (0 = monthly plan)')),
+            TextField(controller: ppm, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Parcels per month (0 = none)')),
+            TextField(controller: rider, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rider fee inside cap (0 = bundled)')),
+            TextField(controller: disc, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Overage discount %')),
+            TextField(controller: days, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cycle length (days)')),
+            TextField(controller: tag, decoration: const InputDecoration(labelText: 'Tag (shown in the app)', hintText: 'e.g. Most popular')),
+            StatefulBuilder(
+              builder: (ctx2, setDialog) => SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Plan active (visible for sale)'),
+                value: active,
+                onChanged: (v) => setDialog(() => active = v),
+              ),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              final res = await DropOffApi.adminSaveTier({
+                'tier': t['tier'],
+                'fee_zmw': double.tryParse(fee.text.trim()) ?? 0,
+                'parcels_per_day': int.tryParse(ppd.text.trim()) ?? 0,
+                'parcels_per_month': int.tryParse(ppm.text.trim()) ?? 0,
+                'rider_fee_zmw': double.tryParse(rider.text.trim()) ?? 0,
+                'overage_discount_pct': double.tryParse(disc.text.trim()) ?? 0,
+                'cycle_days': int.tryParse(days.text.trim()) ?? 30,
+                'tag': tag.text.trim().isEmpty ? null : tag.text.trim(),
+                'active': active ? 1 : 0,
+              });
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              if (mounted) {
+                _snack(res.ok ? 'Plan saved' : 'Save failed (${res.error ?? 'try again'})');
+                await _load();
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.tune, size: 19, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Plans & couriers (owner)',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(
+              tooltip: 'Refresh',
+              icon: _loading
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.refresh, size: 20),
+              onPressed: _loading ? null : _load,
+            ),
+          ]),
+          const SizedBox(height: 2),
+          const Text('Off hides the offer from sellers instantly (new subscriptions stop; existing subscribers keep their cycle benefit). Edit every field below — price, parcels/day, parcels/month, cycle length, discount, tag.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 11.5))),
+          const SizedBox(height: 10),
+          for (final t in _plans)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
+              child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(_tierLabels['${t['tier']}'] ?? '${t['tier']}',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  const SizedBox(height: 2),
+                  Text(_planSubtitle(t), style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                ])),
+                Switch(
+                  value: t['active'] == true || t['active'] == 1,
+                  onChanged: (v) => _togglePlan(t, v),
+                ),
+                TextButton(onPressed: () => _editPlan(t), child: const Text('Edit')),
+              ]),
+            ),
+          const Divider(height: 24),
+          Row(children: [
+            const Icon(Icons.local_shipping_outlined, size: 16, color: AppColors.forest),
+            const SizedBox(width: 6),
+            const Text('Couriers — availability for sellers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+          ]),
+          const SizedBox(height: 8),
+          for (final c in _couriers)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
+              child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${c['name']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                  const SizedBox(height: 2),
+                  Text('${c['city'] ?? ''}${c['depot_name'] != null ? ' • ${c['depot_name']}' : ''} • id ${c['id']}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 10.5), maxLines: 1, overflow: TextOverflow.ellipsis),
+                ])),
+                Switch(
+                  value: c['active'] == true || c['active'] == 1,
+                  onChanged: (v) => _toggleCourier(c, v),
+                ),
+              ]),
             ),
         ]),
       ),

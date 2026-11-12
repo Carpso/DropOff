@@ -30,11 +30,14 @@ export const VEHICLE_MULTIPLIER: Record<VehicleClass, number> = {
   truck: 2.0,
 };
 
+// Owner directive (2026-11-12): motorcycles carry at least 5 parcels; cars,
+// vans and trucks have no practical parcel limit (they house whole batches).
+export const VEHICLE_UNLIMITED = 9999;
 export const VEHICLE_MAX_PARCELS: Record<VehicleClass, number> = {
-  motorcycle: 3,
-  car: 6,
-  van: 10,
-  truck: 15,
+  motorcycle: 5,
+  car: VEHICLE_UNLIMITED,
+  van: VEHICLE_UNLIMITED,
+  truck: VEHICLE_UNLIMITED,
 };
 
 export const TRUCK_MIN_FEE_ZMW = 100;

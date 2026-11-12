@@ -108,7 +108,11 @@ class _BookingScreenState extends State<BookingScreen> {
   String _vehicleClass = 'motorcycle';
   int _parcels = 1;
   final _courierSearchCtl = TextEditingController();
-  static const Map<String, int> _maxParcelsByVehicle = {'motorcycle': 3, 'car': 6, 'van': 10, 'truck': 15};
+  /// Owner directive (2026-11-12): bikes carry at least 5 parcels; cars, vans
+  /// and trucks have NO practical parcel limit. 9999 = "unlimited" sentinel,
+  /// clamped by the server with the same sentinel.
+  static const int _unlimited = 9999;
+  static const Map<String, int> _maxParcelsByVehicle = {'motorcycle': 5, 'car': _unlimited, 'van': _unlimited, 'truck': _unlimited};
   static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
   /// Live plan snapshot ({subscription, plan, remaining_this_period}) — the
@@ -273,7 +277,7 @@ class _BookingScreenState extends State<BookingScreen> {
     if (est == null) return 'Indicative DropOff delivery ($from → $to): quote at the depot counter.';
     return 'Indicative DropOff delivery ($from → $to): K${est.toStringAsFixed(0)} rider leg • depot fare quoted at counter.';
   }
-  List<CourierInfo> get _filteredCouriers => smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size);
+  List<CourierInfo> get _filteredCouriers => smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size, activeServerIds: AppScope.of(context).activeCourierIds);
 
   /// Server-mirrored plan state for THIS trip — 'pack' (sender → depot leg
   /// covered: K0 rider fee, no per-parcel processing fees, no momo prompt),
@@ -852,13 +856,27 @@ class _BookingScreenState extends State<BookingScreen> {
             onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _maxParcelsByVehicle[v]!) _parcels = _maxParcelsByVehicle[v]!; setState(() {}); } },
           )),
           const SizedBox(width: 12),
-          Expanded(child: DropdownButtonFormField<int>(
-            initialValue: _parcels.clamp(1, _maxParcelsByVehicle[_vehicleClass]!),
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Parcels', hintText: '1', prefixIcon: Icon(Icons.inventory)),
-            items: List.generate(_maxParcelsByVehicle[_vehicleClass]!, (i) => i + 1).map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}', maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) { if (v != null) setState(() => _parcels = v); },
-          )),
+          Expanded(child: _vehicleClass == 'motorcycle'
+              ? DropdownButtonFormField<int>(
+                  initialValue: _parcels.clamp(1, _maxParcelsByVehicle['motorcycle']!),
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Parcels', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+                  items: List.generate(_maxParcelsByVehicle['motorcycle']!, (i) => i + 1)
+                      .map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}', maxLines: 1, overflow: TextOverflow.ellipsis)))
+                      .toList(),
+                  onChanged: (v) { if (v != null) setState(() => _parcels = v); },
+                )
+              // Cars, vans and trucks: UNLIMITED parcels — type any number.
+              : TextFormField(
+                  initialValue: '$_parcels',
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Parcels (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+                  onChanged: (v) {
+                    final n = int.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
+                    setState(() => _parcels = (n == null || n < 1) ? 1 : n);
+                  },
+                ),
+              ),
         ]),
         const SizedBox(height: 6),
         const Text('Each parcel counts as one plan parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),

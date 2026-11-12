@@ -1,8 +1,11 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../data/analytics_service.dart';
 import '../data/catalog.dart';
-import '../data/dropoff_api.dart';
+import '../models/booking.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
@@ -292,10 +295,8 @@ class _Step extends StatelessWidget {
 }
 
 /// Enhancement: "Check a fare" right on the home screen — turns price-
-/// shoppers into bookings. Shows ONLY our own side of the money (the DropOff
-/// rider leg) and states the one policy truth sellers need: the courier fare
-/// is heard at the counter. No counter prices ever, no estimates, no
-/// "published rates" — and it books with one tap.
+/// shoppers into bookings. Prices the HOME/OFFICE/STORE → nominated depot
+/// leg only; the courier fare is heard at the counter.
 class _FareChecker extends StatefulWidget {
   const _FareChecker();
 
@@ -303,34 +304,85 @@ class _FareChecker extends StatefulWidget {
   State<_FareChecker> createState() => _FareCheckerState();
 }
 
+/// Prices the user's pinned pickup → the nominated depot. Not city-to-city.
 class _FareCheckerState extends State<_FareChecker> {
-  String _from = 'Lusaka';
-  String _to = 'Ndola';
-  String _weight = '0-5kg';
-  bool _loading = false;
-  bool _checked = false;
-  double? _riderLeg;
-  List<String> _serving = const [];
+  String _courierId = 'platinum';
+  int _branchIndex = 0;
+  String _vehicle = 'motorcycle';
+  double? _lat;
+  double? _lng;
+  bool _locating = false;
+  final _place = TextEditingController(text: 'Home');
 
-  static const _weights = ['0-5kg', '5-15kg', '15kg+'];
+  static const Map<String, double> _multiplier = {'motorcycle': 1.0, 'car': 1.2, 'van': 1.4, 'truck': 2.0};
 
-  Future<void> _check() async {
-    if (_from == _to) return;
-    setState(() => _loading = true);
-    final rows = await DropOffApi.quotes(from: _from, to: _to).catchError((_) => <Map<String, dynamic>>[]);
-    if (!mounted) return;
-    final riderLeg = rows.isNotEmpty ? (rows.first['rider_fee_zmw'] as num?)?.toDouble() : null;
-    final names = rows.map((r) => '${r['courier_name'] ?? ''}').where((n) => n.isNotEmpty).toSet().toList()..sort();
-    setState(() { _riderLeg = riderLeg; _serving = names; _loading = false; _checked = true; });
+  CourierInfo get _courier => courierById(_courierId);
+
+  /// The Lusaka depots this courier can be handed to (branches with coords);
+  /// couriers with no listed Lusaka branch fall back to the flagship anchor.
+  List<CourierBranch> get _branches {
+    final list = _courier.branches.where((b) => b.city == 'Lusaka' && b.lat != null && b.lng != null).toList();
+    if (list.isNotEmpty) return list;
+    return const [CourierBranch(name: 'Lusaka depot', city: 'Lusaka', address: '', lat: -15.4255, lng: 28.2805)];
+  }
+
+  double _haversineKm(double aLat, double aLng, double bLat, double bLng) {
+    const R = 6371.0, d = 3.141592653589793 / 180;
+    final h = 0.5 - math.cos((bLat - aLat) * d) / 2 +
+        math.cos(aLat * d) * math.cos(bLat * d) * (1 - math.cos((bLng - aLng) * d)) / 2;
+    return 2 * R * math.asin(math.sqrt(h));
+  }
+
+  /// MUST match the server's baseRiderFee (K55 ≤ 5 km · K75 ≤ 12 km · K95 beyond,
+  /// × vehicle multiplier; trucks K100 minimum).
+  double _fee(double km) {
+    var base = km <= 5 ? 55.0 : km <= 12 ? 75.0 : 95.0;
+    base = base * (_multiplier[_vehicle] ?? 1.0);
+    if (_vehicle == 'truck') base = base < 100 ? 100 : base;
+    return base;
+  }
+
+  Future<void> _locate() async {
+    setState(() => _locating = true);
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permission is needed to pin the pickup.')));
+        }
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      ).timeout(const Duration(seconds: 12));
+      if (!mounted) return;
+      setState(() {
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not get your location — the fee locks exactly when you book.')));
+      }
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
   }
 
   void _book() {
-    BookingScreen.prefill = {'from': _from, 'to': _to};
+    BookingScreen.prefill = {'from': 'Lusaka', 'pickup': _place.text.trim().isEmpty ? 'Home' : _place.text.trim()};
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
   }
 
   @override
   Widget build(BuildContext context) {
+    final branches = _branches;
+    final branch = branches[_branchIndex.clamp(0, branches.length - 1)];
+    final km = (_lat != null && _lng != null) ? _haversineKm(_lat!, _lng!, branch.lat!, branch.lng!) : null;
+    final fee = km != null ? _fee(km) : null;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -341,78 +393,80 @@ class _FareCheckerState extends State<_FareChecker> {
             Expanded(child: Text('Check the rider fee', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
           ]),
           const SizedBox(height: 4),
-          const Text('Our leg is shown up front. Courier fares are heard at the counter — never published here.',
+          const Text('Your pickup spot → the depot your courier hands over to. Never city-to-city: the inter-city fare is the depot\'s, heard at the counter — we don\'t publish it.',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
           const SizedBox(height: 12),
+          TextField(
+            controller: _place,
+            decoration: const InputDecoration(
+              labelText: 'Pickup from (home / office / store — your own spot)',
+              isDense: true,
+              hintText: 'e.g. Kabulonga office, Matero home, Cairo Road shop',
+            ),
+          ),
+          const SizedBox(height: 8),
           Row(children: [
             Expanded(child: DropdownButtonFormField<String>(
-              initialValue: _from,
+              initialValue: _courierId,
               isExpanded: true,
-              decoration: const InputDecoration(labelText: 'From', isDense: true),
-              items: [for (final t in cities) DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis))],
-              onChanged: (v) => setState(() { _from = v ?? _from; _checked = false; }),
-            )),
-            const Padding(padding: EdgeInsets.symmetric(horizontal: 6), child: Icon(Icons.arrow_forward, size: 16, color: AppColors.muted)),
-            Expanded(child: DropdownButtonFormField<String>(
-              initialValue: _to,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'To', isDense: true),
-              items: [for (final t in cities) DropdownMenuItem(value: t, child: Text(t, overflow: TextOverflow.ellipsis))],
-              onChanged: (v) => setState(() { _to = v ?? _to; _checked = false; }),
+              decoration: const InputDecoration(labelText: 'Courier depot', isDense: true),
+              items: [for (final c in availableCouriers(AppScope.of(context).activeCourierIds)) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))],
+              onChanged: (v) => setState(() {
+                _courierId = v ?? _courierId;
+                _branchIndex = 0;
+              }),
             )),
           ]),
-          const SizedBox(height: 10),
-          DropdownButtonFormField<String>(
-            initialValue: _weight,
-            decoration: const InputDecoration(labelText: 'Weight', isDense: true),
-            items: const [
-              DropdownMenuItem(value: '0-5kg', child: Text('Up to 5kg')),
-              DropdownMenuItem(value: '5-15kg', child: Text('5–15kg')),
-              DropdownMenuItem(value: '15kg+', child: Text('Over 15kg')),
-            ],
-            onChanged: (v) => setState(() { _weight = v ?? _weight; _checked = false; }),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<int>(
+            initialValue: _branchIndex,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Depot branch', isDense: true),
+            items: [for (var i = 0; i < branches.length; i++) DropdownMenuItem(value: i, child: Text(branches[i].name, overflow: TextOverflow.ellipsis))],
+            onChanged: (v) => setState(() => _branchIndex = v ?? 0),
           ),
-          if (_from == _to) ...[
-            const SizedBox(height: 8),
-            const Text('Pick two different towns.', style: TextStyle(color: AppColors.muted, fontSize: 11)),
-          ],
-          const SizedBox(height: 12),
-          if (!_checked)
-            FilledButton.icon(
-              onPressed: (_loading || _from == _to) ? null : _check,
-              icon: _loading
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.search),
-              label: Text(_loading ? 'Checking…' : 'Check'),
-            )
-          else ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(
-                  _riderLeg != null
-                      ? 'DropOff rider leg: K${_riderLeg!.toStringAsFixed(0)} — payable at booking (momo), nothing at the door'
-                      : 'DropOff rider leg: shown in full when you book (momo prepaid)',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
-                ),
-                const SizedBox(height: 4),
-                const Text('Courier fare: heard at the counter on drop-off.',
-                    style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
-                if (_serving.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text('Serving this route: ${_serving.join(', ')}',
-                      style: const TextStyle(color: AppColors.forest, fontSize: 11, fontWeight: FontWeight.w700)),
-                ],
-              ]),
-            ),
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: _book,
-              icon: const Icon(Icons.two_wheeler, size: 18),
-              label: const Text('Book this route'),
-            ),
-          ],
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: _vehicle,
+            decoration: const InputDecoration(labelText: 'Vehicle class', isDense: true),
+            items: const [
+              DropdownMenuItem(value: 'motorcycle', child: Text('Motorcycle')),
+              DropdownMenuItem(value: 'car', child: Text('Car')),
+              DropdownMenuItem(value: 'van', child: Text('Van')),
+              DropdownMenuItem(value: 'truck', child: Text('Truck (large cargo)')),
+            ],
+            onChanged: (v) => setState(() => _vehicle = v ?? _vehicle),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _locating ? null : _locate,
+            icon: _locating
+                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.my_location, size: 18),
+            label: Text(_locating ? 'Pinning…' : (_lat != null ? 'Pickup pinned ✓ — tap to re-pin' : 'Use my current location')),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                fee != null
+                    ? 'DropOff rider leg: K${fee.toStringAsFixed(0)} — pickup to ${branch.name} (${km!.toStringAsFixed(1)} km)'
+                    : 'DropOff rider leg: K55 / K75 / K95 by distance — pin your pickup for your exact fee, or just book: it locks when you pay (momo prepaid)',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+              ),
+              const SizedBox(height: 4),
+              const Text('Courier fare: heard at the counter on drop-off.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: _book,
+            icon: const Icon(Icons.arrow_forward, size: 18),
+            label: const Text('Book the pickup'),
+          ),
         ]),
       ),
     );

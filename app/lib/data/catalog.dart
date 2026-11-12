@@ -184,6 +184,18 @@ const couriers = <CourierInfo>[
 
 CourierInfo courierById(String id) => couriers.firstWhere((courier) => courier.id == id);
 
+/// Built-in catalog filtered to couriers toggled ON by the owner (the public
+/// /couriers endpoint returns only active rows). Unknown/offline → the full
+/// catalog, so booking is never bricked by a connectivity hiccup.
+List<CourierInfo> availableCouriers(List<int>? activeServerIds) {
+  if (activeServerIds == null) return List<CourierInfo>.of(couriers);
+  final ids = activeServerIds.toSet();
+  return couriers.where((c) {
+    final sid = kCourierServerIds[c.id];
+    return sid != null && ids.contains(sid);
+  }).toList();
+}
+
 /// Approximate town coordinates used to order a courier's branches by how
 /// close they are to the seller's pickup city.
 const Map<String, (double, double)> cityCoords = {
@@ -286,7 +298,11 @@ List<CourierInfo> smartCourierSearch(
   String? fromCity,
   String? toCity,
   ParcelSize size = ParcelSize.small,
+  List<int>? activeServerIds,
 }) {
+  // Catalog couriers toggled OFF by the owner (admin console) never surface:
+  // null = availability unknown (offline) → full catalog.
+  final pool = availableCouriers(activeServerIds);
   final q = query.trim().toLowerCase();
   final rawTokens = q.split(RegExp(r'[^a-z0-9]+')).where((t) => t.isNotEmpty).toList();
   final tokens = rawTokens.where((t) => !_stopWords.contains(t)).toList();
@@ -350,14 +366,14 @@ List<CourierInfo> smartCourierSearch(
     return s;
   }
 
-  final scored = <CourierInfo>[...couriers]
+  final scored = <CourierInfo>[...pool]
       .map((c) => (c: c, s: score(c)))
       .where((entry) => entry.s > 0)
       .toList()
     ..sort((a, b) => b.s.compareTo(a.s) == 0 ? a.c.name.compareTo(b.c.name) : b.s.compareTo(a.s));
   if (scored.isEmpty && q.isNotEmpty) {
-    // Never dead-end: show all couriers (sorted by name) and let the user pick.
-    return <CourierInfo>[...couriers]..sort((a, b) => a.name.compareTo(b.name));
+    // Never dead-end: show everything that is AVAILABLE and let the user pick.
+    return pool..sort((a, b) => a.name.compareTo(b.name));
   }
   return scored.map((e) => e.c).toList();
 }
