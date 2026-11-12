@@ -1414,6 +1414,45 @@ app.get('/couriers/:id/profile', async (c) => {
   });
 });
 
+/* Chargebook — user-typed localities: distinct area names extracted from
+ * jobs.pickup_address / jobs.dest_address (letters only, no street numbers or
+ * plot digits, stopword-filtered), most-used first. Staff-only; returns
+ * area-level fragments (e.g. "Kabulonga") — never street addresses. */
+app.get('/admin/localities', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
+  const rows = await c.env.DB.prepare(
+    `SELECT pickup_address AS a, dest_address AS b FROM jobs
+      WHERE (pickup_address IS NOT NULL AND trim(pickup_address) <> '')
+         OR (dest_address IS NOT NULL AND trim(dest_address) <> '')
+      ORDER BY id DESC LIMIT 300`,
+  ).all<any>();
+  const counts = new Map<string, number>();
+  const STOP = new Set(['plot', 'flat', 'house', 'street', 'road', 'avenue', 'ave', 'st', 'lane', 'no', 'unit', 'suite', 'place', 'estate', 'lusaka', 'zambia', 'city', 'roadside', 'roadoff', 'corner', 'opposite']);
+  const add = (words: string[]) => {
+    if (words.length === 0) return;
+    const f = words.join(' ').replace(/\s+/g, ' ').trim();
+    if (f.length < 4 || f.length > 36) return;
+    if (!/^[A-Za-z][A-Za-z ]*$/.test(f)) return;
+    const key = f.replace(/\b([A-Za-z])/g, (m) => m.toUpperCase());
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  };
+  for (const r of (rows.results ?? []) as any[]) {
+    for (const addr of [r.a, r.b]) {
+      if (!addr) continue;
+      for (const seg of String(addr).split(',')) {
+        const words = String(seg).split(/[^A-Za-z]+/)
+          .filter((w) => w.length > 2 && !STOP.has(w.toLowerCase()));
+        if (words.length) add(words);
+      }
+    }
+  }
+  const localities = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 60)
+    .map(([name, n]) => ({ name, n }));
+  return c.json({ localities });
+});
+
 /* --------------------------------- quotes --------------------------------- */
 app.get('/quotes', async (c) => {
   const fromCity = c.req.query('from') ?? 'Lusaka';
@@ -8511,6 +8550,24 @@ async function captureError(env: Env, err: unknown, req: { method: string; url: 
     });
   } catch { /* telemetry is best-effort */ }
 }
+
+/* ------------------------- guaranteed-JSON failures ------------------------- */
+// Hono's default plain-text 500/404 breaks clients that expect JSON — the app
+// surfaced any unhandled throw as a vague "network error". Every error is now
+// a clean JSON body; the client can render the real story.
+app.notFound((c) => c.json({ error: 'not_found' }, 404));
+app.onError((err, c) => {
+  try {
+    console.error(JSON.stringify({
+      where: 'onError',
+      method: c.req.method,
+      path: c.req.path,
+      message: String((err as any)?.message ?? err).slice(0, 300),
+    }));
+  } catch { /* logging must never throw */ }
+  captureError(c.env, err, { method: c.req.method, url: c.req.path }).catch(() => {});
+  return c.json({ error: 'internal_error' }, 500);
+});
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

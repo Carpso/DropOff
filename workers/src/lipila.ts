@@ -124,6 +124,9 @@ export async function lipilaCollect(
         ...(email ? { email } : {}),
         referenceData: sanitizeNarration(note),
       }),
+      // Hard cap — without this a slow provider hangs the whole payment
+      // request past the app's timeout and users see "network error".
+      signal: AbortSignal.timeout(8000),
     }));
   } catch (e: any) {
     if (e?.status === 503) {
@@ -132,6 +135,11 @@ export async function lipilaCollect(
     return { ok: false, status: 502, lipilaReference: undefined, raw: String(e?.message ?? e) };
   }
   const text = await res.text();
+  if (!res.ok) {
+    console.error(JSON.stringify({
+      where: 'lipila-collect', status: res.status, body: text.slice(0, 300),
+    }));
+  }
   let data: any = null;
   try { data = JSON.parse(text); } catch { /* keep raw */ }
   const ref = data?.referenceId ?? data?.reference ?? data?.transactionReference ?? data?.transactionId ?? data?.lipilaReference ?? null;
@@ -164,6 +172,7 @@ export async function lipilaDisburse(
         narration: sanitizeNarration(note),
         referenceData: sanitizeNarration(note),
       }),
+      signal: AbortSignal.timeout(8000),
     }));
   } catch (e: any) {
     if (e?.status === 503) {
@@ -172,6 +181,11 @@ export async function lipilaDisburse(
     return { ok: false, status: 502, lipilaReference: undefined, raw: String(e?.message ?? e) };
   }
   const text = await res.text();
+  if (!res.ok) {
+    console.error(JSON.stringify({
+      where: 'lipila-disburse', status: res.status, body: text.slice(0, 300),
+    }));
+  }
   let data: any = null;
   try { data = JSON.parse(text); } catch { /* keep raw */ }
   const ref = data?.referenceId ?? data?.reference ?? data?.transactionReference ?? data?.transactionId ?? data?.lipilaReference ?? null;
@@ -184,6 +198,7 @@ export async function lipilaStatus(env: Env, reference: string): Promise<'pendin
   try {
     res = await withCircuit('lipila-status', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/collections/check-status?referenceId=${encodeURIComponent(reference)}`, {
       headers: { accept: 'application/json', 'x-api-key': env.LIPILA_API_KEY },
+      signal: AbortSignal.timeout(8000),
     }));
   } catch {
     return 'pending'; // circuit open: treat as pending, never block a payment on a status poll
