@@ -624,7 +624,7 @@ const cacheFor = (seconds: number) => async (c: any, next: any) => {
 };
 
 // Only genuinely shared, non-personal data is cacheable. Everything else —
-// jobs, wallet, partner keys, referrals, ratings, rider routes — is private and
+// jobs, float, partner keys, referrals, ratings, rider routes — is private and
 // must never be stored by a browser or proxy (stale + privacy risk).
 const PUBLIC_CACHEABLE = /^\/(health|cities|couriers(\/[^/]+(\/profile)?)?|quotes|plans)$/;
 app.use('*', async (c, next) => {
@@ -1093,15 +1093,11 @@ app.post('/auth/register', async (c) => {
   }
 
   const passwordHash = await hashPassword(password);
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO auth_users (email, password_hash, phone, full_name) VALUES (?1, ?2, ?3, ?4)`,
-    ).bind(email, passwordHash, phone, fullName),
-    // seed the momo identity so topups/payouts resolve on day one
-    c.env.DB.prepare(
-      `INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)`,
-    ).bind(phone),
-  ]);
+  // NOTE: no stored-value row is created for customers — prepayment is per
+  // parcel (booking_deposit → job). Only rider/ops COD float rows exist.
+  await c.env.DB.prepare(
+    `INSERT INTO auth_users (email, password_hash, phone, full_name) VALUES (?1, ?2, ?3, ?4)`,
+  ).bind(email, passwordHash, phone, fullName).run();
 
   try { await noteDevice(c.env.DB, phone, deviceId(c), clientIp(c), userAgent(c)); } catch { /* best-effort */ }
 
@@ -1579,8 +1575,8 @@ app.post('/jobs', async (c) => {
 
     // PREPAID POLICY (owner directive): every parcel is paid IN ADVANCE at
     // booking — no cash option, no pay-at-pickup. Momo senders get the full
-    // prompt at booking; wallet payments draw pre-funded balance; plans are
-    // prepaid by their subscription. Riders never handle ride money.
+    // prompt at booking; plans are prepaid by their subscription. Riders
+    // never handle ride money.
     const staffEyes = c.get('role') === 'ops' || isAdmin(c);
     if (b.pay_method === 'cash' && !staffEyes) {
       return c.json({
@@ -1900,16 +1896,16 @@ app.post('/jobs', async (c) => {
 
     // Fees ride on the payer leg only: pack parcels carry no per-parcel fees
     // (the pack renewal prompt charges the processing fee on the pack price),
-    // wallet top-ups carry them once per deposit. The customer NEVER pays for
-    // the rider's payout — that lives inside the rider's 10% take. Pack and
-    // promo math happens on the DropOff leg ONLY — the partner fare is theirs.
+    // ride-float top-ups carry them once per deposit. The customer NEVER pays
+    // for the rider's payout — that lives inside the rider's 10% take. Pack
+    // and promo math happens on the DropOff leg ONLY — the partner fare is theirs.
     const feeBase = collectionFees(dropOffLeg, packInclusion === 'pack' ? null : riderFee);
 
     // ADVANCE-PAYMENT GATE (owner directive): pay-as-you-go momo senders pay
     // the FULL DropOff leg prompt at booking — rider dispatch waits for the
     // approval. Plan members already paid via their subscription (skip);
-    // wallet bookings draw their pre-funded balance at pickup (the wallet was
-    // itself topped up in advance), and ops/superadmin bookings ride free.
+    // legacy 'wallet' pay-method rows are no longer issued (customers hold no
+    // stored value), and ops/superadmin bookings ride free.
     let depositRequired = false;
     let depositAmount = 0;
     let depositRef: string | null = null;
@@ -2118,7 +2114,8 @@ app.post('/collections', async (c) => {
   // ADVANCE-PAYMENT GATE (owner directive): every momo collection is paid IN
   // ADVANCE at booking — full rider leg + processing + momo leg. Plan members
   // (in-cap, rider fee K0) ride their prepaid subscription. Deposit settles
-  // into the sender's wallet and dispatches the rider on approval.
+  // the parcel's prepayment directly (job marked paid on approval) and
+  // dispatches the rider.
   const completedEver = (await c.env.DB.prepare(
     `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
   ).bind(phone).first<any>())?.n ?? 0;
@@ -2344,7 +2341,7 @@ app.get('/jobs/:ref/live', async (c) => {
 /* ------------------------- rider app: act on a job ------------------------- */
 // Auth: ops key, admin key, or the ASSIGNED rider's own JWT. Statuses move
 // pickup -> picked_up -> at_depot -> departed -> arrived -> delivered/ready.
-// Also logs waiting minutes (billed) and COD collections (credited to wallet).
+// Also logs waiting minutes (billed) and COD collections (credited to rider float).
 app.post('/jobs/:ref/events', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ error: 'invalid JSON body' }, 400);
@@ -2505,6 +2502,8 @@ app.post('/jobs/:ref/events', async (c) => {
 
   // Wallet jobs settle the same DropOff leg, minus the Lipila momo leg —
   // the platform processing fee still applies (no free rides on the fee).
+  // LEGACY: pay_method 'wallet' rows are no longer issued — customers hold no
+  // stored value; this debit only fires for pre-refactor rows with a balance.
   const walletProcessing = platformFee(dropoffLegZmw);
   const walletDue = round2(dropoffLegZmw + walletProcessing);
 
@@ -4015,9 +4014,11 @@ app.delete('/push/register', async (c) => {
   return c.json({ ok: true, removed: res.meta.changes ?? 0 });
 });
 
-/* ------------------------------ wallet float ------------------------------ */
-// Money is ONLY ever moved through wallet_ledger rows (audit trail).
-// topup +, job charge -, COD receipt +, rider earning +, rider payout -.
+/* ------------------- ride float (rider/ops COD float) ---------------------- */
+// NOT A WALLET: customers never hold stored value — prepayment is per parcel.
+// This ledger only tracks rider/ops COD float: topup +, job charge -,
+// COD receipt +, rider earning +, rider payout -. Money moves through
+// wallet_ledger rows (audit trail).
 async function walletCreditStatements(
   c: { env: { DB: D1Database } },
   phone: string, amount: number, kind: string, jobId?: number,
@@ -4033,7 +4034,7 @@ async function walletCreditStatements(
 
 app.get('/wallet', async (c) => {
   if (!['ops', 'admin'].includes(c.get('role') as string)) {
-    return c.json({ error: 'customer wallets are disabled — riders check float via ops' }, 403);
+    return c.json({ error: 'customers hold no stored value — prepayment is per parcel; riders check float via ops' }, 403);
   }
   const phone = c.get('phone');
   if (!phone) return c.json({ error: 'identity_required' }, 401);
@@ -4047,7 +4048,7 @@ app.get('/wallet', async (c) => {
 });
 
 /* ------------------------------- payments --------------------------------- */
-// Lipila collect for: kind=job (settle a job), kind=topup (wallet float),
+// Lipila collect for: kind=job (settle a job), kind=topup (ride float),
 // kind=subscription (auto-renewal). All settle idempotently below.
 app.post('/payments', async (c) => {
   if (await rateLimited(c, 'payment_create', 30)) return c.json({ error: 'too_many_requests' }, 429);
@@ -4147,7 +4148,7 @@ app.post('/payments', async (c) => {
   } else {
     // Top-ups exist ONLY for rider/ops float (COD handling) — customers/sellers have no wallet.
     if (!['ops', 'admin'].includes(c.get('role') as string)) {
-      return c.json({ error: 'customer wallets are disabled — riders top up float only' }, 403);
+      return c.json({ error: 'ride float is rider/ops only — customers prepay per parcel' }, 403);
     }
     phone = c.get('role') === 'ops' && b.phone ? normalizeZmPhone(b.phone) : c.get('phone')!;
     if (!phone) return c.json({ error: 'missing phone' }, 400);
@@ -4165,7 +4166,7 @@ app.post('/payments', async (c) => {
   const init = await lipilaCollect(c.env, phone, amount, lipilaRef,
     kind === 'job' ? `DropOff ${lipilaRef}`
       : kind === 'subscription' ? 'DropOff pack activation/renewal'
-      : 'DropOff wallet top-up');
+      : 'DropOff ride float top-up');
   if (!init.ok) return c.json({ error: 'lipila_init_failed', detail: init.raw }, 502);
 
   const provider: Provider = b.provider ?? providerFromPhone(phone);
@@ -4262,23 +4263,26 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       data: { job_ref: job?.ref ?? '', kind: 'payment' },
     });
   } else if (pay.kind === 'topup') {
+    // Rider/ops COD float only — customers never hold stored value.
     await sendToPhone(env, pay.phone, {
-      title: 'Wallet topped up',
-      body: `Your wallet balance is updated.`,
+      title: 'Ride float loaded',
+      body: `Your ride float balance is updated.`,
     });
   } else if (pay.kind === 'booking_deposit' && pay.job_id) {
     // Prepayment resolved: the momo money (exactly the quote for this parcel —
-    // trip price + processing + momo legs, never more) lands as the sender's
-    // delivery credit and dispatches the pending booking now. Coords are
-    // optional; jobs from typed addresses fall back to the city anchor.
+    // trip price + processing + momo legs, never more) IS this parcel's
+    // payment. NOT A WALLET (compliance, PAYMENT_COMPLIANCE.md): the customer
+    // balance is never credited — the job is marked paid directly and the
+    // ledger row stays only as a job-linked audit trail. Any residue flows
+    // back to the sender's momo on cancel-before-pickup. Coords are optional;
+    // jobs from typed addresses fall back to the city anchor.
     const job = await env.DB.prepare(
       'SELECT id, ref, sender_phone FROM jobs WHERE id = ?1',
     ).bind(pay.job_id).first<any>();
     await env.DB.batch([
-      env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(pay.phone),
       env.DB.prepare(`INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'deposit', ?3)`)
         .bind(pay.phone, pay.amount_zmw, pay.job_id),
-      env.DB.prepare('UPDATE wallets SET balance_zmw = balance_zmw + ?2 WHERE phone = ?1').bind(pay.phone, pay.amount_zmw),
+      env.DB.prepare(`UPDATE jobs SET paid = 1 WHERE id = ?1 AND paid = 0`).bind(pay.job_id),
       env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'deposit_paid', ?2)`)
         .bind(pay.job_id, 'Prepayment approved — rider dispatch in flight.'),
     ]);
@@ -4293,7 +4297,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
 }
 
 /* -------- platform revenue sweep (fees → business momo) ----------------- */
-// All platform income sits in the Lipila wallet as we collect it. When the
+// All platform income sits in the Lipila merchant account as we collect it. When the
 // undistributed balance reaches PLATFORM_SWEEP_MIN_ZMW, sweep it to the
 // business number in one disbursement. Idempotent: the ledger row is written
 // BEFORE the disburse call, so a crash-then-rerun can never double-pay
@@ -5403,7 +5407,7 @@ fetch('/admin/stats', { headers: H }).then(r => r.json()).then(s => {
     ['parcels (30d)', s.parcels_last_30d],
     ['platform fees (30d)', 'K' + (s.platform_fees_last_30d ?? 0).toFixed(2)],
     ['Lipila fees (30d)', 'K' + (s.lipila_fees_last_30d ?? 0).toFixed(2)],
-    ['wallet float', 'K' + (s.wallet_float_total ?? 0).toFixed(2)],
+    ['ride float held', 'K' + (s.wallet_float_total ?? 0).toFixed(2)],
     ['referrals pending', s.referrals_pending ?? 0],
     ['referrals rewarded', s.referrals_rewarded ?? 0],
   ].map(([label, v]) => '<span class="kpi"><b>' + esc(v) + '</b>' + label + '</span>').join('');
@@ -6332,7 +6336,7 @@ function taxReportHtml(p: any): string {
 <table>
 ${row('Gross turnover (components below)', Number(p.gross_turnover_zmw ?? 0))}
 ${row('· momo job collections', lines.job_collections ?? 0)}
-${row('· delivery-credit-settled DropOff legs', lines.wallet_jobs ?? 0)}
+${row('· float-settled DropOff legs (legacy)', lines.wallet_jobs ?? 0)}
 ${row('· subscriptions & upgrades', lines.subscriptions ?? 0)}
 ${row('· reward/legacy COD cut (historical)', lines.cod_platform_cut ?? 0)}
 ${row('0% band applied', `K${Number(p.zero_band_zmw ?? 0).toFixed(2)} of K${TOT_MONTHLY_ZERO_BAND_ZMW}`)}
@@ -7979,7 +7983,7 @@ app.get('/admin/stats', async (c) => {
     ),
     wallet_float_total: await one(`SELECT COALESCE(SUM(balance_zmw), 0) AS n FROM wallets`),
     // Platform revenue pipeline: total earned as fees sitting in the Lipila
-    // wallet vs how much has been swept to the business momo.
+    // merchant account vs how much has been swept to the business momo.
     lipila_earned_total: await one(
       `SELECT COALESCE(SUM(platform_fee_zmw), 0) AS n FROM payments WHERE status = 'success'`,
     ),
@@ -8296,15 +8300,21 @@ async function refundUnspentPrepaid(
       WHERE job_id = ?1 AND kind = 'booking_deposit' AND status = 'success'`,
   ).bind(job.id).first<any>();
   const prepaid = round2(Number(dep?.n ?? 0));
-  if (prepaid <= 0) return; // charge-on-pickup or wallet sender — nothing to return
+  if (prepaid <= 0) return; // charge-on-pickup or float sender — nothing to return
+  // NOT A WALLET: the unspent residue is computed JOB-SCOPED from the audit
+  // trail — this job's successful deposits minus what its ledger rows show
+  // was charged or already refunded. Customer balances never hold the money,
+  // so the refund never depends on (or drains) a stored balance.
   const spent = round2(Number((await env.DB.prepare(
     `SELECT COALESCE(SUM(-amount_zmw), 0) AS n FROM wallet_ledger
        WHERE job_id = ?1 AND kind = 'job_charge'`,
   ).bind(job.id).first<any>())?.n ?? 0));
-  const wallet = await env.DB.prepare(
-    'SELECT balance_zmw FROM wallets WHERE phone = ?1').bind(job.sender_phone).first<any>();
-  const unspent = round2(Math.min(prepaid - Math.max(0, spent), Math.max(0, wallet?.balance_zmw ?? 0)));
-  if (unspent < 0.5) return; // fully spent or sub-cent residue — nothing to return
+  const refunded = round2(Number((await env.DB.prepare(
+    `SELECT COALESCE(SUM(-amount_zmw), 0) AS n FROM wallet_ledger
+       WHERE job_id = ?1 AND kind = 'prepaid_refund'`,
+  ).bind(job.id).first<any>())?.n ?? 0));
+  const unspent = round2(prepaid - Math.max(0, spent) - Math.max(0, refunded));
+  if (unspent < 0.5) return; // fully spent or already refunded — nothing to return
   const ref = `prepay_refund-${job.id}-${Date.now().toString(36)}`;
   const disb = await lipilaDisburse(env, job.sender_phone, unspent, ref,
     `DropOff unspent prepayment ${job.ref ?? job.id}`.replace(/[^A-Za-z0-9 ]/g, ' '));
@@ -8316,14 +8326,11 @@ async function refundUnspentPrepaid(
     ).bind(job.id, `Auto-cancel: unspent prepayment K${unspent.toFixed(2)} could not be paid back to momo (Lipila payout failed — e.g. insufficient disbursement float or receiver off) — refund manually via /admin/payments/:id/refund.`).run();
     return;
   }
-  // Take the credit out of the delivery credit (ledger leaves an audit row) and
-  // record the momo refund exactly like the admin refund path does.
+  // Audit row only — no balance to drain (customers hold no stored value);
+  // the momo refund is recorded exactly like the admin refund path does.
   await env.DB.batch([
-    env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(job.sender_phone),
     env.DB.prepare(`INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'prepaid_refund', ?3)`)
       .bind(job.sender_phone, -unspent, job.id),
-    env.DB.prepare('UPDATE wallets SET balance_zmw = balance_zmw - ?2 WHERE phone = ?1 AND balance_zmw >= ?2')
-      .bind(job.sender_phone, unspent),
     env.DB.prepare(
       `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
          lipila_fee_zmw, lipila_reference, status, channel, kind, refund_of_payment_id, refunded_at)

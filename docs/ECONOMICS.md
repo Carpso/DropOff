@@ -12,7 +12,7 @@ All figures in Zambian Kwacha (ZMW ≈ K). Rider = person doing the pickup run. 
 | COD processing — REMOVED 2026-11-10 (owner directive: riders never carry recipient cash) | — | — |
 | Waiting bill, K2/min after 10 min free, K50 cap | K0–K50 | Driver (full) |
 | Depot door delivery (placement city) | Pay-as-you-go by recipient-city distance bands × vehicle multiplier (from K45) + processing | DropOff (rider works door for the same job; no second split) |
-| Wallet top-up (riders only) | 1% + K0.48, min K3.48 + K2.50 | DropOff collects on float |
+| Ride float top-up (riders only) | 1% + K0.48, min K3.48 + K2.50 | DropOff collects on float |
 
 **Not shared today:** no per-parcel commission to DropOff from the courier fare — the counter fare is the partner's (seller pays at depot), and DropOff doesn't touch partner money.
 

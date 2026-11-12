@@ -12,7 +12,7 @@ Status: **machine-assisted pass done; native-speaker review still required befor
 ## What was checked (best-effort)
 - Keys/structure parity across ARBs and generated `app_localizations*.dart` for critical flows (booking warnings, hold/deposit/slot, handover/OTP warning, cover terms/acceptance, recipients/quick rebook, evidence).
 - `toi` consistently labeled as **Tonga (Zambia) / Chitonga** and uses locale code `toi`.
-- Product/protocol terms intentionally kept recognizable where appropriate: **DropOff, rider, OTP, SMS, wallet, Sweep, no-show strike** (mixed-language UX is common; confirm with native reviewers).
+- Product/protocol terms intentionally kept recognizable where appropriate: **DropOff, rider, OTP, SMS, Sweep, no-show strike** (mixed-language UX is common; confirm with native reviewers). **Never** "wallet"/"e-wallet"/"top-up" in customer copy — say "prepayment for your parcel delivery" (`docs/PAYMENT_COMPLIANCE.md`).
 - Critical meaning preserved: cover is **quoted protection, not insurance**; acceptance/limits/evidence language present; hold/strike/slot warnings are cautionary, not punitive ambiguity.
 
 ## Requires human native-speaker review (do before production-final sign-off)

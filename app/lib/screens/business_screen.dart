@@ -574,7 +574,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       Expanded(child: _Stat(
         value: spend.k > 0 ? 'K${spend.k % 1 == 0 ? spend.k.toStringAsFixed(0) : spend.k.toStringAsFixed(2)}' : 'K0',
         label: spend.k > 0 ? 'DropOff spend · 30d (${spend.parcels} parcels)' : 'DropOff spend · 30d',
-        icon: Icons.account_balance_wallet_outlined,
+        icon: Icons.receipt_long_outlined,
       )),
     ]);
   }

@@ -20,8 +20,8 @@ Issuing e-money without a BoZ designation can attract severe criminal penalties 
 | 1. Single-purpose money only | Every prepayment is pinned to **exactly one parcel** (`payments.kind='booking_deposit'` → `job_id`). The credit can pay only DropOff's own delivery service — trip price + processing fee. | rides through booking, never free-form |
 | 2. No cash-out, ever | There is no cash-out/withdraw feature for customers. Refunds go back to the **original momo number** via Lipila (a licensed PSP), under `/admin/payments/:id/refund` (manual) and `refundUnspentPrepaid()` (automatic on cancel-before-pickup). | workers/src/index.ts |
 | 3. Unspent prepayment is returned | Cancellation before pickup (auto no-show cron, both branches) automatically momo-refunds the unspent portion to the sender's source number; on payout failure, the job is flagged `prepaid_refund_failed` and ops executes the manual refund. | `refundUnspentPrepaid()` |
-| 4. Prepayment capped at the quote | The momo prompt is the server-computed quote for that parcel only (rider leg + processing + momo leg). It can never exceed what the delivery costs. There is **no free-form customer top-up**: `/payments` `kind='topup'` is gated to rider/ops (COD float) and capped at `WALLET_TOPUP_CAP_ZMW`; customers have no top-up surface at all. Balances are residue of a single booking, never an accumulating wallet. | `/payments`, `/wallet`, quotes |
-| 5. Never accept third parties | The "delivery credit" is accepted ONLY by DropOff for DropOff parcels. Not at depots, courier counters, riders, other merchants, or P2P transfers. Customer `GET /wallet` and customer role gating enforce this. | role gates, 403s |
+| 4. Prepayment capped at the quote | The momo prompt is the server-computed quote for that parcel only (rider leg + processing + momo leg). It can never exceed what the delivery costs. There is **no free-form customer top-up**: `/payments` `kind='topup'` is gated to rider/ops (COD float) and capped at `WALLET_TOPUP_CAP_ZMW`; customers have no top-up surface at all. On approval the deposit **marks the job paid directly — customer balances are never credited** (the `wallet_ledger` 'deposit' row is a job-linked audit trail only); unspent residue is computed job-scoped (`refundUnspentPrepaid`) and returned to momo. No customer store of value exists at any point. | `/payments`, `/wallet`, quotes |
+| 5. Never accept third parties | The prepayment is accepted ONLY by DropOff for DropOff parcels. Not at depots, courier counters, riders, other merchants, or P2P transfers. Customer `GET /wallet` and customer role gating enforce this. | role gates, 403s |
 
 Additional positioning:
 
@@ -29,7 +29,7 @@ Additional positioning:
 - **Rider cash handling**: none. Riders never touch ride money (salaried, `docs/PLAN_ECONOMICS_2026-11-10.md` §9).
 - **Collections**: momo → Lipila (licensed PSP) → per-leg fees; platform sweeps its income to the business number (`sweepPlatformIncome`).
 - **Refunds at customer's request** (outside cancel flow): admin reviews and pays via `/admin/payments/:id/refund`.
-- **Tax treatment**: wallet-settled legs are recognised as turnover when spent (ZRA turnover tax ledger, §see TODOS) — not on receipt.
+- **Tax treatment**: prepaid legs are recognised as turnover when spent (ZRA turnover tax ledger, §see TODOS) — not on receipt.
 
 ## Red lines that would flip us into e-money territory
 

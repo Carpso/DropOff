@@ -128,13 +128,15 @@ WHY SELLERS USE DROPOFF
   evidence.
 
 SIMPLE, TRANSPARENT PAYMENTS
-* Pay with mobile money (Lipila) or cash. Every fee is shown before you book:
-  rider fare, processing fee, nothing hidden.
-* Wallet and in-app receipts, plus a full booking history per parcel.
+* Every parcel is prepaid by mobile money at booking — a prepayment for your
+  parcel delivery (trip price + processing fee), never more. No cash, ever:
+  your rider never handles your money. Cancel before pickup and the unspent
+  prepayment returns to your momo automatically.
+* In-app receipts, plus a full booking history per parcel.
 
 FOR RIDERS
 * Slot-batched task queues, a nearest-neighbour route, targets and daily
-  earnings, 90% of the door-delivery fare in your pocket, and wallet pay-outs
+  stats, salaried pay (never collecting customer cash), and pay-outs
   to your mobile money.
 * Fast KYC: selfie + NRC + plate photos, AI-checked, you ride while review
   completes.

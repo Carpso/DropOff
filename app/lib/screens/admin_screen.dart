@@ -2344,9 +2344,9 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
 
 /// High-value KPI for the admin console, in two layers:
 ///  A) OPERATIONAL — GET /admin/analytics/ops: the real work, computed from
-///     the operational tables (jobs/events/payments/wallet/subscriptions):
+///     the operational tables (jobs/events/payments/float/subscriptions):
 ///     parcels booked/delivered today & 30d, active sellers/riders, PAYG vs
-///     wallet money, MoMo success rate. Always real, never telemetry-fuzzy.
+///     float money, MoMo success rate. Always real, never telemetry-fuzzy.
 ///  B) APP USAGE — GET /admin/analytics/kpi: telemetry (screens, features,
 ///     funnel, DAU) — as good as the outbox; kept secondary on purpose.
 class _AnalyticsKpiCard extends StatefulWidget {
@@ -2470,7 +2470,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
               Row(children: [
                 Expanded(child: _KpiMetric('PAYG collected', zmw(ops['payg_collected_zmw'] as num?), Icons.payments_outlined)),
                 const SizedBox(width: 8),
-                Expanded(child: _KpiMetric('Wallet charges', zmw(ops['wallet_charges_zmw'] as num?), Icons.account_balance_wallet_outlined)),
+                Expanded(child: _KpiMetric('Float charges', zmw(ops['wallet_charges_zmw'] as num?), Icons.point_of_sale_outlined)),
               ]),
               const SizedBox(height: 8),
               Row(children: [
@@ -2479,7 +2479,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
                 Expanded(child: _KpiMetric('Subs active', '${ops['subscriptions_active'] ?? 0}', Icons.workspace_premium_outlined)),
               ]),
               const SizedBox(height: 6),
-              Text('Delivery rate ${deliveryPct == null ? '—' : '${deliveryPct.toStringAsFixed(1)}%'} · Pickups ${ops['pickups'] ?? 0} · Parcels shipped ${ops['parcels_shipped'] ?? 0} · Chargebook routes learned ${ops['chargebook_routes_learned'] ?? 0} · Wallet jobs ${ops['wallet_charge_jobs'] ?? 0}',
+              Text('Delivery rate ${deliveryPct == null ? '—' : '${deliveryPct.toStringAsFixed(1)}%'} · Pickups ${ops['pickups'] ?? 0} · Parcels shipped ${ops['parcels_shipped'] ?? 0} · Chargebook routes learned ${ops['chargebook_routes_learned'] ?? 0} · Float jobs ${ops['wallet_charge_jobs'] ?? 0}',
                   style: const TextStyle(color: AppColors.muted, fontSize: 11)),
             ],
             const SizedBox(height: 14),
