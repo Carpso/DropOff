@@ -1913,6 +1913,7 @@ app.post('/jobs', async (c) => {
     let depositRequired = false;
     let depositAmount = 0;
     let depositRef: string | null = null;
+    let depositInitFailed = false;
     // PREPAID CAP (compliance): the customer prompt is the server-computed
     // quote for THIS parcel only — trip price + processing + momo legs. It can
     // never exceed what the delivery costs, there is no free-form top-up for
@@ -1933,7 +1934,21 @@ app.post('/jobs', async (c) => {
           depositAmount, round2(platformFee(dropOffLeg)), MOMO_COLLECTION_FEE,
           init.lipilaReference ?? depositRef).run();
       } else {
-        depositRequired = false; // Lipila down — let the sweep assign a rider, fee still owed
+        // PREPAY, NO EXCEPTIONS (owner directive): if the provider is down the
+        // booking is HELD, never dispatched on credit. No prompt went out, so
+        // there is nothing to approve — the job waits unassigned with a
+        // prepayment_pending event; the sender taps Pay now (POST /payments
+        // kind=job) which issues a fresh prompt and dispatches on approval.
+        depositRequired = false;
+        depositInitFailed = true;
+        await c.env.DB.prepare(
+          `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'prepayment_pending', ?2)`,
+        ).bind(meta.last_row_id,
+          'Prepayment could not start (mobile-money provider unreachable). Booking HELD — no rider is assigned until the DropOff leg is prepaid. Retry payment to dispatch.').run();
+        c.executionCtx.waitUntil(
+          sendSms(c.env, senderPhone,
+          `DropOff: booking ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — open Bookings and tap Pay now to dispatch.`).catch(() => {}),
+        );
       }
     }
     if (depositRequired) {
@@ -1951,7 +1966,7 @@ app.post('/jobs', async (c) => {
     // waiting (momo) or the caller opts out. Coords are optional — dispatch
     // falls back to the Lusaka centre when the sender typed an address only.
     let autoAssigned: { rider_id: number; rider: string; photo_url: string | null; eta_minutes: number; km: number } | null = null;
-    if (!depositRequired && b.auto_assign !== false) {
+    if (!depositRequired && !depositInitFailed && b.auto_assign !== false) {
       const pick = await dispatchToNearestRider(c.env, ref);
       if (pick) {
         autoAssigned = { rider_id: pick.rider.id, rider: pick.rider.full_name, photo_url: pick.rider.photo_url ?? null, eta_minutes: pick.eta_minutes, km: pick.km };
@@ -1971,6 +1986,7 @@ app.post('/jobs', async (c) => {
       deposit_required: depositRequired,
       deposit_amount_zmw: depositRequired ? depositAmount : 0,
       deposit_reference: depositRef,
+      deposit_init_failed: depositInitFailed,
       pack_inclusion: packInclusion, pay_method: payMethod,
       auto_assigned: autoAssigned,
       tracking_token: trackingToken, tracking_url: trackUrl,
@@ -2109,6 +2125,7 @@ app.post('/collections', async (c) => {
   const depositRequired = !staffEyes && planInclusion !== 'pack' && completedEver >= 0 && riderFee > 0;
   const depositAmount = round2(riderFee + round2(platformFee(riderFee)) + MOMO_COLLECTION_FEE);
   let depositRef: string | null = null;
+  let depositInitFailed = false;
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
@@ -2161,7 +2178,17 @@ app.post('/collections', async (c) => {
       await sendSms(c.env, phone,
         `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`).catch(() => {});
     } else {
-      // deposit failed to init — same as /jobs: proceed, fee still owed on prompt
+      // PREPAY, NO EXCEPTIONS: provider down → the collection is HELD, never
+      // dispatched on credit. Sender retries payment to dispatch.
+      depositInitFailed = true;
+      await c.env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'prepayment_pending', ?2)`,
+      ).bind(meta.last_row_id,
+        'Prepayment could not start (mobile-money provider unreachable). Collection HELD — no rider is assigned until the DropOff leg is prepaid. Retry payment to dispatch.').run();
+      c.executionCtx.waitUntil(
+        sendSms(c.env, phone,
+        `DropOff: collection ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — open Bookings and tap Pay now to dispatch.`).catch(() => {}),
+      );
     }
   }
 
@@ -2177,6 +2204,7 @@ app.post('/collections', async (c) => {
     deposit_required: depositRequired,
     deposit_amount_zmw: depositRequired ? depositAmount : 0,
     deposit_reference: depositRef,
+    deposit_init_failed: depositInitFailed,
     parcels,
     vehicle_class: vehicleClass,
     pay_method: payMethod,

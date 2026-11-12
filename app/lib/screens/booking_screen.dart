@@ -617,7 +617,7 @@ class _BookingScreenState extends State<BookingScreen> {
         };
         _message(msg);
       } else if (mounted) {
-        _message('Payment could not start now (${res.error}); the booking is saved — settle at pickup or try again.');
+        _message('Payment could not start now (${res.error}); the booking is saved and HELD — no rider until prepayment lands. Open Bookings and tap Pay now.');
       }
     } else if (booking.dispatched && due != null && due > 0 && mounted) {
       // Covered by the advance prompt (or offline mode): the sender

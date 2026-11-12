@@ -239,7 +239,13 @@ class Booking {
     this.parcels = 1,
     this.vehicleClass = 'motorcycle',
     this.branch,
+    this.lastEvent,
   });
+
+  /// Latest server job_event status for dispatched bookings — 'advance_pending'
+  /// (momo prompt waiting) / 'prepayment_pending' (held: prompt never started).
+  /// Drives the Pay-now affordance in Bookings.
+  final String? lastEvent;
 
   bool get dispatched => serverRef != null && serverRef!.isNotEmpty;
 
@@ -310,6 +316,7 @@ class Booking {
         'parcels': parcels,
         'vehicleClass': vehicleClass,
         'branch': branch,
+        'lastEvent': lastEvent,
       };
 
   factory Booking.fromJson(Map<String, dynamic> json) => Booking(
@@ -344,5 +351,6 @@ class Booking {
         parcels: (json['parcels'] as num?)?.toInt() ?? 1,
         vehicleClass: json['vehicleClass'] as String? ?? 'motorcycle',
         branch: json['branch'] as String?,
+        lastEvent: json['lastEvent'] as String?,
       );
 }

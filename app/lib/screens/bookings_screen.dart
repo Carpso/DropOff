@@ -1,4 +1,5 @@
 import '../ui/app_toast.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -287,6 +288,12 @@ class BookingDetailScreen extends StatelessWidget {
             _detailRow('Promo', '${booking.promoCode}${booking.promoDiscount != null ? ' — saved ${kwacha(booking.promoDiscount)} on the DropOff leg' : ''}'),
         ]))),
         const SizedBox(height: 20),
+        // PREPAY GATE (owner directive): a booking that never got its momo
+        // prepayment approved is HELD — surface it loudly with a working
+        // Pay now. Plan-covered bookings never carry these events.
+        if (booking.dispatched && !complete &&
+            (booking.lastEvent == 'prepayment_pending' || booking.lastEvent == 'advance_pending'))
+          _PrepayCard(booking: booking),
         // Operator controls (assign rider / advance status) are staff-only —
         // sellers and recipients never see the fleet console on a job card.
         if (store.isStaff && store.riders.where((item) => item.active).length > 1) ...[
@@ -907,6 +914,95 @@ class _ParcelsForYou extends StatelessWidget {
                 ),
               ),
             ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// PREPAY GATE card: a dispatched booking whose DropOff-leg prepayment has not
+/// landed is HELD — no rider is assigned until the momo prompt is approved.
+/// 'prepayment_pending' = the provider never started the prompt (booking held
+/// at booking time); 'advance_pending' = a prompt is live on the sender's
+/// phone. Pay now reuses the live prompt or issues a fresh one; approval
+/// settles the payment server-side and dispatches the rider.
+class _PrepayCard extends StatefulWidget {
+  final Booking booking;
+  const _PrepayCard({required this.booking});
+
+  @override
+  State<_PrepayCard> createState() => _PrepayCardState();
+}
+
+class _PrepayCardState extends State<_PrepayCard> {
+  bool _busy = false;
+
+  Future<void> _payNow() async {
+    final store = AppScope.of(context);
+    setState(() => _busy = true);
+    final res = await DropOffApi.pay(
+      jobRef: widget.booking.serverRef!,
+      phone: widget.booking.senderPhone,
+      idempotencyKey: 'pay-${widget.booking.serverRef}-${DateTime.now().millisecondsSinceEpoch}',
+    );
+    if (!mounted) return;
+    if (!res.ok) {
+      setState(() => _busy = false);
+      AppToast.show(context, res.error == 'job already paid'
+          ? 'This delivery is already paid.'
+          : 'Payment could not start (${res.error ?? 'network'}) — check your connection and retry.');
+      return;
+    }
+    final paymentId = '${res.body['payment_id']}';
+    final reused = res.body['reused_advance_prompt'] == true;
+    var status = 'pending';
+    for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppToast.show(context, switch (status) {
+      'success' => 'Prepayment received — your rider is being dispatched.',
+      'failed' => 'The momo prompt was rejected. Check your balance and tap Pay now again.',
+      _ => reused
+          ? 'The prompt is waiting on your phone — approve it to dispatch.'
+          : 'Prompt sent — approve it on your phone to dispatch your rider.',
+    });
+    unawaited(store.syncJobsFromServer());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final held = widget.booking.lastEvent == 'prepayment_pending';
+    return Card(
+      color: held ? const Color(0x14B3261E) : AppColors.amber.withValues(alpha: 0.14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: held ? const Color(0x66B3261E) : AppColors.amber.withValues(alpha: 0.5))),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(held ? Icons.pause_circle_outline : Icons.schedule_outlined,
+                size: 18, color: held ? const Color(0xFFB3261E) : const Color(0xFF7B5710)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(held ? 'Booking HELD — prepayment not started'
+                    : 'Prepayment prompt waiting on your phone',
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
+          ]),
+          const SizedBox(height: 4),
+          Text(held
+                  ? 'The mobile-money prompt could not start, so no rider is assigned yet. Pay now to dispatch — the booking stays saved.'
+                  : 'Approve the momo prompt to dispatch your rider. Not received? Pay now resends it.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: _busy ? null : _payNow,
+            icon: _busy
+                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.payments_outlined),
+            label: Text(_busy ? 'Starting prompt…' : 'Pay now — dispatch rider'),
+          ),
         ]),
       ),
     );

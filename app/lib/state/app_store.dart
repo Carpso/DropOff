@@ -885,6 +885,7 @@ class AppStore extends ChangeNotifier {
       returnLegFee: (j['return_leg_fee_zmw'] as num?)?.toDouble() ?? 0,
       promoCode: j['promo_code'] as String?,
       promoDiscount: (j['promo_discount_zmw'] as num?)?.toDouble(),
+      lastEvent: j['last_event'] as String?,
     );
   }
 
