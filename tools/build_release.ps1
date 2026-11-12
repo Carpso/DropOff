@@ -22,6 +22,11 @@ Write-Host '== flutter clean (clears the build cache) =='
 flutter clean
 Write-Host '== flutter pub get =='
 flutter pub get
+if ($LASTEXITCODE -ne 0) {
+  Write-Host '!! pub.dev unreachable — falling back to --offline (using the pub cache)'
+  flutter pub get --offline
+  if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed (online and offline)' }
+}
 
 if (-not $SkipAnalyze) {
   Write-Host '== flutter analyze =='
