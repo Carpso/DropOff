@@ -434,7 +434,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
           ] else if (daily != null) ...[
             const SizedBox(height: 12),
             Text(
-              'Shipping in bursts? The Daily Rider pass (K49/day, 2 parcels included) likely beats a monthly plan — ${daily['days_needed']} day(s) ≈ K${daily['cost_zmw']}.',
+              'Shipping in bursts? The Daily Rider pass (K49/day, 1 parcel included) likely beats a monthly plan — ${daily['days_needed']} day(s) ≈ K${daily['cost_zmw']}.',
               style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
             ),
           ],

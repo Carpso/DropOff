@@ -56,7 +56,7 @@ const PLANS: Record<PlanTier, PlanDef> = {
   // payment, lasts 24h, includes 2 parcels, overage stays discounted.
   // (The old Daily Dash was removed per product decision; this is a different,
   // leaner product re-introduced at the owner's request.)
-  rider_daily: { fee_zmw: 49, windows: ['now', '06:00', '10:00', '14:00'], parcels_per_day: 2, parcels_per_month: 0, rider_fee_zmw: 0, overage_discount_pct: 45, cycle_days: 1, tag: 'Daily Rider' },
+  rider_daily: { fee_zmw: 49, windows: ['now', '06:00', '10:00', '14:00'], parcels_per_day: 1, parcels_per_month: 0, rider_fee_zmw: 0, overage_discount_pct: 0, cycle_days: 1, tag: 'Daily Rider' },
   weekly:  { fee_zmw: 399, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 20, rider_fee_zmw: 0, overage_discount_pct: 10, cycle_days: 7, tag: 'Weekly Sprint' },
   silver: { fee_zmw: 250, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 10, rider_fee_zmw: 0, overage_discount_pct: 15, cycle_days: 30 },
   gold:   { fee_zmw: 500, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 25, rider_fee_zmw: 0, overage_discount_pct: 25, cycle_days: 30 },
@@ -3155,12 +3155,14 @@ app.get('/predict/seller', async (c) => {
     }
     if (teaser) planTeaser = `Ship ~${teaser.parcels} parcels this month and ${teaser.label} (K${catalogue[teaser.tier].fee_zmw}) pays for itself.`;
   }
-  const dailyDays = Math.min(30, Math.ceil(blended / 2));
+  // Daily Rider covers ONE parcel per active day — a 30-parcel month needs
+  // 30 activations (that's why the pass only wins for genuinely bursty senders).
+  const dailyDays = Math.min(30, Math.ceil(blended));
   const paygCost = Math.round(blended * avgFee);
   const dailyCost = dailyDays * catalogue.rider_daily.fee_zmw;
-  let dailyNote = 'On-demand days - activate only the days you ship. 24h validity, 2 parcels included per day.';
+  let dailyNote = 'On-demand days - activate only the days you ship. 24h validity, 1 parcel included per day.';
   if (blended > 0 && dailyDays > 0) {
-    dailyNote += ` Up to 4 parcels a week cheaper than pay-as-you-go.`;
+    dailyNote += ` Each active day beats one pay-as-you-go trip on price.`;
     dailyNote += ` At your volume: ~${dailyDays} active days × K${catalogue.rider_daily.fee_zmw} ≈ K${dailyCost} vs ≈ K${paygCost} pay-as-you-go.`;
     if (planTeaser) dailyNote += ` ${planTeaser}`;
   }
@@ -7514,7 +7516,7 @@ app.get('/admin/analytics/ops', async (c) => {
 
   const [
     booked, bookedToday, parcels, delivered, pickups, deliveredToday,
-    activeSellers, activeRiders, paygZmw, paygSuccess, paygFailed,
+    activeSellers, activeRiders, ridersOnBooks, paygZmw, paygSuccess, paygFailed,
     walletCharges, walletChargesCount, subsActive, routesLearned,
   ] = await Promise.all([
     one(`SELECT COUNT(*) AS n FROM jobs WHERE created_at >= ${since}`),
@@ -7525,6 +7527,10 @@ app.get('/admin/analytics/ops', async (c) => {
     one(`SELECT COUNT(DISTINCT job_id) AS n FROM job_events WHERE status = 'delivered' AND date(created_at, '+2 hours') = ${todayCAT}`),
     one(`SELECT COUNT(DISTINCT sender_phone) AS n FROM jobs WHERE created_at >= ${since}`),
     one(`SELECT COUNT(DISTINCT rider_id) AS n FROM jobs WHERE rider_id IS NOT NULL AND created_at >= ${since}`),
+    // Roster truth: verified + active riders on the books right now (not just
+    // those who carried a parcel in the window) — this is the number every
+    // rider sees on their Team tab via GET /team.
+    one(`SELECT COUNT(*) AS n FROM riders WHERE active = 1 AND verification_status = 'verified'`),
     money(`SELECT COALESCE(SUM(amount_zmw), 0) AS n FROM payments WHERE status = 'success' AND kind = 'job' AND created_at >= ${since}`),
     one(`SELECT COUNT(*) AS n FROM payments WHERE status = 'success' AND kind = 'job' AND created_at >= ${since}`),
     one(`SELECT COUNT(*) AS n FROM payments WHERE status = 'failed' AND kind = 'job' AND created_at >= ${since}`),
@@ -7549,6 +7555,7 @@ app.get('/admin/analytics/ops', async (c) => {
     delivery_rate_pct: deliveryRatePct,
     active_sellers: activeSellers,
     active_riders: activeRiders,
+    riders_on_books: ridersOnBooks,
     payg_collected_zmw: paygZmw,
     payg_success: paygSuccess,
     payg_failed: paygFailed,

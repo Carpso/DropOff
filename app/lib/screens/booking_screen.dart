@@ -1300,7 +1300,7 @@ class _PlanBannerState extends State<_PlanBanner> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
             child: const Text(
-              'Pay-as-you-go — rider fee per trip. The Daily Rider pass (K49/day, 2 parcels) bundles the rider fee into plan parcels.',
+              'Pay-as-you-go — rider fee per trip. The Daily Rider pass (K49/day, 1 parcel) bundles the rider fee into the plan parcel.',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
             ),
           );

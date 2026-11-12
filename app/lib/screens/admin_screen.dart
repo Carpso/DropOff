@@ -2464,7 +2464,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
               Row(children: [
                 Expanded(child: _KpiMetric('Active sellers', '${ops['active_sellers'] ?? 0}', Icons.storefront_outlined)),
                 const SizedBox(width: 8),
-                Expanded(child: _KpiMetric('Active riders', '${ops['active_riders'] ?? 0}', Icons.two_wheeler)),
+                Expanded(child: _KpiMetric('Riders', '${ops['active_riders'] ?? 0} worked · ${ops['riders_on_books'] ?? 0} on books', Icons.two_wheeler)),
               ]),
               const SizedBox(height: 8),
               Row(children: [

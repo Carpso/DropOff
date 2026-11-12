@@ -408,7 +408,9 @@ class OperationsScreen extends StatelessWidget {
         Row(children: [
           Expanded(child: _Metric(value: '${store.bookings.length}', label: 'Total bookings', icon: Icons.inventory_2_outlined)),
           const SizedBox(width: 12),
-          Expanded(child: _Metric(value: '$activeRiders', label: 'Active team', icon: Icons.groups_outlined)),
+          // Live roster count from GET /team — same number riders and admins
+          // see, straight from the riders table (device count is only a fallback).
+          Expanded(child: _TeamSizeChip(fallback: activeRiders)),
         ]),
         const SizedBox(height: 26),
         const _SmartRouteCard(),
