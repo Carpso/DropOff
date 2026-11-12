@@ -104,9 +104,15 @@ class _BookingScreenState extends State<BookingScreen> {
   static const Map<String, int> _maxParcelsByVehicle = {'motorcycle': 3, 'car': 6, 'van': 10, 'truck': 15};
   static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
+  /// Live plan snapshot ({subscription, plan, remaining_this_period}) — the
+  /// estimate mirrors the server's pack-inclusion math so plan members see the
+  /// truth BEFORE booking (sender → depot leg covered → K0), not after.
+  Map<String, dynamic>? _planSnap;
+
   @override
   void initState() {
     super.initState();
+    _refreshPlan();
     // Repeat last booking: adopt the snapshot's fields, then clear it so we
     // never prefill twice for a fresh booking.
     final pre = BookingScreen.prefill;
@@ -189,6 +195,15 @@ class _BookingScreenState extends State<BookingScreen> {
     super.dispose();
   }
 
+  /// Reload the plan snapshot (also fired after a plan-code redemption so the
+  /// estimate flips to "covered" immediately).
+  Future<void> _refreshPlan() async {
+    if (!DropOffApi.enabled) return;
+    final snap = await DropOffApi.subscription();
+    if (!mounted) return;
+    setState(() => _planSnap = snap);
+  }
+
   /// Redeem a bulk-paid plan code (sold offline) onto the signed-in number.
   Future<void> _applyPack() async {
     final code = _pack.text.trim().toUpperCase();
@@ -200,6 +215,7 @@ class _BookingScreenState extends State<BookingScreen> {
       final tier = '${res.body['tier'] ?? 'plan'}';
       final end = '${res.body['period_end'] ?? ''}'.split(' ').first;
       _message('$tier plan activated${end.isEmpty ? '' : ' until $end'} — rider fee covered on this booking.');
+      unawaited(_refreshPlan());
     } else {
       _message(res.error == 'code_not_found'
           ? 'That plan code was not recognised.'
@@ -252,12 +268,43 @@ class _BookingScreenState extends State<BookingScreen> {
   }
   List<CourierInfo> get _filteredCouriers => smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size);
 
+  /// Server-mirrored plan state for THIS trip — 'pack' (sender → depot leg
+  /// covered: K0 rider fee, no per-parcel processing fees, no momo prompt),
+  /// 'overage' (cap reached: tier discount off PAYG), or null (pay-as-you-go).
+  /// Mirrors the pack-inclusion gate in workers/src/index.ts.
+  String? get _planLeg {
+    final sub = _planSnap?['subscription'] as Map<String, dynamic>?;
+    final plan = _planSnap?['plan'] as Map<String, dynamic>?;
+    if (sub == null || plan == null || '${sub['status'] ?? ''}' != 'active') return null;
+    // Expired period → pay-as-you-go, exactly like the server's SQL gate.
+    final end = DateTime.tryParse('${sub['period_end'] ?? ''}'.trim());
+    if (end != null && end.isBefore(DateTime.now())) return null;
+    final remaining = (_planSnap?['remaining_this_period'] as num?)?.toInt() ?? 0;
+    return remaining >= _parcels ? 'pack' : 'overage';
+  }
+
+  int get _overagePct =>
+      ((_planSnap?['plan'] as Map<String, dynamic>?)?['overage_discount_pct'] as num?)?.toInt() ?? 0;
+
+  /// Rider fee actually due on the DropOff leg after plan math (server parity:
+  /// pack → plan.rider_fee_zmw 0; overage → tierOverageFee discount).
+  double get _riderFeeEstimate {
+    if (_planLeg == 'pack') return 0;
+    if (_planLeg == 'overage') return DropOffApi.round2(riderFee * (1 - _overagePct / 100));
+    return riderFee;
+  }
+
   /// DropOff-only leg: rider fee + door leg (+door-leg platform cut). Never partner money.
-  double get _dropOffLeg => riderFee + (_lastMile ? lastMilePrice + DropOffApi.platformFee(lastMilePrice) : 0);
+  double get _dropOffLeg => _riderFeeEstimate + (_lastMile ? lastMilePrice + DropOffApi.platformFee(lastMilePrice) : 0);
 
   /// What the customer pays DropOff on the prompt for this order.
-  double get _dropOffDue =>
-      DropOffApi.collectionFees(DropOffApi.round2(_dropOffLeg), riderFee: riderFee)['prompt_total_zmw'] ?? _dropOffLeg;
+  double get _dropOffDue {
+    final leg = DropOffApi.round2(_dropOffLeg);
+    // Pack parcels carry NO per-parcel processing fees — the server passes
+    // riderFee=null to collectionFees() for them, so the prompt is the leg only.
+    if (_planLeg == 'pack') return leg;
+    return DropOffApi.collectionFees(leg, riderFee: _riderFeeEstimate)['prompt_total_zmw'] ?? leg;
+  }
 
   void _message(String text) => AppToast.show(context, text);
 
@@ -1103,13 +1150,24 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 4),
           Text('${courier.name} • ${_size.label} parcel • ${pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.muted, fontSize: 13)),
           const Divider(height: 28),
-          _priceLine('DropOff rider fee', kwacha(riderFee)),
+          if (_planLeg == 'pack')
+            _priceLine('DropOff leg (sender → depot)', 'Covered by plan')
+          else if (_planLeg == 'overage')
+            _priceLine('DropOff rider fee ($_overagePct% plan discount)', kwacha(_riderFeeEstimate))
+          else
+            _priceLine('DropOff rider fee', kwacha(riderFee)),
           if (_lastMile) ...[
             _priceLine('Destination door delivery', kwacha(lastMilePrice)),
             _priceLine('Processing fee (door leg — platform + mobile money)', kwacha(DropOffApi.platformFee(lastMilePrice))),
           ],
-          if (_payment == 'Mobile money') Builder(builder: (context) {
-            final fees = DropOffApi.collectionFees(DropOffApi.round2(_dropOffLeg), riderFee: riderFee);
+          if (_planLeg == 'pack')
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text('Your plan covers this trip\'s sender → depot leg — no momo prompt at booking, no per-parcel fees.',
+                  style: TextStyle(color: AppColors.forest, fontSize: 11.5, height: 1.4)),
+            )
+          else if (_payment == 'Mobile money') Builder(builder: (context) {
+            final fees = DropOffApi.collectionFees(DropOffApi.round2(_dropOffLeg), riderFee: _riderFeeEstimate);
             final processing = fees['processing_fee_zmw'] ?? 0.0;
             return Column(children: [
               _priceLine('Processing fee (platform + mobile money)', kwacha(processing)),
@@ -1136,21 +1194,37 @@ class _BookingScreenState extends State<BookingScreen> {
       );
 
   /// Full-width grand-total bar promoted above the Place booking button so the
-  /// seller never misses what they actually pay.
-  Widget _grandTotalBar() => Container(
+  /// seller never misses what they actually pay. Plan members see the leg as
+  /// covered — the depot counter fare is never part of this number.
+  Widget _grandTotalBar() {
+    final covered = _planLeg == 'pack';
+    return Container(
         width: double.infinity,
         margin: const EdgeInsets.fromLTRB(20, 8, 20, 4),
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.forest.withValues(alpha: 0.22))),
+        decoration: BoxDecoration(
+          color: covered ? AppColors.forest.withValues(alpha: 0.1) : AppColors.forest.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.forest.withValues(alpha: covered ? 0.4 : 0.22)),
+        ),
         child: Row(children: [
-          const Icon(Icons.receipt_long, size: 18, color: AppColors.forest),
+          Icon(covered ? Icons.card_membership : Icons.receipt_long, size: 18, color: AppColors.forest),
           const SizedBox(width: 8),
-          const Expanded(child: Text('Estimated total you pay', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: AppColors.muted))),
+          Expanded(
+            child: Text(
+              covered ? 'Plan covers this trip' : 'Estimated total you pay DropOff',
+              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            ),
+          ),
           const SizedBox(width: 8),
           Text(kwacha(_dropOffDue), maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
-          const Text(' + depot counter fare', maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          const SizedBox(width: 6),
+          const Expanded(
+            child: Text('(depot fare paid separately at the counter)', maxLines: 2, overflow: TextOverflow.ellipsis, softWrap: true, style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          ),
         ]),
       );
+  }
 
   Widget _cityDropdown(String label, String value, ValueChanged<String> onChanged) => DropdownButtonFormField<String>(
         initialValue: value,

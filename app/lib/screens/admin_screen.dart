@@ -1568,10 +1568,12 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
   }
 }
 
-/// Ops counter-quote capture: the staff/ops side of the self-learning
-/// chargebook. Keys in fares verified by phone or depot visit; the rider
-/// app learns 'recorded' fares automatically at depot drop. Every entry here
-/// flips that courier's card badge and answers fare searches with REAL data.
+/// Ops chargebook capture: the staff/ops side of the DropOff leg chargebook —
+/// door → depot first-mile runs (e.g. Kabulonga → Platinum) and collections
+/// (depot → door). Locations come from what app users actually type (most-used
+/// first), with free typing allowed; depots come from the live courier list.
+/// Every entry is keyed to the depot courier it belongs to so ops can read
+/// leg coverage per courier. No counter fares are published to sellers here.
 class _CounterQuoteCard extends StatefulWidget {
   const _CounterQuoteCard();
 
@@ -1582,23 +1584,21 @@ class _CounterQuoteCard extends StatefulWidget {
 class _CounterQuoteCardState extends State<_CounterQuoteCard> {
   List<Map<String, dynamic>> _couriers = const [];
   List<Map<String, dynamic>> _quotes = const [];
+  List<String> _localities = const [];
   int? _courierId;
-  String _from = 'Lusaka';
-  String _to = 'Ndola';
+  String _leg = 'dropoff'; // 'dropoff' (door → depot) | 'collection' (depot → door)
   String _weight = '0-5kg';
-  String _service = 'standard';
   final _price = TextEditingController();
+  TextEditingController? _autoCtl;
   bool _busy = false;
   String? _error;
 
   static const _weights = ['0-5kg', '5-15kg', '15kg+'];
-  static const _services = ['standard', 'overnight', 'same_day'];
-  static const _towns = [
-    'Lusaka', 'Ndola', 'Kitwe', 'Kabwe', 'Kapiri Mposhi', 'Livingstone',
-    'Chingola', 'Choma', 'Chipata', 'Solwezi', 'Kasama', 'Mongu',
-    'Mufulira', 'Luanshya', 'Kalulushi', 'Chililabombwe', 'Kasumbalesa',
-    'Mpongwe', 'Mumbwa', 'Mkushi', 'Serenje', 'Kafue', 'Mazabuka',
-    'Monze', 'Chinsali', 'Nakonde', 'Mpika', 'Mansa', 'Samfya',
+  /// Fallback area suggestions when no user-typed addresses are on file yet.
+  static const _fallbackLocalities = [
+    'Kabulonga', 'Makeni', 'Woodlands', 'Emmasdale', 'Mass Media', 'Chelston',
+    'Garden', 'Chilenje', 'Kalingalinga', 'Matero', 'Misisi', 'Zingalume',
+    'Chilanga', 'Chongwe', 'Kafue', 'Chelanga', 'Riverside',
   ];
 
   @override
@@ -1610,33 +1610,47 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
   @override
   void dispose() {
     _price.dispose();
+    _autoCtl?.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     final couriers = await DropOffApi.couriers();
     final quotes = await DropOffApi.adminQuotes();
+    final localities = await DropOffApi.adminLocalities();
     if (!mounted) return;
     setState(() {
       _couriers = couriers;
       _quotes = quotes;
+      _localities = localities.isEmpty ? _fallbackLocalities : localities;
       if (_courierId == null && couriers.isNotEmpty) {
         _courierId = (couriers.first['id'] as num?)?.toInt();
       }
     });
   }
 
+  Map<String, dynamic>? get _depot =>
+      _couriers.where((c) => (c['id'] as num?)?.toInt() == _courierId).firstOrNull;
+
+  String get _depotLabel {
+    final d = _depot;
+    if (d == null) return '';
+    return '${d['name']} (${d['city'] ?? ''})';
+  }
+
   Future<void> _save() async {
     final price = double.tryParse(_price.text.trim());
-    if (_courierId == null) return _msg('Pick a courier first.');
-    if (price == null || price <= 0) return _msg('Enter the counter fare in Kwacha, e.g. 40.');
+    final locality = (_autoCtl?.text ?? '').trim();
+    if (_courierId == null) return _msg('Pick the depot first.');
+    if (locality.length < 3) return _msg('Type the customer locality, e.g. Kabulonga.');
+    if (price == null || price <= 0) return _msg('Enter the DropOff leg fee in Kwacha, e.g. 55.');
     setState(() { _busy = true; _error = null; });
     final res = await DropOffApi.upsertQuote(
       courierId: _courierId!,
-      fromCity: _from,
-      toCity: _to,
+      fromCity: _leg == 'dropoff' ? locality : _depotLabel,
+      toCity: _leg == 'dropoff' ? _depotLabel : locality,
       weightClass: _weight,
-      service: _service,
+      service: _leg,
       counterPriceZmw: price,
     );
     if (!mounted) return;
@@ -1645,9 +1659,17 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
       _msg(res.body['detail']?.toString() ?? 'Could not save (${res.error ?? 'network'}).');
       return;
     }
+    final recorded = _fromToText;
     _price.clear();
-    AppToast.show(context, 'Chargebook updated — $_from → $_to ($_weight) now shows a verified counter fare.');
+    _autoCtl?.clear();
+    AppToast.show(context,
+        'Chargebook updated — $recorded now shows the recorded ${_leg == 'dropoff' ? 'drop-off' : 'collection'} leg fee.');
     await _load();
+  }
+
+  String get _fromToText {
+    final locality = (_autoCtl?.text ?? '').trim();
+    return _leg == 'dropoff' ? '$locality → $_depotLabel' : '$_depotLabel → $locality';
   }
 
   void _msg(String m) {
@@ -1655,9 +1677,47 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
     setState(() => _error = m);
   }
 
+  String _legBadge(Map<String, dynamic> q) {
+    final s = '${q['service'] ?? ''}';
+    if (s == 'dropoff') return 'drop-off leg';
+    if (s == 'collection') return 'collection';
+    return s;
+  }
+
+  Widget _depotField(String label) => DropdownButtonFormField<int>(
+        initialValue: _courierId,
+        isExpanded: true,
+        decoration: InputDecoration(labelText: label, isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+        items: [for (final c in _couriers)
+          DropdownMenuItem(value: (c['id'] as num?)?.toInt(), child: Text('${c['name']} — ${c['city'] ?? ''}', overflow: TextOverflow.ellipsis))],
+        onChanged: (v) => setState(() => _courierId = v),
+      );
+
+  Widget _localityField(String label) => Autocomplete<String>(
+        optionsBuilder: (value) {
+          final q = value.text.trim().toLowerCase();
+          if (q.isEmpty) return _localities.take(15);
+          return _localities.where((l) => l.toLowerCase().contains(q));
+        },
+        fieldViewBuilder: (ctx, ctl, focusNode, onSubmit) {
+          _autoCtl = ctl;
+          return TextField(
+            controller: ctl,
+            focusNode: focusNode,
+            onSubmitted: (_) => onSubmit(),
+            textCapitalization: TextCapitalization.words,
+            decoration: InputDecoration(labelText: label, isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+          );
+        },
+        optionsMaxHeight: 220,
+        onSelected: (v) => _autoCtl?.text = v,
+      );
+
   @override
   Widget build(BuildContext context) {
     final coverage = _quotes.length;
+    final localityLabel = _leg == 'dropoff' ? 'From (customer locality)' : 'To (customer locality)';
+    final depotLabel = _leg == 'dropoff' ? 'To (depot)' : 'From (depot)';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1665,61 +1725,53 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
           Row(children: [
             const Icon(Icons.menu_book_outlined, size: 18, color: AppColors.forest),
             const SizedBox(width: 8),
-            Expanded(child: Text('Chargebook — counter quotes ($coverage on file)',
+            Expanded(child: Text('Chargebook — DropOff legs ($coverage on file)',
                 style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
           ]),
           const SizedBox(height: 6),
           const Text(
-            'Verified fares only — key in what a depot counter actually charges (phone check or depot visit). '
-            'Riders recording the counter fare at drop-off feed this automatically. Nothing is invented.',
+            'First-mile door → depot runs and collections depot → door. '
+            'E.g. door → depot: Kabulonga → Platinum (Lusaka) — our rider fee for that leg. '
+            'E.g. depot → door: Icypeed (Lusaka) → Kabulonga — our collection fee. '
+            'No counter fares here — depot fares stay at the counter. Locations come from what app users type (most used shown).',
             style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
           ),
           const SizedBox(height: 12),
+          Wrap(spacing: 8, children: [
+            ChoiceChip(
+              label: const Text('Door → depot (drop-off)'),
+              selected: _leg == 'dropoff',
+              onSelected: (_) => setState(() { _leg = 'dropoff'; _autoCtl = null; }),
+            ),
+            ChoiceChip(
+              label: const Text('Depot → door (collection)'),
+              selected: _leg == 'collection',
+              onSelected: (_) => setState(() { _leg = 'collection'; _autoCtl = null; }),
+            ),
+          ]),
+          const SizedBox(height: 12),
           if (_couriers.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Loading couriers…', style: TextStyle(color: AppColors.muted, fontSize: 12)))
+            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Loading depots…', style: TextStyle(color: AppColors.muted, fontSize: 12)))
           else ...[
-            DropdownButtonFormField<int>(
-              initialValue: _courierId,
-              decoration: const InputDecoration(labelText: 'Courier'),
-              items: [for (final c in _couriers)
-                DropdownMenuItem(value: (c['id'] as num?)?.toInt(), child: Text('${c['name']} — ${c['city'] ?? ''}'))],
-              onChanged: (v) => setState(() => _courierId = v),
+            Row(children: [
+              Expanded(child: _leg == 'dropoff'
+                  ? _localityField(localityLabel)
+                  : _depotField(depotLabel)),
+              const Padding(padding: EdgeInsets.symmetric(horizontal: 6), child: Icon(Icons.arrow_forward, size: 16, color: AppColors.muted)),
+              Expanded(child: _leg == 'dropoff'
+                  ? _depotField(depotLabel)
+                  : _localityField(localityLabel)),
+            ]),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              initialValue: _weight,
+              decoration: const InputDecoration(labelText: 'Parcel size', isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+              items: [for (final w in _weights) DropdownMenuItem(value: w, child: Text(w))],
+              onChanged: (v) => setState(() => _weight = v ?? _weight),
             ),
             const SizedBox(height: 10),
-            Row(children: [
-              Expanded(child: DropdownButtonFormField<String>(
-                initialValue: _from,
-                decoration: const InputDecoration(labelText: 'From'),
-                items: [for (final t in _towns) DropdownMenuItem(value: t, child: Text(t))],
-                onChanged: (v) => setState(() => _from = v ?? _from),
-              )),
-              const Padding(padding: EdgeInsets.symmetric(horizontal: 6), child: Icon(Icons.arrow_forward, size: 16, color: AppColors.muted)),
-              Expanded(child: DropdownButtonFormField<String>(
-                initialValue: _to,
-                decoration: const InputDecoration(labelText: 'To'),
-                items: [for (final t in _towns) DropdownMenuItem(value: t, child: Text(t))],
-                onChanged: (v) => setState(() => _to = v ?? _to),
-              )),
-            ]),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(child: DropdownButtonFormField<String>(
-                initialValue: _weight,
-                decoration: const InputDecoration(labelText: 'Weight class'),
-                items: [for (final w in _weights) DropdownMenuItem(value: w, child: Text(w))],
-                onChanged: (v) => setState(() => _weight = v ?? _weight),
-              )),
-              const SizedBox(width: 8),
-              Expanded(child: DropdownButtonFormField<String>(
-                initialValue: _service,
-                decoration: const InputDecoration(labelText: 'Service'),
-                items: [for (final s in _services) DropdownMenuItem(value: s, child: Text(s))],
-                onChanged: (v) => setState(() => _service = v ?? _service),
-              )),
-            ]),
-            const SizedBox(height: 10),
             TextField(controller: _price, keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Counter fare (ZMW)', prefixText: 'K ', hintText: 'e.g. 40')),
+              decoration: const InputDecoration(labelText: 'DropOff leg fee (ZMW)', prefixText: 'K ', hintText: 'e.g. 55')),
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
@@ -1747,8 +1799,8 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
                   Expanded(
                     child: Text(
                       '${q['courier_name']} · ${q['from_city']} → ${q['to_city']} · ${q['weight_class']} · K${q['counter_price_zmw']}'
-                      ' · ${q['source'] == 'recorded' ? 'recorded at counter' : 'ops'}'
-                      "${q['stale'] == 1 ? ' · STALE — reconfirm at the counter' : ''}",
+                      ' · ${_legBadge(q)} · ${q['source'] == 'recorded' ? 'recorded at source' : 'ops'}'
+                      "${q['stale'] == 1 ? ' · STALE — reconfirm' : ''}",
                       style: TextStyle(
                         fontSize: 11.5,
                         color: q['stale'] == 1 ? Colors.orangeAccent.shade700 : AppColors.muted,

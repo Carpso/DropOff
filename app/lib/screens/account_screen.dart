@@ -19,6 +19,7 @@ import '../state/app_store.dart';
 import '../ui/app_theme.dart';
 import '../ui/in_app_browser.dart';
 import '../services/device_lock.dart';
+import '../ui/money_errors.dart';
 
 /// Email + password sign in / create account (the JWT + phone persist locally;
 /// the ops device-link stays separate under Team).
@@ -1118,6 +1119,10 @@ class _TiersCardState extends State<_TiersCard> {
     return list.take(3).map((w) => ranges['$w'] ?? '$w').join(' / ');
   }
 
+  /// Map API errors to honest copy — never a bare "network error" for a
+  /// provider-side or server-side rejection.
+  String _moneyErrorText(ApiResponse r, String fallback) => moneyErrorText(r, fallback);
+
   Future<void> _chooseTier(String tier) async {
     final store = AppScope.of(context);
     if (!store.linked) {
@@ -1139,9 +1144,7 @@ class _TiersCardState extends State<_TiersCard> {
         if (!mounted) return;
         setState(() => _busyTier = null);
         if (!up.ok) {
-          AppToast.show(context, up.error == 'payment_already_pending'
-              ? 'A payment prompt is already waiting on your phone — approve it first.'
-              : 'Could not upgrade (${up.error}). Try again.');
+          AppToast.show(context, _moneyErrorText(up, 'Could not upgrade'));
           return;
         }
         final extra = ((up.body['amount_zmw'] as num?) ?? 0).toDouble();
@@ -1162,7 +1165,7 @@ class _TiersCardState extends State<_TiersCard> {
     if (!res.ok) {
       if (!mounted) return;
       setState(() => _busyTier = null);
-      AppToast.show(context, 'Could not start the plan (${res.error}). Try again.');
+      AppToast.show(context, _moneyErrorText(res, 'Could not start the plan'));
       return;
     }
     // Lipila prompt for the plan price; success activates the plan server-side.
@@ -1170,12 +1173,10 @@ class _TiersCardState extends State<_TiersCard> {
     if (!mounted) return;
     if (!pay.ok) {
       setState(() => _busyTier = null);
-      // The Lipila prompt never reached the phone (no pending payment is
-      // created on a failed init), so there's nothing to "pay from this
-      // screen" — let the seller resubscribe to retry the prompt.
-      AppToast.show(context, pay.error == 'lipila_init_failed'
-          ? 'Mobile-money prompt failed to start — check your phone/network and tap the plan again.'
-          : 'Could not start the mobile-money prompt (${pay.error ?? 'network'}). Tap the plan again.');
+      AppToast.show(context, _moneyErrorText(pay,
+          pay.error == 'lipila_init_failed'
+              ? 'Mobile-money prompt was rejected by Lipila — payments are down; the plan did not start.'
+              : 'Could not start the mobile-money prompt'));
       return;
     }
     final paymentId = '${pay.body['payment_id']}';

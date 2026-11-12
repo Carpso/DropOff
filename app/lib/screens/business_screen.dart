@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
+import '../ui/money_errors.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../ui/in_app_browser.dart';
@@ -141,16 +142,25 @@ class _BusinessScreenState extends State<BusinessScreen> {
     final tier = '${sub['tier'] ?? ''}';
     if (tier.isEmpty) return;
     FocusScope.of(context).unfocus();
-    AppToast.show(context, 'Momo prompt on its way — approve it to renew.');
     final res = await DropOffApi.subscribe(
       tier: tier,
       pickupWindow: '${sub['pickup_window'] ?? '10:00'}',
       city: '${sub['city'] ?? 'Lusaka'}',
     );
     if (!mounted) return;
-    final err = res.error ?? (res.ok ? null : 'Something went wrong.');
-    AppToast.show(context, err == null || err.isEmpty ? 'Prompt sent — approve on your phone to renew $tier.' : err);
-    if (err == null || err.isEmpty) _load();
+    if (!res.ok) {
+      AppToast.show(context, moneyErrorText(res, 'Could not start the renewal'));
+      return;
+    }
+    // Fire the Lipila prompt — without this the row books but nothing charges.
+    final pay = await DropOffApi.paySubscription();
+    if (!mounted) return;
+    if (!pay.ok) {
+      AppToast.show(context, moneyErrorText(pay, 'Choose the plan again — no prompt went out'));
+      return;
+    }
+    AppToast.show(context, 'Prompt sent — approve it on your phone to renew $tier.');
+    _load();
   }
 
   /// Retention card: the maths that keeps sellers subscribed — pay-for-itself
@@ -300,21 +310,28 @@ class _BusinessScreenState extends State<BusinessScreen> {
     );
   }
 
-  /// One-tap switch to the recommended plan — same momo-prompt activation
-  /// path as renewing (webhook flips the plan live on payment).
+  /// One-tap switch to the recommended plan — subscribe + fire the Lipila prompt.
   Future<void> _switchToPlan(String tier, String label) async {
     FocusScope.of(context).unfocus();
     final sub = _sub2;
-    AppToast.show(context, 'Momo prompt on its way — approve it to activate $label.');
     final res = await DropOffApi.subscribe(
       tier: tier,
       pickupWindow: '${sub?['pickup_window'] ?? '10:00'}',
       city: '${sub?['city'] ?? 'Lusaka'}',
     );
     if (!mounted) return;
-    final err = res.error ?? (res.ok ? null : 'Something went wrong.');
-    AppToast.show(context, err == null || err.isEmpty ? 'Prompt sent — approve on your phone to activate.' : err);
-    if (err == null || err.isEmpty) _load();
+    if (!res.ok) {
+      AppToast.show(context, moneyErrorText(res, 'Could not start the switch'));
+      return;
+    }
+    final pay = await DropOffApi.paySubscription();
+    if (!mounted) return;
+    if (!pay.ok) {
+      AppToast.show(context, moneyErrorText(pay, 'Choose the plan again — no prompt went out'));
+      return;
+    }
+    AppToast.show(context, 'Prompt sent — approve it on your phone to activate $label.');
+    _load();
   }
 
   /// DropOff Predict card: what the seller will likely ship next 30 days,

@@ -233,7 +233,13 @@ class DropOffApi {
       final res = await http
           .delete(_uri(path), headers: _headers, body: jsonEncode(body ?? const {}))
           .timeout(timeout ?? _timeout);
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
+      Map<String, dynamic>? decoded;
+      try {
+        decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+      } catch (_) {
+        return ApiResponse(status: res.statusCode, ok: false, body: const {}, error: 'http_${res.statusCode}');
+      }
+      decoded ??= const {};
       final ok = res.statusCode >= 200 && res.statusCode < 300;
       if (ok) _invalidateAfterMutation(path);
       return ApiResponse(
@@ -261,7 +267,16 @@ class DropOffApi {
               headers: {...(admin ? _adminHeaders : _headers), ...?extraHeaders},
               body: jsonEncode(body))
           .timeout(timeout ?? _timeout);
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
+      // A 5xx from the Worker (or a non-JSON edge page) must NOT masquerade as
+      // "network error" — clients can only render a truthful message when the
+      // status is preserved.
+      Map<String, dynamic>? decoded;
+      try {
+        decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+      } catch (_) {
+        return ApiResponse(status: res.statusCode, ok: false, body: const {}, error: 'http_${res.statusCode}');
+      }
+      decoded ??= const {};
       final ok = res.statusCode >= 200 && res.statusCode < 300;
       if (ok) _invalidateAfterMutation(path);
       return ApiResponse(
@@ -516,8 +531,14 @@ class DropOffApi {
     try {
       final headers = <String, String>{'Content-Type': 'application/json', ...authHeaders};
       final res = await http.patch(_uri(path), headers: headers, body: jsonEncode(body)).timeout(const Duration(seconds: 20));
-      final data = res.body.isEmpty ? <String, dynamic>{} : (jsonDecode(res.body) as Map<String, dynamic>? ?? {});
-      return ApiResponse(status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, body: data);
+      Map<String, dynamic> data;
+      try {
+        data = res.body.isEmpty ? <String, dynamic>{} : (jsonDecode(res.body) as Map<String, dynamic>? ?? {});
+      } catch (_) {
+        return ApiResponse(status: res.statusCode, ok: false, body: const {}, error: 'http_${res.statusCode}');
+      }
+      return ApiResponse(status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, body: data,
+          error: res.statusCode >= 400 ? '${data['error'] ?? 'http_${res.statusCode}'}' : null);
     } catch (_) {
       return const ApiResponse(error: 'network_error');
     }
@@ -915,7 +936,7 @@ class DropOffApi {
         'pickup_window': pickupWindow,
         'city': city,
         if (senderName != null) 'sender_name': senderName,
-      });
+      }, timeout: _paymentTimeout);
 
   static Future<Map<String, dynamic>?> subscription([String? phone]) =>
       phone != null ? get('/subscriptions/$phone') : get('/subscriptions');
@@ -972,7 +993,7 @@ class DropOffApi {
         'kind': 'subscription',
         'channel': channel,
         'idempotency_key': 'sub-${DateTime.now().millisecondsSinceEpoch}',
-      });
+      }, timeout: _paymentTimeout);
 
   // ---- superadmin console (pricebook / partners / growth dashboard) ----
   static Future<ApiResponse> upsertCourier(Map<String, dynamic> courier) =>
@@ -995,7 +1016,18 @@ class DropOffApi {
         'counter_price_zmw': counterPriceZmw,
       }, admin: true);
 
-  /// Chargebook listing for the ops console (verified counter fares on file).
+  /// Area-level localities extracted from user-typed addresses (jobs), most-used
+  /// first — for the chargebook's location pickers. Area names only, never full
+  /// street addresses.
+  static Future<List<String>> adminLocalities() async {
+    final data = await getAdmin('/admin/localities');
+    return ((data?['localities'] as List?) ?? const [])
+        .map((e) => '${(e as Map)['name'] ?? ''}'.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  /// Chargebook listing for the ops console (DropOff leg records on file).
   static Future<List<Map<String, dynamic>>> adminQuotes({int courierId = 0}) async {
     final data = await getAdmin('/admin/quotes', {'courier_id': '$courierId'});
     return (data?['quotes'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
