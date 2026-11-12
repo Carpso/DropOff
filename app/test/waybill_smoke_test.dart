@@ -67,7 +67,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('DEPOT COUNTER WAYBILL'), findsOneWidget);
+    expect(find.text('PLATINUM COUNTER WAYBILL'), findsOneWidget);
     expect(find.text('DO-2026-000042'), findsNWidgets(2)); // big monospace + Reference row
     expect(find.text('LUSAKA → KITWE BRANCH'), findsOneWidget);
     expect(find.text('SENDER'), findsOneWidget);

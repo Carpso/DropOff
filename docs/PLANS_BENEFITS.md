@@ -68,9 +68,12 @@ shape the rider's work life:
 
 1. **Salary, not piece-work gamble.** Payroll lands on the cycle (weekly/monthly
    balance); the rider never depends on a given day's order count for rent.
-2. **No money handling.** Riders never collect, hold or owe cash — customers
-   prepay by momo; the depot fare is settled between sender and depot. The
-   rider's phone is never a wallet.
+2. **No cash from senders, ever.** Customers prepay by momo; the rider's phone
+   is never a collection point. Depot runs: the rider may front the depot's
+   counter fare from their own pocket and photographs the depot receipt —
+   DropOff reimburses the exact amount **fee-free** as soon as the sender
+   repays it through the app (the sender's processing fee covers DropOff's
+   costs, so no payout fee touches the reimbursement).
 3. **Clean work slots.** Riders work their assigned **sweep slots**
    (06:00 / 10:00 / 14:00 early/mid/afternoon sweeps) — booked work windows
    with route batching, not an all-day scramble. Outside their slot the phone

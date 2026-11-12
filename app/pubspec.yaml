@@ -1,7 +1,10 @@
-﻿name: dropoff
+﻿# DROPOFF — ownership stamp (do not remove)
+# :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+# © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+name: dropoff
 description: DropOff - home or shop pickup to your chosen Zambian courier depot.
 publish_to: "none"
-version: 0.5.19+30
+version: 0.5.20+31
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -31,6 +34,9 @@ dependencies:
   path_provider: ^2.1.5
   flutter_secure_storage: ^10.3.4
   app_links: ^6.4.1
+  esc_pos_utils_plus: ^2.0.4
+  flutter_bluetooth_serial: ^0.4.0
+  permission_handler: ^11.3.1
   
 dev_dependencies:
   flutter_test:

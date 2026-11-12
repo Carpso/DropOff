@@ -1,5 +1,13 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// All rights reserved — unauthorised copying, resale or rebranding of
+// this source code is prohibited.
+// ─────────────────────────────────────────────────────────────────────
 import '../ui/app_toast.dart';
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -294,6 +302,13 @@ class BookingDetailScreen extends StatelessWidget {
         if (booking.dispatched && !complete &&
             (booking.lastEvent == 'prepayment_pending' || booking.lastEvent == 'advance_pending'))
           _PrepayCard(booking: booking),
+        // DEPOT COUNTER FLOW (owner directive 2026-11-12): the rider fronted
+        // the depot's counter fare — the sender repays the exact receipt
+        // amount + processing; the receipt photo unlocks after payment.
+        if (booking.dispatched && !complete && booking.counterFareDue)
+          _CounterReceiptCard(booking: booking),
+        if (booking.dispatched && booking.counterReceiptPaid && booking.counterReceiptUrl?.isNotEmpty == true)
+          _CounterReceiptPaidCard(booking: booking),
         // Operator controls (assign rider / advance status) are staff-only —
         // sellers and recipients never see the fleet console on a job card.
         if (store.isStaff && store.riders.where((item) => item.active).length > 1) ...[
@@ -1003,6 +1018,195 @@ class _PrepayCardState extends State<_PrepayCard> {
                 : const Icon(Icons.payments_outlined),
             label: Text(_busy ? 'Starting prompt…' : 'Pay now — dispatch rider'),
           ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// DEPOT COUNTER FLOW — due card: the rider fronted the depot's counter fare
+/// and submitted the written receipt; the sender repays the exact amount +
+/// processing to DropOff by momo. The receipt photo is server-locked until
+/// this payment lands, then it unlocks here and the rider is reimbursed.
+class _CounterReceiptCard extends StatefulWidget {
+  final Booking booking;
+  const _CounterReceiptCard({required this.booking});
+
+  @override
+  State<_CounterReceiptCard> createState() => _CounterReceiptCardState();
+}
+
+class _CounterReceiptCardState extends State<_CounterReceiptCard> {
+  bool _busy = false;
+
+  Future<void> _payNow() async {
+    final store = AppScope.of(context);
+    setState(() => _busy = true);
+    final res = await DropOffApi.payCounterFare(
+      jobRef: widget.booking.serverRef!,
+      phone: widget.booking.senderPhone,
+      idempotencyKey: 'cfare-${widget.booking.serverRef}-${DateTime.now().millisecondsSinceEpoch}',
+    );
+    if (!mounted) return;
+    if (!res.ok) {
+      setState(() => _busy = false);
+      AppToast.show(context, switch (res.error) {
+        'counter_fare_already_paid' => 'This counter fare is already paid — the receipt is revealed in Bookings.',
+        _ => 'Payment could not start (${res.error ?? 'network'}) — check your connection and retry.',
+      });
+      return;
+    }
+    final paymentId = '${res.body['payment_id']}';
+    final total = (res.body['amount_zmw'] as num?)?.toDouble();
+    var status = 'pending';
+    for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppToast.show(context, switch (status) {
+      'success' => 'Counter fare paid — your depot receipt is revealed below.',
+      'failed' => 'The momo prompt was rejected. Check your balance and tap Pay now again.',
+      _ => total != null
+          ? 'Prompt sent for K${total.toStringAsFixed(2)} — approve it on your phone to reveal the receipt.'
+          : 'Prompt sent — approve it on your phone to reveal the receipt.',
+    });
+    unawaited(store.syncJobsFromServer());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = widget.booking.counterReceiptUrl;
+    return Card(
+      color: AppColors.amber.withValues(alpha: 0.14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: AppColors.amber.withValues(alpha: 0.5))),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.receipt_long_outlined, size: 18, color: Color(0xFF7B5710)),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Depot counter fare due',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
+          ]),
+          const SizedBox(height: 4),
+          Text('Your rider paid the depot counter out of their own pocket. The receipts below are YOURS — revealed when you pay — and the rider gets reimbursed.'
+              '${(widget.booking.counterReceipts.length > 1) ? ' The depot split the batch into ${widget.booking.counterReceipts.length} receipts; you repay the exact total DropOff computed from them.' : ''}',
+              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          // REAL receipt photo (owner directive): the rider's actual depot
+          // receipt is served to the sender, but rendered blurred behind a
+          // lock until the depot bill is cleared — never a placeholder.
+          if (url != null && url.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: AspectRatio(
+                aspectRatio: 1.4,
+                child: Stack(fit: StackFit.expand, children: [
+                  ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(sigmaX: 9, sigmaY: 9),
+                    child: Image.network(url, fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const ColoredBox(
+                            color: Color(0x11800000),
+                            child: Center(child: Icon(Icons.lock_outline, size: 34, color: Color(0xFF7B5710))))),
+                  ),
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(20)),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.lock_outline, size: 14, color: Colors.white),
+                        SizedBox(width: 6),
+                        Text('Depot receipt — revealed after payment',
+                            style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+                      ]),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: _busy ? null : _payNow,
+            icon: _busy
+                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.lock_open_outlined),
+            label: Text(_busy ? 'Starting prompt…' : 'Pay now — reveal receipt'),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Counter fare settled — show the unlocked depot receipt photo(s). A depot
+/// that split a multi-parcel batch across receipts shows ALL of them.
+class _CounterReceiptPaidCard extends StatelessWidget {
+  final Booking booking;
+  const _CounterReceiptPaidCard({required this.booking});
+
+  @override
+  Widget build(BuildContext context) {
+    // Full filed list when the job carried multiple receipts; otherwise the
+    // single primary photo.
+    final receipts = booking.counterReceipts.isNotEmpty
+        ? booking.counterReceipts
+        : (booking.counterReceiptUrl?.isNotEmpty == true
+            ? [(booking.counterReceiptZmw ?? 0, booking.counterReceiptUrl!)]
+            : <(double, String)>[]);
+    if (receipts.isEmpty) return const SizedBox.shrink();
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: AppColors.forest.withValues(alpha: 0.4))),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.verified_outlined, size: 18, color: AppColors.forest),
+            const SizedBox(width: 8),
+            Expanded(child: Text(receipts.length > 1
+                ? 'Counter fare paid — ${receipts.length} depot receipts'
+                : 'Counter fare paid — depot receipt',
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
+              child: Text('K${(booking.counterReceiptZmw ?? 0).toStringAsFixed(2)}',
+                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11.5, color: AppColors.forest)),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          for (var i = 0; i < receipts.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: Stack(alignment: Alignment.topRight, children: [
+                  Image.network(
+                    receipts[i].$2,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (_, child, progress) =>
+                        progress == null ? child : const Padding(padding: EdgeInsets.all(18), child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)))),
+                    errorBuilder: (_, __, ___) => const Text('Receipt photo could not load — it is stored safely on the server.',
+                        style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                  ),
+                  if (receipts.length > 1)
+                    Container(
+                      margin: const EdgeInsets.all(6),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(12)),
+                      child: Text('Receipt ${i + 1} · K${receipts[i].$1.toStringAsFixed(2)}',
+                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+                    ),
+                ]),
+              ),
+            ),
+          ],
         ]),
       ),
     );

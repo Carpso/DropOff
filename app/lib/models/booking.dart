@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// All rights reserved — unauthorised copying, resale or rebranding of
+// this source code is prohibited.
+// ─────────────────────────────────────────────────────────────────────
 enum ParcelSize { small, medium, large }
 
 extension ParcelSizeLabel on ParcelSize {
@@ -240,12 +247,35 @@ class Booking {
     this.vehicleClass = 'motorcycle',
     this.branch,
     this.lastEvent,
+    this.counterReceiptZmw,
+    this.counterReceiptUrl,
+    this.counterReceiptPaid = false,
+    this.counterReceipts = const [],
   });
 
   /// Latest server job_event status for dispatched bookings — 'advance_pending'
   /// (momo prompt waiting) / 'prepayment_pending' (held: prompt never started).
   /// Drives the Pay-now affordance in Bookings.
   final String? lastEvent;
+
+  /// Depot counter flow (owner directive 2026-11-12): the exact amount the
+  /// rider transcribed off the depot's written receipt. The sender repays it
+  /// (+ processing, waived for plan-active senders) through DropOff; the REAL
+  /// receipt photo ([counterReceiptUrl]) is served to the sender as soon as
+  /// the rider files it — the app keeps it blurred behind a lock until the
+  /// depot bill is cleared (paid). Null = no receipt submitted yet.
+  final double? counterReceiptZmw;
+  final String? counterReceiptUrl;
+  final bool counterReceiptPaid;
+
+  /// Every photographed depot receipt on the trip (multi-receipt drops when
+  /// the depot splits a batch): (exact amount written on that receipt, photo
+  /// url). [counterReceiptZmw] is the SERVER-computed total of these; the
+  /// first entry is the primary preview. Empty for single-receipt drops.
+  final List<(double, String)> counterReceipts;
+
+  bool get counterFareDue =>
+      counterReceiptZmw != null && counterReceiptZmw! > 0 && !counterReceiptPaid;
 
   bool get dispatched => serverRef != null && serverRef!.isNotEmpty;
 
@@ -282,6 +312,10 @@ class Booking {
         pickupAt: pickupAt,
         parcels: parcels ?? this.parcels,
         vehicleClass: vehicleClass ?? this.vehicleClass,
+        counterReceiptZmw: counterReceiptZmw,
+        counterReceiptUrl: counterReceiptUrl,
+        counterReceiptPaid: counterReceiptPaid,
+        counterReceipts: counterReceipts,
       );
 
   Map<String, dynamic> toJson() => {
@@ -317,6 +351,10 @@ class Booking {
         'vehicleClass': vehicleClass,
         'branch': branch,
         'lastEvent': lastEvent,
+        'counterReceiptZmw': counterReceiptZmw,
+        'counterReceiptUrl': counterReceiptUrl,
+        'counterReceiptPaid': counterReceiptPaid,
+        'counterReceipts': [for (final (amt, url) in counterReceipts) {'amount_zmw': amt, 'url': url}],
       };
 
   factory Booking.fromJson(Map<String, dynamic> json) => Booking(
@@ -352,5 +390,13 @@ class Booking {
         vehicleClass: json['vehicleClass'] as String? ?? 'motorcycle',
         branch: json['branch'] as String?,
         lastEvent: json['lastEvent'] as String?,
+        counterReceiptZmw: (json['counterReceiptZmw'] as num?)?.toDouble(),
+        counterReceiptUrl: json['counterReceiptUrl'] as String?,
+        counterReceiptPaid: json['counterReceiptPaid'] as bool? ?? false,
+        counterReceipts: [
+          for (final r in (json['counterReceipts'] as List?) ?? [])
+            if (r is Map)
+              ((r['amount_zmw'] as num?)?.toDouble() ?? 0, '${r['url'] ?? ''}')
+        ],
       );
 }

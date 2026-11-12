@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// All rights reserved — unauthorised copying, resale or rebranding of
+// this source code is prohibited.
+// ─────────────────────────────────────────────────────────────────────
 import '../ui/app_toast.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -14,7 +21,18 @@ import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
+import '../ui/thermal_print.dart';
 import '../widgets/common.dart';
+
+/// Owner directive (2026-11-12): the waybill title leads with the sender's
+/// chosen DEPOT in its short form — "PLATINUM COUNTER WAYBILL" — not the
+/// courier's full legal name, and never a generic "DEPOT COUNTER WAYBILL"
+/// unless the courier is unknown.
+String waybillDepotTitle(String courierId, String courierName) {
+  var label = courierId.trim();
+  if (label.isEmpty) label = courierName.trim().split(RegExp(r'\s+')).first;
+  return label.isEmpty ? 'DEPOT COUNTER WAYBILL' : '${label.toUpperCase()} COUNTER WAYBILL';
+}
 
 /// Printable depot counter receipt / waybill.
 ///
@@ -100,6 +118,61 @@ class _WaybillScreenState extends State<WaybillScreen> {
     final image = await boundary.toImage(pixelRatio: 3.0);
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData?.buffer.asUint8List();
+  }
+
+  /// Portable Bluetooth thermal printer (ESC/POS 58mm). Android only —
+  /// cheap receipt printers are classic-Bluetooth SPP devices.
+  Future<void> _printBluetooth() async {
+    final booking = _lookup();
+    if (booking == null || _busy) return;
+    final store = AppScope.of(context);
+    final courier = courierById(booking.courierId);
+    final rider = store.riders.where((item) => item.id == booking.riderId).firstOrNull;
+    final branchInfo = _branchInfo(booking, courier);
+    final hasBranch = booking.branch?.trim().isNotEmpty == true;
+    final ref = booking.serverRef?.isNotEmpty == true ? booking.serverRef! : booking.reference;
+    final title = waybillDepotTitle(courier.id, courier.name);
+    final data = WaybillPrintData(
+      title: title,
+      ref: ref,
+      route: (hasBranch ? '${booking.fromCity} → ${booking.branch}' : '${booking.fromCity} → ${booking.toCity}').toUpperCase(),
+      courierLine: hasBranch ? '${courier.name} · onward to ${booking.toCity}' : courier.name,
+      statusLabel: booking.timeline[booking.stage],
+      from: booking.fromCity,
+      to: booking.toCity,
+      branch: hasBranch ? booking.branch! : (branchInfo != null ? branchInfo.name : ''),
+      courier: '${courier.name} ($courier.id)',
+      pickupAddress: booking.pickupAddress,
+      pickupWindow: _ReceiptCard._pickupWindowLabel(booking),
+      scheduledSlot: booking.pickupAt == null ? '' : DateFormat('d MMM yyyy · HH:mm').format(DateTime.tryParse(booking.pickupAt!) ?? DateTime.now()),
+      size: booking.parcelSize.label,
+      parcels: '${booking.parcels}',
+      vehicle: _ReceiptCard._vehicleLabel(booking.vehicleClass),
+      description: booking.description,
+      declaredValue: _declaredValue() == null ? '' : kwacha(_declaredValue()!),
+      cover: _coverSummary(),
+      partnerWaybill: _partnerWaybill() ?? 'Not recorded yet — counter fills in at lodgement',
+      riderFee: kwacha(booking.riderFee),
+      lastMileFee: booking.lastMileFee > 0 ? kwacha(booking.lastMileFee) : '',
+      promo: booking.promoCode == null ? '' : '${booking.promoCode}${booking.promoDiscount != null ? ' — saved ${kwacha(booking.promoDiscount!)} on the DropOff leg' : ''}',
+      dropoffDue: '${kwacha(booking.dropoffLeg)} + processing — DropOff charge, never partner money',
+      courierFare: _counterReceipt() != null
+          ? (_counterReceipt()!.$2
+              ? '${kwacha(_counterReceipt()!.$1)} — paid via DropOff (depot receipt in Bookings)'
+              : '${kwacha(_counterReceipt()!.$1)} — depot receipt submitted; pay in Bookings to unlock it')
+          : (booking.courierFare != null ? '${kwacha(booking.courierFare!)} — pay at the counter' : 'Confirmed at depot — pay at the counter'),
+      paymentMethod: booking.paymentMethod,
+      senderName: booking.senderName,
+      senderPhone: booking.senderPhone,
+      recipientName: booking.recipientName,
+      recipientPhone: booking.recipientPhone,
+      reference: booking.reference,
+      dispatchRef: booking.serverRef?.isNotEmpty == true ? booking.serverRef! : '',
+      bookedAt: DateFormat('d MMM yyyy · HH:mm').format(booking.createdAt),
+      rider: rider?.name ?? '',
+      trackingUrl: _trackingUrl != null ? 'https://dropoff-api.godfreymoseskalambo.workers.dev/t/${_trackingUrl!}' : null,
+    );
+    await ThermalWaybill.print(context, data);
   }
 
   String _fileName(Booking booking) {
@@ -188,11 +261,12 @@ class _WaybillScreenState extends State<WaybillScreen> {
     final declaredValue = _declaredValue();
     final cover = _coverSummary();
     final partnerWaybill = _partnerWaybill();
+    final counterReceipt = _counterReceipt();
     final dateFmt = DateFormat('d MMM yyyy · HH:mm');
     final ref = booking.serverRef?.isNotEmpty == true ? booking.serverRef! : booking.reference;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Depot counter waybill', style: TextStyle(fontWeight: FontWeight.w800))),
+      appBar: AppBar(title: Text('${courier.name} counter waybill', style: const TextStyle(fontWeight: FontWeight.w800))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
         children: [
@@ -217,6 +291,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
                   declaredValue: declaredValue,
                   cover: cover,
                   partnerWaybill: partnerWaybill,
+                  counterReceipt: counterReceipt,
                   ref: ref,
                   dateFmt: dateFmt,
                   trackingToken: _trackingToken,
@@ -252,6 +327,20 @@ class _WaybillScreenState extends State<WaybillScreen> {
                 : const Icon(Icons.share_outlined),
             label: Text(_busy ? 'Working…' : 'Share waybill image'),
           ),
+          if (!kIsWeb && Platform.isAndroid) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _printBluetooth,
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('Print on Bluetooth printer'),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Portable receipt printers (58 mm Bluetooth). Pair the printer in Android Settings first.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.35),
+            ),
+          ],
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: _busy ? null : _downloadImage,
@@ -309,6 +398,16 @@ class _WaybillScreenState extends State<WaybillScreen> {
     return (value == null || value.isEmpty) ? null : value;
   }
 
+  /// Depot counter receipt (owner directive 2026-11-12): the actual written
+  /// amount the rider transcribed. Null = not submitted yet.
+  (double, bool)? _counterReceipt() {
+    final nested = (_evidence?['evidence'] as Map?)?.cast<String, dynamic>();
+    final cr = nested?['counter_receipt'] as Map?;
+    final amount = (cr?['amount_zmw'] as num?)?.toDouble();
+    if (amount == null || amount <= 0) return null;
+    return (amount, cr?['paid'] == true);
+  }
+
   /// Best-effort branch contact from the courier catalogue: match the booked
   /// branch name, else any branch in the same city, else nothing.
   CourierBranch? _branchInfo(Booking booking, CourierInfo courier) {
@@ -336,6 +435,7 @@ class _ReceiptCard extends StatelessWidget {
   final double? declaredValue;
   final String cover;
   final String? partnerWaybill;
+  final (double, bool)? counterReceipt;
   final String ref;
   final DateFormat dateFmt;
   final String? trackingToken;
@@ -351,6 +451,7 @@ class _ReceiptCard extends StatelessWidget {
     required this.declaredValue,
     required this.cover,
     required this.partnerWaybill,
+    required this.counterReceipt,
     required this.ref,
     required this.dateFmt,
     required this.trackingToken,
@@ -364,6 +465,9 @@ class _ReceiptCard extends StatelessWidget {
     final route = hasBranch ? '${booking.fromCity} → ${booking.branch}' : '${booking.fromCity} → ${booking.toCity}';
     final dropoffLeg = booking.dropoffLeg;
     final total = booking.total;
+    // Local copy so the nullable record promotes (`.$1`/`.$2` after the null
+    // check) — field promotion does not apply to public class fields.
+    final counterReceipt = this.counterReceipt;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
@@ -384,9 +488,12 @@ class _ReceiptCard extends StatelessWidget {
                     'DROPOFF',
                     style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17, letterSpacing: 4, color: AppColors.forest),
                   ),
-                  const Text(
-                    'DEPOT COUNTER WAYBILL',
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 21, letterSpacing: 0.6, color: AppColors.ink),
+                  // The SENDER's chosen depot leads the title — the counter this
+                  // waybill is presented at (e.g. "PLATINUM COUNTER WAYBILL").
+                  Text(
+                    waybillDepotTitle(courierId, courierName),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 21, letterSpacing: 0.6, color: AppColors.ink),
                   ),
                   const SizedBox(height: 2),
                   const Text(
@@ -492,7 +599,12 @@ class _ReceiptCard extends StatelessWidget {
                     if (booking.promoCode != null)
                       _row('Promo', '${booking.promoCode}${booking.promoDiscount != null ? ' — saved ${kwacha(booking.promoDiscount)} on the DropOff leg' : ''}'),
                     _row('DropOff due', '${kwacha(dropoffLeg)} + processing — DropOff charge, never partner money'),
-                    _row('Courier fare', booking.courierFare != null ? '${kwacha(booking.courierFare)} — pay at the counter' : 'Confirmed at depot — pay at the counter'),
+                    if (counterReceipt != null)
+                      _row('Courier fare', counterReceipt.$2
+                          ? '${kwacha(counterReceipt.$1)} — paid via DropOff (depot receipt in Bookings)'
+                          : '${kwacha(counterReceipt.$1)} — depot receipt submitted; pay in Bookings to unlock it')
+                    else
+                      _row('Courier fare', booking.courierFare != null ? '${kwacha(booking.courierFare)} — pay at the counter' : 'Confirmed at depot — pay at the counter'),
                     _row('Booking total', total != null ? kwacha(total) : 'Confirmed at depot (fare set by the counter)'),
                     _row('Payment method', booking.paymentMethod),
                   ]),

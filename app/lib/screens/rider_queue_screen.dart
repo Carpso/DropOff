@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// All rights reserved — unauthorised copying, resale or rebranding of
+// this source code is prohibited.
+// ─────────────────────────────────────────────────────────────────────
 import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +14,7 @@ import '../data/analytics_service.dart';
 import '../l10n/app_localizations.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../ui/in_app_browser.dart';
 
 /// The rider's day as slot-batched task queues:
 ///   BATCH: 10:00 AM SLOT · TOTAL PARCELS: 6 · DESTINATION: Mercury — Kabulonga
@@ -75,6 +83,36 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
     AppToast.show(context, msg);
   }
 
+  /// One-tap navigation to the stop's pickup. Pinned bookings (sender tapped
+  /// "use my location") navigate by exact coordinates; typed addresses
+  /// navigate by the address text as a fallback — never leave the rider
+  /// guessing how to find the sender.
+  void _navigateToStop(Map<String, dynamic> s, String app) {
+    final lat = (s['lat'] as num?)?.toDouble();
+    final lng = (s['lng'] as num?)?.toDouble();
+    if (lat != null && lng != null) {
+      if (app == 'waze') {
+        openInApp('https://waze.com/ul?ll=$lat,$lng&navigate=yes&follow_deep=1');
+      } else {
+        openInApp('https://maps.google.com/?q=$lat,$lng');
+      }
+      return;
+    }
+    // No pin on the booking — fall back to the typed address text.
+    final city = '${s['from_city'] ?? ''}'.trim();
+    final addr = '${s['address'] ?? ''}'.trim();
+    final query = addr.isEmpty ? '' : '$addr${city.isNotEmpty ? ', $city' : ''}';
+    if (query.isEmpty) {
+      _snack('This stop has no pin or address yet — refresh, or ask ops.');
+      return;
+    }
+    if (app == 'waze') {
+      openInApp('https://waze.com/ul?q=${Uri.encodeComponent(query)}&navigate=yes');
+    } else {
+      openInApp('https://maps.google.com/?q=${Uri.encodeComponent(query)}');
+    }
+  }
+
   Future<void> _advanceStop(Map<String, dynamic> s) async {
     final String ref = '${s['ref']}';
     if (_busyRef != null) return;
@@ -105,45 +143,18 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
               }
             },
           ),
-          // NO-QUOTING POLICY (owner directive): there is NO fare entry here —
-          // not optional, not "recorded", not ever. The depot fare is heard at
-          // the counter and stays the depot's business. A parcel is marked
-          // delivered by CAMERA CAPTURE only: no photo, no delivery.
+          // DEPOT COUNTER FLOW (owner directive 2026-11-12): the drop needs
+          // TWO camera photos (parcel + depot receipt) and the EXACT amount
+          // transcribed off the depot's written receipt. The rider never
+          // QUOTES a fare — the depot's own receipt is the source, the photo
+          // is the proof. The sender pays that amount + processing through
+          // DropOff and the rider is reimbursed fee-free. No fare entry, no
+          // cash from senders, ever.
           ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
             title: Text(l10n.riderDepotDrop),
             subtitle: Text(l10n.riderDepotDropSub),
-            onTap: () async {
-              final photo = await _pickPodPhoto();
-              if (!mounted) return;
-              if (photo == null) {
-                await _snack(l10n.riderPhotoRequired);
-                return;
-              }
-              setState(() => _busyRef = ref);
-              final res = await DropOffApi.jobEvent(
-                jobRef: ref, status: 'delivered', photoUrl: photo, stage: 'delivery');
-              if (!mounted) return;
-              setState(() => _busyRef = null);
-              Navigator.pop(ctx);
-              await _snack(res.ok ? '$ref ✓ ${l10n.riderDepotDrop}' : 'Could not update (${res.error})');
-              if (res.ok) {
-                AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
-                // Best-effort: compare seller's booking photo vs this drop photo.
-                final chk = await DropOffApi.parcelCheck(ref);
-                if (!mounted) return;
-                if (chk.ok) {
-                  final verdict = chk.body['same_parcel'] ?? 'uncertain';
-                  final flagged = chk.body['flagged'] == true;
-                  await _snack(flagged
-                      ? '$ref parcel check: possible mismatch — ops flagged for review'
-                      : '$ref parcel check: $verdict');
-                } else if (chk.status == 409) {
-                  await _snack('$ref parcel check skipped: ${chk.body['detail'] ?? chk.body['error'] ?? 'photo missing'}');
-                }
-                _load();
-              }
-            },
+            onTap: () => _depotDropWithReceipt(ctx, ref),
           ),
           ListTile(
             leading: const Icon(Icons.home_outlined),
@@ -158,6 +169,194 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
           ),
         ]),
       ),
+    );
+  }
+
+  /// Depot drop with the counter-receipt kit (owner directive 2026-11-12):
+  /// photograph EVERY parcel in the batch, and file EVERY depot receipt the
+  /// depot wrote — each photographed, each with the EXACT amount written on
+  /// it. A submitted receipt is a single, exact, photographed document, never
+  /// a rider-computed sum; the SERVER totals the receipts. The rider fronts
+  /// the fare with their own money; DropOff reimburses it fee-free the moment
+  /// the sender pays.
+  Future<void> _depotDropWithReceipt(BuildContext sheetCtx, String ref) async {
+    Navigator.pop(sheetCtx); // close the "how did it move on" sheet
+    if (!mounted) return;
+    final parcelPhotos = <String>[]; // batch: one or more parcel photos
+    // Each depot receipt: its own amount field + its own photo. A batch may
+    // be split across receipts by the depot — file them all, one by one.
+    final receipts = <_ReceiptEntry>[];
+    final res = await showDialog<ApiResponse>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          title: Text('Depot drop — $ref', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Photograph EVERY parcel in the batch, then file EVERY depot receipt the depot wrote — each receipt photographed with the EXACT amount written on it. Never add receipts up yourself: DropOff totals the photographed documents.',
+                  style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),
+              const SizedBox(height: 12),
+              // ── Parcel photos (one or more) ──
+              Text('PARCEL PHOTOS (${parcelPhotos.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
+              const SizedBox(height: 4),
+              for (var i = 0; i < parcelPhotos.length; i++)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.check_circle, size: 18, color: AppColors.forest),
+                  title: Text('Parcel photo ${i + 1} attached', style: const TextStyle(fontSize: 12.5)),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close, size: 16),
+                    tooltip: 'Remove',
+                    onPressed: () => setDialog(() => parcelPhotos.removeAt(i)),
+                  ),
+                ),
+              TextButton.icon(
+                icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                label: Text(parcelPhotos.isEmpty ? 'Add parcel photo (required)' : 'Add another parcel photo',
+                    style: const TextStyle(fontSize: 12.5)),
+                onPressed: () async {
+                  final url = await _pickPodPhoto();
+                  if (url != null) setDialog(() => parcelPhotos.add(url));
+                },
+              ),
+              const Divider(height: 20),
+              // ── Depot receipts (one or more, each exact) ──
+              Text('DEPOT RECEIPTS (${receipts.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
+              const SizedBox(height: 4),
+              for (var i = 0; i < receipts.length; i++) _receiptEntryTile(setDialog, receipts, i),
+              TextButton.icon(
+                icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                label: Text(receipts.isEmpty ? 'Add depot receipt (required)' : 'Add another depot receipt (if the depot split the batch)',
+                    style: const TextStyle(fontSize: 12.5)),
+                onPressed: () => setDialog(() => receipts.add(_ReceiptEntry())),
+              ),
+              const Text('The receipt photos stay locked for the sender until they pay — then they are revealed and your money comes back.',
+                  style: TextStyle(fontSize: 11, height: 1.35, color: AppColors.muted)),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                if (parcelPhotos.isEmpty) {
+                  _snack('At least one parcel photo is required.');
+                  return;
+                }
+                if (receipts.isEmpty) {
+                  _snack('Add the depot receipt — photo + the exact amount written on it.');
+                  return;
+                }
+                for (var i = 0; i < receipts.length; i++) {
+                  final r = receipts[i];
+                  if (r.url == null) {
+                    _snack('Receipt ${i + 1} needs its photo.');
+                    return;
+                  }
+                  final amt = double.tryParse(r.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
+                  if (amt == null || amt <= 0) {
+                    _snack('Receipt ${i + 1}: type the exact amount written on it.');
+                    return;
+                  }
+                }
+                final r = await DropOffApi.jobEvent(
+                  jobRef: ref, status: 'delivered',
+                  photoUrl: parcelPhotos.first, stage: 'delivery',
+                  parcelPhotos: parcelPhotos,
+                  receipts: [
+                    for (final e in receipts)
+                      {
+                        'amount_zmw': double.parse(e.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')),
+                        'url': e.url,
+                      }
+                  ],
+                );
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx, r);
+              },
+              child: const Text('Submit drop'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (res == null) return; // cancelled
+    final l10n = AppLocalizations.of(context);
+    if (res.ok) {
+      setState(() => _busyRef = null);
+      await _snack('$ref ✓ ${l10n.riderDepotDrop}');
+      AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
+      // Best-effort: compare seller's booking photo vs this drop photo.
+      final chk = await DropOffApi.parcelCheck(ref);
+      if (!mounted) return;
+      if (chk.ok) {
+        final verdict = chk.body['same_parcel'] ?? 'uncertain';
+        final flagged = chk.body['flagged'] == true;
+        await _snack(flagged
+            ? '$ref parcel check: possible mismatch — ops flagged for review'
+            : '$ref parcel check: $verdict');
+      }
+      _load();
+      return;
+    }
+    // Server-side receipt errors map to rider-readable guidance.
+    final err = res.error ?? '';
+    final detail = (res.body['detail'] as String?) ?? '';
+    setState(() => _busyRef = null);
+    await _snack(switch (err) {
+      'receipt_required' => detail.isEmpty ? 'Every depot receipt needs its photo and exact amount.' : detail,
+      'photo_required' => detail.isEmpty ? 'A parcel photo is required.' : detail,
+      'two_photos_required' => detail.isEmpty ? 'Parcel photos and receipt photos must be separate images.' : detail,
+      _ => 'Could not submit the drop ($err).',
+    });
+  }
+
+  /// One filed depot receipt inside the drop dialog: its own photo + its own
+  /// exact amount (never summed by the rider).
+  Widget _receiptEntryTile(void Function(void Function()) setDialog, List<_ReceiptEntry> receipts, int i) {
+    final e = receipts[i];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: AppColors.amber.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.amber.withValues(alpha: 0.4)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Text('Receipt ${i + 1}${e.url != null ? ' — photo attached ✓' : ''}',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12))),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16),
+            tooltip: 'Remove receipt',
+            onPressed: () => setDialog(() => receipts.removeAt(i)),
+          ),
+        ]),
+        TextField(
+          controller: e.amountCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Exact amount written on THIS receipt (K)',
+            prefixText: 'K ',
+            isDense: true,
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextButton.icon(
+          icon: Icon(e.url == null ? Icons.camera_alt_outlined : Icons.check_circle, size: 16,
+              color: e.url == null ? null : AppColors.forest),
+          label: Text(e.url == null ? 'Photo of THIS receipt (required)' : 'Receipt photo attached ✓',
+              style: const TextStyle(fontSize: 12)),
+          onPressed: () async {
+            final url = await _pickPodPhoto();
+            if (url != null) setDialog(() => e.url = url);
+          },
+        ),
+      ]),
     );
   }
 
@@ -329,6 +528,18 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
                           style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                     ])),
                     IconButton(
+                      tooltip: 'Navigate to pickup (Waze)',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.navigation_rounded, color: AppColors.forest),
+                      onPressed: () => _navigateToStop(s, 'waze'),
+                    ),
+                    IconButton(
+                      tooltip: 'Open in Google Maps',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.map_outlined, color: AppColors.forest),
+                      onPressed: () => _navigateToStop(s, 'gmaps'),
+                    ),
+                    IconButton(
                       tooltip: 'Update stop',
                       visualDensity: VisualDensity.compact,
                       icon: _busyRef == '${s['ref']}'
@@ -357,4 +568,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
       ),
     );
   }
+}
+
+/// One depot receipt filed by the rider in the drop dialog: its own photo and
+/// its own exact amount - receipts are never summed by the rider; the server
+/// totals the photographed documents.
+class _ReceiptEntry {
+  final TextEditingController amountCtrl = TextEditingController();
+  String? url;
 }

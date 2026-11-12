@@ -886,6 +886,14 @@ class AppStore extends ChangeNotifier {
       promoCode: j['promo_code'] as String?,
       promoDiscount: (j['promo_discount_zmw'] as num?)?.toDouble(),
       lastEvent: j['last_event'] as String?,
+      counterReceiptZmw: (j['counter_receipt_zmw'] as num?)?.toDouble(),
+      counterReceiptUrl: j['counter_receipt_url'] as String?,
+      counterReceiptPaid: (j['counter_receipt_paid'] ?? 0) == 1,
+      counterReceipts: [
+        for (final r in (j['counter_receipts'] as List?) ?? [])
+          if (r is Map && r['url'] != null)
+            ((r['amount_zmw'] as num?)?.toDouble() ?? 0, '${r['url']}')
+      ],
     );
   }
 

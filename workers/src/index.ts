@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// All rights reserved — unauthorised copying, resale or rebranding of
+// this source code is prohibited.
+// ─────────────────────────────────────────────────────────────────────
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import {
@@ -1578,6 +1585,20 @@ app.post('/jobs', async (c) => {
     // prompt at booking; plans are prepaid by their subscription. Riders
     // never handle ride money.
     const staffEyes = c.get('role') === 'ops' || isAdmin(c);
+    // Counter-fare gate: the rider fronts the depot fare, the sender repays
+    // it through DropOff. A sender with an UNPAID depot receipt settles it
+    // before booking again (prepay, no exceptions — the rider is owed).
+    if (!staffEyes) {
+      const dueCfare = await c.env.DB.prepare(
+        `SELECT ref FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
+      ).bind(c.get('phone') ?? '').first<any>();
+      if (dueCfare) {
+        return c.json({
+          error: 'counter_fare_due',
+          detail: `You have an unpaid depot counter fare on ${dueCfare.ref}. Open Bookings and pay it first — your rider fronted that money and is reimbursed when you do.`,
+        }, 409);
+      }
+    }
     if (b.pay_method === 'cash' && !staffEyes) {
       return c.json({
         error: 'prepaid_required',
@@ -2247,12 +2268,27 @@ app.get('/jobs', async (c) => {
   const page = hasMore ? results.slice(0, -1) : results;
   // NO-QUOTING POLICY: never ship counter-fare or full-total numbers to the
   // job list — counter fare stays at the counter; total includes it.
+  // Counter RECEIPT flow (owner directive 2026-11-12): the sender sees the
+  // actual written receipt amount AND the real rider-submitted receipt photo
+  // on their OWN job (that is what they owe) — the app keeps it blurred/
+  // locked until they pay. Partners never see any of it.
   const role2 = c.get('role');
   if (role2 === 'customer' || role2 === 'partner' || role2 === 'rider') {
     for (const j of page as any[]) {
+      // Multi-receipt depot drops: ship the parsed array to sender/rider;
+      // partners never see any counter-receipt data.
+      const receipts = j.counter_receipts_json ? JSON.parse(j.counter_receipts_json) : null;
+      delete j.counter_receipts_json;
       delete j.counter_price_zmw;
       delete j.total_zmw;
       delete j.rider_payout_zmw;
+      if (role2 === 'partner') {
+        delete j.counter_receipt_zmw;
+        delete j.counter_receipt_paid;
+        delete j.counter_receipt_url;
+      } else if (receipts) {
+        j.counter_receipts = receipts;
+      }
     }
   }
   return c.json({
@@ -2286,7 +2322,19 @@ app.get('/jobs/:ref', async (c) => {
     // NO-QUOTING POLICY (owner directive): the counter fare is the depot's
     // business, transacted at the counter — a seller never reads any number
     // for it, and `total_zmw` includes it, so both stay staff-only.
+    // Counter RECEIPT exception (owner directive 2026-11-12): the sender of
+    // the job reads the actual written receipt amount AND the real
+    // rider-submitted receipt photo (the app locks it visually until they
+    // pay); partners and strangers read none of it.
     for (const k of ['counter_price_zmw', 'total_zmw']) delete payload[k];
+    if (phone !== job.sender_phone) {
+      for (const k of ['counter_receipt_zmw', 'counter_receipt_paid', 'counter_receipt_url']) delete payload[k];
+      delete payload.counter_receipts_json;
+    } else {
+      // Multi-receipt depot drops: the parsed receipt list rides with the job.
+      payload.counter_receipts = job.counter_receipts_json ? JSON.parse(job.counter_receipts_json) : null;
+      delete payload.counter_receipts_json;
+    }
     if (phone === job.recipient_phone && phone !== job.sender_phone) {
       // recipient sees delivery status only — never the sender's money side
       for (const k of ['rider_fee_zmw', 'leg2_fee_zmw',
@@ -2352,6 +2400,7 @@ app.post('/jobs/:ref/events', async (c) => {
   const job = await c.env.DB.prepare(
     `SELECT j.id, j.ref, j.sender_phone, j.counter_price_zmw, j.rider_fee_zmw, j.leg2_fee_zmw,
             j.leg2_processing_fee_zmw, j.promo_discount_zmw,
+            j.counter_receipt_zmw, j.counter_receipt_paid,
             j.total_zmw, j.wait_minutes, j.wait_fee_zmw, j.pay_method, j.paid,
             j.courier_id, j.from_city, j.dest_city, j.weight_class, j.service,
             r.phone AS rider_phone
@@ -2372,6 +2421,12 @@ app.post('/jobs/:ref/events', async (c) => {
   }
 
   const dbStatements: D1PreparedStatement[] = [];
+  // True when a door delivery's recipient code was just verified — depot
+  // drops (the counter flow) never carry a recipient code.
+  let doorVerified = false;
+  // Set when the rider just submitted a depot receipt — drives the sender's
+  // pay-your-counter-fare notification after the batch lands.
+  let counterReceiptDue: number | null = null;
 
   // HANDOVER PROOF (anti-false-parcel): marking a job 'delivered' requires the
   // recipient's 4-digit DropOff code (SMSed to them at booking). Ops/admin keys
@@ -2383,6 +2438,7 @@ app.post('/jobs/:ref/events', async (c) => {
     ).bind(job.id).first<any>();
     // Only DOOR deliveries (last mile to the recipient) need the code — depot
     // drops already carry AI-checked depot photo evidence.
+    doorVerified = false;
     if (otpRow?.delivery_otp_hash && Number(otpRow.last_mile) === 1) {
       if ((otpRow.delivery_otp_attempts ?? 0) >= 8) {
         await addStrike(c.env, phone ?? '', job.id, 'otp_abuse'); // the wrong-code device earns a strike
@@ -2401,6 +2457,7 @@ app.post('/jobs/:ref/events', async (c) => {
           detail: 'Ask the recipient for their 4-digit DropOff code — it is in the handover SMS. It protects both of you against false parcels.',
         }, 403);
       }
+      doorVerified = true;
       dbStatements.push(c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id));
     }
   }
@@ -2494,6 +2551,76 @@ app.post('/jobs/:ref/events', async (c) => {
     } catch { /* alerting must never block the event */ }
   }
 
+  // DEPOT COUNTER FLOW (owner directive 2026-11-12): the rider FRONTS the
+  // depot's counter fare with their own money, then photographs BOTH the
+  // parcel and the depot's written receipt and transcribes the EXACT amount
+  // on the receipt (transcription of a written document — the rider never
+  // QUOTES a fare). The sender pays that amount + processing fee to DropOff
+  // by momo; the receipt photo unlocks only after payment; the rider is then
+  // reimbursed the exact counter amount, fee-free. Riders still never take
+  // cash from senders. Door deliveries (code-verified) skip this — no
+  // counter is involved.
+  if (status === 'delivered' && !doorVerified && !isAdminKey && !isOpsKey) {
+    // RECEIPT IMMUTABILITY (audit fix): once the sender has PAID the counter
+    // fare, the submitted receipt is money-movement evidence — a rider (or a
+    // dropped network retry) must never be able to rewrite it. Unpaid
+    // resubmissions stay allowed: a network drop must be self-healing.
+    if (Number(job.counter_receipt_paid ?? 0) === 1) {
+      return c.json({
+        error: 'counter_receipt_locked',
+        detail: 'This depot receipt is already paid — its amount and photos are locked. Contact DropOff support if something is wrong.',
+      }, 409);
+    }
+    const amount = Math.round(Number(b.receipt_amount_zmw) * 100) / 100;
+    const receiptUrl = String(b.receipt_url ?? '').trim();
+    // MULTI-RECEIPT DEPOT DROPS (owner request 2026-11-12): a depot may split
+    // one batch across several written receipts. The rider files EACH one —
+    // photographed with its own exact amount. A submitted receipt is a
+    // single, exact, photographed document, never a rider-computed sum; the
+    // SERVER sums the documents. The legacy single fields
+    // (receipt_amount_zmw/receipt_url) are honoured as a one-receipt list.
+    const filed: { amount_zmw: number; url: string }[] = [];
+    if (Array.isArray(b.receipts)) {
+      for (const r of b.receipts as any[]) {
+        filed.push({
+          amount_zmw: Math.round(Number(r?.amount_zmw) * 100) / 100,
+          url: String(r?.url ?? '').trim(),
+        });
+      }
+    } else if (Number.isFinite(amount) && amount > 0 && receiptUrl) {
+      filed.push({ amount_zmw: amount, url: receiptUrl });
+    }
+    const badReceipt = filed.find((r) => !Number.isFinite(r.amount_zmw) || r.amount_zmw <= 0 || r.amount_zmw > 20000 || !r.url);
+    if (filed.length === 0 || badReceipt) {
+      return c.json({
+        error: 'receipt_required',
+        detail: 'Every depot receipt needs its photo AND the exact amount written on it (each receipt is a separate photographed document).',
+      }, 400);
+    }
+    // Parcel photos: the legacy photo_url is the primary; extra parcel
+    // photos ride on parcel_photos[] (batches of different parcels).
+    const parcelPhotos = [String(b.photo_url ?? '').trim(), ...(Array.isArray(b.parcel_photos) ? (b.parcel_photos as any[]).map((u) => String(u ?? '').trim()) : [])]
+      .filter((u) => u.length > 0);
+    if (parcelPhotos.length === 0) {
+      return c.json({ error: 'photo_required', detail: 'A camera photo of the parcel is required — delivery is marked by capture, never by price entry.' }, 400);
+    }
+    if (parcelPhotos.some((u) => filed.some((r) => r.url === u))) {
+      return c.json({
+        error: 'two_photos_required',
+        detail: 'Parcel photos and depot receipt photos must be separate images.',
+      }, 400);
+    }
+    const receiptTotal = round2(filed.reduce((s, r) => s + r.amount_zmw, 0));
+    dbStatements.push(c.env.DB.prepare(
+      `UPDATE jobs SET counter_receipt_url = ?2, counter_receipt_zmw = ?3, counter_receipts_json = ?4, counter_receipt_paid = 0 WHERE id = ?1`,
+    ).bind(job.id, filed[0].url, receiptTotal, JSON.stringify(filed)));
+    const receiptList = filed.map((r, i) => `#${i + 1} K${r.amount_zmw.toFixed(2)}`).join(', ');
+    dbStatements.push(c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_receipt_submitted', ?2)`,
+    ).bind(job.id, `Depot receipt${filed.length > 1 ? `s (${filed.length})` : ''} submitted: ${receiptList} as written on the photographed document${filed.length > 1 ? 's' : ''} (${parcelPhotos.length} parcel photo${parcelPhotos.length > 1 ? 's' : ''} + ${filed.length} receipt photo${filed.length > 1 ? 's' : ''} filed). Sender repays the K${receiptTotal.toFixed(2)} total through DropOff (plan members: no processing fee) — the depot receipt photos are revealed on payment.`));
+    counterReceiptDue = receiptTotal;
+  }
+
   // DropOff NEVER holds partner money: the customer pays us only the DropOff
   // leg — rider fee + last-mile door leg (+ its processing), minus any promo.
   const dropoffLegZmw = round2(
@@ -2544,6 +2671,27 @@ app.post('/jobs/:ref/events', async (c) => {
       `UPDATE jobs SET ${sets.join(', ')} WHERE id = ?1`).bind(...vals));
   }
   if (dbStatements.length) await c.env.DB.batch(dbStatements);
+
+  // Counter fare is now owed by the sender — tell them exactly what to pay
+  // and that the receipt photo unlocks when they do. (Rider fronted the
+  // money; reimbursement fires on payment approval.)
+  if (counterReceiptDue != null) {
+    // Same fee math the /payments endpoint will apply — plan-active senders
+    // see the waived total in the SMS, not a number that later changes.
+    const cfare = await counterFareFees(c.env, job.sender_phone, counterReceiptDue);
+    const fee = round2(cfare.total - counterReceiptDue);
+    try {
+      await sendSms(c.env, job.sender_phone,
+        cfare.planWaived
+          ? `DropOff: parcel ${job.ref} is at the depot counter. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your depot receipt photo (processing waived — plan active).`
+          : `DropOff: parcel ${job.ref} is at the depot counter. Counter fare K${counterReceiptDue.toFixed(2)} + K${fee.toFixed(2)} processing = K${cfare.total.toFixed(2)}. Open Bookings to pay — your depot receipt photo is revealed after payment.`);
+    } catch { /* notification must never break the event */ }
+    c.executionCtx.waitUntil(sendToPhone(c.env, job.sender_phone, {
+      title: 'Counter fare due',
+      body: `Parcel ${job.ref} reached the depot. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your depot receipt photo and release the rider's reimbursement.`,
+      data: { job_ref: job.ref ?? '', kind: 'counter_fare_due' },
+    }));
+  }
 
   // Free the rider's load slot and flip them back to available — without this,
   // riders stay 'on_route' and accumulate current_load forever, eventually
@@ -4057,7 +4205,7 @@ app.post('/payments', async (c) => {
   const idemKey = idemKeyOf(c, b);
   const replay = await replayIdempotent(c, idemKey, 'payment', c.get('phone') ?? null);
   if (replay) return replay;
-  const kind: string = ['job', 'topup', 'subscription'].includes(b.kind) ? b.kind : 'job';
+  const kind: string = ['job', 'topup', 'subscription', 'counter_fare'].includes(b.kind) ? b.kind : 'job';
 
   let phone: string;
   let amount = 0;        // the full prompt: base + our platform fee + Lipila legs
@@ -4145,6 +4293,59 @@ app.post('/payments', async (c) => {
     amount = round2(plan.fee_zmw + platformFeeZmw + lipilaFeeZmw);
     subscriptionId = sub.id;
     lipilaRef = `sub-${sub.id}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+  } else if (kind === 'counter_fare') {
+    // Depot counter fare (owner directive 2026-11-12): the sender pays the
+    // EXACT amount the rider transcribed off the depot's written receipt, plus
+    // processing — the rider is reimbursed fee-free on approval. The client
+    // never sets an amount; the server reads it from the job.
+    const job = await c.env.DB.prepare(
+      `SELECT id, ref, sender_phone, counter_receipt_zmw, counter_receipt_paid FROM jobs WHERE ref = ?1`,
+    ).bind(b.job_ref ?? '').first() as any;
+    if (!job) return c.json({ error: 'job not found' }, 404);
+    if (c.get('role') === 'customer' && c.get('phone') !== job.sender_phone) {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+    if (!job.counter_receipt_zmw || Number(job.counter_receipt_zmw) <= 0) {
+      return c.json({ error: 'no_counter_receipt', detail: 'No depot receipt has been submitted for this parcel yet.' }, 409);
+    }
+    if (Number(job.counter_receipt_paid) === 1) {
+      return c.json({ error: 'counter_fare_already_paid' }, 409);
+    }
+    // Idempotency: a pending prompt for this job IS this payment.
+    const pendingCfare = await c.env.DB.prepare(
+      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status FROM payments
+        WHERE job_id = ?1 AND kind = 'counter_fare' AND status IN ('pending','success')
+        ORDER BY id DESC LIMIT 1`,
+    ).bind(job.id).first<any>();
+    if (pendingCfare) {
+      if (pendingCfare.status === 'success') return c.json({ error: 'counter_fare_already_paid' }, 409);
+      return c.json({
+        ok: true,
+        payment_id: pendingCfare.id,
+        lipila_reference: pendingCfare.lipila_reference ?? null,
+        amount_zmw: pendingCfare.amount_zmw,
+        platform_fee_zmw: pendingCfare.platform_fee_zmw ?? 0,
+        lipila_fee_zmw: pendingCfare.lipila_fee_zmw ?? 0,
+        reused_prompt: true,
+      });
+    }
+    const receipt = round2(Number(job.counter_receipt_zmw));
+    phone = c.get('role') === 'ops' && b.phone ? normalizeZmPhone(b.phone) : c.get('phone')!;
+    if (!phone) return c.json({ error: 'missing phone' }, 400);
+    // PLAN-ACTIVE senders only pay for the receipt reveal (owner directive
+    // 2026-11-12) — processing waived, momo pass-through stays.
+    const cfareFees = await counterFareFees(c.env, phone, receipt);
+    platformFeeZmw = cfareFees.platformFeeZmw;
+    lipilaFeeZmw = cfareFees.lipilaFeeZmw;
+    amount = cfareFees.total;
+    jobId = job.id;
+    // Retry-safe Lipila reference: a FAILED attempt's reference cannot be
+    // reused at the telco, so retries after a failure get a fresh unique ref.
+    // Pending/success prompts are reused via the idempotency check above.
+    const failedCfare = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM payments WHERE job_id = ?1 AND kind = 'counter_fare' AND status = 'failed'`,
+    ).bind(job.id).first<any>();
+    lipilaRef = failedCfare && failedCfare.n > 0 ? `cfare-${job.ref}-${Number(failedCfare.n) + 1}` : `cfare-${job.ref}`;
   } else {
     // Top-ups exist ONLY for rider/ops float (COD handling) — customers/sellers have no wallet.
     if (!['ops', 'admin'].includes(c.get('role') as string)) {
@@ -4166,6 +4367,7 @@ app.post('/payments', async (c) => {
   const init = await lipilaCollect(c.env, phone, amount, lipilaRef,
     kind === 'job' ? `DropOff ${lipilaRef}`
       : kind === 'subscription' ? 'DropOff pack activation/renewal'
+      : kind === 'counter_fare' ? 'DropOff depot counter fare'
       : 'DropOff ride float top-up');
   if (!init.ok) return c.json({ error: 'lipila_init_failed', detail: init.raw }, 502);
 
@@ -4185,10 +4387,31 @@ app.post('/payments', async (c) => {
   return c.json(payload);
 });
 
+// Depot counter fare owed by a sender (owner directive 2026-11-12).
+// PLAN-ACTIVE SENDERS (owner directive) pay ONLY for the receipt reveal:
+// the processing fee is waived because their plan already funds the DropOff
+// leg — they still repay the exact depot receipt amount, plus the real momo
+// collection pass-through (that is a telco cost, not a DropOff fee). Everyone
+// else pays receipt + processing + momo fee. The rider is reimbursed the
+// receipt amount fee-free either way.
+async function counterFareFees(env: Env, phone: string, receipt: number) {
+  const active = await env.DB.prepare(
+    `SELECT 1 FROM subscriptions WHERE phone = ?1 AND status = 'active'
+      AND period_end IS NOT NULL AND period_end > datetime('now') LIMIT 1`,
+  ).bind(phone).first();
+  const platformFeeZmw = active ? 0 : platformFee(receipt);
+  const lipilaFeeZmw = MOMO_COLLECTION_FEE;
+  return {
+    planWaived: !!active,
+    platformFeeZmw,
+    lipilaFeeZmw,
+    total: round2(receipt + platformFeeZmw + lipilaFeeZmw),
+  };
+}
+
 // Idempotent settlement: the `settled` flag is flipped in the same batch as the
 // ledger rows; webhook + status-poll can race safely. Subscription rows renew.
-async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: string): Promise<void> {
-  if (finalStatus !== 'success') return;
+async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: string): Promise<void> {  if (finalStatus !== 'success') return;
   const claim = await env.DB.prepare(
     `UPDATE payments SET status = 'success', settled = 1, paid_at = datetime('now')
       WHERE id = ?1 AND settled = 0`,
@@ -4289,10 +4512,89 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     if (job) {
       await dispatchToNearestRider(env, job.ref);
     }
+  } else if (pay.kind === 'counter_fare' && pay.job_id) {
+    // Sender paid the depot counter fare (+ processing) through DropOff.
+    // Unlock the receipt photo for them, then reimburse the rider the EXACT
+    // counter amount fee-free (the processing fee the sender paid covers
+    // DropOff's costs — no payout fee is charged on the reimbursement).
+    const job = await env.DB.prepare(
+      `SELECT id, ref, sender_phone, counter_receipt_zmw, rider_id FROM jobs WHERE id = ?1`,
+    ).bind(pay.job_id).first<any>();
+    if (job) {
+      const receipt = round2(Number(job.counter_receipt_zmw ?? 0));
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE jobs SET counter_receipt_paid = 1 WHERE id = ?1 AND counter_receipt_paid = 0`).bind(job.id),
+        env.DB.prepare(
+          `INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'counter_fare', ?3)`,
+        ).bind(pay.phone, receipt, job.id),
+        env.DB.prepare(
+          `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_fare_paid', ?2)`,
+        ).bind(job.id, `Sender paid the depot counter fare K${receipt.toFixed(2)} (+ processing) — receipt photo unlocked for the sender. Rider reimbursement in flight.`),
+      ]);
+      await sendToPhone(env, pay.phone, {
+        title: 'Receipt unlocked',
+        body: `Counter fare for ${job.ref ?? 'your parcel'} paid — the depot receipt photo is now visible in Bookings.`,
+        data: { job_ref: job.ref ?? '', kind: 'counter_fare_paid' },
+      });
+      // Fire-and-forget: the reimbursement does its own error bookkeeping.
+      reimburseRider(env, job, receipt).catch(() => { /* flagged on the job if it fails */ });
+    }
   } else if (pay.kind === 'cod_remit' && pay.job_id) {
     await env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_remit_paid', ?2)`,
     ).bind(pay.job_id, 'COD remit paid to sender momo (webhook)').run();
+  }
+}
+
+// Reimburse the rider the EXACT depot counter amount they fronted — fee-free
+// (the sender's processing fee already covered DropOff's costs). The audit
+// trail: a payments row (kind rider_reimbursement, settles by webhook like
+// cod_remit) + a job-linked ledger row. Failures raise a job event so ops can
+// pay the rider manually via /admin/payments/:id/refund — the money is owed,
+// it never disappears.
+async function reimburseRider(
+  env: Env,
+  job: { id: number; ref: string | null; rider_id: number | null },
+  amount: number,
+): Promise<void> {
+  if (amount <= 0) return;
+  const rider = job.rider_id
+    ? await env.DB.prepare('SELECT phone FROM riders WHERE id = ?1').bind(job.rider_id).first<any>()
+    : null;
+  if (!rider?.phone) {
+    await env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_failed', ?2)`,
+    ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} could not be sent — no rider on the job. Pay the rider manually via /admin/payments/:id/refund or payroll adjustment.`).run();
+    return;
+  }
+  const ref = `reimb-${job.id}-${Date.now().toString(36)}`;
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
+           lipila_fee_zmw, lipila_reference, status, channel, kind)
+         VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, 'pending', 'merchant', 'rider_reimbursement')`,
+      ).bind(job.id, rider.phone, providerFromPhone(rider.phone), amount, ref),
+      env.DB.prepare(
+        `INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'rider_reimburse', ?3)`,
+      ).bind(rider.phone, amount, job.id),
+    ]);
+    const disb = await lipilaDisburse(env, rider.phone, amount, ref,
+      `DropOff counter fare reimbursement ${job.ref ?? job.id}`.replace(/[^A-Za-z0-9 ]/g, ' '));
+    if (!disb.ok) {
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE payments SET status = 'failed' WHERE lipila_reference = ?1 AND status = 'pending'`).bind(ref),
+        env.DB.prepare(
+          `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_failed', ?2)`,
+        ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} to the rider failed at payout init (Lipila) — retry via /admin/payments/:id/refund. The rider is OWED this money.`),
+      ]);
+    }
+  } catch {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_failed', ?2)`,
+      ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} bookkeeping failed — pay the rider manually. The money is owed.`);
+    } catch { /* last resort: never break settlement */ }
   }
 }
 
@@ -4457,8 +4759,8 @@ app.post('/webhooks/lipila', async (c) => {
   ).bind(String(ref)).first<any>();
   if (!pay) return c.json({ ok: true });
 
-  if (pay.kind === 'cod_remit') {
-    // our own disbursement — only mark the audit event, settle flag not needed
+  if (pay.kind === 'cod_remit' || pay.kind === 'rider_reimbursement') {
+    // our own disbursements — only mark the audit event, settle flag not needed
     if (pay.status !== 'success') await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, 'success').run();
     return c.json({ ok: true });
   }
@@ -5095,7 +5397,7 @@ app.get('/rider/queue', async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.parcels, j.status,
-            j.sender_name, j.eta_minutes, j.pickup_window, j.created_at,
+            j.sender_name, j.eta_minutes, j.pickup_window, j.created_at, j.from_city,
             co.name AS courier_name, co.depot_name, co.city AS courier_city
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
       WHERE j.rider_id = ?1 AND j.status NOT IN ('delivered', 'ready_for_collection')
@@ -5139,6 +5441,12 @@ app.get('/rider/queue', async (c) => {
           time: hmOf(clockMin),
           ref: job.ref,
           address: job.pickup_address,
+          // Coordinates let the app offer one-tap Waze/Google-Maps navigation
+          // per stop; null for typed addresses without a pin (the app then
+          // navigates by address text).
+          lat: job.pickup_lat ?? null,
+          lng: job.pickup_lng ?? null,
+          from_city: job.from_city ?? '',
           seller: job.sender_name,
           parcels: Number(job.parcels ?? 1),
           status: job.status,
@@ -7191,6 +7499,8 @@ app.get('/jobs/:ref/evidence', async (c) => {
             j.parcel_photo_url, j.dropoff_photo_url, j.pod_pickup_url, j.pod_delivery_url,
             j.parcel_check, j.parcel_check_review, j.partner_confirmed, j.last_mile,
             j.declared_value_zmw, j.cover_opt_in, j.cover_fee_zmw, j.cover_status,
+            j.counter_receipt_url, j.counter_receipt_zmw, j.counter_receipt_paid,
+            j.counter_receipts_json,
             j.delivery_otp_hash, j.courier_waybill, j.pickup_window, j.dest_city, j.branch,
             r.phone AS rider_phone, r.full_name AS rider_name
        FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
@@ -7205,6 +7515,21 @@ app.get('/jobs/:ref/evidence', async (c) => {
   ).bind(job.id).all<any>();
   let parcelCheck: any = null;
   try { parcelCheck = job.parcel_check ? JSON.parse(job.parcel_check) : null; } catch {}
+  const isOwnSender = phone === job.sender_phone;
+  // REAL RECEIPT, VISIBLE BUT LOCKED (owner directive 2026-11-12): the sender
+  // (and staff) always receive the rider-submitted depot receipt photo(s) and
+  // amount(s) — the app renders them blurred behind a lock until the depot
+  // bill is cleared. Recipients and strangers get nothing.
+  const counterReceipt = job.counter_receipt_zmw && (isOwnSender || isAdminKey || isOpsKey)
+    ? {
+        amount_zmw: job.counter_receipt_zmw,
+        url: job.counter_receipt_url ?? null,
+        paid: Number(job.counter_receipt_paid ?? 0) === 1,
+        // Multi-receipt depot drops: every photographed receipt with its own
+        // exact written amount (first = the primary preview).
+        receipts: job.counter_receipts_json ? JSON.parse(job.counter_receipts_json) : null,
+      }
+    : null;
   const evidence = {
     booking_photo: job.parcel_photo_url || null,
     pickup_photo: job.pod_pickup_url || null,
@@ -7215,6 +7540,7 @@ app.get('/jobs/:ref/evidence', async (c) => {
     partner_confirmed: Number(job.partner_confirmed ?? 0) === 1,
     otp_required: !!job.delivery_otp_hash && job.delivery_otp_hash !== '0000' && Number(job.last_mile) === 1,
     waybill: job.courier_waybill || null,
+    counter_receipt: counterReceipt,
   };
   return c.json({
     ok: true,

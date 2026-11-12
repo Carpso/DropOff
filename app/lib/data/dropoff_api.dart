@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// All rights reserved — unauthorised copying, resale or rebranding of
+// this source code is prohibited.
+// ─────────────────────────────────────────────────────────────────────
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -485,8 +492,10 @@ class DropOffApi {
   /// photo (depot drop or door alike). For door deliveries the server also
   /// REQUIRES [otp] — the recipient's 4-digit DropOff code. [stage]
   /// ('pickup' | 'delivery') files the proof photo against the right leg.
-  /// NO-QUOTING POLICY: riders never send counter fares — that field is
-  /// ops/admin-only on the server and no rider UI offers it.
+  /// Depot counter flow (owner directive 2026-11-12): riders TRANSCRIBE the
+  /// exact amount written on the depot receipt (never quote a fare) and file
+  /// two photos — the parcel and the depot receipt. The sender pays that
+  /// amount + processing through DropOff; the rider is reimbursed fee-free.
   static Future<ApiResponse> jobEvent({
     required String jobRef,
     String? status,
@@ -495,6 +504,10 @@ class DropOffApi {
     String? photoUrl,
     String? stage,
     String? otp,
+    String? receiptUrl,
+    double? receiptAmountZmw,
+    List<Map<String, dynamic>>? receipts,
+    List<String>? parcelPhotos,
     double? lat,
     double? lng,
   }) =>
@@ -505,6 +518,10 @@ class DropOffApi {
         if (photoUrl != null) 'photo_url': photoUrl,
         if (stage != null) 'stage': stage,
         if (otp != null) 'otp': otp,
+        if (receiptUrl != null) 'receipt_url': receiptUrl,
+        if (receiptAmountZmw != null) 'receipt_amount_zmw': receiptAmountZmw,
+        if (receipts != null) 'receipts': receipts,
+        if (parcelPhotos != null) 'parcel_photos': parcelPhotos,
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,
       });
@@ -913,6 +930,21 @@ class DropOffApi {
         'job_ref': jobRef,
         'phone': phone,
         'channel': channel,
+        if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
+      }, timeout: _paymentTimeout);
+
+  /// Depot counter fare (owner directive 2026-11-12): pay the EXACT amount
+  /// transcribed off the depot receipt + processing. The receipt photo
+  /// unlocks on approval and the rider is reimbursed fee-free.
+  static Future<ApiResponse> payCounterFare({
+    required String jobRef,
+    required String phone,
+    String? idempotencyKey,
+  }) =>
+      post('/payments', {
+        'kind': 'counter_fare',
+        'job_ref': jobRef,
+        'phone': phone,
         if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
       }, timeout: _paymentTimeout);
   /// Poll Lipila collect status (call every ~2s up to ~40s).

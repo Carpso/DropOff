@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// All rights reserved — unauthorised copying, resale or rebranding of
+// this source code is prohibited.
+// ─────────────────────────────────────────────────────────────────────
 import '../ui/app_toast.dart';
 import 'dart:async';
 
@@ -385,6 +392,11 @@ class _BookingScreenState extends State<BookingScreen> {
     if (_step == 0) {
       if (_from == _to) return _message('Choose different pickup and destination cities.');
       if (_pickup.text.trim().length < 4) return _message('Enter the home or shop pickup address.');
+      // Nudge, never block: a pin gives exact dispatch + turn-by-turn stops;
+      // a typed address still books (navigated by its text).
+      if (_pickupLat == null) {
+        _message('Tip: tap the location icon to pin the pickup — the nearest rider and the turn-by-turn route both use it.');
+      }
     } else if (_step == 1) {
       if (_description.text.trim().length < 3) return _message('Briefly describe what is inside the parcel.');
     }
@@ -476,7 +488,7 @@ class _BookingScreenState extends State<BookingScreen> {
     final l10n = AppLocalizations.of(context);
     final serverCourierId = courierServerIdOf(_courierId);
     if (serverCourierId == null) {
-      return _message('That courier is not available for booking yet — pick Platinum, Mercury, DHL, One World, Rovert or Icypeed.');
+      return _message('That courier is not available for booking yet — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
     }
     if (_senderName.text.trim().length < 2 || _recipientName.text.trim().length < 2) {
       return _message('Enter the sender and recipient names.');
@@ -748,6 +760,10 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 4),
           const Text('Pickup pinned to your current location — we will match you with the nearest rider.',
               style: TextStyle(color: AppColors.forest, fontSize: 10.5, height: 1.3)),
+        ] else ...[
+          const SizedBox(height: 4),
+          const Text('No pin yet — the rider still finds you by your address, but pinning it gives the nearest rider and an exact route.',
+              style: TextStyle(color: AppColors.amber, fontSize: 10.5, height: 1.3)),
         ],
         const SizedBox(height: 16),
         SwitchListTile(
@@ -1143,6 +1159,8 @@ class _BookingScreenState extends State<BookingScreen> {
           ]),
         ),
         const SizedBox(height: 24),
+        _CounterReminder(to: _to),
+        const SizedBox(height: 8),
         _PlanBanner(parcels: _parcels),
         const SizedBox(height: 14),
         Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1272,6 +1290,59 @@ class BookingSuccessScreen extends StatelessWidget {
 }
 
 
+
+/// SMART COUNTER REMINDER (owner directive 2026-11-12): a repeat sender sees
+/// what they ACTUALLY paid at that destination's depot last time — drawn only
+/// from PAID depot receipts already filed on their bookings. This is memory
+/// of real receipts, never a quote: the next trip's fare is still decided at
+/// the depot counter and repaid from the receipt photo.
+class _CounterReminder extends StatelessWidget {
+  final String to;
+  const _CounterReminder({required this.to});
+
+  @override
+  Widget build(BuildContext context) {
+    final dest = to.trim().toLowerCase();
+    if (dest.isEmpty) return const SizedBox.shrink();
+    final hits = AppScope.of(context)
+        .bookings
+        .where((b) =>
+            b.dispatched &&
+            b.counterReceiptPaid &&
+            (b.counterReceiptZmw ?? 0) > 0 &&
+            b.toCity.trim().toLowerCase() == dest)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (hits.isEmpty) return const SizedBox.shrink();
+    final last = hits.first;
+    final courierName = courierById(last.courierId).name;
+    final d = last.createdAt;
+    final when = '${d.day}/${d.month}/${d.year}';
+    final parcelsSeen = hits.fold<int>(0, (n, b) => n + b.parcels);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.amber.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.amber.withValues(alpha: 0.4)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Row(children: [
+          Icon(Icons.history, size: 15, color: Color(0xFF7B5710)),
+          SizedBox(width: 6),
+          Text('Smart reminder', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: Color(0xFF7B5710))),
+        ]),
+        const SizedBox(height: 5),
+        Text(
+          'Last time to ${last.toCity} you paid K${(last.counterReceiptZmw ?? 0).toStringAsFixed(2)} at the $courierName counter ($when).'
+          '${parcelsSeen > 1 ? ' Across ${hits.length} paid trip${hits.length == 1 ? '' : 's'} ($parcelsSeen parcels) since you started booking there.' : ''}'
+          ' Expect a similar depot amount — your rider fronts it and you repay exactly what the receipt says.',
+          style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+        ),
+      ]),
+    );
+  }
+}
 
 /// Shows the signed-in seller which plan is active and how this trip deducts
 /// from it — no more guessing between plan parcels and pay-as-you-go.

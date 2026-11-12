@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// All rights reserved — unauthorised copying, resale or rebranding of
+// this source code is prohibited.
+// ─────────────────────────────────────────────────────────────────────
 import 'dart:math';
 
 import '../models/booking.dart';
@@ -6,7 +13,7 @@ import '../models/booking.dart';
 /// jobs.courier_id against couriers(id) — a catalog string like 'platinum'
 /// bound into that INTEGER FK fails the whole INSERT (SQLITE_CONSTRAINT).
 const Map<String, int> kCourierServerIds = {
-  'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4,
+  'platinum': 1, 'mercury': 3, 'dhl': 14, 'rovert': 22, 'oneworld': 6, 'icypeed': 4, 'falcon': 39,
 };
 
 /// Catalog id ('platinum'…) or a raw server id → server courier id.
@@ -143,6 +150,35 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'The public rate cards primarily cover UK/South Africa to Zambia forwarding. They must not be presented as Lusaka–Ndola domestic fares. Request a local counter quote instead.',
     colorValue: 0xFF147D92,
+  ),
+  CourierInfo(
+    id: 'falcon',
+    name: 'Falcon Express',
+    strapline: 'Express parcels • Dial-A-Collector free pickups',
+    priceStatus: 'Quoted at counter',
+    sourceLabel: 'iZambia + published depot listings',
+    sourceUrl: 'https://www.izambia.net/falcon-express/',
+    sourceDate: 'Checked 12 November 2026',
+    note: 'Lusaka express courier. Woodlands HQ: 16 Mwapona Rd cnr Sianjalika Rd, Lusaka 10101 (also Chilenje: Choppies Mall, Muramba Rd). +260 971 130 766 · +260 966 297 000 · expressfalcon29@gmail.com. Mon–Fri 07:45–17:15, Sat 08:00–17:00, Sun 08:30–14:30. Dial-A-Collector pickups are free on their side. No public tariff — the counter fare is confirmed at the depot and recorded before dispatch.',
+    colorValue: 0xFFB25E09,
+    branches: [
+      CourierBranch(
+        name: 'Woodlands HQ',
+        city: 'Lusaka',
+        address: '16 Mwapona Rd cnr Sianjalika Rd, Woodlands · 07:45–17:15 (Sun 08:30–14:30)',
+        phone: '+260 971 130 766',
+        lat: -15.442786,
+        lng: 28.346064,
+      ),
+      CourierBranch(
+        name: 'Chilenje branch',
+        city: 'Lusaka',
+        address: 'Choppies Mall, Muramba Rd, Chilenje',
+        phone: '+260 966 297 000',
+        lat: -15.4312,
+        lng: 28.3166,
+      ),
+    ],
   ),
 ];
 

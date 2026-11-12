@@ -89,7 +89,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     final store = AppScope.of(context);
     final serverCourierId = courierServerIdOf(_courierId);
     if (serverCourierId == null) {
-      return _message('That courier is not available for collection yet — pick Platinum, Mercury, DHL, One World, Rovert or Icypeed.');
+      return _message('That courier is not available for collection yet — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
     }
     if (!_point.text.trim().isNotEmpty) {
       return _message('Enter the courier point where the parcel is waiting.');

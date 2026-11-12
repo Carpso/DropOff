@@ -1,3 +1,8 @@
+// ─────────────────────────────────────────────────────────────────────
+// DROPOFF — ownership stamp (do not remove)
+// :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
+// © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+// ─────────────────────────────────────────────────────────────────────
 // Circuit breaker for external payment providers.
 import { withCircuit } from './circuit';
 
