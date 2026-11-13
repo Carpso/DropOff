@@ -794,8 +794,13 @@ class _BusinessScreenState extends State<BusinessScreen> {
             ),
             const SizedBox(width: 10),
             IconButton.filled(
-              tooltip: 'Copy code',
-              onPressed: code.isEmpty ? null : () => Clipboard.setData(ClipboardData(text: code)),
+              tooltip: 'Copy code with context',
+              onPressed: code.isEmpty
+                  ? null
+                  : () => Clipboard.setData(ClipboardData(
+                        text: 'DropOff referral code: $code\n'
+                            'Use it when signing up — you and they both get 20% off a DropOff leg.',
+                      )),
               icon: const Icon(Icons.copy, size: 18),
             ),
             const SizedBox(width: 4),

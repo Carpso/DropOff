@@ -1016,7 +1016,10 @@ class _ReferralCardState extends State<_ReferralCard> {
   Future<void> _copy() async {
     final code = _data?['code'] as String? ?? '';
     if (code.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: code));
+    // Include human context: what the code is for and how to use it.
+    final text = 'My DropOff referral code: $code\n'
+        'Sign up in the app → enter this code and get home pickup to your courier — both of us get a 20% promo on a DropOff leg.';
+    await Clipboard.setData(ClipboardData(text: text));
     if (mounted) setState(() => _copied = true);
     await Future<void>.delayed(const Duration(seconds: 2));
     if (mounted) setState(() => _copied = false);

@@ -17,6 +17,7 @@ class AppStore extends ChangeNotifier {
   static const _rememberKey = 'dropoff_remember_v1';
   static const _biometricKey = 'dropoff_biometric_v1';
   static const _deviceKey = 'dropoff_device_id_v1';
+  static const _shareLocationKey = 'dropoff_share_location_v1';
   static const _accountKey = 'dropoff_acct_v1';
 
   String _account = 'anon';
@@ -44,6 +45,9 @@ class AppStore extends ChangeNotifier {
   String? _fullName;
   String? _localeCode;
   bool _superadmin = false;
+  /// Live-position broadcasting defaults ON once a rider signs in. The rider
+  /// can flip it off any time; it only fires when GPS is granted anyway.
+  bool _shareLocationOn = true;
   bool _biometricEnabled = false;
   String _deviceId = 'unknown';
 
@@ -80,6 +84,16 @@ class AppStore extends ChangeNotifier {
   /// True when the signed-in phone is the app owner's (or the admin key is
   /// configured): unlocks user/role management in the admin console.
   bool get isSuperAdmin => _superadmin;
+
+  /// Whether this rider broadcasts live GPS for the jobs they carry.
+  bool get shareLocationOn => _shareLocationOn;
+
+  Future<void> setShareLocationOn(bool on) async {
+    _shareLocationOn = on;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_shareLocationKey, on);
+    notifyListeners();
+  }
 
   /// Fingerprint/face gate for this device (Account → Privacy & sign-in).
   bool get biometricEnabled => _biometricEnabled;
@@ -156,6 +170,7 @@ class AppStore extends ChangeNotifier {
       await preferences.setString(_deviceKey, dev);
     }
     _deviceId = dev;
+    _shareLocationOn = preferences.getBool(_shareLocationKey) ?? true;
     DropOffApi.installDeviceId(dev);
     unawaited(refreshCourierAvailability());
     if (!remember) {
@@ -519,6 +534,10 @@ class AppStore extends ChangeNotifier {
     _photoUrl = null;
     _fullName = null;
     _superadmin = false;
+    // A different rider may link this phone next — do not leak this GPS.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_shareLocationKey, false);
+    _shareLocationOn = false;
     _bookings.clear();
     _riders.clear();
     _outbox.clear();

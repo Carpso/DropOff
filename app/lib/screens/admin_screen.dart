@@ -951,7 +951,10 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
     final data = await DropOffApi.adminSupportThreads();
     if (!mounted) return;
     setState(() {
-      _threads = ((data?['threads'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _threads = ((data?['threads'] as List?) ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
       _loading = false;
     });
   }

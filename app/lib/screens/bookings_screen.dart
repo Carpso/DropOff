@@ -589,6 +589,9 @@ class _TrackingLinkCard extends StatefulWidget {
 class _TrackingLinkCardState extends State<_TrackingLinkCard> {
   bool _busy = false;
 
+  /// Copies a message WITH context (not the bare URL) so whatever channel the
+  /// user pastes it into is instantly understood: what it is, whose parcel,
+  /// how to use it.
   Future<void> _copy() async {
     setState(() => _busy = true);
     final data = await DropOffApi.trackingLink(widget.jobRef);
@@ -599,9 +602,13 @@ class _TrackingLinkCardState extends State<_TrackingLinkCard> {
       AppToast.warning(context, 'Tracking link not ready yet — check your connection and try again.');
       return;
     }
-    await Clipboard.setData(ClipboardData(text: url));
+    final ref = widget.jobRef;
+    final text = 'DropOff — parcel $ref is on the way!\n'
+        'Track it live here (parcel status + rider GPS on the map, no account needed, prices never shown):\n'
+        '$url';
+    await Share.share(text, subject: 'DropOff parcel $ref — live tracking link');
     if (!mounted) return;
-    AppToast.success(context, 'Recipient tracking link copied — send it by SMS or WhatsApp.');
+    AppToast.success(context, 'Tracking link ready to share — paste into WhatsApp/SMS.');
   }
 
   @override

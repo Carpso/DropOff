@@ -9,6 +9,7 @@ import 'dart:io';
 
 import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
+import '../state/app_store.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../ui/in_app_browser.dart';
@@ -255,6 +256,13 @@ class OperationsScreen extends StatelessWidget {
     }
   }
 
+  /// Live-position card: visible ON/OFF state + auto-ping for riders who opted
+  /// in (the default). Requests GPS once, and shows precise feedback.
+  Widget _RiderLocationCard(BuildContext context) {
+    final store = AppScope.of(context);
+    return _RiderLocationCardInner(store: store);
+  }
+
   Future<void> _pingMyLocation(BuildContext context) async {
     final store = AppScope.of(context);
     if (!store.linked) {
@@ -342,18 +350,7 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 12),
           const _RiderTargetsCard(),
           const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.my_location, color: AppColors.forest),
-              title: const Text('Share live position', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-              subtitle: const Text('Broadcast your GPS so senders of your jobs can follow you live.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
-              trailing: FilledButton.tonal(
-                style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), minimumSize: const Size(0, 36)),
-                onPressed: () => _pingMyLocation(context),
-                child: const Text('Share'),
-              ),
-            ),
-          ),
+          _RiderLocationCard(context),
           const SizedBox(height: 22),
           Card(
             child: ListTile(
@@ -527,6 +524,123 @@ class OperationsScreen extends StatelessWidget {
     if (v.contains('van')) return 'van';
     if (v.contains('car')) return 'car';
     return 'motorcycle';
+  }
+}
+
+/// Rider live-position panel:
+/// - Shows an obvious ON/OFF status with forest/OFF semantics.
+/// - Default ON for riders (they can opt out any time it just stops sharing).
+/// - Auto-pings when the card mounts if sharing is enabled + rider is linked.
+class _RiderLocationCardInner extends StatefulWidget {
+  final AppStore store;
+  const _RiderLocationCardInner({required this.store});
+
+  @override
+  State<_RiderLocationCardInner> createState() => _RiderLocationCardInnerState();
+}
+
+class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
+  bool _pinging = false;
+  String? _lastStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-share when enabled — gentle one-time ping on mount.
+    if (widget.store.shareLocationOn && widget.store.linked && widget.store.isRider) {
+      _ping(silent: true);
+    }
+  }
+
+  Future<void> _ping({bool silent = false}) async {
+    if (_pinging) return;
+    if (!widget.store.linked) return;
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      if (mounted && !silent) {
+        setState(() => _lastStatus = 'Location permission needed to share your live position.');
+        AppToast.show(context, 'Enable location permission to share your position.');
+      }
+      return;
+    }
+    setState(() => _pinging = true);
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      final res = await DropOffApi.riderPing(phone: widget.store.linkedPhone!, lat: pos.latitude, lng: pos.longitude);
+      if (!mounted) return;
+      setState(() {
+        _pinging = false;
+        _lastStatus = res.ok ? 'Live position ON — senders can follow you.' : 'Location saved locally; ping failed — try again.';
+      });
+      if (!silent && res.ok) {
+        AppToast.show(context, 'Live position shared with senders of your jobs.');
+      } else if (!silent && !res.ok) {
+        AppToast.show(context, 'Could not submit position (network) — retry when online.');
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _pinging = false; _lastStatus = 'Location unavailable — GPS off or no fix.'; });
+      if (!silent) AppToast.show(context, 'Location unavailable — check GPS.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = widget.store;
+    final on = store.shareLocationOn;
+    return Card(
+      color: on ? AppColors.forest.withValues(alpha: 0.07) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: on ? AppColors.forest.withValues(alpha: 0.45) : AppColors.line),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.my_location, color: AppColors.forest),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Live position sharing', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            Switch(
+              value: on,
+              activeTrackColor: AppColors.forest,
+              onChanged: (value) async {
+                await store.setShareLocationOn(value);
+                if (value) await _ping();
+                if (mounted) setState(() {});
+              },
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text(
+            on
+                ? 'ON — when you take a job the sender\'s tracking link cannot see prices, but it can show them exactly where you are on the map.'
+                : 'Off — senders will see your name, vehicle and ETA only; never your live coordinates.',
+            style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+          ),
+          if (_lastStatus != null) ...[
+            const SizedBox(height: 6),
+            Text(_lastStatus!, style: const TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.3)),
+          ],
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _pinging ? null : _ping,
+              icon: _pinging
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.gps_fixed, size: 17),
+              label: Text(on ? 'Re-share my live position now' : 'Enable & share position'),
+            ),
+          ),
+        ]),
+      ),
+    );
   }
 }
 
