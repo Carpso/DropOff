@@ -1003,6 +1003,8 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
   bool _faceBusy = false;
   String? _busyField;
   bool _submitted = false;
+  /// Collapsed by default — the verified rider is busy, not editing. Tap to open.
+  bool _collapsed = true;
 
   @override
   void initState() {
@@ -1232,9 +1234,14 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
             ? (const Color(0xFFB3261E), 'REJECTED')
             : (const Color(0xFF8A5A00), 'PENDING REVIEW');
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: InkWell(
+          onTap: () => setState(() => _collapsed = !_collapsed),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Icon(Icons.verified_user_outlined, color: AppColors.forest),
             const SizedBox(width: 10),
@@ -1244,7 +1251,14 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
               decoration: BoxDecoration(color: chipColor.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
               child: Text(chipText, style: TextStyle(color: chipColor, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
             ),
+            const SizedBox(width: 6),
+            AnimatedRotation(
+              turns: _collapsed ? 0 : 0.5,
+              duration: const Duration(milliseconds: 220),
+              child: const Icon(Icons.expand_more, color: AppColors.muted),
+            ),
           ]),
+          if (!_collapsed) ...[
           const SizedBox(height: 4),
           const Text('Your NRC, licence, plate and vehicle photos. The owner/admin verifies these before you can be assigned jobs.',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
@@ -1331,9 +1345,12 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
               ),
             ),
           ],
-        ]),
-      ),
-    );
+          ],
+          ]),
+          ), // Padding
+        ), // InkWell
+      ), // Theme
+    ); // Card
   }
 }
 
