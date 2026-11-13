@@ -115,8 +115,9 @@ makes false-parcel claims impossible.
 WHY SELLERS USE DROPOFF
 * Door pickup in Zambian cities — Lusaka's 6:00/10:00/14:00 sweeps or an
   instant ride, tomorrow slots included.
-* One place for every courier: Mercury, and more — counter prices are
-  published in the app so you compare before you commit.
+* One place for every courier — Platinum, Mercury, DHL, One World, Icypeed,
+  Rovert, Falcon and more. Counter fares are heard at the depot — we never
+  publish them or quote them; you pay exactly what the receipt says.
 * Handover protection: your parcel recipient gets a 4-digit DropOff code by
   SMS; the delivery only completes when that code is entered. Photos are
   filed at pickup and at handover.
@@ -168,8 +169,8 @@ Questions? support@carpsosolutions.store
   deliveries — the delivery only completes with the right code. Protects
   sellers from false-parcel claims.
 * Proof-of-delivery photos on every leg from the rider queue.
-* Parcels can now carry a declared value (K1-K1,000,000) for insurance and
-  compliance.
+* Parcels can now carry a declared value (K1-K1,000,000) for quoted-protection
+  cover (never insurance — payout is at DropOff's discretion) and compliance.
 * Book a pickup for tomorrow morning (06:00 sweep) directly from the app.
 * Subscriptions renamed to Packs — clearer pricing, easier upgrades.
 * Camera capture fixes on profile & rider KYC; text scaling fixed on all
@@ -179,7 +180,8 @@ Questions? support@carpsosolutions.store
 ## 6. Verify before promoting
 
 - Fresh install from the testing track, not a local build.
-- Register → OTP arrives → book a cash job → recipient receives the tracking SMS
+- Register → OTP arrives → book a prepaid (momo) job → prompt approved →
+  rider dispatched → recipient receives the tracking SMS
   WITH the 4-digit handover code.
 - Mark a delivery as the assigned rider **without** the code → server rejects
   (`otp_required`); with the code → delivered.
