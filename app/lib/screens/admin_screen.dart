@@ -1224,7 +1224,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
       child: Container(
         height: MediaQuery.of(context).size.height * 0.82,
         width: double.infinity,
-        color: AppColors.surface,
+        color: Colors.white,
         child: Column(children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
