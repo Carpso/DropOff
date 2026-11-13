@@ -307,7 +307,6 @@ class _FareChecker extends StatefulWidget {
 /// Prices the user's pinned pickup → the nominated depot. Not city-to-city.
 class _FareCheckerState extends State<_FareChecker> {
   String _courierId = 'platinum';
-  int _branchIndex = 0;
   String _vehicle = 'motorcycle';
   double? _lat;
   double? _lng;
@@ -378,15 +377,24 @@ class _FareCheckerState extends State<_FareChecker> {
     }
   }
 
+  /// Check the rider fee → Book: carry over EVERYTHING the sender already
+  /// typed on the checker (pickup name, courier, vehicle class, pinned GPS)
+  /// so they never retype it in the booking wizard.
   void _book() {
-    BookingScreen.prefill = {'from': 'Lusaka', 'pickup': _place.text.trim().isEmpty ? 'Home' : _place.text.trim()};
+    BookingScreen.prefill = {
+      'from': 'Lusaka',
+      'pickup': _place.text.trim().isEmpty ? 'Home' : _place.text.trim(),
+      'courier': _courierId,
+      'vehicle_class': _vehicle,
+      if (_lat != null) 'pickup_lat': _lat,
+      if (_lng != null) 'pickup_lng': _lng,
+    };
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
   }
 
   @override
   Widget build(BuildContext context) {
-    final branches = _branches;
-    final branch = branches[_branchIndex.clamp(0, branches.length - 1)];
+    final branch = _branches.first; // estimate target depot (owner dropped the picker)
     final km = (_lat != null && _lng != null) ? _haversineKm(_lat!, _lng!, branch.lat!, branch.lng!) : null;
     final fee = km != null ? _fee(km) : null;
     return Card(
@@ -399,8 +407,6 @@ class _FareCheckerState extends State<_FareChecker> {
             Expanded(child: Text('Check the rider fee', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
           ]),
           const SizedBox(height: 4),
-          const Text('Your pickup spot → the depot your courier hands over to. Never city-to-city: the inter-city fare is the depot\'s, heard at the counter — we don\'t publish it.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
           const SizedBox(height: 12),
           TextField(
             controller: _place,
@@ -417,20 +423,9 @@ class _FareCheckerState extends State<_FareChecker> {
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'Courier depot', isDense: true),
               items: [for (final c in mergedCouriers(AppScope.of(context).activeServerCouriers)) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))],
-              onChanged: (v) => setState(() {
-                _courierId = v ?? _courierId;
-                _branchIndex = 0;
-              }),
+              onChanged: (v) => setState(() => _courierId = v ?? _courierId),
             )),
           ]),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<int>(
-            initialValue: _branchIndex,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Depot branch', isDense: true),
-            items: [for (var i = 0; i < branches.length; i++) DropdownMenuItem(value: i, child: Text(branches[i].name, overflow: TextOverflow.ellipsis))],
-            onChanged: (v) => setState(() => _branchIndex = v ?? 0),
-          ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             initialValue: _vehicle,
@@ -458,7 +453,7 @@ class _FareCheckerState extends State<_FareChecker> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
                 fee != null
-                    ? 'DropOff rider leg: K${fee.toStringAsFixed(0)} — pickup to ${branch.name} (${km!.toStringAsFixed(1)} km)'
+                    ? 'DropOff rider leg: K${fee.toStringAsFixed(0)} — pickup to ${_courier.name} (${km!.toStringAsFixed(1)} km)'
                     : 'DropOff rider leg: K55 / K75 / K95 by distance — pin your pickup for your exact fee, or just book: it locks when you pay (momo prepaid)',
                 style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
               ),

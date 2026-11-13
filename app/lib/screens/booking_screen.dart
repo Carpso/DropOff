@@ -148,17 +148,28 @@ class _BookingScreenState extends State<BookingScreen> {
       for (final s in ParcelSize.values) {
         if (s.name == size) { _size = s; break; }
       }
+      // Fee checker pins the pickup GPS — reuse it in dispatch.
+      final lat = (pre['pickup_lat'] as num?)?.toDouble();
+      final lng = (pre['pickup_lng'] as num?)?.toDouble();
+      if (lat != null && lng != null) { _pickupLat = lat; _pickupLng = lng; }
       // Older snapshots/job rows carry the chargebook weight class instead.
       switch ('${pre['weight_class'] ?? ''}') {
         case '0-5kg': _size = ParcelSize.small; break;
         case '5-15kg': _size = ParcelSize.medium; break;
         case '15kg+': _size = ParcelSize.large; break;
       }
-      final catalogCourier = '${pre['courier_catalog_id'] ?? ''}'.trim();
-      if (catalogCourier.isNotEmpty) {
-        _courierId = catalogCourier;
+      // Fee checker sends the catalog id straight through; legacy snapshots
+      // carry server ids instead — accept either, prefer an exact catalog id.
+      final direct = '${pre['courier'] ?? ''}'.trim();
+      if (direct.isNotEmpty && couriers.any((c) => c.id == direct)) {
+        _courierId = direct;
       } else {
-        _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
+        final catalogCourier = '${pre['courier_catalog_id'] ?? ''}'.trim();
+        if (catalogCourier.isNotEmpty) {
+          _courierId = catalogCourier;
+        } else {
+          _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
+        }
       }
       final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
       if (parcels > 0 && parcels <= _maxParcelsByVehicle[_vehicleClass]!) _parcels = parcels;
