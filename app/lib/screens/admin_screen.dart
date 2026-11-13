@@ -49,8 +49,16 @@ class _AdminScreenState extends State<AdminScreen> {
   @override
   void initState() {
     super.initState();
+    // Re-evaluate the Send button (and the preview) as the admin types —
+    // otherwise the button looks permanently disabled while the field is
+    // filled, because typing never triggers a rebuild on its own.
+    _pushTitle.addListener(_revalidateForm);
+    _pushBody.addListener(_revalidateForm);
+    _smsBody.addListener(_revalidateForm);
     _load();
   }
+
+  void _revalidateForm() => setState(() {});
 
   @override
   void dispose() {
@@ -862,7 +870,7 @@ class _AdminScreenState extends State<AdminScreen> {
             const SizedBox(height: 10),
             Row(children: [
               Expanded(child: FilledButton(
-                onPressed: _pushSending || _pushTitle.text.trim().isEmpty ? null : _sendPushBroadcast,
+                onPressed: _pushSending || _pushTitle.text.trim().isEmpty || _pushBody.text.trim().isEmpty ? null : _sendPushBroadcast,
                 child: Text(_pushSending ? 'Sending…' : 'Send push broadcast'),
               )),
             ]),
