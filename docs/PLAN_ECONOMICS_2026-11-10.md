@@ -44,7 +44,7 @@ On a plan (`/collections` plan-inclusion path, `index.ts` ~1988–2006):
 
 But a rider still physically drives the trip. Rider payouts are recorded manually via `/admin/payouts` (kind `rider_earning`). The rider's defensible rate is the same share they'd earn on PAYG: **90% of the prevailing fee ≈ K58 net per motorcycle trip** (90% of K70, minus K1.5 disbursement and K3.48 platform-fee-on-share — per `payoutNet`).
 
-**Therefore: every in-plan trip is a cost the plan fee must cover.** There is no other payer. A bike can carry up to 3 parcels in one trip, which divides that K58 across the parcels consumed.
+**Therefore: every in-plan trip is a cost the plan fee must cover.** There is no other payer. A bike can carry up to 5 parcels in one trip, which divides that K58 across the parcels consumed.
 
 ## 4. Per-tier audit at full cap utilisation (worst case) and consolidated trips
 

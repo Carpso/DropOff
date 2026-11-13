@@ -41,7 +41,7 @@ Push constant, honest, maths-first nudges — never nags:
 
 | Stage | Signal | Message |
 |---|---|---|
-| PAYG → Daily Rider | seller ships 1–2 parcels on burst days | "Bursting this week? Daily Rider: K49/day, 2 parcels, rider included — only the days you ship." (visible as `daily_option` in Business → DropOff Predict) |
+| PAYG → Daily Rider | seller ships 1–2 parcels on burst days | "Bursting this week? Daily Rider: K49/day, 1 parcel, rider included — only the days you ship." (visible as `daily_option` in Business → DropOff Predict) |
 | Regular → Weekly Sprint | 3+ parcels in 30 days, no plan | "You shipped N parcels at K45. Weekly Sprint is K399/20." (already implemented as the 3+ upsell; now data-driven from Predict) |
 | Weekly → Silver | consistently hitting weekly cap | "50% more headroom: Silver K250/mo = 10 parcels, K25 each." |
 | Silver → Gold/Platinum | hitting monthly cap mid-cycle | "You'll outgrow Silver 7 days before month-end — Gold keeps the same rate, zero drama." (existing overage nudge, keep) |
@@ -70,7 +70,7 @@ Done, in both of the ways that matter:
    door pickup, courier-depot collection → door, and the last-mile leg — not only the classic drop-off booking.
    Collections consume the same slots. So "my shop's daily parcel runs" are just... covered by the plan, exactly
    like Yango bundling rides into a daily commuter pass.
-2. **Daily Rider (K49/day)** — the literal Yango answer: activate today, ship today, done. 2 parcels/day,
+2. **Daily Rider (K49/day)** — the literal Yango answer: activate today, ship today, done. 1 parcel/day,
    rider included, overage 45% off, windows include `now`. It is deliberately the *top* of the plan ladder's
    psychology (cheapest entry) and deliberately *not* a flat discount — it exists to convert PAYG occasionals,
    then graduate them up (Daily → Weekly → monthly) by showing them their own monthly spend every time they

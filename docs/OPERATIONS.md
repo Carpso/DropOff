@@ -325,7 +325,7 @@ Four explainable surfaces — no opaque model, every number carries basis + samp
   `cycle_days`, and **no payment prompt** is sent. Admin console → Plan codes
   card shows a "Copy all" batch for texting to the agent.
 - **Plans in D1** (source of truth, editable live): Daily Rider `rider_daily`
-  **K49/day, 2 parcels/day**, Weekly Sprint K399 (7 days), Silver K250 / 10
+  **K49/day, 1 parcel/day**, Weekly Sprint K399 (7 days), Silver K250 / 10
   parcels, Gold K500 / 25, Platinum K750 / 50 (30 days). Migration
   `0043_rider_daily.sql` seeds Daily Rider; `0039_tier_prices.sql` the price sync.
   `/plans` merges the D1 chargebook over the built-in fallback.

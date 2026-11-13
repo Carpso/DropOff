@@ -56,14 +56,14 @@ Example: 32 stops across Kabulonga/Northmead/Kanyama/Chilenje → 2 routes: 22 s
 - Float handling: COD is REMOVED — DropOff never handles recipient cash; parcels are prepaid at booking.
 - Rider payouts: `/admin/payouts kind=rider_payout` (momo) or batch remit Fridays, ≤ K5,000/day cap
 
-## 5b. Daily Rider (K49/day, 2 parcels)
+## 5b. Daily Rider (K49/day, 1 parcel)
 
 On-demand "Yango-style" usage, priced for impulse buys, not subscriptions:
 
 - **Price K49/day**, activates on payment (no approval window), 24h validity.
-- **2 parcels/day** included; rider fee and processing K0 inside the allowance (same guarantee as monthly plans).
-- **Overage 45% off PAYG** — a K45 trip costs K24.75 once the day's 2 slots are gone.
-- **Economics:** at 1 parcel/day average usage, effective cost ≈ K24.50/parcel — still above the Platinum K15/parcel, deliberately: the ladder's job is to push regular shippers *up* (Daily → Weekly at 4+ parcels/week → Silver+ at 10+/mo), and Daily's job is to convert pure-PAYG occasionals into plan-payers. Days used < 2 parcels are pure margin; the risk of abuse is capped by the 2-parcel/day meter.
+- **1 parcel/day** included; rider fee and processing K0 inside the allowance (same guarantee as monthly plans).
+- **No overage discount** — extra parcels that day price as plain PAYG.
+- **Economics:** at 1 parcel/day, effective cost ≈ K49/parcel — deliberately above Weekly Sprint and Platinum per-slot. The ladder's job is to push regular shippers *up* (Daily → Weekly at 4+ parcels/week → Silver+ at 10+/mo), and Daily's job is to convert pure-PAYG occasionals into plan-payers. Days used under 1 parcel are pure margin.
 - **Placement in the app:** Account → Subscribe; shown next to the plan ladder; never replaces Weekly Sprint as the default upsell. `POST /admin/tiers` can re-price/re-cap it live without a deploy.
 - **Frontend nudge:** Business → DropOff Predict surfaces it as `daily_option` when a seller ships in bursts (`forecast/2` days needed ≤ 30).
 
