@@ -6,6 +6,7 @@
 // this source code is prohibited.
 // ─────────────────────────────────────────────────────────────────────
 import '../ui/app_toast.dart';
+import '../ui/pay_job.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -962,35 +963,18 @@ class _PrepayCardState extends State<_PrepayCard> {
   Future<void> _payNow() async {
     final store = AppScope.of(context);
     setState(() => _busy = true);
-    final res = await DropOffApi.pay(
-      jobRef: widget.booking.serverRef!,
-      phone: widget.booking.senderPhone,
-      idempotencyKey: 'pay-${widget.booking.serverRef}-${DateTime.now().millisecondsSinceEpoch}',
-    );
-    if (!mounted) return;
-    if (!res.ok) {
-      setState(() => _busy = false);
-      AppToast.show(context, res.error == 'job already paid'
-          ? 'This delivery is already paid.'
-          : 'Payment could not start (${res.error ?? 'network'}) — check your connection and retry.');
-      return;
-    }
-    final paymentId = '${res.body['payment_id']}';
-    final reused = res.body['reused_advance_prompt'] == true;
-    var status = 'pending';
-    for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
-    }
+    final outcome = await PayJob.startAndPoll(jobRef: widget.booking.serverRef!, phone: widget.booking.senderPhone);
     if (!mounted) return;
     setState(() => _busy = false);
-    AppToast.show(context, switch (status) {
-      'success' => 'Prepayment received — your rider is being dispatched.',
-      'failed' => 'The momo prompt was rejected. Check your balance and tap Pay now again.',
-      _ => reused
-          ? 'The prompt is waiting on your phone — approve it to dispatch.'
-          : 'Prompt sent — approve it on your phone to dispatch your rider.',
-    });
+    AppToast.show(context, outcome == 'success'
+        ? 'Prepayment received — your rider is being dispatched.'
+        : outcome == 'failed'
+            ? 'The momo prompt was rejected. Check your balance and tap Pay now again.'
+            : outcome.startsWith('error:')
+                ? (outcome.contains('already paid')
+                    ? 'This delivery is already paid.'
+                    : 'Payment could not start (${outcome.substring(6)}) — check your connection and retry.')
+                : 'Prompt sent — approve it on your phone to dispatch your rider.');
     unawaited(store.syncJobsFromServer());
   }
 

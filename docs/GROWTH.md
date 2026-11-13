@@ -49,7 +49,7 @@ Push constant, honest, maths-first nudges — never nags:
 
 **Offer design that actually converts (and doesn't leak money):**
 - **First plan free month** for sellers who complete 2 paid PAYG bookings (KYC-lite = email verified + phone match). Cost of one free Silver month is K0 marginal (rider time is already swept) — buys an entire season of habit.
-- **Launch Friday**: every Friday for 4 weeks, one depot branch gets "plan activation day" with an agent + QR signup bonus (the agent and the depot partner both earn K50 per activated plan — self-funding acquisition).
+- **Month-close over-target incentive (added 2026-11-13):** riders stay salaried; the monthly target (30/day × days in month) is still the pace gate. On top of base salary (K3,000 incl. K300/week fuel), a month with target met pays **+K200 completion**, **+K5 per parcel beyond target** (counted up to 135 extra → max K675), and a **+K150 stretch bonus** at ≥1.25× target. Paid through payroll (note lists the split), never as cash-in-hand in-app — no "per parcel rate", compliance firmly intact.
 - **Hard rule**: never discount the plan below cost to hook sellers. Discount the *trial*, not the product — margin is the moat's fuel.
 
 ## 4. The moat — what stops a copycat

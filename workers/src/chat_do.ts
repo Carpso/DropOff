@@ -66,9 +66,13 @@ export class ChatRoom extends DurableObject {
       return;
     }
     const threadId = Number(client.threadId);
-    const thread = await this.db.prepare('SELECT id, kind, job_id, phone FROM chat_threads WHERE id = ?1')
+    const thread = await this.db.prepare('SELECT id, kind, job_id, phone, closed_at FROM chat_threads WHERE id = ?1')
       .bind(threadId).first<any>();
     if (!thread) { ws.close(1011, 'thread gone'); return; }
+    if (thread.closed_at) {
+      ws.send(JSON.stringify({ type: 'error', error: 'chat_closed', until: thread.closed_at }));
+      return;
+    }
 
     const { meta } = await this.db.prepare(
       `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, ?3, ?4)`,
@@ -143,20 +147,27 @@ export class ChatRoom extends DurableObject {
         const phone = claims.phone;
         if (thread.kind === 'support') {
           if (thread.phone === phone) return { role: 'seller', phone };
+          if (phone === env.OWNER_PHONE) return { role: 'ops', phone };
         } else if (thread.job_id) {
-          const job = await this.db.prepare('SELECT id, sender_phone, recipient_phone, courier_id, rider_id FROM jobs WHERE id = ?1')
+          const job = await this.db.prepare('SELECT id, sender_phone, recipient_phone, rider_id, courier_id FROM jobs WHERE id = ?1')
             .bind(thread.job_id).first<any>();
           if (job) {
             if (job.sender_phone === phone) return { role: 'seller', phone };
             if (job.recipient_phone === phone) return { role: 'recipient', phone };
-            const user = await this.db.prepare('SELECT role, courier_id FROM auth_users WHERE phone = ?1').bind(phone).first<any>();
-            if (user?.role === 'ops') return { role: 'ops', phone };
-            if (user?.role === 'partner' && user.courier_id != null && Number(user.courier_id) === Number(job.courier_id)) {
-              return { role: 'courier', phone };
-            }
             if (job.rider_id) {
               const rider = await this.db.prepare('SELECT phone FROM riders WHERE id = ?1').bind(job.rider_id).first<any>();
               if (rider?.phone === phone) return { role: 'rider', phone };
+            }
+            if (job.courier_id) {
+              const partner = await this.db.prepare('SELECT role, courier_id FROM auth_users WHERE phone = ?1').bind(phone).first<any>();
+              if (partner?.role === 'partner' && partner?.courier_id != null && Number(partner.courier_id) === Number(job.courier_id)) {
+                // Explicit join required (same rule as REST): the depot must tap
+                // "Join chat" once, then every message flows over the socket.
+                const joined = await this.db.prepare(
+                  'SELECT 1 AS x FROM chat_partner_joins WHERE thread_id = ?1 AND phone = ?2',
+                ).bind(threadId, phone).first();
+                if (joined) return { role: 'partner', phone };
+              }
             }
           }
         }

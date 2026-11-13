@@ -6,7 +6,9 @@
 // this source code is prohibited.
 // ─────────────────────────────────────────────────────────────────────
 import '../ui/app_toast.dart';
+import '../ui/pay_job.dart';
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -39,9 +41,9 @@ class BookingScreen extends StatefulWidget {
 
 class _BookingScreenState extends State<BookingScreen> {
   // First-mile rider fee estimate. MUST match the server's baseRiderFee for
-  // Lusaka pickups (K55 ≤ 5 km; K75 ≤ 12 km; K95 beyond) — it used to say K45,
-  // showing senders one number while the booking charged another.
-  static const double riderFee = 55;
+  /// The estimate now mirrors the worker's baseRiderFee exactly — Lusaka distance
+  /// bands × vehicle multiplier — so the card never under-states what the
+  /// prepaid prompt will charge.
   /// Last-mile door delivery: priced server-side like first-mile PAYG
   /// (recipient-city distance + vehicle). K45 is the default estimate shown
   /// before the server quote; the authoritative charge comes from the Worker.
@@ -308,12 +310,35 @@ class _BookingScreenState extends State<BookingScreen> {
   int get _overagePct =>
       ((_planSnap?['plan'] as Map<String, dynamic>?)?['overage_discount_pct'] as num?)?.toInt() ?? 0;
 
+  /// Server-mirrored base rider fee BEFORE plan math (mirror of baseRiderFee in
+  /// workers/src/pricing.ts — the estimate must never lie about the plan fee).
+  double get _goRiderFee {
+    const multi = {'motorcycle': 1.0, 'car': 1.2, 'van': 1.4, 'truck': 2.0};
+    double base;
+    if (_from == 'Lusaka' && _pickupLat != null && _pickupLng != null) {
+      final km = _haversineKmBooks(_pickupLat!, _pickupLng!, -15.4255, 28.2805);
+      base = km <= 5 ? 55.0 : km <= 12 ? 75.0 : 95.0;
+    } else {
+      base = 70.0;
+    }
+    base = base * (multi[_vehicleClass] ?? 1.0);
+    if (_vehicleClass == 'truck' && base < 100) base = 100;
+    return DropOffApi.round2(base);
+  }
+
+  double _haversineKmBooks(double aLat, double aLng, double bLat, double bLng) {
+    const R = 6371.0, d = 0.0174532925199433;
+    final h = 0.5 - math.cos((bLat - aLat) * d) / 2 +
+        math.cos(aLat * d) * math.cos(bLat * d) * (1 - math.cos((bLng - aLng) * d)) / 2;
+    return 2 * R * math.asin(math.sqrt(h));
+  }
+
   /// Rider fee actually due on the DropOff leg after plan math (server parity:
   /// pack → plan.rider_fee_zmw 0; overage → tierOverageFee discount).
   double get _riderFeeEstimate {
     if (_planLeg == 'pack') return 0;
-    if (_planLeg == 'overage') return DropOffApi.round2(riderFee * (1 - _overagePct / 100));
-    return riderFee;
+    if (_planLeg == 'overage') return DropOffApi.round2(_goRiderFee * (1 - _overagePct / 100));
+    return _goRiderFee;
   }
 
   /// DropOff-only leg: rider fee + door leg (+door-leg platform cut). Never partner money.
@@ -329,6 +354,13 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   void _message(String text) => AppToast.show(context, text);
+
+  /// Shared copy for the post-prompt verdict (both pay paths use it).
+  String _payResultMessage(String outcome) => switch (outcome) {
+        'success' => 'Lipila payment received. Your rider is being dispatched.',
+        'failed' => 'The mobile-money request was rejected — check your momo balance and try again, or tap Pay now to resend the prompt.',
+        _ => 'Payment still pending — the rider sweep confirms when your money lands.',
+      };
 
   Future<void> _pickParcelPhoto() async {
     final source = await showModalBottomSheet<ImageSource>(
@@ -531,7 +563,7 @@ class _BookingScreenState extends State<BookingScreen> {
       recipientName: _recipientName.text,
       recipientPhone: _recipientPhone.text,
       paymentMethod: _payment,
-      riderFee: riderFee,
+      riderFee: _riderFeeEstimate,
       courierFare: null,
       lastMileFee: _lastMile ? lastMilePrice : 0,
       pickupWindow: _tomorrowMorning ? 'tomorrow:06:00' : _pickupWindow,
@@ -580,6 +612,10 @@ class _BookingScreenState extends State<BookingScreen> {
     final used = store.lastBookingPlanUsed;
     final cap = store.lastBookingPlanCap;
     final justParcels = store.lastBookingParcels ?? _parcels;
+    // 'free' = nothing to pay (plan pack / offline-covered); 'paid' = prepayment confirmed;
+    // 'held' = prepayment due and NOT confirmed — booking saved but held, no rider.
+    // A booking that never reached the server counts as held: no green check without money.
+    String paymentOutcome = booking.dispatched ? 'free' : 'held';
     if (booking.dispatched && inclusion == 'pack') {
       if (mounted) {
         final remaining = (used != null && cap != null) ? cap - used : null;
@@ -595,64 +631,39 @@ class _BookingScreenState extends State<BookingScreen> {
         if (mounted) {
           _message('Your plan cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.');
         }
-        final res = await DropOffApi.pay(
-          jobRef: booking.serverRef!,
-          phone: _senderPhone.text,
-          idempotencyKey: 'pay-${booking.serverRef}',
-        );
-        if (res.ok) {
-          final paymentId = '${res.body['payment_id']}';
-          String status = 'pending';
-          for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
-            await Future<void>.delayed(const Duration(seconds: 2));
-            status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
-          }
-          if (!mounted) return;
-          final msg = switch (status) {
-            'success' => 'Lipila payment received. Your rider is being dispatched.',
-            'failed' => 'The mobile-money request was rejected — check your momo balance and try again, or contact DropOff support.',
-            _ => 'Payment still pending — the rider sweep confirms when your money lands.',
-          };
-          _message(msg);
-        } else if (mounted) {
-          _message('Payment could not start now (${res.error}); the booking is saved — approve the momo prompt or ask DropOff support to resend it.');
+        final outcome = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
+        if (!mounted) return;
+        paymentOutcome = outcome == 'success' ? 'paid' : 'held';
+        if (outcome.startsWith('error:')) {
+          _message('Payment could not start now (${outcome.substring(6)}); the booking is saved and HELD — tap Pay now on the booking screen to retry.');
+        } else {
+          _message(_payResultMessage(outcome));
         }
       } else if (mounted) {
         _message(due != null && due > 0
             ? 'Your plan cap is reached — approve the momo prompt for K${due.toStringAsFixed(2)} to pay this leg and dispatch your rider.'
             : 'Plan cap reached — approve the momo prompt to dispatch your rider (tier discount applied to this leg).');
+        if (due != null && due > 0) paymentOutcome = 'held';
       }
     } else if (booking.dispatched && DropOffApi.enabled && _payment == 'Mobile money' && store.linked) {
       _message('Sending a Lipila prompt${due != null ? ' for K${due.toStringAsFixed(2)}' : ''} to ${_senderPhone.text}…\nYou pay DropOff only — the courier counter fare stays with the depot.');
-      final res = await DropOffApi.pay(
-        jobRef: booking.serverRef!,
-        phone: _senderPhone.text,
-        idempotencyKey: 'pay-${booking.serverRef}',
-      );
-      if (res.ok) {
-        final paymentId = '${res.body['payment_id']}';
-        String status = 'pending';
-        for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
-          await Future<void>.delayed(const Duration(seconds: 2));
-          status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
-        }
-        if (!mounted) return;
-        final msg = switch (status) {
-          'success' => 'Lipila payment received. Your rider is being dispatched.',
-          'failed' => 'The mobile-money request was rejected — check your momo balance and try again, or contact DropOff support.',
-          _ => 'Payment still pending — the rider sweep confirms when your money lands.',
-        };
-        _message(msg);
-      } else if (mounted) {
-        _message('Payment could not start now (${res.error}); the booking is saved and HELD — no rider until prepayment lands. Open Bookings and tap Pay now.');
+      final outcome = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
+      if (!mounted) return;
+      if (outcome.startsWith('error:')) {
+        _message('Payment could not start now (${outcome.substring(6)}); the booking is saved and HELD — no rider until prepayment lands. Tap Pay now on the booking screen to retry.');
+        paymentOutcome = 'held';
+      } else {
+        paymentOutcome = outcome == 'success' ? 'paid' : 'held';
+        _message(_payResultMessage(outcome));
       }
     } else if (booking.dispatched && due != null && due > 0 && mounted) {
       // Covered by the advance prompt (or offline mode): the sender
       // approves the momo prompt that was sent at booking time.
       _message('DropOff leg: K${due.toStringAsFixed(2)} — approve the prepayment prompt sent to your momo at booking; your rider dispatches on approval. Courier counter fare is separate.');
+      paymentOutcome = 'held';
     }
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => BookingSuccessScreen(bookingId: booking.id)));
+    Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => BookingSuccessScreen(bookingId: booking.id, paymentHeld: paymentOutcome == 'held')));
     AnalyticsService.instance.track(
       feature: 'booking', action: 'submit', context: 'booking_step_3',
       meta: {
@@ -1202,7 +1213,7 @@ class _BookingScreenState extends State<BookingScreen> {
           else if (_planLeg == 'overage')
             _priceLine('DropOff rider fee ($_overagePct% plan discount)', kwacha(_riderFeeEstimate))
           else
-            _priceLine('DropOff rider fee', kwacha(riderFee)),
+            _priceLine('DropOff rider fee', kwacha(_riderFeeEstimate)),
           if (_lastMile) ...[
             _priceLine('Destination door delivery', kwacha(lastMilePrice)),
             _priceLine('Processing fee (door leg — platform + mobile money)', kwacha(DropOffApi.platformFee(lastMilePrice))),
@@ -1281,13 +1292,57 @@ class _BookingScreenState extends State<BookingScreen> {
       );
 }
 
-class BookingSuccessScreen extends StatelessWidget {
+/// Shown after booking. Plan-covered trips (nothing due) or a CONFIRMED
+/// prepayment see the success view. When the DropOff prepayment never landed,
+/// the SAME screen flips to the HELD variant: the booking details stay visible,
+/// the green check is gone, and a big "Pay now — dispatch rider" button re-tries
+/// the momo prompt. No "your pickup is booked" screen without confirmed money.
+class BookingSuccessScreen extends StatefulWidget {
   final String bookingId;
-  const BookingSuccessScreen({super.key, required this.bookingId});
+  final bool paymentHeld;
+  const BookingSuccessScreen({super.key, required this.bookingId, this.paymentHeld = false});
+
+  @override
+  State<BookingSuccessScreen> createState() => _BookingSuccessScreenState();
+}
+
+class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
+  bool _busy = false;
+  late bool _paid = !widget.paymentHeld;
+
+  Future<void> _payNow(Booking booking) async {
+    final jobRef = booking.serverRef;
+    if (jobRef == null || jobRef.isEmpty) {
+      AppToast.show(context, 'This booking has not reached the server yet — it syncs when you are back online.');
+      return;
+    }
+    if (_busy) return;
+    setState(() => _busy = true);
+    final outcome = await PayJob.startAndPoll(jobRef: jobRef, phone: booking.senderPhone);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    switch (outcome) {
+      case 'success':
+        AppToast.show(context, 'Prepayment received — your rider is being dispatched.');
+        setState(() => _paid = true);
+        unawaited(AppScope.of(context).syncJobsFromServer());
+        break;
+      case 'failed':
+        AppToast.show(context, 'The momo prompt was rejected — check your balance and tap Pay now again.');
+        break;
+      default:
+        if (outcome.startsWith('error:')) {
+          AppToast.show(context, 'Payment could not start (${outcome.substring(6)}) — check your connection and tap Pay now again.');
+        } else {
+          AppToast.show(context, 'Prompt sent — approve it on your phone to dispatch your rider.');
+        }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final booking = AppScope.of(context).bookings.firstWhere((item) => item.id == bookingId);
+    final booking = AppScope.of(context).bookings.firstWhere((item) => item.id == widget.bookingId);
+    if (!_paid) return _held(booking);
     return Scaffold(
       body: SafeArea(
         child: Padding(
@@ -1316,6 +1371,48 @@ class BookingSuccessScreen extends StatelessWidget {
       ),
     );
   }
+
+  /// HELD variant — the unpaid booking. Details ON SCREEN, Pay now button,
+  /// no success copy, no dispatch language until money lands.
+  Widget _held(Booking booking) => Scaffold(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(26),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Spacer(),
+              const CircleAvatar(radius: 48, backgroundColor: Color(0xFFFDECEA), child: Icon(Icons.pause_rounded, color: Color(0xFFB3261E), size: 52)),
+              const SizedBox(height: 22),
+              const Text('Payment required to dispatch', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 10),
+              const Text('Your booking is saved but HELD. No rider is assigned — and nothing moves — until your prepayment lands.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.5)),
+              const SizedBox(height: 18),
+              Text('Reference ${booking.reference}\n${booking.fromCity} → ${booking.toCity}', textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.6)),
+              const SizedBox(height: 10),
+              InfoPill(icon: Icons.payments_outlined, label: 'Momo prompt pending — approve it to dispatch'),
+              const Spacer(),
+              SizedBox(
+                height: 54,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E), foregroundColor: Colors.white),
+                  onPressed: _busy ? null : () => _payNow(booking),
+                  icon: _busy
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.payments_outlined),
+                  label: Text(_busy ? 'Sending prompt…' : 'Pay now — dispatch rider', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonalIcon(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: booking.id))),
+                icon: const Icon(Icons.receipt_long_outlined, size: 20),
+                label: const Text('Booking details'),
+              ),
+              const SizedBox(height: 10),
+              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Back to home')),
+            ]),
+          ),
+        ),
+      );
 }
 
 

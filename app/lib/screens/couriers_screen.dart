@@ -75,7 +75,12 @@ class _CouriersScreenState extends State<CouriersScreen> {
     final filtered = smartCourierSearch(_query, fromCity: 'Lusaka', toCity: '', size: ParcelSize.small,
         activeServerIds: activeIds);
     return SafeArea(
-      child: ListView(
+      child: RefreshIndicator(
+        onRefresh: () async {
+          await AppScope.of(context).syncJobsFromServer();
+          if (mounted) setState(() {});
+        },
+        child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
         children: [
           const Text('Courier directory', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.6)),
@@ -146,6 +151,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
           const SizedBox(height: 8),
           const Text('Rate information is dated and sourced. “Quoted at counter” means the fare is set at the depot counter — never an estimated or invented courier fare.', style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.45)),
         ],
+        ),
       ),
     );
   }

@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../data/dropoff_api.dart';
 import '../ui/app_theme.dart';
+import '../main.dart';
 import 'track_screen.dart';
 
 /// One chat, three doors:
@@ -43,6 +44,9 @@ class _ChatScreenState extends State<ChatScreen> {
   List<Map<String, dynamic>> _messages = const [];
   String? _myRole;
   int? _threadId;
+  String? _closedAt;
+  bool _joinRequired = false;
+  bool _joinBusy = false;
   bool _loading = true;
   bool _needsVerify = false;
   bool _sending = false;
@@ -153,6 +157,25 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _refresh() async {
     try {
+      // Linked partner (courier depot): the thread 404s until they opt in —
+      // probe the door predicate first and render the Join button.
+      final store = AppScope.of(context);
+      if (!widget.support && widget.jobRef != null && store.role == 'partner') {
+        final js = await DropOffApi.jobChatJoinStatus(widget.jobRef!);
+        final state = js?['state'] as String?;
+        if (state == 'join_required') {
+          if (!mounted) return;
+          setState(() {
+            _loading = false;
+            _joinRequired = true;
+          });
+          _poll?.cancel();
+          return;
+        }
+        if (state == 'joined' && _joinRequired && mounted) {
+          setState(() => _joinRequired = false);
+        }
+      }
       final Map<String, dynamic>? data;
       if (widget.support) {
         data = await DropOffApi.supportChat();
@@ -175,6 +198,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _messages = incoming;
         _myRole = data!['role'] as String?;
         _threadId = (data['thread_id'] as num?)?.toInt();
+        _closedAt = data!['closed_at'] as String?;
         _blockedSenders = ((data['blocked_senders'] as List?) ?? const [])
             .map((p) => '$p')
             .where((p) => p.isNotEmpty)
@@ -189,6 +213,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _send() async {
+    if (_closedAt != null) return;
     final body = _input.text.trim();
     if (body.isEmpty || _sending) return;
     setState(() => _sending = true);
@@ -233,6 +258,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _showModerationError(String? error, String until) {
     if (!mounted) return;
+    if (error == 'chat_closed') {
+      setState(() => _closedAt = until.isNotEmpty ? until : DateTime.now().toIso8601String());
+      AppToast.show(context, 'This conversation is archived — history is read-only.');
+      return;
+    }
     final text = switch (error) {
       'message_blocked' => 'Keep messages respectful.',
       'chat_suspended' => until.isNotEmpty
@@ -246,6 +276,49 @@ class _ChatScreenState extends State<ChatScreen> {
 
   String _maskPhone(String phone) =>
       phone.length >= 4 ? '••• ${phone.substring(phone.length - 4)}' : phone;
+
+  /// Partner opts in to the delivery chat (linked courier required server-side).
+  Future<void> _join() async {
+    if (widget.jobRef == null || _joinBusy) return;
+    setState(() => _joinBusy = true);
+    final res = await DropOffApi.jobChatJoin(widget.jobRef!);
+    if (!mounted) return;
+    setState(() => _joinBusy = false);
+    if (res.ok) {
+      setState(() => _joinRequired = false);
+      _refresh();
+    } else {
+      AppToast.show(context, res.error == 'not found'
+          ? 'This chat is not for your depot.'
+          : 'Could not join (${res.error ?? 'network'}) — try again.');
+    }
+  }
+
+  Future<void> _close() async {
+    if (_threadId == null) return;
+    final threadId = _threadId!;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Close this chat?'),
+        content: const Text('The conversation will become read-only for everyone. All history — every message, every photo, every system note — stays available to you and the other participants.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Close & archive')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final res = await DropOffApi.closeChatThread(threadId);
+    if (!mounted) return;
+    if (!res.ok) {
+      AppToast.show(context, 'Could not close (${res.error ?? 'try again'})');
+      return;
+    }
+    AppToast.show(context, 'Chat closed & archived — you can still read history.');
+    setState(() => _closedAt = DateTime.now().toUtc().toIso8601String());
+    await _refresh();
+  }
 
   Future<void> _openMessageActions(Map<String, dynamic> m) async {
     if (!_canModerate) return;
@@ -350,10 +423,42 @@ class _ChatScreenState extends State<ChatScreen> {
             ? 'Chat — ${widget.jobRef}'
             : 'Parcel chat';
     return Scaffold(
-      appBar: AppBar(title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900))),
+      appBar: AppBar(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
+        actions: [
+          if (widget.jobRef != null && !widget.support && _closedAt == null && (_myRole == 'seller' || _myRole == 'recipient' || _myRole == 'rider' || _myRole == 'partner'))
+            IconButton(
+              tooltip: 'Close this chat (archive for everyone)',
+              icon: const Icon(Icons.lock_outline),
+              onPressed: _threadId == null ? null : () => _close(),
+            ),
+        ],
+      ),
       body: Column(children: [
         Expanded(
-          child: _needsVerify
+          child: _joinRequired
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      const Icon(Icons.apartment_outlined, size: 48, color: AppColors.forest),
+                      const SizedBox(height: 16),
+                      const Text('Join this delivery\u2019s chat', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+                      const SizedBox(height: 8),
+                      const Text('Your depot is linked to this courier. Join to follow the parcel with the sender, recipient and rider — every message, every milestone. You can leave or close it any time; history stays available either way.',
+                          textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.5)),
+                      const SizedBox(height: 20),
+                      FilledButton.icon(
+                        onPressed: _joinBusy ? null : _join,
+                        icon: _joinBusy
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.forum_outlined),
+                        label: Text(_joinBusy ? 'Joining…' : 'Join chat'),
+                      ),
+                    ]),
+                  ),
+                )
+              : _needsVerify
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32),
@@ -410,31 +515,46 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
               ),
+            if (_closedAt != null && !_joinRequired)
+              // Read-only archive ribbon — everyone can still scroll history.
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                color: AppColors.forest.withValues(alpha: 0.08),
+                child: Row(children: const [
+                  Icon(Icons.lock_outline, size: 16, color: AppColors.forest),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('This conversation is archived — history stays available to everyone.',
+                      style: TextStyle(color: AppColors.forest, fontWeight: FontWeight.w700, fontSize: 11.5))),
+                ]),
+              ),
+            if (!_joinRequired)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
               child: Row(children: [
               Expanded(
                 child: TextField(
                   controller: _input,
+                  enabled: _closedAt == null,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _send(),
                   maxLength: 500,
                   decoration: InputDecoration(
-                    hintText: 'Message…',
+                    hintText: _closedAt == null ? 'Message…' : 'Archived — read only',
                     counterText: '',
                     prefixIcon: Icon(
                       Icons.chat_bubble_outline,
-                      color: _wsOpen ? AppColors.forest : AppColors.muted,
+                      color: _closedAt != null ? AppColors.muted : (_wsOpen ? AppColors.forest : AppColors.muted),
                     ),
                   ),
                 ),
               ),
               const SizedBox(width: 10),
               IconButton.filled(
-                onPressed: _sending ? null : _send,
+                onPressed: _closedAt == null && !_sending ? _send : null,
                 icon: _sending
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.send_rounded),
+                    : Icon(_closedAt == null ? Icons.send_rounded : Icons.lock_outline),
               ),
             ]),
             ),

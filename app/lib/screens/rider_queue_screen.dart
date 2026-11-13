@@ -5,6 +5,8 @@
 // All rights reserved — unauthorised copying, resale or rebranding of
 // this source code is prohibited.
 // ─────────────────────────────────────────────────────────────────────
+import 'dart:async';
+
 import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -31,16 +33,32 @@ class RiderQueueScreen extends StatefulWidget {
   State<RiderQueueScreen> createState() => _RiderQueueScreenState();
 }
 
-class _RiderQueueScreenState extends State<RiderQueueScreen> {
+class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _data;
   bool _loading = true;
   String? _busyRef;
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AnalyticsService.instance.trackScreenView('rider_queue');
     _load();
+    // Keep the queue synced with new assignments without a manual refresh.
+    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) _load();
   }
 
   Future<void> _load() async {
@@ -183,6 +201,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
     Navigator.pop(sheetCtx); // close the "how did it move on" sheet
     if (!mounted) return;
     final parcelPhotos = <String>[]; // batch: one or more parcel photos
+    final branchCtrl = TextEditingController();
     // Each depot receipt: its own amount field + its own photo. A batch may
     // be split across receipts by the depot — file them all, one by one.
     final receipts = <_ReceiptEntry>[];
@@ -221,6 +240,22 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
                   if (url != null) setDialog(() => parcelPhotos.add(url));
                 },
               ),
+              const SizedBox(height: 12),
+              const Text('DEPOT BRANCH', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
+              const SizedBox(height: 4),
+              TextField(
+                controller: branchCtrl,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  hintText: 'e.g. Platinum — Kabwata',
+                  prefixIcon: Icon(Icons.storefront_outlined),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text('Optional — the exact branch you handed the parcel to. Until now the route reads "to Platinum"; this is where it lands on the books.',
+                  style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.35)),
               const Divider(height: 20),
               // ── Depot receipts (one or more, each exact) ──
               Text('DEPOT RECEIPTS (${receipts.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
@@ -260,10 +295,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
                     return;
                   }
                 }
+                final branch = branchCtrl.text.trim();
                 final r = await DropOffApi.jobEvent(
                   jobRef: ref, status: 'delivered',
                   photoUrl: parcelPhotos.first, stage: 'delivery',
                   parcelPhotos: parcelPhotos,
+                  branch: branch.isEmpty ? null : branch,
                   receipts: [
                     for (final e in receipts)
                       {

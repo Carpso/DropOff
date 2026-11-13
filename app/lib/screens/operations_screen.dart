@@ -319,7 +319,11 @@ class OperationsScreen extends StatelessWidget {
       // no economics — those stay staff-only (routes/batch 403 for riders).
       final activeRiders = store.riders.where((item) => item.active).length;
       return SafeArea(
-        child: ListView(padding: const EdgeInsets.fromLTRB(20, 22, 20, 28), children: [
+        child: RefreshIndicator(
+          onRefresh: () async {
+            await store.syncJobsFromServer();
+          },
+          child: ListView(padding: const EdgeInsets.fromLTRB(20, 22, 20, 28), children: [
           Row(children: [
             const Icon(Icons.two_wheeler, color: AppColors.forest),
             const SizedBox(width: 10),
@@ -361,6 +365,7 @@ class OperationsScreen extends StatelessWidget {
             ),
           ),
         ]),
+        ),
       );
     }
     if (!store.isStaff) {
@@ -390,7 +395,11 @@ class OperationsScreen extends StatelessWidget {
     final activeRiders = store.riders.where((item) => item.active).length;
     final canAddRiders = store.isSuperAdmin || store.isAdminRole;
     return SafeArea(
-      child: ListView(padding: const EdgeInsets.fromLTRB(20, 22, 20, 28), children: [
+      child: RefreshIndicator(
+        onRefresh: () async {
+          await store.syncJobsFromServer();
+        },
+        child: ListView(padding: const EdgeInsets.fromLTRB(20, 22, 20, 28), children: [
         const Text('Your operation', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.6)),
         const SizedBox(height: 5),
         const Text('Run your team, your routes and your live location from here.', style: TextStyle(color: AppColors.muted)),
@@ -502,7 +511,9 @@ class OperationsScreen extends StatelessWidget {
             _RevenueRow(number: '04', title: 'Door delivery & subscription plans', text: 'Last-mile door delivery priced like first-mile pay-as-you-go (recipient-city distance + vehicle). Plan parcels bundle the rider inside the monthly fee.'),
           ]))),
         ],
-      ]),
+        ],
+        ),
+      ),
     );
   }
 
@@ -1027,6 +1038,7 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
     final onTrack = t?['on_track'] == true;
     final behind = (t?['behind_by'] as num?)?.toInt() ?? 0;
     final day = (t?['day_of_month'] as num?)?.toInt() ?? 0;
+    final targetBonus = (t?['bonus'] as Map?)?.cast<String, dynamic>();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1086,6 +1098,23 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
                   : '$behind behind pace - clear the daily $daily first, then use the rest of the month to catch up.',
               style: TextStyle(color: onTrack ? AppColors.forest : const Color(0xFF8A5A00), fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600),
             ),
+            if (targetBonus != null) ...[
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 10),
+              const Row(children: [
+                Icon(Icons.savings_outlined, size: 15, color: AppColors.forest),
+                SizedBox(width: 6),
+                Text('Over-target bonus', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
+              ]),
+              const SizedBox(height: 4),
+              Text(
+                targetBonus['target_met'] == true
+                    ? 'K200 completion locked ✓  ·  +K${(targetBonus['over_target_bonus_zmw'] ?? 0).toStringAsFixed(0)} over target so far (${targetBonus['counted_extra'] ?? 0} parcels)  ·  K150 stretch at 1.25× target'
+                    : 'Hit the month target ($monthTarget parcels) and you bank K200 + K5 per parcel beyond it (max K675) + K150 stretch at 1.25× target.',
+                style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+              ),
+            ],
           ],
         ]),
       ),
@@ -1163,6 +1192,9 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
         _plateUrl = rider['plate_photo_url'] as String?;
         _licenseUrl = rider['license_photo_url'] as String?;
         _faceCheck = _parseFace(rider['ai_check_json'] as String?);
+        // Hiding stall photos after submission: a rider whose status is pending
+        // signed off already — no need to keep their document photos on screen.
+        if ('${rider['verification_status'] ?? ''}' == 'pending') _submitted = true;
       }
     });
   }

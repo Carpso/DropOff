@@ -542,7 +542,12 @@ class _AccountScreenState extends State<AccountScreen> {
     final signedIn = store.linked;
     return Scaffold(
       appBar: AppBar(title: const Text('Account')),
-      body: ListView(
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await store.syncJobsFromServer();
+          if (mounted) setState(() {});
+        },
+        child: ListView(
         controller: _listController,
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
         children: [
@@ -568,6 +573,14 @@ class _AccountScreenState extends State<AccountScreen> {
                 const SizedBox(width: 14),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   const Text('Signed in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+                  if (store.role != null) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(20)),
+                      child: Text(store.role!.toUpperCase(), style: const TextStyle(color: AppColors.forest, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.6)),
+                    ),
+                  ],
                   const SizedBox(height: 2),
                   Text(store.fullName ?? store.email ?? store.linkedPhone ?? 'Linked device', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest)),
                   if (store.fullName != null && store.email != null) Text(store.email!, style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
@@ -809,6 +822,7 @@ class _AccountScreenState extends State<AccountScreen> {
             ),
           ],
         ],
+        ),
       ),
     );
   }
@@ -1237,8 +1251,11 @@ class _TiersCardState extends State<_TiersCard> {
                   final currentTier = '${_current?['tier'] ?? ''}';
                   final currentActive = '${_current?['status'] ?? ''}' == 'active';
                   return Column(children: [
+                    /// Only render tiers the admin/superadmin has toggled ON —
+                    /// a toggled-off plan vanishes from the seller page entirely.
                     for (final entry in display.entries)
-                      Padding(
+                      if (models[entry.key] != null)
+                        Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(14),

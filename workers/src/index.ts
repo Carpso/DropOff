@@ -141,6 +141,16 @@ const DRIVER_FUEL_MONTHLY_ZMW = DRIVER_FUEL_ALLOWANCE_WEEKLY_ZMW * 4; // 1200
 const DRIVER_BASE_MONTHLY_ZMW = DRIVER_MONTHLY_PAY_ZMW - DRIVER_FUEL_MONTHLY_ZMW; // 1800
 const DRIVER_WEEKLY_PAY_ZMW = DRIVER_MONTHLY_PAY_ZMW / 4; // K750/week — weekly-paid riders get this per week
 const DRIVER_DAILY_TARGET = 30;       // parcels/day each rider is expected to sweep
+// Over-target incentive paid at MONTH CLOSE (never per-parcel "rate" — riders
+// stay salaried; bonuses sit on top of base pay; payroll pays them):
+//   K200  flat when the month's target is met
+//   K5    per parcel delivered beyond the target (max 135 counted, K675 cap)
+//   K150  extra stretch bonus at >= 1.25x target
+const DRIVER_COMPLETION_BONUS_ZMW = 200;
+const DRIVER_OVER_TARGET_BONUS_ZMW = 5;
+const DRIVER_OVER_TARGET_CAP = 135;            // 4.5x the daily target / month
+const DRIVER_STRETCH_RATIO = 1.25;
+const DRIVER_STRETCH_BONUS_ZMW = 150;
 const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
 // Business day = Central Africa Time (UTC+2). D1's 'localtime' is UTC, so every
 // daily-cap / sweep query must use this explicit offset or the day rolls over
@@ -195,6 +205,17 @@ interface RiderTargetStats {
   on_track: boolean;
   day_of_month: number;
   days_in_month: number;
+  bonus: {
+    extra_parcels: number;
+    counted_extra: number;
+    completion_bonus_zmw: number;
+    over_target_bonus_zmw: number;
+    stretch_bonus_zmw: number;
+    total_bonus_zmw: number;
+    target_met: boolean;
+    programme?: string;
+    programme_id?: number;
+  };
 }
 
 function monthCalendar(): { dayOfMonth: number; daysInMonth: number } {
@@ -205,10 +226,84 @@ function monthCalendar(): { dayOfMonth: number; daysInMonth: number } {
   };
 }
 
-function shapeTargets(today: number, month: number): RiderTargetStats {
+interface IncentiveProgramme {
+  id: number;
+  title: string;
+  completion_bonus_zmw: number;
+  per_extra_parcel_zmw: number;
+  per_extra_cap: number;
+  stretch_ratio: number;
+  stretch_bonus_zmw: number;
+  active: boolean;
+}
+
+// Load the active incentive programme (if any). Falls back to the constants
+// when none is configured — promos are optional, never mandatory.
+async function incentiveProgramme(env: Env): Promise<IncentiveProgramme> {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT id, title, completion_bonus_zmw, per_extra_parcel_zmw, per_extra_cap,
+              stretch_ratio, stretch_bonus_zmw, active, starts_on, ends_on
+         FROM incentive_programmes
+        WHERE active = 1
+          AND (starts_on IS NULL OR starts_on <= date('now', '+2 hours'))
+          AND (ends_on IS NULL OR ends_on >= date('now', '+2 hours'))
+        ORDER BY id DESC LIMIT 1`,
+    ).first<any>();
+    if (row) {
+      return {
+        id: Number(row.id),
+        title: String(row.title ?? 'Rider incentive'),
+        completion_bonus_zmw: Number(row.completion_bonus_zmw ?? DRIVER_COMPLETION_BONUS_ZMW),
+        per_extra_parcel_zmw: Number(row.per_extra_parcel_zmw ?? DRIVER_OVER_TARGET_BONUS_ZMW),
+        per_extra_cap: Number(row.per_extra_cap ?? DRIVER_OVER_TARGET_CAP),
+        stretch_ratio: Number(row.stretch_ratio ?? DRIVER_STRETCH_RATIO),
+        stretch_bonus_zmw: Number(row.stretch_bonus_zmw ?? DRIVER_STRETCH_BONUS_ZMW),
+        active: true,
+      };
+    }
+  } catch {
+    // Table missing or read error — fall back to the built-in incentive.
+  }
+  return {
+    id: 0,
+    title: 'Built-in rider incentive',
+    completion_bonus_zmw: DRIVER_COMPLETION_BONUS_ZMW,
+    per_extra_parcel_zmw: DRIVER_OVER_TARGET_BONUS_ZMW,
+    per_extra_cap: DRIVER_OVER_TARGET_CAP,
+    stretch_ratio: DRIVER_STRETCH_RATIO,
+    stretch_bonus_zmw: DRIVER_STRETCH_BONUS_ZMW,
+    active: true,
+  };
+}
+
+/** Over-target incentive for a month (paid through payroll, additive to salary). */
+function riderBonusSplits(trips: number, monthTarget: number, prog?: IncentiveProgramme | null) {
+  const p = prog ?? { completion_bonus_zmw: DRIVER_COMPLETION_BONUS_ZMW, per_extra_parcel_zmw: DRIVER_OVER_TARGET_BONUS_ZMW, per_extra_cap: DRIVER_OVER_TARGET_CAP, stretch_ratio: DRIVER_STRETCH_RATIO, stretch_bonus_zmw: DRIVER_STRETCH_BONUS_ZMW };
+  const target = Math.max(0, monthTarget);
+  const extra = Math.max(0, trips - target);
+  const completion = trips >= target && target > 0 ? p.completion_bonus_zmw : 0;
+  const capped = Math.min(extra, p.per_extra_cap);
+  const over = round2(capped * p.per_extra_parcel_zmw);
+  const stretch = trips >= target * p.stretch_ratio && target > 0 ? p.stretch_bonus_zmw : 0;
+  return {
+    extra_parcels: extra,
+    counted_extra: capped,
+    completion_bonus_zmw: completion,
+    over_target_bonus_zmw: over,
+    stretch_bonus_zmw: stretch,
+    total_bonus_zmw: round2(completion + over + stretch),
+    target_met: trips >= target && target > 0,
+    programme: prog?.title ?? 'Built-in incentive',
+    programme_id: prog?.id ?? 0,
+  };
+}
+
+function shapeTargets(today: number, month: number, prog?: IncentiveProgramme | null): RiderTargetStats {
   const { dayOfMonth, daysInMonth } = monthCalendar();
   const monthTarget = DRIVER_DAILY_TARGET * daysInMonth;
   const paceTarget = DRIVER_DAILY_TARGET * dayOfMonth;
+  const bonus = riderBonusSplits(month, monthTarget, prog ?? null);
   return {
     today,
     daily_target: DRIVER_DAILY_TARGET,
@@ -222,10 +317,11 @@ function shapeTargets(today: number, month: number): RiderTargetStats {
     on_track: month >= paceTarget,
     day_of_month: dayOfMonth,
     days_in_month: daysInMonth,
+    bonus,
   };
 }
 
-async function riderTargetStats(db: D1Database, riderId?: number): Promise<Map<number, RiderTargetStats>> {
+async function riderTargetStats(db: D1Database, riderId?: number, prog?: IncentiveProgramme | null): Promise<Map<number, RiderTargetStats>> {
   const sql = `SELECT j.rider_id,
       COUNT(DISTINCT CASE WHEN date(je.created_at, '${CAT_OFFSET}') = date('now', '${CAT_OFFSET}') THEN j.id END) AS today,
       COUNT(DISTINCT CASE WHEN date(je.created_at, '${CAT_OFFSET}') >= date('now', 'start of month', '${CAT_OFFSET}') THEN j.id END) AS month
@@ -238,7 +334,7 @@ async function riderTargetStats(db: D1Database, riderId?: number): Promise<Map<n
     const { results } = await (riderId ? stmt.bind(riderId) : stmt).all<any>();
     const out = new Map<number, RiderTargetStats>();
     for (const row of (results ?? []) as any[]) {
-      out.set(Number(row.rider_id), shapeTargets(Number(row.today ?? 0), Number(row.month ?? 0)));
+      out.set(Number(row.rider_id), shapeTargets(Number(row.today ?? 0), Number(row.month ?? 0), prog ?? null));
     }
     return out;
   } catch {
@@ -2423,7 +2519,7 @@ app.post('/jobs/:ref/events', async (c) => {
   if (status !== undefined && !allowed.includes(status)) return c.json({ error: 'bad status' }, 400);
 
   const job = await c.env.DB.prepare(
-    `SELECT j.id, j.ref, j.sender_phone, j.counter_price_zmw, j.rider_fee_zmw, j.leg2_fee_zmw,
+    `SELECT j.id, j.ref, j.sender_phone, j.recipient_phone, j.rider_id, j.counter_price_zmw, j.rider_fee_zmw, j.leg2_fee_zmw,
             j.leg2_processing_fee_zmw, j.promo_discount_zmw,
             j.counter_receipt_zmw, j.counter_receipt_paid,
             j.total_zmw, j.wait_minutes, j.wait_fee_zmw, j.pay_method, j.paid,
@@ -2684,18 +2780,70 @@ app.post('/jobs/:ref/events', async (c) => {
     ).bind(job.id, status, b.note ?? null, b.lat ?? null, b.lng ?? null));
     const sets = ['status = ?2'];
     const vals: unknown[] = [job.id, status];
-    if (b.waybill) { sets.push('courier_waybill = ?3'); vals.push(b.waybill); }
+    const nextParam = () => '?' + (vals.length + 1);
+    if (b.waybill) { sets.push('courier_waybill = ' + nextParam()); vals.push(b.waybill); }
+    // Rider records the depot branch AT THE DEPOT — not in advance. Before
+    // lodgement the parcel route is "to PLATINUM" (or the quoted courier);
+    // the specific branch is only known when the rider hands it in. Any event
+    // that files a depot receipt IS the lodgement moment.
+    if ((status === 'at_depot' || counterReceiptDue != null) && typeof b.branch === 'string' && b.branch.trim()) {
+      sets.push('branch = ' + nextParam());
+      vals.push(b.branch.trim().slice(0, 80));
+    }
     if (b.photo_url) {
-      sets.push('dropoff_photo_url = ?4'); vals.push(b.photo_url);
+      sets.push('dropoff_photo_url = ' + nextParam()); vals.push(b.photo_url);
       // Proof-of-delivery stages: the pickup photo and the handover photo each
       // land in their own evidence column (false-parcel disputability).
-      if (b.stage === 'pickup' && status === 'picked_up') { sets.push('pod_pickup_url = ?5'); vals.push(b.photo_url); }
-      else if (b.stage === 'delivery' && status === 'delivered') { sets.push('pod_delivery_url = ?5'); vals.push(b.photo_url); }
+      if (b.stage === 'pickup' && status === 'picked_up') { sets.push('pod_pickup_url = ' + nextParam()); vals.push(b.photo_url); }
+      else if (b.stage === 'delivery' && status === 'delivered') { sets.push('pod_delivery_url = ' + nextParam()); vals.push(b.photo_url); }
     }
     dbStatements.push(c.env.DB.prepare(
       `UPDATE jobs SET ${sets.join(', ')} WHERE id = ?1`).bind(...vals));
   }
   if (dbStatements.length) await c.env.DB.batch(dbStatements);
+
+  // Auto-mark in the parcel chat on every major milestone (everyone watches,
+  // no typing required). Executes only after the canonical events commit has
+  // landed — these are derived from `status` set by the authorized caller,
+  // and the message is always labelled SYSTEM (no fake user).
+  const chatEvent = (() => {
+    switch (status) {
+      case 'rider_assigned': return `SYSTEM: Rider is on the way to the pickup — parcel handoff in progress.`;
+      case 'picked_up':      return `SYSTEM: Picked up by the rider — en route to ${job.from_city ?? 'the depot'}.`;
+      case 'at_depot':       return `SYSTEM: Parcel dropped at the courier depot — awaiting lodgement.`;
+      case 'departed':       return `SYSTEM: Parcel dispatched from the depot to the destination.`;
+      case 'arrived':        return `SYSTEM: Parcel arrived at the destination — awaiting collection.`;
+      case 'delivered':      return `SYSTEM: Parcel delivered — journey complete.`;
+      case 'ready_for_collection': return `SYSTEM: Parcel ready for collection at the depot.`;
+      default: return '';
+    }
+  })();
+  if (chatEvent) {
+    try {
+      const threadId = await getOrCreateJobThread(c.env, job.id);
+      await c.env.DB.prepare(
+        `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, ?3, ?4)`,
+      ).bind(threadId, 'dropoff', 'ops', chatEvent).run();
+      c.executionCtx.waitUntil(notifyChatParticipants(c.env, { id: threadId }, job, '', chatEvent).catch(() => {}));
+      // Recipient confirmed by handing over their OTP — that IS the confirmation.
+      // The parcel is with the recipient, so the chat closes itself and archives;
+      // every participant keeps the full history forever, read-only.
+      if (status === 'delivered' && doorVerified) {
+        try {
+          const closedMsg = `SYSTEM: Delivery confirmed — chat closed & archived. Everyone keeps the full history, read-only.`;
+          await c.env.DB.prepare(
+            `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, 'dropoff', 'ops', ?2)`,
+          ).bind(threadId, closedMsg).run();
+          await c.env.DB.prepare(
+            `UPDATE chat_threads SET closed_by = 'system', closed_at = datetime('now') WHERE id = ?1 AND closed_at IS NULL`,
+          ).bind(threadId).run();
+          await c.env.DB.prepare(
+            `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'chat_closed', ?2)`,
+          ).bind(job.id, 'Chat auto-archived on delivery confirmation — history kept for all participants.').run();
+        } catch { /* auto-archive is best-effort; delivery already persisted */ }
+      }
+    } catch { /* chat is best-effort; core milestone already persisted */ }
+  }
 
   // Counter fare is now owed by the sender — tell them exactly what to pay
   // and that the receipt photo unlocks when they do. (Rider fronted the
@@ -3490,15 +3638,25 @@ app.get('/admin/demand-forecast', async (c) => {
 // One thread per job: seller, recipient (token), assigned rider, depot partner
 // and ops share it. Support threads (kind='support') connect a phone to ops.
 
-type ChatRole = 'seller' | 'recipient' | 'rider' | 'courier' | 'ops';
+type ChatRole = 'seller' | 'recipient' | 'rider' | 'courier' | 'ops' | 'partner';
 
 async function jobChatRole(c: any, job: any): Promise<ChatRole | null> {
   const phone: string | null = c.get('phone') ?? null;
   const role: string | null = c.get('role') ?? null;
-  if (role === 'ops' || isAdmin(c)) return 'ops';
   if (phone && phone === job.sender_phone) return 'seller';
   if (phone && phone === job.recipient_phone) return 'recipient';
-  if (role === 'partner' && c.get('courierId') != null && Number(c.get('courierId')) === Number(job.courier_id)) return 'courier';
+  if (phone && role === 'partner' && c.get('courierId') != null && Number(c.get('courierId')) === Number(job.courier_id)) {
+    // Explicit join required: linked depots observe a delivery's chat only
+    // after tapping Join (0060_chat_partner_joins). No join row → 404, same
+    // as any outsider — the join door is surfaced via /join-status.
+    const joined = await c.env.DB.prepare(
+      `SELECT 1 AS x FROM chat_partner_joins p
+         JOIN chat_threads t ON t.id = p.thread_id
+        WHERE t.job_id = ?1 AND p.phone = ?2`,
+    ).bind(job.id, phone).first();
+    if (joined) return 'partner';
+    return null;
+  }
   if (phone && job.rider_id) {
     const rider: any = await c.env.DB.prepare('SELECT phone FROM riders WHERE id = ?1').bind(job.rider_id).first();
     if (rider?.phone === phone) return 'rider';
@@ -3596,10 +3754,11 @@ app.get('/jobs/:ref/chat', async (c) => {
   const chatRole = await jobChatRole(c, job);
   if (!chatRole) return c.json({ error: 'not found' }, 404); // no existence leak
   const threadId = await getOrCreateJobThread(c.env, job.id);
+  const thread = await c.env.DB.prepare('SELECT closed_by, closed_at FROM chat_threads WHERE id = ?1').bind(threadId).first<{ closed_by: string | null; closed_at: string | null }>();
   const viewerPhone = c.get('phone');
   if (viewerPhone) await markThreadRead(c.env, threadId, viewerPhone);
   const chat = await chatMessages(c.env, threadId, viewerPhone);
-  return c.json({ thread_id: threadId, role: chatRole, ...chat });
+  return c.json({ thread_id: threadId, role: chatRole, closed_by: thread?.closed_by ?? null, closed_at: thread?.closed_at ?? null, ...chat });
 });
 
 // Suspended or abusive senders are stopped before insertion; a profanity-hit
@@ -3619,6 +3778,8 @@ app.post('/jobs/:ref/chat', async (c) => {
   const gate = await chatSendGate(c, body, c.get('phone') ?? null);
   if (gate) return gate;
   const threadId = await getOrCreateJobThread(c.env, job.id);
+  const thread = await c.env.DB.prepare('SELECT closed_at FROM chat_threads WHERE id = ?1').bind(threadId).first<{ closed_at: string | null }>();
+  if (thread?.closed_at) return c.json({ error: 'chat_closed', detail: 'This conversation has been closed. Read-only history remains for everyone.' }, 409);
   const senderPhone = c.get('phone') ?? 'ops';
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, ?3, ?4)`,
@@ -3638,9 +3799,9 @@ app.get('/track/:token/chat', async (c) => {
   if (!access.granted) return c.json({ error: 'verification_required' }, 401);
   const threadId = await getOrCreateJobThread(c.env, access.jobId);
   const chat = await chatMessages(c.env, threadId, access.recipientPhone);
-  // recipient read state keyed by their phone on the job
   if (access.recipientPhone) await markThreadRead(c.env, threadId, access.recipientPhone);
-  return c.json({ thread_id: threadId, role: 'recipient', ...chat });
+  const thread = await c.env.DB.prepare('SELECT closed_by, closed_at FROM chat_threads WHERE id = ?1').bind(threadId).first<{ closed_by: string | null; closed_at: string | null }>();
+  return c.json({ thread_id: threadId, role: 'recipient', closed_by: thread?.closed_by ?? null, closed_at: thread?.closed_at ?? null, ...chat });
 });
 
 app.post('/track/:token/chat', async (c) => {
@@ -3663,6 +3824,8 @@ app.post('/track/:token/chat', async (c) => {
   ).bind(access.jobId).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
   const threadId = await getOrCreateJobThread(c.env, job.id);
+  const thread = await c.env.DB.prepare('SELECT closed_at FROM chat_threads WHERE id = ?1').bind(threadId).first<{ closed_at: string | null }>();
+  if (thread?.closed_at) return c.json({ error: 'chat_closed', detail: 'This conversation has been closed. Read-only history remains for everyone.' }, 409);
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, 'recipient', ?3)`,
   ).bind(threadId, job.recipient_phone, body).run();
@@ -3906,7 +4069,7 @@ app.get('/chat/threads', async (c) => {
   if (!phone) return c.json({ error: 'identity_required' }, 401);
   const rider = await c.env.DB.prepare('SELECT id FROM riders WHERE phone = ?1').bind(phone).first<{ id: number }>();
   const { results } = await c.env.DB.prepare(
-    `SELECT t.id, t.kind, t.job_id, j.ref AS job_ref, j.dest_city,
+    `SELECT t.id, t.kind, t.job_id, t.closed_by, t.closed_at, j.ref AS job_ref, j.dest_city,
             (SELECT body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_message,
             (SELECT created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_at,
             (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id AND m.id > COALESCE((SELECT last_read_id FROM chat_reads r WHERE r.thread_id = t.id AND r.phone = ?1), 0) AND m.sender_phone <> ?1) AS unread
@@ -3916,9 +4079,107 @@ app.get('/chat/threads', async (c) => {
          OR (t.job_id IS NOT NULL AND EXISTS (
               SELECT 1 FROM jobs jj WHERE jj.id = t.job_id
                 AND (jj.sender_phone = ?1 OR jj.recipient_phone = ?1
-                     OR (?2 IS NOT NULL AND jj.rider_id = ?2))))`,
+                     OR (?2 IS NOT NULL AND jj.rider_id = ?2)
+                     OR EXISTS (SELECT 1 FROM chat_partner_joins p JOIN chat_threads t2 ON t2.id = p.thread_id WHERE t2.job_id = jj.id AND p.phone = ?1))))`,
   ).bind(phone, rider?.id ?? null).all();
   return c.json({ threads: results });
+});
+
+// A linked partner joins the parcel chat for THEIR courier's delivery —
+// explicit one-tap opt-in recorded per thread. Before joining, the depot
+// sees nothing (the chat 404s like for any outsider); after joining they
+// read and write alongside sender, recipient and rider. A closed chat stays
+// read-only for everyone, joiners included.
+app.post('/jobs/:ref/chat/join', async (c) => {
+  const phone = c.get('phone');
+  const role = c.get('role');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const job = await c.env.DB.prepare('SELECT id, courier_id FROM jobs WHERE ref = ?1').bind(c.req.param('ref')).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  const linked = role === 'partner' && job.courier_id != null && c.get('courierId') != null
+    && Number(c.get('courierId')) === Number(job.courier_id);
+  if (!linked && !isAdmin(c)) return c.json({ error: 'not found' }, 404);
+  const threadId = await getOrCreateJobThread(c.env, job.id);
+  await c.env.DB.prepare(
+    `INSERT INTO chat_partner_joins (thread_id, phone) VALUES (?1, ?2)
+     ON CONFLICT(thread_id, phone) DO NOTHING`,
+  ).bind(threadId, phone).run();
+  return c.json({ ok: true, thread_id: threadId });
+});
+
+// Door probe for the Join button — reveals only whether the linked partner
+// has joined this thread; no chat content leaks before the tap.
+app.get('/jobs/:ref/chat/join-status', async (c) => {
+  const phone = c.get('phone');
+  const role = c.get('role');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const job = await c.env.DB.prepare('SELECT id, courier_id FROM jobs WHERE ref = ?1').bind(c.req.param('ref')).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  const linked = role === 'partner' && job.courier_id != null && c.get('courierId') != null
+    && Number(c.get('courierId')) === Number(job.courier_id);
+  if (!linked) return c.json({ error: 'not found' }, 404);
+  const joined = await c.env.DB.prepare(
+    `SELECT 1 AS x FROM chat_partner_joins p
+     JOIN chat_threads t ON t.id = p.thread_id
+    WHERE t.job_id = ?1 AND p.phone = ?2`,
+  ).bind(job.id, phone).first();
+  return c.json({ state: joined ? 'joined' : 'join_required' });
+});
+
+// Close a parcel chat — sends the archive state to ALL participants; the
+// history stays available to everyone forever, nobody can post any more.
+// The sender / recipient / assigned rider / linked partner may close it.
+app.post('/chat/threads/:id/close', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'bad_thread' }, 400);
+  const thread = await c.env.DB.prepare(
+    `SELECT t.id, t.kind, t.phone, t.job_id, t.closed_at, t.closed_by,
+            j.sender_phone, j.recipient_phone, j.courier_id, j.rider_id, j.ref
+       FROM chat_threads t LEFT JOIN jobs j ON j.id = t.job_id
+      WHERE t.id = ?1`,
+  ).bind(id).first<any>();
+  if (!thread) return c.json({ error: 'not found' }, 404);
+  if (thread.closed_at) return c.json({ ok: true, already_closed: true });
+  if (thread.kind === 'support') {
+    if (phone !== thread.phone && !isAdmin(c)) return c.json({ error: 'not found' }, 404);
+  }
+  // WHO may close: sender, recipient, the ASSIGNED rider, a linked partner who
+  // has joined the thread, and staff — no one else.
+  if (thread.kind === 'job' && thread.job_id) {
+    const isStaff = isAdmin(c) || c.get('role') === 'ops' || (c.get('role') as any) === 'cfo';
+    let isAssignedRider = false;
+    if (thread.rider_id) {
+      const riderRow = await c.env.DB.prepare('SELECT phone FROM riders WHERE id = ?1').bind(thread.rider_id).first<{ phone: string }>();
+      isAssignedRider = riderRow?.phone === phone;
+    }
+    let isPartner = false;
+    if (thread.courier_id) {
+      const partnerRow = await c.env.DB.prepare(
+        `SELECT 1 AS x FROM chat_partner_joins p
+          WHERE p.thread_id = ?1 AND p.phone = ?2`,
+      ).bind(id, phone).first();
+      isPartner = !!partnerRow;
+    }
+    if (!isStaff && phone !== thread.sender_phone && phone !== thread.recipient_phone && !isAssignedRider && !isPartner) {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+  }
+  await c.env.DB.prepare(
+    `UPDATE chat_threads SET closed_by = ?2, closed_at = datetime('now') WHERE id = ?1 AND closed_at IS NULL`,
+  ).bind(id, phone).run();
+  // Announce the closure to all participants — they'll see the archive ribbon.
+  const job = thread.job_id ? { id: thread.job_id, ref: thread.ref, sender_phone: thread.sender_phone, recipient_phone: thread.recipient_phone, rider_id: thread.rider_id } : null;
+  void job; // (not used — kept for future realtime broadcast)
+  try {
+    if (thread.job_id) {
+      await c.env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'chat_closed', ?2)`,
+      ).bind(thread.job_id, `Chat closed by ${phone} — all history preserved, read-only from here.`).run();
+    }
+  } catch { /* audit must never block the close */ }
+  return c.json({ ok: true });
 });
 
 /* --------------------------- support inbox (admin) ------------------------- */
@@ -5130,6 +5391,87 @@ app.post('/admin/promos', async (c) => {
        applies_tier=excluded.applies_tier, uses_left=excluded.uses_left, expires_at=excluded.expires_at, active=1`,
   ).bind(code, pct, b?.note ?? null, tier, uses, exp).run();
   return c.json({ ok: true, code, discount_pct: pct });
+});
+
+/* ----------------- rider incentive programmes (admin-promoted promos) -------- */
+// Admin/superadmin creates a promo with a TITLE ("Christmas Bonus", "Weekend
+// Sprint") — rider incentives then run through the normal payroll confirmation
+// chain, never in-app cash-outs. Per the salaried model, incentives sit ON TOP
+// of base pay; this programme simply defines the bonus envelope.
+// Only ONE programme is active at a time — activate a different one to replace it.
+app.get('/admin/incentives', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM incentive_programmes ORDER BY active DESC, id DESC LIMIT 50`,
+  ).all();
+  // Include currently-active programme for convenience.
+  const active = results?.find((r: any) => Number(r.active) === 1) ?? null;
+  return c.json({ programmes: results ?? [], active });
+});
+app.post('/admin/incentives', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const title = String(b?.title ?? '').trim().slice(0, 64);
+  if (title.length < 3) return c.json({ error: 'title must be 3+ characters' }, 400);
+  const num = (v: any, d: number, min: number, max: number) => {
+    const n = Number(v ?? d); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : d;
+  };
+  const startsOn = b?.starts_on ? String(b.starts_on).trim() : null;
+  const endsOn = b?.ends_on ? String(b.ends_on).trim() : null;
+  const params = [
+    title,
+    startsOn, endsOn,
+    num(b?.completion_bonus_zmw, DRIVER_COMPLETION_BONUS_ZMW, 0, 10000),
+    num(b?.per_extra_parcel_zmw, DRIVER_OVER_TARGET_BONUS_ZMW, 0, 500),
+    Math.round(num(b?.per_extra_cap, DRIVER_OVER_TARGET_CAP, 0, 5000)),
+    num(b?.stretch_ratio, DRIVER_STRETCH_RATIO, 1, 5),
+    num(b?.stretch_bonus_zmw, DRIVER_STRETCH_BONUS_ZMW, 0, 10000),
+    String(b?.note ?? '').trim().slice(0, 280),
+    String(b?.created_by ?? c.get('phone') ?? 'admin').slice(0, 30),
+  ];
+  const id = Number(b?.id ?? 0);
+  if (id > 0) {
+    await c.env.DB.prepare(
+      `UPDATE incentive_programmes SET title=?1, starts_on=?2, ends_on=?3,
+         completion_bonus_zmw=?4, per_extra_parcel_zmw=?5, per_extra_cap=?6,
+         stretch_ratio=?7, stretch_bonus_zmw=?8, note=?9, created_by=?10
+       WHERE id=?11`,
+    ).bind(...params, id).run();
+    return c.json({ ok: true, id });
+  }
+  // Creating a NEW active programme also deactivates the previous one.
+  const active = b?.active == null ? 1 : (b.active ? 1 : 0);
+  if (active) {
+    await c.env.DB.prepare(
+      `UPDATE incentive_programmes SET active = 0 WHERE active = 1`,
+    ).run();
+  }
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO incentive_programmes (title, starts_on, ends_on,
+       completion_bonus_zmw, per_extra_parcel_zmw, per_extra_cap,
+       stretch_ratio, stretch_bonus_zmw, active, note, created_by)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+  ).bind(...params, active).run();
+  return c.json({ ok: true, id: meta.last_row_id });
+});
+// Toggle on/off without touching amounts.
+app.post('/admin/incentives/:id/toggle', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'bad_id' }, 400);
+  const b: any = await c.req.json().catch(() => null);
+  const on = b?.active == null ? undefined : (b.active ? 1 : 0);
+  if (on === undefined) {
+    const row = await c.env.DB.prepare('SELECT active FROM incentive_programmes WHERE id=?1').bind(id).first<any>();
+    if (!row) return c.json({ error: 'not found' }, 404);
+    const now = Number(row.active) === 1 ? 0 : 1;
+    if (now === 1) await c.env.DB.prepare('UPDATE incentive_programmes SET active = 0 WHERE active = 1 AND id != ?1').bind(id).run();
+    await c.env.DB.prepare('UPDATE incentive_programmes SET active = ?2 WHERE id = ?1').bind(id, now).run();
+    return c.json({ ok: true, id, active: now });
+  }
+  if (on === 1) await c.env.DB.prepare('UPDATE incentive_programmes SET active = 0 WHERE active = 1 AND id != ?1').bind(id).run();
+  await c.env.DB.prepare('UPDATE incentive_programmes SET active = ?2 WHERE id = ?1').bind(id, on).run();
+  return c.json({ ok: true, id, active: on });
 });
 
 /* -------- partner collection rails (THEIR POS — never DropOff money) ------- */
@@ -6456,34 +6798,46 @@ export async function generatePayroll(env: Env, kind: 'weekly' | 'monthly'): Pro
         // (K3,000 − weeks already paid) for weekly-cycle riders.
         const startD = new Date(Date.UTC(Number(period.start.slice(0, 4)), Number(period.start.slice(5, 7)) - 1, 1));
         const daysInPeriod = Math.round((new Date(period.end).getTime() - startD.getTime()) / 86400_000);
+        const prog = await incentiveProgramme(env);
         if ((r.pay_cycle ?? 'weekly') === 'monthly') {
           const trips = await riderTripsInWindow(env.DB, Number(r.id), period.start, period.end);
-          const split = paceSplit(trips, DRIVER_DAILY_TARGET * daysInPeriod, DRIVER_BASE_MONTHLY_ZMW, DRIVER_FUEL_MONTHLY_ZMW);
-          const amount = round2(split.base + split.fuel);
+          const monthTarget = DRIVER_DAILY_TARGET * daysInPeriod;
+          const split = paceSplit(trips, monthTarget, DRIVER_BASE_MONTHLY_ZMW, DRIVER_FUEL_MONTHLY_ZMW);
+          // Over-target incentive bonus (paid through payroll, additive to salary; admin-promoted promo if configured):
+          const bonusSplit = riderBonusSplits(trips, monthTarget, prog);
+          const amount = round2(split.base + split.fuel + bonusSplit.total_bonus_zmw);
           if (amount <= 0) continue;
+          const note = bonusSplit.total_bonus_zmw > 0
+            ? `${split.paceMet ? 'On target' : `Behind pace (${trips}/${monthTarget} trips) — base pro-rated`}. Bonus: +K${bonusSplit.total_bonus_zmw.toFixed(2)} (${bonusSplit.completion_bonus_zmw > 0 ? 'completion +K200 ' : ''}${bonusSplit.over_target_bonus_zmw > 0 ? `+K${bonusSplit.over_target_bonus_zmw.toFixed(2)} ${bonusSplit.counted_extra} over-target ` : ''}${bonusSplit.stretch_bonus_zmw > 0 ? '+ stretch +K150' : ''}).`
+            : (split.paceMet ? null : `Behind pace (${trips}/${monthTarget} trips) — pay pro-rated.`);
           await env.DB.prepare(
             `INSERT OR IGNORE INTO rider_payroll
                (rider_phone, rider_name, period_kind, period_start, period_end,
                 base_zmw, fuel_zmw, trips, period_target, pace_met, amount_zmw, status, note)
              VALUES (?1, ?2, 'monthly', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11)`,
           ).bind(r.phone, r.full_name ?? null, period.start, period.end, split.base, split.fuel,
-            trips, DRIVER_DAILY_TARGET * daysInPeriod, split.paceMet ? 1 : 0, amount,
-            split.paceMet ? null : `Behind pace (${trips}/${DRIVER_DAILY_TARGET * daysInPeriod} trips) — pay pro-rated.`).run();
+            trips, monthTarget, split.paceMet ? 1 : 0, amount, note).run();
         } else {
           const paidRow = await env.DB.prepare(
             `SELECT COALESCE(SUM(amount_zmw), 0) AS paid FROM rider_payroll
               WHERE rider_phone = ?1 AND status = 'paid'
                 AND period_kind = 'weekly' AND period_start >= ?2 AND period_end <= ?3`,
           ).bind(r.phone, period.start, period.end).first<any>();
-          const balance = round2(DRIVER_MONTHLY_PAY_ZMW - Number(paidRow?.paid ?? 0));
+          // Over-target bonus paid at month close regardless of cycle (weekly
+          // riders don't wait for the monthly reconciliation to chase it).
+          const monthTarget = DRIVER_DAILY_TARGET * daysInPeriod;
+          const trips = await riderTripsInWindow(env.DB, Number(r.id), period.start, period.end);
+          const bonusSplit = riderBonusSplits(trips, monthTarget, prog);
+          const balance = round2(DRIVER_MONTHLY_PAY_ZMW - Number(paidRow?.paid ?? 0) + bonusSplit.total_bonus_zmw);
           if (balance <= 0) continue;
           await env.DB.prepare(
             `INSERT OR IGNORE INTO rider_payroll
                (rider_phone, rider_name, period_kind, period_start, period_end,
                 base_zmw, fuel_zmw, trips, period_target, pace_met, amount_zmw, status, note)
-             VALUES (?1, ?2, 'monthly_balance', ?3, ?4, 0, 0, 0, 0, 1, ?5, 'pending',
-               'Monthly reconciliation: K${DRIVER_MONTHLY_PAY_ZMW} salary top-up minus K${Number(paidRow?.paid ?? 0)} weekly pay already settled this month.')`,
-          ).bind(r.phone, r.full_name ?? null, period.start, period.end, balance).run();
+             VALUES (?1, ?2, 'monthly_balance', ?3, ?4, 0, 0, ?5, ?6, 1, ?7, 'pending',
+               'Monthly reconciliation: K${DRIVER_MONTHLY_PAY_ZMW} salary top-up minus K${Number(paidRow?.paid ?? 0)} weekly pay already settled this month.${bonusSplit.total_bonus_zmw > 0 ? ` Bonus: +K${bonusSplit.total_bonus_zmw.toFixed(2)} (${bonusSplit.counted_extra} over target; ).` : ''}')`,
+          ).bind(r.phone, r.full_name ?? null, period.start, period.end,
+            trips, monthTarget, balance).run();
         }
       }
     } catch (e) {
@@ -6942,7 +7296,8 @@ app.get('/rider/profile', async (c) => {
     `SELECT ${riderDocSelect()} FROM riders WHERE phone = ?1 AND active = 1`,
   ).bind(phone).first<any>();
   if (!rider) return c.json({ error: 'rider_not_found' }, 404);
-  const targets = await riderTargetStats(c.env.DB, rider.id);
+  const prog = await incentiveProgramme(c.env);
+  const targets = await riderTargetStats(c.env.DB, rider.id, prog);
   return c.json({ rider, targets: targets.get(rider.id) ?? shapeTargets(0, 0) });
 });
 
@@ -6992,7 +7347,8 @@ app.get('/rider/targets', async (c) => {
     'SELECT id, full_name FROM riders WHERE phone = ?1 AND active = 1',
   ).bind(phone).first<any>();
   if (!rider) return c.json({ error: 'rider_not_found' }, 404);
-  const targets = await riderTargetStats(c.env.DB, rider.id);
+  const prog = await incentiveProgramme(c.env);
+  const targets = await riderTargetStats(c.env.DB, rider.id, prog);
   const t = targets.get(rider.id) ?? shapeTargets(0, 0);
   return c.json({
     rider: { id: rider.id, name: rider.full_name },
@@ -7025,7 +7381,8 @@ app.get('/admin/riders', async (c) => {
   ).bind(limit + 1).all<any>();
   const hasMore = results.length > limit;
   const page = hasMore ? results.slice(0, -1) : results;
-  const targets = await riderTargetStats(c.env.DB);
+  const prog = await incentiveProgramme(c.env);
+  const targets = await riderTargetStats(c.env.DB, undefined, prog);
   const riders = ((page ?? []) as any[]).map((r) => ({
     ...r,
     targets: targets.get(Number(r.id)) ?? shapeTargets(0, 0),
@@ -7914,7 +8271,8 @@ app.get('/dashboard/riders', async (c) => {
   ).bind(limit + 1).all<any>();
   const hasMore = results.length > limit;
   const page = hasMore ? results.slice(0, -1) : results;
-  const targets = await riderTargetStats(c.env.DB);
+  const prog = await incentiveProgramme(c.env);
+  const targets = await riderTargetStats(c.env.DB, undefined, prog);
   const rows = ((page ?? []) as any[]).map((r) => {
     const t = targets.get(Number(r.id)) ?? shapeTargets(0, 0);
     return `<tr>
@@ -8785,7 +9143,8 @@ async function notifyRiderTargets(env: Env): Promise<void> {
       `SELECT id, phone, full_name FROM riders
         WHERE active = 1 AND verification_status = 'verified'`,
     ).all<any>();
-    const stats = await riderTargetStats(env.DB);
+    const prog = await incentiveProgramme(env);
+    const stats = await riderTargetStats(env.DB, undefined, prog);
     const short: { name: string; t: RiderTargetStats }[] = [];
     for (const r of (results ?? []) as any[]) {
       const t = stats.get(Number(r.id)) ?? shapeTargets(0, 0);

@@ -94,14 +94,18 @@ class _TrackScreenState extends State<TrackScreen> {
           if (gated) _accountCard(),
           if (_data != null && !gated) ...[
             _statusHeader(_data!),
-            const SizedBox(height: 14),
-            FilledButton.tonalIcon(
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => ChatScreen.token(_resolvedToken!),
-              )),
-              icon: const Icon(Icons.chat_bubble_outline),
-              label: const Text('Chat about this parcel'),
-            ),
+            if (AppScope.of(context).linked) ...[
+              const SizedBox(height: 14),
+              // Show chat ONLY to account holders — a stranger with the link has
+              // no participant phone and cannot read the parcel anyway.
+              FilledButton.tonalIcon(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => ChatScreen.token(_resolvedToken!),
+                )),
+                icon: const Icon(Icons.chat_bubble_outline),
+                label: const Text('Chat about this parcel'),
+              ),
+            ],
             const SizedBox(height: 8),
             _riderStrip(_data!),
             const SizedBox(height: 20),

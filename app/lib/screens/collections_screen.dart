@@ -203,7 +203,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     final points = courier.branchesNear('Lusaka').map((b) => b.name).toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Book a collection', style: TextStyle(fontWeight: FontWeight.w900))),
-      body: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await AppScope.of(context).syncJobsFromServer();
+        },
+        child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
         const Text('Where is the parcel waiting?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.4)),
         const SizedBox(height: 4),
         const Text('Your parcel already arrived at the courier in Lusaka. A rider picks it up and brings it to your recipient’s door.', style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4)),
@@ -370,7 +374,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Text('Book collection'),
         ),
-      ]),
+      ],
+      ),
+      ),
     );
   }
 }
+
+

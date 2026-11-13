@@ -515,6 +515,7 @@ class DropOffApi {
     List<String>? parcelPhotos,
     double? lat,
     double? lng,
+    String? branch,
   }) =>
       post('/jobs/$jobRef/events', {
         if (status != null) 'status': status,
@@ -529,6 +530,7 @@ class DropOffApi {
         if (parcelPhotos != null) 'parcel_photos': parcelPhotos,
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,
+        if (branch != null) 'branch': branch,
       });
 
   /// AI parcel photo check: compares the seller's booking capture against the
@@ -787,6 +789,19 @@ class DropOffApi {
   static Future<ApiResponse> supportReply(int threadId, String body) =>
       post('/chat/support/$threadId/reply', {'body': body}, admin: true);
 
+  /// Close a parcel chat: read-only history preserved for everyone.
+  static Future<ApiResponse> closeChatThread(int threadId) =>
+      post('/chat/threads/$threadId/close', const {});
+
+  /// Partner joins a job's parcel chat (their courier must be linked).
+  static Future<ApiResponse> jobChatJoin(String jobRef) =>
+      post('/jobs/$jobRef/chat/join', const {});
+
+  /// Partner-only door probe: {'state': 'joined' | 'join_required'} or null
+  /// when the thread is not for this depot (404).
+  static Future<Map<String, dynamic>?> jobChatJoinStatus(String jobRef) =>
+      get('/jobs/$jobRef/chat/join-status');
+
   /// {users: [{email, phone, full_name, role, ...}]} — staff can read, superadmin can write.
   static Future<Map<String, dynamic>?> adminUsers() => getAdmin('/admin/users');
 
@@ -1006,6 +1021,18 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> adminCouriers() => getAdmin('/admin/couriers');
   static Future<ApiResponse> adminCourierToggle(int id, bool active) =>
       post('/admin/couriers', {'id': id, 'active': active ? 1 : 0}, admin: true);
+
+  /// Rider incentive programmes — admin creates/edits with a title, toggles on/off.
+  static Future<Map<String, dynamic>?> adminIncentives() => getAdmin('/admin/incentives');
+
+  static Future<ApiResponse> adminSaveIncentive(Map<String, dynamic> programme) =>
+      post('/admin/incentives', programme, admin: true);
+
+  static Future<ApiResponse> adminIncentiveToggle(int id, {bool? active}) => post(
+        '/admin/incentives/$id/toggle',
+        active == null ? const <String, dynamic>{} : {'active': active ? 1 : 0},
+        admin: true,
+      );
 
   /// Senders parked by the no-show guard (3 strikes / 14 days) — job refs
   /// included so ops can eyeball the pattern before clearing.

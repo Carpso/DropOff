@@ -80,12 +80,13 @@ class _BusinessScreenState extends State<BusinessScreen> {
     final link = await DropOffApi.trackingLink(ref);
     if (!mounted) return;
     final url = '${link?['url'] ?? ''}';
-    if (url.isEmpty) {
-      AppToast.show(context, 'Tracking not available for this parcel yet.');
-      return;
-    }
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrackScreen(initialToken: url)));
-    if (mounted) _load();
+    // Tracking link not minted yet (connection hiccup or the job is brand-new):
+    // still open the tracking screen so the sender can use the SMS link later —
+    // never leave them staring at an empty page.
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TrackScreen(initialToken: url.isEmpty ? ref : url)));
+    if (!mounted) return;
+    if (url.isEmpty) AppToast.show(context, 'Tracking not ready yet — paste the SMS link in the screen opened.');
+    _load();
   }
 
   void _shareReferral() async {

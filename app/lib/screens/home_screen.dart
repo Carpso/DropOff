@@ -52,13 +52,17 @@ class HomeScreen extends StatelessWidget {
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const CollectionsScreen()));
   }
 
+  Future<void> _refresh(BuildContext context) => AppScope.of(context).syncJobsFromServer();
+
   @override
   Widget build(BuildContext context) {
     AnalyticsService.instance.trackScreenView('home');
     final store = AppScope.of(context);
     final active = store.bookings.where((item) => item.stage < item.timeline.length - 1).toList();
     return SafeArea(
-      child: ListView(
+      child: RefreshIndicator(
+        onRefresh: () => _refresh(context),
+        child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
         children: [
           Row(children: [
@@ -230,6 +234,7 @@ class HomeScreen extends StatelessWidget {
           const SizedBox(height: 6),
           const _HowItWorks(),
         ],
+        ),
       ),
     );
   }

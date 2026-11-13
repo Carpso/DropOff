@@ -275,6 +275,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _PlansAndCouriersCard(),
               const SizedBox(height: 18),
+              const _IncentivePromoCard(),
+              const SizedBox(height: 18),
               const _RiderVerificationAdminCard(),
               const SizedBox(height: 18),
               const _BranchManagerCard(),
@@ -2392,9 +2394,177 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
   }
 }
 
-/// Owner/admin verification queue: driver ID, plate and photo checks, plus the
-/// daily/monthly target line for every driver. Approval is admin-only server
-/// side; ops can view but not decide.
+/// Admin/superadmin console: run rider incentive programmes as named promos
+/// ("Christmas Bonus", "Hydro-gen Sprint"…). Toggle on/off to promote or
+/// retire — amounts never cash out in-app, they flow through the same payroll
+/// confirmation chain as salary. Only ONE programme can be active at a time.
+class _IncentivePromoCard extends StatefulWidget {
+  const _IncentivePromoCard();
+
+  @override
+  State<_IncentivePromoCard> createState() => _IncentivePromoCardState();
+}
+
+class _IncentivePromoCardState extends State<_IncentivePromoCard> {
+  bool _loading = false;
+  List<Map<String, dynamic>> _rows = const [];
+  Map<String, dynamic>? _active;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await DropOffApi.adminIncentives();
+    if (!mounted) return;
+    setState(() {
+      _rows = ((data?['programmes'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+      _active = (data?['active'] as Map?)?.cast<String, dynamic>();
+      _loading = false;
+    });
+  }
+
+  Future<void> _toggle(Map<String, dynamic> row) async {
+    final id = (row['id'] as num).toInt();
+    final on = !(row['active'] == 1 || row['active'] == true);
+    final res = await DropOffApi.adminIncentiveToggle(id, active: on);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res.ok ? '${on ? 'Activated' : 'Ended'} "${row['title']}" — through payroll, as always.' : 'Could not toggle (${res.error})'),
+    ));
+    await _load();
+  }
+
+  Future<void> _edit(Map<String, dynamic>? row) async {
+    final title = TextEditingController(text: row?['title'] as String? ?? '');
+    final endsOn = TextEditingController(text: row?['ends_on'] as String? ?? '');
+    final perExtra = TextEditingController(text: '${row?['per_extra_parcel_zmw'] ?? 5}');
+    final completion = TextEditingController(text: '${row?['completion_bonus_zmw'] ?? 200}');
+    final cap = TextEditingController(text: '${row?['per_extra_cap'] ?? 135}');
+    final stretch = TextEditingController(text: '${row?['stretch_ratio'] ?? 1.25}');
+    final stretchBonus = TextEditingController(text: '${row?['stretch_bonus_zmw'] ?? 150}');
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(row == null ? 'New rider incentive' : 'Edit: ${row['title']}',
+            style: const TextStyle(fontWeight: FontWeight.w900)),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: title, decoration: const InputDecoration(labelText: 'Promo title (e.g. Christmas Bonus)', hintText: 'Christmas Bonus')),
+            const SizedBox(height: 8),
+            TextField(controller: endsOn, decoration: const InputDecoration(labelText: 'Ends on (blank = always-on)', hintText: '2026-12-31')),
+            Row(children: [
+              Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: completion, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Completion K')))),
+              Expanded(child: TextField(controller: perExtra, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per extra parcel K'))),
+            ]),
+            Row(children: [
+              Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: cap, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max extra parcels')))),
+              Expanded(child: TextField(controller: stretch, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stretch ratio'))),
+            ]),
+            TextField(controller: stretchBonus, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stretch bonus K')),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (result != true) return;
+    final res = await DropOffApi.adminSaveIncentive({
+      if (row != null) 'id': row['id'],
+      'title': title.text.trim(),
+      'ends_on': endsOn.text.trim().isEmpty ? null : endsOn.text.trim(),
+      'completion_bonus_zmw': double.tryParse(completion.text.trim()) ?? 200,
+      'per_extra_parcel_zmw': double.tryParse(perExtra.text.trim()) ?? 5,
+      'per_extra_cap': int.tryParse(cap.text.trim()) ?? 135,
+      'stretch_ratio': double.tryParse(stretch.text.trim()) ?? 1.25,
+      'stretch_bonus_zmw': double.tryParse(stretchBonus.text.trim()) ?? 150,
+      'active': 1,
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res.ok ? 'Saved "${title.text.trim()}" — it pays through payroll, never cash-in-app.' : 'Could not save (${res.error})'),
+    ));
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.card_giftcard, size: 18, color: AppColors.amber),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Rider incentive promos', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(
+              tooltip: 'New promo',
+              icon: const Icon(Icons.add_circle_outline),
+              onPressed: _loading ? null : () => _edit(null),
+            ),
+            IconButton(
+              tooltip: 'Refresh',
+              icon: _loading
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.refresh, size: 20),
+              onPressed: _loading ? null : _load,
+            ),
+          ]),
+          const SizedBox(height: 2),
+          const Text('Up the incentive for a period (Christmas Bonus, Year-End Sprint…). Toggle to promote or retire — flows through the same payroll confirmation chain as salary, never as cash-in-app.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          if (_active != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(children: [
+                const Icon(Icons.play_circle_outline, size: 15, color: AppColors.forest),
+                const SizedBox(width: 6),
+                Expanded(child: Text('Active now: "${_active!['title'] ?? '—'}"', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.forest))),
+              ]),
+            ),
+          const SizedBox(height: 12),
+          if (_rows.isEmpty && !_loading)
+            const Text('No rider incentives configured — the built-in bonus applies.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+          for (final row in _rows) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: row['active'] == 1 || row['active'] == true ? AppColors.forest.withValues(alpha: 0.08) : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: row['active'] == 1 || row['active'] == true ? AppColors.forest.withValues(alpha: 0.45) : AppColors.line),
+              ),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${row['title'] ?? 'Promo'}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+                  Text('K${(row['completion_bonus_zmw'] ?? 0).toStringAsFixed(0)} completion · +K${(row['per_extra_parcel_zmw'] ?? 0).toStringAsFixed(0)}/extra (max ${row['per_extra_cap'] ?? 135}) · stretch ×${(row['stretch_ratio'] ?? 1.25)} +K${(row['stretch_bonus_zmw'] ?? 150).toStringAsFixed(0)}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 10.5), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  if ((row['ends_on'] as String?)?.isNotEmpty == true)
+                    Text('Ends ${row['ends_on']}', style: const TextStyle(color: AppColors.muted, fontSize: 10)),
+                ])),
+                Switch(
+                  value: row['active'] == 1 || row['active'] == true,
+                  onChanged: (_) => _toggle(row),
+                  activeColor: AppColors.forest,
+                ),
+                TextButton(onPressed: () => _edit(row), child: const Text('Edit')),
+              ]),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
 class _RiderVerificationAdminCard extends StatefulWidget {
   const _RiderVerificationAdminCard();
 
