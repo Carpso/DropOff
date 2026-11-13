@@ -28,6 +28,7 @@ class _TrackScreenState extends State<TrackScreen> {
   final _input = TextEditingController();
   Map<String, dynamic>? _data;
   String? _resolvedToken;
+  String? _autoTriggeredFor;
   bool _loading = false;
   String? _error;
 
@@ -55,9 +56,37 @@ class _TrackScreenState extends State<TrackScreen> {
     setState(() {
       _loading = false;
       _data = data;
-      _resolvedToken = data == null ? null : token;
+      _resolvedToken = data == null ? null : _trackTokenOfRaw(token);
       _error = data == null ? 'Not found — check the link or code from the SMS.' : null;
     });
+  }
+
+  /// Pull a tracking token out of whatever was pasted — a bare token, a full
+  /// /track/<token> URL, the /t/<token> vanity path, or a deep link.
+  String? _tokenIn(String raw) {
+    final v = raw.trim();
+    if (v.isEmpty) return null;
+    final m = RegExp(r'/(?:track|t)/([A-Za-z0-9_-]{16,})').firstMatch(v);
+    if (m != null) return m.group(1);
+    if (RegExp(r'^[A-Za-z0-9_-]{16,}$').hasMatch(v)) return v;
+    return null;
+  }
+
+  static String _trackTokenOfRaw(String raw) {
+    return RegExp(r'/(?:track|t)/([A-Za-z0-9_-]+)').firstMatch(raw.trim())?.group(1) ?? raw.trim();
+  }
+
+  /// Paste fires onChanged but never submits — auto-lookup once the pasted
+  /// text contains something that looks like a full token.
+  void _onChanged(String value) {
+    final token = _tokenIn(value);
+    if (token == null) {
+      if (_autoTriggeredFor != null && !value.contains(_autoTriggeredFor!)) _autoTriggeredFor = null;
+      return;
+    }
+    if (token == _autoTriggeredFor || _loading) return;
+    _autoTriggeredFor = token;
+    _lookup();
   }
 
   /// Open the account flow, then retry the lookup with the fresh session.
@@ -80,6 +109,7 @@ class _TrackScreenState extends State<TrackScreen> {
             controller: _input,
             textInputAction: TextInputAction.go,
             onSubmitted: (_) => _lookup(),
+            onChanged: _onChanged,
             decoration: InputDecoration(
               labelText: 'Tracking link or code',
               hintText: 'Paste the link from the SMS',

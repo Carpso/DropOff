@@ -680,7 +680,7 @@ class DropOffApi {
 
   static String _trackTokenOf(String input) {
     final raw = input.trim();
-    return RegExp(r'/track/([A-Za-z0-9_-]+)').firstMatch(raw)?.group(1) ?? raw;
+    return RegExp(r'/(?:track|t)/([A-Za-z0-9_-]+)').firstMatch(raw)?.group(1) ?? raw;
   }
 
   /// Live (never cached) tracking fetch — the gate response must not be
