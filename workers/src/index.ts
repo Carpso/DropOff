@@ -3838,6 +3838,58 @@ app.post('/admin/chat/strikes/:phone/clear', async (c) => {
   return c.json({ ok: true, cleared });
 });
 
+// ── Booking strikes (no-show / ghost bookings) — the No-contact guard ─────
+// A sender with 3+ strikes in 14 days is parked from new bookings (see the
+// /bookings gate). This endpoint lists everyone parked/on-notice, with the
+// job ids behind each strike so ops can eyeball the pattern before clearing.
+app.get('/admin/booking-strikes', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT s.phone,
+            u.full_name AS sender_name,
+            COUNT(*) AS strikes,
+            SUM(CASE WHEN s.created_at > datetime('now', '-14 days') THEN 1 ELSE 0 END) AS strikes_14d,
+            MAX(s.created_at) AS last_strike,
+            MIN(s.created_at) AS first_strike,
+            GROUP_CONCAT(DISTINCT j.ref) AS job_refs
+       FROM booking_strikes s
+       LEFT JOIN auth_users u ON u.phone = s.phone
+       LEFT JOIN jobs j ON j.id = s.job_id
+      WHERE s.created_at > datetime('now', '-90 days')
+      GROUP BY s.phone
+      ORDER BY strikes_14d DESC, strikes DESC LIMIT 100`,
+  ).all();
+  const rows = (results ?? []) as any[];
+  return c.json({
+    strikes: rows.map((r) => ({
+      phone: r.phone,
+      sender_name: r.sender_name ?? null,
+      strikes: Number(r.strikes ?? 0),
+      strikes_14d: Number(r.strikes_14d ?? 0),
+      on_hold: Number(r.strikes_14d ?? 0) >= 3,
+      last_strike: r.last_strike ?? null,
+      job_refs: r.job_refs ?? null,
+    })),
+  });
+});
+
+// Clear the booking strikes for one sender (the unblock button). Deleting the
+// rows is all the gate needs — there is no other state to lift.
+app.post('/admin/booking-strikes/:phone/clear', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const phone = String(c.req.param('phone'));
+  // One job_event per struck job — audit trail BEFORE the rows vanish.
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note)
+       SELECT s.job_id, 'strikes_cleared', 'Booking strikes cleared by ops — sender unparked.'
+       FROM booking_strikes s WHERE s.phone = ?1`,
+    ).bind(phone).run();
+  } catch { /* audit copy must never block the clear */ }
+  const cleared = await c.env.DB.prepare('DELETE FROM booking_strikes WHERE phone = ?1').bind(phone).run();
+  return c.json({ ok: true, cleared: cleared.meta.changes });
+});
+
 // Inbox: my threads with unread counts (seller + recipient-with-JWT + rider view)
 app.get('/chat/threads', async (c) => {
   const phone = c.get('phone');
@@ -4495,6 +4547,10 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       env.DB.prepare(`UPDATE jobs SET paid = 1 WHERE id = ?1 AND paid = 0`).bind(pay.job_id),
     ]);
     const job = await env.DB.prepare('SELECT ref FROM jobs WHERE id = ?1').bind(pay.job_id).first<{ ref: string }>();
+    // The sender retried a HELD booking (Lipila down at booking time, then
+    // came back) — dispatch now, on THIS approval. dispatchToNearestRider is
+    // idempotent (skips already-assigned jobs), so a duplicate webhook is safe.
+    if (job) await dispatchToNearestRider(env, job.ref);
     await sendToPhone(env, pay.phone, {
       title: 'Payment received',
       body: 'Confirmed! Your parcel is booked — follow every step in Bookings.',
@@ -5293,14 +5349,17 @@ async function dispatchToNearestRider(
     const pick = await nearestAvailableRider(env, lat, lng);
     if (!pick) return null;
     const etaMin = Math.round((pick.km / 22) * 60 + 4);
-    await env.DB.batch([
-      env.DB.prepare(
-        `UPDATE jobs SET rider_id = ?1, status = 'rider_assigned', assigned_at = datetime('now'), eta_minutes = ?2 WHERE id = ?3 AND status != 'delivered'`,
-      ).bind(pick.rider.id, etaMin, job.id),
-      env.DB.prepare(
-        `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
-      ).bind(pick.rider.id),
-    ]);
+    // Idempotency guard (webhook double-fire or stale dispatch): only claim
+    // the job when it is STILL unassigned and not delivered/canceled — and
+    // only then count it against the rider's load.
+    const claim = await env.DB.prepare(
+      `UPDATE jobs SET rider_id = ?1, status = 'rider_assigned', assigned_at = datetime('now'), eta_minutes = ?2
+        WHERE id = ?3 AND rider_id IS NULL AND status != 'delivered' AND status != 'canceled'`,
+    ).bind(pick.rider.id, etaMin, job.id).run();
+    if (!claim.meta.changes) return null;
+    await env.DB.prepare(
+      `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
+    ).bind(pick.rider.id).run();
     await sendToPhone(env, job.sender_phone, {
       title: 'Rider assigned',
       body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup — track live in Bookings.`,

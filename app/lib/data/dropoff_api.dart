@@ -1007,6 +1007,13 @@ class DropOffApi {
   static Future<ApiResponse> adminCourierToggle(int id, bool active) =>
       post('/admin/couriers', {'id': id, 'active': active ? 1 : 0}, admin: true);
 
+  /// Senders parked by the no-show guard (3 strikes / 14 days) — job refs
+  /// included so ops can eyeball the pattern before clearing.
+  static Future<Map<String, dynamic>?> adminBookingStrikes() => getAdmin('/admin/booking-strikes');
+
+  static Future<ApiResponse> clearBookingStrikes(String phone) =>
+      post('/admin/booking-strikes/${Uri.encodeComponent(phone)}/clear', const {}, admin: true);
+
   /// Collection from a courier point to the recipient's door (Lusaka). The
   /// parcel already arrived at the depot; a rider picks it up and runs the
   /// last mile. No counter fare, no branch choice.

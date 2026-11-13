@@ -279,6 +279,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _BranchManagerCard(),
               const SizedBox(height: 18),
+              const _BookingStrikesCard(),
+              const SizedBox(height: 18),
               const _CounterQuoteCard(),
               const SizedBox(height: 18),
               _smsCard(),
@@ -2259,6 +2261,126 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
                   value: c['active'] == true || c['active'] == 1,
                   onChanged: (v) => _toggleCourier(c, v),
                 ),
+              ]),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// No-show guard (owner directive): senders with 3+ missed pickups in 14 days
+/// are parked from new bookings. Ops reviews the job refs behind the strikes
+/// and clears them — that IS the unblock button.
+class _BookingStrikesCard extends StatefulWidget {
+  const _BookingStrikesCard();
+
+  @override
+  State<_BookingStrikesCard> createState() => _BookingStrikesCardState();
+}
+
+class _BookingStrikesCardState extends State<_BookingStrikesCard> {
+  bool _loading = false;
+  List<Map<String, dynamic>> _rows = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await DropOffApi.adminBookingStrikes();
+    if (!mounted) return;
+    setState(() {
+      _rows = ((data?['strikes'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+      _loading = false;
+    });
+  }
+
+  Future<void> _clear(Map<String, dynamic> row) async {
+    final phone = '${row['phone']}';
+    final fullName = '${row['sender_name'] ?? ''}'.trim();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear booking strikes?'),
+        content: Text('Wipe ALL booking strikes for $phone${fullName.isNotEmpty ? ' ($fullName)' : ''}?\n\nJobs: ${row['job_refs'] ?? '—'}\n\nThey can book immediately after this.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Clear & unblock')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final res = await DropOffApi.clearBookingStrikes(phone);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(res.ok ? 'Strikes cleared — $phone can book again.' : 'Could not clear strikes (${res.error})'),
+    ));
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.warning_amber_outlined, size: 19, color: AppColors.warning),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('No-show strikes — parked bookers',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(
+              tooltip: 'Refresh',
+              icon: _loading
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.refresh, size: 20),
+              onPressed: _loading ? null : _load,
+            ),
+          ]),
+          const SizedBox(height: 2),
+          const Text('3 strikes in 14 days parks new bookings. Clear one or all from this list.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+          const SizedBox(height: 10),
+          if (_rows.isEmpty && !_loading)
+            const Text('No strikes on file — nobody is parked right now.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12)),
+          for (final row in _rows)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: row['on_hold'] == true ? AppColors.danger.withValues(alpha: 0.05) : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: row['on_hold'] == true ? AppColors.danger.withValues(alpha: 0.4) : AppColors.line),
+              ),
+              child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${row['sender_name'] ?? row['phone']}',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                  const SizedBox(height: 2),
+                  Text('${row['phone']} • ${row['strikes']} strike${row['strikes'] == 1 ? '' : 's'} (${row['strikes_14d']} in 14d) • last ${row['last_strike'] ?? '?'}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 10.5), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text('jobs: ${row['job_refs'] ?? '—'}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 10, fontFamily: 'monospace'),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ])),
+                const SizedBox(width: 8),
+                if (row['on_hold'] == true)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    margin: const EdgeInsets.only(right: 4),
+                    decoration: BoxDecoration(color: AppColors.danger.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
+                    child: const Text('PARKED', style: TextStyle(color: AppColors.danger, fontSize: 9, fontWeight: FontWeight.w900)),
+                  ),
+                TextButton(onPressed: () => _clear(row), child: const Text('Clear')),
               ]),
             ),
         ]),
