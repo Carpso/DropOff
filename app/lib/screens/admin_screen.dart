@@ -1104,17 +1104,31 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
   }
 
   Future<void> _load() async {
-    final data = await DropOffApi.adminSupportThread(widget.threadId);
-    if (!mounted) return;
-    if (data == null) {
-      setState(() { _loading = false; _error = 'Could not load this ticket. Check your connection and staff role, then retry.'; });
+    try {
+      final data = await DropOffApi.adminSupportThread(widget.threadId);
+      if (!mounted) return;
+      if (data == null) {
+        setState(() { _loading = false; _error = 'Could not load this ticket. Check your connection and staff role, then retry.'; });
+        return;
+      }
+      // Tolerate rows that are not plain maps — a cast here must not wedge the spinner.
+      final rows = ((data['messages'] as List?) ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+      setState(() {
+        _messages = rows;
+        _error = null;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Could not open this ticket — ${e.toString().split('\n').first.substring(0, e.toString().split('\n').first.length.clamp(0, 180))}';
+      });
       return;
     }
-    setState(() {
-      _messages = ((data['messages'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _error = null;
-      _loading = false;
-    });
     await Future<void>.delayed(const Duration(milliseconds: 30));
     if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
   }
@@ -1207,8 +1221,10 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.8,
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.82,
+        width: double.infinity,
+        color: AppColors.surface,
         child: Column(children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),

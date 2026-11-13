@@ -79,6 +79,11 @@ migrations_dir = "migrations"
 #   SMS_SENDER_ID    - approved sender name, e.g. "DropOff" (optional)
 #   OWNER_PHONE      - 260XXXXXXXXX — receives intrusion / new-device alerts (security.ts)
 #   OWNER_EMAIL      - email copy of owner alerts (falls back to SMS/push only)
+#   HF_API_KEY       - Hugging Face Inference Providers token (optional, PAID).
+#                      Used only when set, for AI calls if Workers AI ever lacks a
+#                      model. PRIMARY AI is free Workers AI (LLaVA vision, Mistral text).
+#                      Note: this account returned HTTP 402 (no credits) — HF calls
+#                      will no-op (fallback to free Workers AI).
 # EMAIL BINDING: no secrets needed — transactional mail goes through `send_email`.
 #
 # FIRST-TIME SETUP:
