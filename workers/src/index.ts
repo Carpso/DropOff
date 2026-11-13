@@ -1094,6 +1094,16 @@ app.post('/auth/verify', async (c) => {
 // POST /auth/register {email, password, phone, full_name?} -> { token, ... }
 // POST /auth/login    {email, password}                    -> { token, ... }
 // JWT identity stays the phone so jobs/payments/wallets need no changes.
+// Add a debug error surface: when the admin key matches, the raw exception is
+// returned so we can see WHAT broke instead of a bare 500. Surfaced only with
+// X-Admin-Key — production users see nothing new.
+app.onError((err, c) => {
+  if (c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY) {
+    return c.json({ error: 'internal_error', debug: String(err?.message ?? err).slice(0, 500) }, 500);
+  }
+  return c.json({ error: 'internal_error' }, 500);
+});
+
 app.post('/auth/register', async (c) => {
   if (await rateLimited(c, 'register', 10)) return c.json({ error: 'too_many_requests' }, 429);
   const b: any = await c.req.json().catch(() => null);

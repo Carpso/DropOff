@@ -94,7 +94,10 @@ export async function verifyJwtClaims(token: string, secret: string, opts?: { al
 // PBKDF2-SHA256, 100k iterations (Workers runtime caps at 100k), 32-byte hash, random 16-byte salt.
 // Stored as: pbkdf2$100000$<saltHex>$<hashHex>
 
-const PBKDF2_ITERATIONS = 210_000;
+// Cloudflare Workers Web Crypto caps PBKDF2 at 100,000 iterations — going
+// higher throws "Pbkdf2 failed: iteration counts above 100000 are not
+// supported" and 500s every registration. Do not raise this.
+const PBKDF2_ITERATIONS = 100_000;
 
 function toHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
