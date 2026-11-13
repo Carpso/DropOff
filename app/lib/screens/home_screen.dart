@@ -316,7 +316,13 @@ class _FareCheckerState extends State<_FareChecker> {
 
   static const Map<String, double> _multiplier = {'motorcycle': 1.0, 'car': 1.2, 'van': 1.4, 'truck': 2.0};
 
-  CourierInfo get _courier => courierById(_courierId);
+  CourierInfo get _courier {
+    final pool = mergedCouriers(AppScope.of(context).activeServerCouriers);
+    return pool.firstWhere(
+      (c) => c.id == _courierId,
+      orElse: () => courierById('platinum'),
+    );
+  }
 
   /// The Lusaka depots this courier can be handed to (branches with coords);
   /// couriers with no listed Lusaka branch fall back to the flagship anchor.
@@ -410,7 +416,7 @@ class _FareCheckerState extends State<_FareChecker> {
               initialValue: _courierId,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'Courier depot', isDense: true),
-              items: [for (final c in availableCouriers(AppScope.of(context).activeCourierIds)) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))],
+              items: [for (final c in mergedCouriers(AppScope.of(context).activeServerCouriers)) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))],
               onChanged: (v) => setState(() {
                 _courierId = v ?? _courierId;
                 _branchIndex = 0;

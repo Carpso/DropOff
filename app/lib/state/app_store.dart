@@ -94,6 +94,12 @@ class AppStore extends ChangeNotifier {
   List<int>? _activeCourierIds;
   List<int>? get activeCourierIds => _activeCourierIds;
 
+  /// Full live rows from /couriers (id, name, city, depot_name, lat, lng…) —
+  /// lets screens merge built-in catalog entries with live depots the owner
+  /// adds/toggles without an app release.
+  List<Map<String, dynamic>>? _activeServerCouriers;
+  List<Map<String, dynamic>>? get activeServerCouriers => _activeServerCouriers;
+
   Future<void> refreshCourierAvailability() async {
     try {
       final rows = await DropOffApi.couriers();
@@ -101,6 +107,7 @@ class AppStore extends ChangeNotifier {
         for (final r in rows)
           if ((r['id'] as num?) != null && (r['id'] as num).toInt() > 0) (r['id'] as num).toInt(),
       ];
+      _activeServerCouriers = rows.map((r) => Map<String, dynamic>.from(r)).toList();
     } catch (_) {
       // Offline / API unavailable → keep null (full catalog).
     }

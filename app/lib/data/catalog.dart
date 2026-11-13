@@ -196,6 +196,46 @@ List<CourierInfo> availableCouriers(List<int>? activeServerIds) {
   }).toList();
 }
 
+/// Fare-checker / directory pool: built-in catalog PLUS live Lusaka depots in
+/// the server DB that have no built-in page (Zampost, Gavic, FedEx, Peshi,
+/// Kingsway…) synthesized as lightweight CourierInfo entries. Booking stays
+/// catalog-only; estimates work for any Lusaka depot. Depots without stored
+/// coordinates fall back to the Lusaka pricing anchor (the same anchor the
+/// server uses), so the estimator stays honest.
+const lusakaAnchor = (-15.4255, 28.2805);
+List<CourierInfo> mergedCouriers(List<Map<String, dynamic>>? serverRows) {
+  if (serverRows == null) return List<CourierInfo>.of(couriers);
+  final serverIds = serverRows.map((r) => (r['id'] as num?)?.toInt()).whereType<int>().toList();
+  final pool = availableCouriers(serverIds);
+  final mapped = kCourierServerIds.values.toSet();
+  final extra = <CourierInfo>[];
+  for (final r in serverRows) {
+    final id = (r['id'] as num?)?.toInt();
+    if (id == null || mapped.contains(id)) continue;
+    final city = '${r['city'] ?? ''}'.trim();
+    if (city.toLowerCase() != 'lusaka') continue; // DropOff serves Lusaka only
+    final lat = (r['lat'] as num?)?.toDouble();
+    final lng = (r['lng'] as num?)?.toDouble();
+    final name = '${r['name'] ?? 'Courier'}'.trim();
+    extra.add(CourierInfo(
+      id: 'server_$id',
+      name: name,
+      strapline: '$city · live depot',
+      priceStatus: '${r['price_status'] ?? 'Quoted at counter'}'.replaceAll('_', ' '),
+      sourceLabel: 'Live depot listing',
+      sourceUrl: '',
+      sourceDate: 'Live',
+      note: '${r['note'] ?? ''}'.trim(),
+      colorValue: 0xFF176B87,
+      branches: [
+        CourierBranch(name: '${r['depot_name'] ?? name}', city: city,
+            lat: lat ?? lusakaAnchor.$1, lng: lng ?? lusakaAnchor.$2),
+      ],
+    ));
+  }
+  return [...pool, ...extra].toList()..sort((a, b) => a.name.compareTo(b.name));
+}
+
 /// Approximate town coordinates used to order a courier's branches by how
 /// close they are to the seller's pickup city.
 const Map<String, (double, double)> cityCoords = {
