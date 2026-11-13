@@ -640,10 +640,47 @@ class _AccountScreenState extends State<AccountScreen> {
               ]))),
             ],
           ] else ...[
-            const Text('Sign in to your account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+            const Text('Link this phone', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
             const SizedBox(height: 6),
-            const Text('Phone code or email — your parcels, plans and bookings live behind your account.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+            const Text('No passwords, no emails — your number is your account. Works for every rider and every sender.',
+                style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.45)),
             const SizedBox(height: 14),
+            TextField(
+              controller: _otpPhone,
+              keyboardType: TextInputType.phone,
+              textCapitalization: TextCapitalization.none,
+              decoration: const InputDecoration(labelText: 'Your mobile number', hintText: '0971234567', prefixIcon: Icon(Icons.phone_outlined)),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: AppColors.forest),
+              onPressed: _otpBusy ? null : _sendOtp,
+              icon: const Icon(Icons.sms_outlined),
+              label: Text(_otpSent ? 'Send a new 6-digit code' : 'Send 6-digit code by SMS', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+            ),
+            if (_otpSent) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _otpCode,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _verifyOtp(),
+                decoration: const InputDecoration(labelText: 'Enter the 6-digit SMS code', hintText: '123456', prefixIcon: Icon(Icons.lock_outline)),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50), backgroundColor: AppColors.forest),
+                onPressed: _otpBusy ? null : _verifyOtp,
+                icon: const Icon(Icons.check_rounded),
+                label: const Text('Verify & sign in', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+              ),
+            ],
+            if (_otpMsg != null) ...[
+              const SizedBox(height: 10),
+              Text(_otpMsg!, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+            ],
+            const SizedBox(height: 20),
             TextField(
               controller: _email,
               keyboardType: TextInputType.emailAddress,
@@ -732,47 +769,6 @@ class _AccountScreenState extends State<AccountScreen> {
                 _legalLink('Privacy policy', 'assets/legal/privacy.md'),
               ],
             ),
-            const SizedBox(height: 22),
-            const Row(children: [
-              Expanded(child: Divider()),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10),
-                child: Text('or link with your phone', style: TextStyle(color: AppColors.muted, fontSize: 12, fontWeight: FontWeight.w700)),
-              ),
-              Expanded(child: Divider()),
-            ]),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _otpPhone,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Mobile number', hintText: '0971234567', prefixIcon: Icon(Icons.phone_outlined)),
-            ),
-            const SizedBox(height: 10),
-            FilledButton.tonal(
-              onPressed: _otpBusy ? null : _sendOtp,
-              child: Text(_otpSent ? 'Resend one-time code' : 'Send one-time code'),
-            ),
-            if (_otpSent) ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _otpCode,
-                keyboardType: TextInputType.number,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _verifyOtp(),
-                decoration: const InputDecoration(labelText: '6-digit code', prefixIcon: Icon(Icons.password_outlined)),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                onPressed: _otpBusy ? null : _verifyOtp,
-                icon: const Icon(Icons.verified_user_outlined),
-                label: const Text('Verify & link this device'),
-              ),
-            ],
-            if (_otpMsg != null) ...[
-              const SizedBox(height: 10),
-              Text(_otpMsg!, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4), textAlign: TextAlign.center),
-            ],
           ],
           if (signedIn) ...[
             const _ReferralCard(),
