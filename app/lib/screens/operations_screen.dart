@@ -1060,7 +1060,11 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
     if (!mounted) return;
     setState(() => _faceBusy = false);
     if (!res.ok) {
-      _snack(res.error == 'no_selfie' ? 'Upload a selfie first, then check it.' : 'AI check unavailable (${res.error}).');
+      _snack(res.error == 'no_selfie'
+          ? 'Upload a selfie first, then check it.'
+          : (res.error == 'network_error'
+              ? 'Could not reach the AI right now — check your connection and retry in a moment.'
+              : 'AI check unavailable (${res.error}).'));
       return;
     }
     setState(() => _faceCheck = (res.body['face'] as Map?)?.cast<String, dynamic>());

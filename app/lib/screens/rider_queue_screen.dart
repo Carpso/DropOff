@@ -297,6 +297,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> {
         await _snack(flagged
             ? '$ref parcel check: possible mismatch — ops flagged for review'
             : '$ref parcel check: $verdict');
+      } else {
+        // AI check is best-effort; a slow/unavailable vision model must not
+        // confuse a rider who just filed the drop correctly.
+        await _snack('$ref drop filed. Parcel check skipped (${chk.error ?? 'unavailable'}) — ops will eyeball the photos.');
       }
       _load();
       return;

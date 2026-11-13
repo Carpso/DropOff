@@ -2352,7 +2352,10 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     if (!mounted) return;
     setState(() => _busy = null);
     if (!res.ok) {
-      AppToast.show(context, 'AI check failed (${res.error}).');
+      final msg = res.error == 'network_error'
+          ? 'Could not reach the AI — check your connection and retry (vision models are cold-start slow).'
+          : 'AI check failed (${res.error}).';
+      AppToast.show(context, msg);
       return;
     }
     AnalyticsService.instance.track(

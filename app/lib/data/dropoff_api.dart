@@ -84,6 +84,11 @@ class DropOffApi {
   // 15 s: mobile data is slow, and PBKDF2 login + cold D1 can take several
   // seconds. 6 s produced false "something went wrong" on real phones.
   static const Duration _timeout = Duration(seconds: 15);
+
+  /// AI-heavy endpoints (vision/OCR/chat models) get a much longer budget:
+  /// the default 15s kills a cold-start image call and surfaces to users as
+  /// a confusing "network_error".
+  static const Duration _aiTimeout = Duration(seconds: 180);
   /// Mobile-money collects are slow on Zambian networks — give them room.
   static const Duration _paymentTimeout = Duration(seconds: 20);
 
@@ -530,7 +535,7 @@ class DropOffApi {
   /// rider's depot/delivery photo. Returns {same_parcel, confidence, note, flagged}.
   /// 409 when either photo is missing — treat as "no check available", not an error.
   static Future<ApiResponse> parcelCheck(String ref) =>
-      post('/jobs/$ref/parcel-check', {});
+      post('/jobs/$ref/parcel-check', const {}, timeout: _aiTimeout);
 
   static Future<Map<String, dynamic>?> jobEvidence(String ref) => get('/jobs/$ref/evidence');
   static Future<Map<String, dynamic>?> slotsSuggest({String? fromCity}) =>
@@ -1146,7 +1151,7 @@ class DropOffApi {
   /// `{face: {face, single_person, real_photo, document_or_id,
   /// illustration_or_avatar, verdict: pass|review|fail, note}}`.
   static Future<ApiResponse> riderFaceCheck() =>
-      post('/rider/profile/ai-face-check', const {});
+      post('/rider/profile/ai-face-check', const {}, timeout: _aiTimeout);
 
   /// Add ONLY a selfie (grandfathered verified riders keep their standing).
   /// Server AI-reviews it inline; a clear fail demotes a verified rider to
@@ -1172,13 +1177,13 @@ class DropOffApi {
       post('/admin/riders/$id/verify', {'status': status, if (note != null) 'note': note}, admin: true);
 
   static Future<ApiResponse> adminAiCheckRider(int id) =>
-      post('/admin/riders/$id/ai-check', const {}, admin: true);
+      post('/admin/riders/$id/ai-check', const {}, admin: true, timeout: _aiTimeout);
 
   /* ------------------------------ AI helpers ------------------------- */
-  static Future<ApiResponse> aiAddress(String text) => post('/ai/address', {'text': text});
+  static Future<ApiResponse> aiAddress(String text) => post('/ai/address', {'text': text}, timeout: _aiTimeout);
 
   static Future<ApiResponse> supportAiDraft(int threadId) =>
-      post('/admin/support/threads/$threadId/ai-draft', const {}, admin: true);
+      post('/admin/support/threads/$threadId/ai-draft', const {}, admin: true, timeout: _aiTimeout);
 }
 
 class ApiResponse {
