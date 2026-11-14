@@ -935,6 +935,7 @@ class AppStore extends ChangeNotifier {
       counterReceiptZmw: (j['counter_receipt_zmw'] as num?)?.toDouble(),
       counterReceiptUrl: j['counter_receipt_url'] as String?,
       counterReceiptPaid: (j['counter_receipt_paid'] ?? 0) == 1,
+      repromptPaused: (j['reprompt_paused'] ?? 0) == 1 || j['reprompt_paused'] == true,
       counterReceipts: [
         for (final r in (j['counter_receipts'] as List?) ?? [])
           if (r is Map && r['url'] != null)

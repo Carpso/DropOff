@@ -20,6 +20,8 @@ import '../data/analytics_service.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
+import '../ui/in_app_browser.dart';
+import '../ui/tidy.dart';
 import '../widgets/common.dart';
 import '../l10n/app_localizations.dart';
 import 'account_screen.dart';
@@ -98,6 +100,8 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _aiBusy = false;
   String? _parcelPhotoUrl;
   bool _parcelPhotoUploading = false;
+  String? _tidyPinLabel; // '✨ Tidy pinned ≈ Kabwata — bands apply (±1 km)'
+  String? _plusCode;
   final _declaredValue = TextEditingController();
   bool _coverOptIn = false;
   bool _coverTosAccepted = false;
@@ -110,11 +114,21 @@ class _BookingScreenState extends State<BookingScreen> {
   String _vehicleClass = 'motorcycle';
   int _parcels = 1;
   final _courierSearchCtl = TextEditingController();
-  /// Owner directive (2026-11-12): bikes carry at least 5 parcels; cars, vans
-  /// and trucks have NO practical parcel limit. 9999 = "unlimited" sentinel,
-  /// clamped by the server with the same sentinel.
+  /// Owner directive (2026-11-13): motorcycle carries at most 10 SMALL,
+  /// 5 MEDIUM or 1 LARGE parcel — past that, the rider bumps vehicle, not
+  /// stuffing. Cars, vans and trucks carry whole batches: no practical limit.
+  /// 9999 = "unlimited" sentinel; the worker applies the same caps with the
+  /// same parcel_size key (workers/src/pricing.ts).
   static const int _unlimited = 9999;
-  static const Map<String, int> _maxParcelsByVehicle = {'motorcycle': 5, 'car': _unlimited, 'van': _unlimited, 'truck': _unlimited};
+  int get _parcelCap => _parcelCapFor(_vehicleClass);
+  int _parcelCapFor(String vehicleClass) {
+    if (vehicleClass != 'motorcycle') return _unlimited;
+    switch (_size) {
+      case ParcelSize.small: return 10;
+      case ParcelSize.medium: return 5;
+      case ParcelSize.large: return 1;
+    }
+  }
   static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
   /// Live plan snapshot ({subscription, plan, remaining_this_period}) — the
@@ -173,13 +187,10 @@ class _BookingScreenState extends State<BookingScreen> {
           _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
         }
       }
-      final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
-      if (parcels > 0 && parcels <= _maxParcelsByVehicle[_vehicleClass]!) _parcels = parcels;
       final vehicle = '${pre['vehicle_class'] ?? ''}';
-      if (_maxParcelsByVehicle.containsKey(vehicle)) {
-        _vehicleClass = vehicle;
-        if (_parcels > _maxParcelsByVehicle[vehicle]!) _parcels = _maxParcelsByVehicle[vehicle]!;
-      }
+      if (_vehicleLabels.containsKey(vehicle)) _vehicleClass = vehicle;
+      final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
+      if (parcels > 0 && parcels <= _parcelCapFor(_vehicleClass)) _parcels = parcels;
       final pw = '${pre['pickup_window'] ?? pre['pickupWindow'] ?? ''}'.trim();
       if (pw == 'tomorrow:06:00') {
         _tomorrowMorning = true;
@@ -386,24 +397,85 @@ class _BookingScreenState extends State<BookingScreen> {
     _message(res.ok ? 'Parcel photo attached — protects you if the parcel is disputed.' : 'Photo upload failed. You can still book.');
   }
 
-  /// AI tidy-up of the free-text pickup address (best-effort; never blocks).
-  Future<void> _aiTidyAddress() async {
+  /// ✨ Tidy, the DropOff app AI (server /ai/address + local pin snap).
+  /// Best-effort, never blocks — the reply is captioned for human check.
+  Future<void> _tidyAddress() async {
     final text = _pickup.text.trim();
-    if (text.length < 5) return _message('Type the address first, then tap AI.');
+    if (text.length < 5) return _message('Type the address first, then tap Tidy.');
     setState(() => _aiBusy = true);
+    // Plus codes resolve natively in Google Maps — carry the code through the
+    // address string so rider, depot and waybill all read it (no decoder needed).
+    _updateTidyPins(text);
     final res = await DropOffApi.aiAddress(text);
     if (!mounted) return;
     setState(() => _aiBusy = false);
     final parsed = res.body['parsed'];
-    if (!res.ok || parsed is! Map) return _message('AI is unavailable right now - your address is unchanged.');
-    final parts = [parsed['street'], parsed['area'], parsed['landmark']]
+    if (!res.ok || parsed is! Map) {
+      return _message(_plusCode == null
+          ? '✨ Tidy is unavailable right now — your address is unchanged.'
+          : '✨ Tidy is unavailable — but the plus code is pinned for Google Maps.');
+    }
+    final parts = [parsed['street'], parsed['area'], parsed['city']]
         .map((e) => '${e ?? ''}'.trim())
         .where((e) => e.isNotEmpty)
         .toList();
     if (parts.isNotEmpty) _pickup.text = parts.join(', ');
+    final landmark = '${parsed['landmark'] ?? ''}'.trim();
+    if (landmark.isNotEmpty && !_pickup.text.toLowerCase().contains(landmark.toLowerCase())) {
+      _pickup.text = '${_pickup.text} ($landmark)';
+    }
+    final plus = '${parsed['plus_code'] ?? ''}'.trim();
+    if (plus.isNotEmpty && _plusCode == null) _setPlusCode(plus);
+    _updateTidyPins(_pickup.text);
     final phone = '${parsed['phone'] ?? ''}'.trim();
     if (phone.isNotEmpty && _senderPhone.text.trim().isEmpty) _senderPhone.text = phone;
-    _message('AI tidied the address - check it before booking.');
+    final conf = '${parsed['confidence'] ?? ''}'.trim();
+    final town = '${parsed['city'] ?? ''}'.trim();
+    final inZambia = Tidy.isZambiaTown(town) || Tidy.isZambiaTown('${parsed['area'] ?? ''}');
+    if (!inZambia && town.isNotEmpty) {
+      _message('✨ Tidy isn\'t sure that is a Zambian town — double-check the address.');
+    } else if (conf == 'low') {
+      _message('✨ Tidy tidied what it could — eyeball it before booking.');
+    } else {
+      _message('✨ Tidy done — check the address before booking.');
+    }
+  }
+
+  /// Extract/pin anything offline-detectable: plus code, or the nearest known
+  /// Zambian spot for a Lusaka band (never overrides a manual GPS pin).
+  void _updateTidyPins(String text) {
+    final plus = Tidy.extractPlusCode(text);
+    if (plus != null && plus != _plusCode) _setPlusCode(plus);
+    if (_pickupLat != null) return; // a real pin already wins
+    final match = Tidy.matchZambianPlace(text);
+    if (match != null && mounted) {
+      setState(() {
+        _pickupLat = match.lat;
+        _pickupLng = match.lng;
+        _tidyPinLabel = '✨ Tidy pinned ≈ ${match.name} — bands apply (±1 km)';
+      });
+    }
+  }
+
+  void _setPlusCode(String code) {
+    final c = code.trim();
+    setState(() {
+      _plusCode = c;
+      // Carry the code inside the pickup address — the rider, the depot
+      // waybill, Google Maps (via Open in Maps) and the SMS all see it.
+      if (!_pickup.text.toLowerCase().contains(c.toLowerCase())) {
+        _pickup.text = _pickup.text.trim().isEmpty ? c : '${_pickup.text.trim()} ($c)';
+      }
+      _tidyPinLabel = 'Plus code pinned — tap Open in Maps for the rider pin';
+    });
+  }
+
+  /// Open the raw pickup text (or plus code) in Google Maps — the app already
+  /// deep-links Maps for navigation; Tidy rides the same rail.
+  void _openInMaps() {
+    final q = (_plusCode != null && _plusCode!.isNotEmpty) ? _plusCode! : _pickup.text.trim();
+    if (q.isEmpty) return;
+    openInApp('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(q)}');
   }
 
   Future<void> _captureLocation() async {
@@ -781,7 +853,14 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 8),
         const InfoPill(icon: Icons.receipt_long, label: 'Your parcel is dropped at the courier depot. The destination above is for your receipt only — it is not the actual door drop-off.', color: AppColors.amber),
         const SizedBox(height: 18),
-              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _aiTidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
+              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market — or a plus code like 8FQ4+J9', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _tidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('✨ Tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
+        if (_tidyPinLabel != null) ...[
+          const SizedBox(height: 4),
+          Row(children: [
+            Expanded(child: Text(_tidyPinLabel!, style: const TextStyle(color: AppColors.forest, fontSize: 10.5, height: 1.3))),
+            if (_plusCode != null) TextButton(onPressed: _openInMaps, child: const Text('Open in Maps', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.forest))),
+          ]),
+        ],
         if (_pickupLat != null && _pickupLng != null) ...[
           const SizedBox(height: 4),
           const Text('Pickup pinned to your current location — we will match you with the nearest rider.',
@@ -810,7 +889,7 @@ class _BookingScreenState extends State<BookingScreen> {
           const Text('The return ride (depot → your door) is confirmed at the counter before the return starts.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
         ],
         const SizedBox(height: 16),
-        const InfoPill(icon: Icons.two_wheeler, label: 'Pickup rider fee: from K45'),
+        const InfoPill(icon: Icons.two_wheeler, label: 'DropOff rider fee K55 / K75 / K95 by band — shown before you book'),
       ];
 
   List<Widget> _parcelStep(CourierInfo selected) => [
@@ -819,7 +898,10 @@ class _BookingScreenState extends State<BookingScreen> {
         SegmentedButton<ParcelSize>(
           segments: [for (final size in ParcelSize.values) ButtonSegment(value: size, label: Text(size.label))],
           selected: {_size},
-          onSelectionChanged: (selection) => setState(() => _size = selection.first),
+          onSelectionChanged: (selection) => setState(() {
+            _size = selection.first;
+            if (_parcels > _parcelCap) _parcels = _parcelCap;
+          }),
         ),
         const SizedBox(height: 16),
         TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents', hintText: 'e.g. Two boxed phones', prefixIcon: Icon(Icons.inventory_2_outlined))),
@@ -875,15 +957,15 @@ class _BookingScreenState extends State<BookingScreen> {
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'Vehicle', hintText: 'Motorcycle', prefixIcon: Icon(Icons.directions)),
             items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _maxParcelsByVehicle[v]!) _parcels = _maxParcelsByVehicle[v]!; setState(() {}); } },
+            onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _parcelCapFor(v)) _parcels = _parcelCapFor(v); setState(() {}); } },
           )),
           const SizedBox(width: 12),
           Expanded(child: _vehicleClass == 'motorcycle'
               ? DropdownButtonFormField<int>(
-                  initialValue: _parcels.clamp(1, _maxParcelsByVehicle['motorcycle']!),
+                  initialValue: _parcels.clamp(1, _parcelCap),
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Parcels', hintText: '1', prefixIcon: Icon(Icons.inventory)),
-                  items: List.generate(_maxParcelsByVehicle['motorcycle']!, (i) => i + 1)
+                  items: List.generate(_parcelCap, (i) => i + 1)
                       .map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}', maxLines: 1, overflow: TextOverflow.ellipsis)))
                       .toList(),
                   onChanged: (v) { if (v != null) setState(() => _parcels = v); },
@@ -900,6 +982,26 @@ class _BookingScreenState extends State<BookingScreen> {
                 ),
               ),
         ]),
+        if (_vehicleClass == 'motorcycle') ...[
+          const SizedBox(height: 6),
+          Text(_size == ParcelSize.large
+                  ? 'A motorbike carries ONE large parcel. For more, switch to a Car.'
+                  : 'Motorcycle: up to $_parcelCap ${_size.label.toLowerCase()} parcels — beyond that, bump vehicle.',
+              style: const TextStyle(fontSize: 10.5, color: AppColors.amber, height: 1.3)),
+        ],
+        if (_vehicleClass == 'motorcycle') ...[
+          const SizedBox(height: 6),
+          ActionChip(
+            avatar: const Icon(Icons.directions_car, size: 15, color: AppColors.forest),
+            label: Text(_parcels >= _parcelCap
+                ? 'Need more than $_parcelCap? Switch to Car (no limit)'
+                : 'Got lots? Switch to Car (no limit)',
+                style: const TextStyle(fontSize: 11.5, color: AppColors.forest, fontWeight: FontWeight.w700)),
+            onPressed: () => setState(() => _vehicleClass = 'car'),
+            backgroundColor: AppColors.forest.withValues(alpha: 0.08),
+            side: BorderSide(color: AppColors.forest.withValues(alpha: 0.4)),
+          ),
+        ],
         const SizedBox(height: 6),
         const Text('Each parcel counts as one plan parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
         const SizedBox(height: 26),
@@ -1308,7 +1410,28 @@ class BookingSuccessScreen extends StatefulWidget {
 
 class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
   bool _busy = false;
+  bool _pausing = false;
+  bool? _pausedOverride;
   late bool _paid = !widget.paymentHeld;
+
+  Future<void> _togglePause(Booking booking, bool pause) async {
+    final jobRef = booking.serverRef;
+    if (jobRef == null || jobRef.isEmpty) {
+      AppToast.show(context, 'This booking has not reached the server yet.');
+      return;
+    }
+    setState(() => _pausing = true);
+    final res = await DropOffApi.jobPauseReprompt(jobRef, paused: pause);
+    if (!mounted) return;
+    setState(() {
+      _pausing = false;
+      if (res.ok) _pausedOverride = pause;
+    });
+    AppToast.show(context, res.ok
+        ? (pause ? 'Reminders paused — the booking stays HELD. Resume anytime.' : 'Reminders resumed — tap Pay now when you are ready.')
+        : 'Could not update reminders (${res.error ?? 'try again'}).');
+    if (res.ok) unawaited(AppScope.of(context).syncJobsFromServer());
+  }
 
   Future<void> _payNow(Booking booking) async {
     final jobRef = booking.serverRef;
@@ -1373,8 +1496,11 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
   }
 
   /// HELD variant — the unpaid booking. Details ON SCREEN, Pay now button,
-  /// no success copy, no dispatch language until money lands.
-  Widget _held(Booking booking) => Scaffold(
+  /// no success copy, no dispatch language until money lands. Includes a
+  /// Pause/Resume toggle for the sender who can't pay right now.
+  Widget _held(Booking booking) {
+    final paused = _pausedOverride ?? booking.repromptPaused;
+    return Scaffold(
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(26),
@@ -1382,15 +1508,18 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
               const Spacer(),
               const CircleAvatar(radius: 48, backgroundColor: Color(0xFFFDECEA), child: Icon(Icons.pause_rounded, color: Color(0xFFB3261E), size: 52)),
               const SizedBox(height: 22),
-              const Text('Payment required to dispatch', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900)),
+              Text(paused ? 'Reminders paused — payment held' : 'Payment required to dispatch', textAlign: TextAlign.center, style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900)),
               const SizedBox(height: 10),
-              const Text('Your booking is saved but HELD. No rider is assigned — and nothing moves — until your prepayment lands.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.5)),
+              Text(paused
+                  ? 'You asked us not to prompt you for now. The booking stays saved and HELD — no rider until you pay. Pushes already on your phone can\'t be recalled.'
+                  : 'Your booking is saved but HELD. No rider is assigned — and nothing moves — until your prepayment lands.', textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.5)),
               const SizedBox(height: 18),
               Text('Reference ${booking.reference}\n${booking.fromCity} → ${booking.toCity}', textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.6)),
               const SizedBox(height: 10),
-              InfoPill(icon: Icons.payments_outlined, label: 'Momo prompt pending — approve it to dispatch'),
+              if (paused) const InfoPill(icon: Icons.notifications_off_outlined, label: 'Reminders paused by you — resume below')
+              else const InfoPill(icon: Icons.payments_outlined, label: 'Momo prompt pending — approve it to dispatch'),
               const Spacer(),
-              SizedBox(
+              if (!paused) SizedBox(
                 height: 54,
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E), foregroundColor: Colors.white),
@@ -1401,7 +1530,16 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
                   label: Text(_busy ? 'Sending prompt…' : 'Pay now — dispatch rider', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
                 ),
               ),
-              const SizedBox(height: 10),
+              if (!paused) const SizedBox(height: 4),
+              TextButton.icon(
+                onPressed: _pausing ? null : () => _togglePause(booking, !paused),
+                icon: _pausing
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Icon(paused ? Icons.notifications_active_outlined : Icons.notifications_off_outlined, size: 18),
+                label: Text(_pausing ? 'Working…' : (paused ? 'Resume reminders' : 'Pause reminders — I can\'t pay right now'),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: paused ? AppColors.forest : const Color(0xFFB3261E))),
+              ),
+              const SizedBox(height: 4),
               FilledButton.tonalIcon(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: booking.id))),
                 icon: const Icon(Icons.receipt_long_outlined, size: 20),
@@ -1413,6 +1551,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
           ),
         ),
       );
+  }
 }
 
 

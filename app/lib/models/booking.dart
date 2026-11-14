@@ -250,6 +250,7 @@ class Booking {
     this.counterReceiptZmw,
     this.counterReceiptUrl,
     this.counterReceiptPaid = false,
+    this.repromptPaused = false,
     this.counterReceipts = const [],
   });
 
@@ -267,6 +268,12 @@ class Booking {
   final double? counterReceiptZmw;
   final String? counterReceiptUrl;
   final bool counterReceiptPaid;
+
+  /// Sender paused DropOff's payment reminders for this booking (they know
+  /// they can't pay right now). USSD pushes already on their handset are out
+  /// of app control; resuming re-arms a fresh prompt on the next deliberate
+  /// tap (paused rows are excluded from the advance-prompt reuse check).
+  final bool repromptPaused;
 
   /// Every photographed depot receipt on the trip (multi-receipt drops when
   /// the depot splits a batch): (exact amount written on that receipt, photo
@@ -316,6 +323,7 @@ class Booking {
         counterReceiptUrl: counterReceiptUrl,
         counterReceiptPaid: counterReceiptPaid,
         counterReceipts: counterReceipts,
+        repromptPaused: repromptPaused,
       );
 
   Map<String, dynamic> toJson() => {
@@ -354,6 +362,7 @@ class Booking {
         'counterReceiptZmw': counterReceiptZmw,
         'counterReceiptUrl': counterReceiptUrl,
         'counterReceiptPaid': counterReceiptPaid,
+        'repromptPaused': repromptPaused,
         'counterReceipts': [for (final (amt, url) in counterReceipts) {'amount_zmw': amt, 'url': url}],
       };
 
@@ -393,6 +402,7 @@ class Booking {
         counterReceiptZmw: (json['counterReceiptZmw'] as num?)?.toDouble(),
         counterReceiptUrl: json['counterReceiptUrl'] as String?,
         counterReceiptPaid: json['counterReceiptPaid'] as bool? ?? false,
+        repromptPaused: json['repromptPaused'] as bool? ?? false,
         counterReceipts: [
           for (final r in (json['counterReceipts'] as List?) ?? [])
             if (r is Map)

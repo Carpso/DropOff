@@ -52,8 +52,6 @@ class AnalyticsService {
     if (_pending.isNotEmpty) unawaited(flush());
   }
 
-  void _scheduleTimer() => _scheduleTimerInternal();
-
   void _scheduleTimerInternal() {
     // HOLD FIX: this used to be an empty no-op AND flush only happened at 10
     // pending events (or 5-minute maybeFlush, which nothing ever called), so

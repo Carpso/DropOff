@@ -207,9 +207,7 @@ class BookingCard extends StatelessWidget {
                   (booking.branch?.isNotEmpty == true)
                       ? '${courier.name} · onward to ${booking.toCity}'
                       : courier.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted, height: 1.35),
                 ),
               ])),
               const Icon(Icons.chevron_right, color: AppColors.muted),
@@ -444,7 +442,7 @@ class BookingDetailScreen extends StatelessWidget {
   Widget _detailRow(String label, String value) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(width: 95, child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 12))),
+          SizedBox(width: 95, child: Text(label, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.3))),
           const SizedBox(width: 10),
           Expanded(child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.35))),
         ]),
@@ -959,6 +957,10 @@ class _PrepayCard extends StatefulWidget {
 
 class _PrepayCardState extends State<_PrepayCard> {
   bool _busy = false;
+  bool _pausing = false;
+  bool? _pausedOverride;
+
+  bool get _paused => _pausedOverride ?? widget.booking.repromptPaused;
 
   Future<void> _payNow() async {
     final store = AppScope.of(context);
@@ -978,9 +980,54 @@ class _PrepayCardState extends State<_PrepayCard> {
     unawaited(store.syncJobsFromServer());
   }
 
+  /// Pause/resume DropOff's payment reminders for this booking — for the
+  /// sender who realised the money isn't there right now.
+  Future<void> _togglePause(bool pause) async {
+    final store = AppScope.of(context);
+    setState(() => _pausing = true);
+    final resume = await DropOffApi.jobPauseReprompt(widget.booking.serverRef!, paused: pause);
+    if (!mounted) return;
+    setState(() {
+      _pausing = false;
+      if (resume.ok) _pausedOverride = pause;
+    });
+    AppToast.show(context, resume.ok
+        ? (pause ? 'Reminders paused — the booking stays HELD. Resume anytime.' : 'Reminders resumed — tap Pay now when you are ready.')
+        : 'Could not update reminders (${resume.error ?? 'try again'}).');
+    if (resume.ok) unawaited(store.syncJobsFromServer());
+  }
+
   @override
   Widget build(BuildContext context) {
     final held = widget.booking.lastEvent == 'prepayment_pending';
+    if (_paused) {
+      return Card(
+        color: const Color(0x14B3261E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14),
+            side: const BorderSide(color: Color(0x66B3261E))),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Row(children: [
+              Icon(Icons.notifications_off_outlined, size: 18, color: Color(0xFFB3261E)),
+              SizedBox(width: 8),
+              Expanded(child: Text('Reminders paused — booking HELD', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
+            ]),
+            const SizedBox(height: 4),
+            const Text('You asked us not to prompt for payment right now. Nothing new goes out to your phone (pushes already on it can\'t be recalled). The booking stays saved and held — no rider until you pay.',
+                style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _pausing ? null : () => _togglePause(false),
+              icon: _pausing
+                  ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.notifications_active_outlined),
+              label: Text(_pausing ? 'Resuming…' : 'Resume reminders'),
+            ),
+          ]),
+        ),
+      );
+    }
     return Card(
       color: held ? const Color(0x14B3261E) : AppColors.amber.withValues(alpha: 0.14),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14),
@@ -1008,6 +1055,13 @@ class _PrepayCardState extends State<_PrepayCard> {
                 ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.payments_outlined),
             label: Text(_busy ? 'Starting prompt…' : 'Pay now — dispatch rider'),
+          ),
+          const SizedBox(height: 6),
+          TextButton.icon(
+            onPressed: _pausing ? null : () => _togglePause(true),
+            icon: const Icon(Icons.notifications_off_outlined, size: 16),
+            label: Text(_pausing ? 'Pausing…' : 'Pause reminders — I can\'t pay right now',
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Color(0xFFB3261E))),
           ),
         ]),
       ),

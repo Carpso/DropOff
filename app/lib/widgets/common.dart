@@ -44,7 +44,7 @@ class InfoPill extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 15, color: color),
           const SizedBox(width: 5),
-          Flexible(child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12))),
+          Flexible(child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12, height: 1.35))),
         ]),
       );
 }

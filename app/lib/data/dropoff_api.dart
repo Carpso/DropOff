@@ -793,6 +793,12 @@ class DropOffApi {
   static Future<ApiResponse> closeChatThread(int threadId) =>
       post('/chat/threads/$threadId/close', const {});
 
+  /// Pause (true) or resume (false) DropOff's payment reminders for this
+  /// booking. USSD pushes already on the handset can't be recalled — this
+  /// only stops anything new going out. Sender of the job or staff.
+  static Future<ApiResponse> jobPauseReprompt(String jobRef, {bool paused = true}) =>
+      post('/jobs/$jobRef/payment/pause-reprompt', {'paused': paused});
+
   /// Partner joins a job's parcel chat (their courier must be linked).
   static Future<ApiResponse> jobChatJoin(String jobRef) =>
       post('/jobs/$jobRef/chat/join', const {});

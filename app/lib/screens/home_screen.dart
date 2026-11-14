@@ -5,7 +5,6 @@ import 'package:geolocator/geolocator.dart';
 
 import '../data/analytics_service.dart';
 import '../data/catalog.dart';
-import '../models/booking.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
@@ -309,32 +308,26 @@ class _FareChecker extends StatefulWidget {
   State<_FareChecker> createState() => _FareCheckerState();
 }
 
-/// Prices the user's pinned pickup → the nominated depot. Not city-to-city.
+/// Prices the user's pinned pickup → the fixed Lusaka depot anchor — the SAME
+/// formula and the SAME anchor the booking wizard and the Worker use, so the
+/// card can never contradict the prompt.
 class _FareCheckerState extends State<_FareChecker> {
   String _courierId = 'platinum';
   String _vehicle = 'motorcycle';
   double? _lat;
   double? _lng;
   bool _locating = false;
+  bool _feeChecked = false;
   final _place = TextEditingController(text: 'Home');
 
   static const Map<String, double> _multiplier = {'motorcycle': 1.0, 'car': 1.2, 'van': 1.4, 'truck': 2.0};
 
-  CourierInfo get _courier {
-    final pool = mergedCouriers(AppScope.of(context).activeServerCouriers);
-    return pool.firstWhere(
-      (c) => c.id == _courierId,
-      orElse: () => courierById('platinum'),
-    );
-  }
-
-  /// The Lusaka depots this courier can be handed to (branches with coords);
-  /// couriers with no listed Lusaka branch fall back to the flagship anchor.
-  List<CourierBranch> get _branches {
-    final list = _courier.branches.where((b) => b.city == 'Lusaka' && b.lat != null && b.lng != null).toList();
-    if (list.isNotEmpty) return list;
-    return const [CourierBranch(name: 'Lusaka depot', city: 'Lusaka', address: '', lat: -15.4255, lng: 28.2805)];
-  }
+  // The one authoritative anchor for every price in this app: matches the
+  // Worker's baseRiderFee (workers/src/pricing.ts) distance bands exactly.
+  // Do not price against the selected courier's depot — the fee has to be
+  // identical wherever the sender looks.
+  static const double _anchorLat = -15.4255;
+  static const double _anchorLng = 28.2805;
 
   double _haversineKm(double aLat, double aLng, double bLat, double bLng) {
     const R = 6371.0, d = 3.141592653589793 / 180;
@@ -372,6 +365,7 @@ class _FareCheckerState extends State<_FareChecker> {
       setState(() {
         _lat = pos.latitude;
         _lng = pos.longitude;
+        _feeChecked = false;
       });
     } catch (_) {
       if (mounted) {
@@ -380,6 +374,16 @@ class _FareCheckerState extends State<_FareChecker> {
     } finally {
       if (mounted) setState(() => _locating = false);
     }
+  }
+
+  void _checkFee() {
+    final from = _place.text.trim();
+    if (from.length < 3 && _lat == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Type where we collect from — or pin your location.')));
+      return;
+    }
+    setState(() => _feeChecked = true);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✓ Fee checked — book when you are ready.')));
   }
 
   /// Check the rider fee → Book: carry over EVERYTHING the sender already
@@ -399,8 +403,7 @@ class _FareCheckerState extends State<_FareChecker> {
 
   @override
   Widget build(BuildContext context) {
-    final branch = _branches.first; // estimate target depot (owner dropped the picker)
-    final km = (_lat != null && _lng != null) ? _haversineKm(_lat!, _lng!, branch.lat!, branch.lng!) : null;
+    final km = (_lat != null && _lng != null) ? _haversineKm(_lat!, _lng!, _anchorLat, _anchorLng) : null;
     final fee = km != null ? _fee(km) : null;
     return Card(
       child: Padding(
@@ -415,6 +418,7 @@ class _FareCheckerState extends State<_FareChecker> {
           const SizedBox(height: 12),
           TextField(
             controller: _place,
+            onChanged: (_) => setState(() => _feeChecked = false),
             decoration: const InputDecoration(
               labelText: 'Pickup from (home / office / store — your own spot)',
               isDense: true,
@@ -428,7 +432,7 @@ class _FareCheckerState extends State<_FareChecker> {
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'Courier depot', isDense: true),
               items: [for (final c in mergedCouriers(AppScope.of(context).activeServerCouriers)) DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))],
-              onChanged: (v) => setState(() => _courierId = v ?? _courierId),
+              onChanged: (v) => setState(() { _courierId = v ?? _courierId; _feeChecked = false; }),
             )),
           ]),
           const SizedBox(height: 8),
@@ -441,7 +445,7 @@ class _FareCheckerState extends State<_FareChecker> {
               DropdownMenuItem(value: 'van', child: Text('Van')),
               DropdownMenuItem(value: 'truck', child: Text('Truck (large cargo)')),
             ],
-            onChanged: (v) => setState(() => _vehicle = v ?? _vehicle),
+            onChanged: (v) => setState(() { _vehicle = v ?? _vehicle; _feeChecked = false; }),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -458,8 +462,8 @@ class _FareCheckerState extends State<_FareChecker> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
                 fee != null
-                    ? 'DropOff rider leg: K${fee.toStringAsFixed(0)} — pickup to ${_courier.name} (${km!.toStringAsFixed(1)} km)'
-                    : 'DropOff rider leg: K55 / K75 / K95 by distance — pin your pickup for your exact fee, or just book: it locks when you pay (momo prepaid)',
+                    ? 'DropOff rider leg: K${fee.toStringAsFixed(0)} — pickup, band price (${km!.toStringAsFixed(1)} km) — same number you will see at booking'
+                    : 'DropOff rider leg: K55 / K75 / K95 by distance band — pin your pickup for your exact fee, it matches booking exactly (momo prepaid)',
                 style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
               ),
               const SizedBox(height: 4),
@@ -468,11 +472,21 @@ class _FareCheckerState extends State<_FareChecker> {
             ]),
           ),
           const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: _book,
-            icon: const Icon(Icons.arrow_forward, size: 18),
-            label: const Text('Book the pickup'),
-          ),
+          if (!_feeChecked) ...[
+            OutlinedButton.icon(
+              onPressed: _checkFee,
+              icon: const Icon(Icons.calculate_outlined, size: 18),
+              label: const Text('Check fee'),
+            ),
+            const SizedBox(height: 6),
+            const Text('The booking button unlocks after you have seen your price.',
+                style: TextStyle(color: AppColors.muted, fontSize: 10.5)),
+          ] else
+            FilledButton.icon(
+              onPressed: _book,
+              icon: const Icon(Icons.arrow_forward, size: 18),
+              label: const Text('Book the pickup — fee checked ✓'),
+            ),
         ]),
       ),
     );

@@ -17,7 +17,7 @@ import {
 } from './auth';
 import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
 import { PRIVACY_MD, PRIVACY_TITLE, mdToHtml } from './legal';
-import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VEHICLE_MAX_PARCELS, VehicleClass } from './pricing';
+import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VEHICLE_MAX_PARCELS, VehicleClass, parcelCapFor } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { sendSms } from './sms';
 import { sendToPhone } from './push';
@@ -1783,7 +1783,7 @@ app.post('/jobs', async (c) => {
     // still fit under the cap; otherwise the whole trip pays the tier overage.
     const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class)
       ? b.vehicle_class : 'motorcycle';
-    const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, VEHICLE_MAX_PARCELS[vehicleClass]));
+    const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, b.parcel_size)));
     let riderFee = baseRiderFee(fromCity, Number(b.pickup_lat ?? 0), Number(b.pickup_lng ?? 0), vehicleClass);
     let packInclusion: 'pack' | 'payg' | 'none' = 'none';
     let planUsed = 0;
@@ -2188,7 +2188,7 @@ app.post('/collections', async (c) => {
     pickupAt = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1, 4, 0)).toISOString();
   }
   const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class) ? b.vehicle_class : 'motorcycle';
-  const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, VEHICLE_MAX_PARCELS[vehicleClass]));
+  const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, b.parcel_size)));
   // PREPAID POLICY (owner directive): no cash — everything is paid in advance
   // at booking by momo; plans ride prepaid via their subscription.
   const payMethod = b.pay_method === 'cash' ? 'cash' : 'mobile_money';
@@ -2380,7 +2380,8 @@ app.get('/jobs', async (c) => {
   const afterBind = after != null && Number.isFinite(after) ? after : 9007199254740991;
   const { results } = await c.env.DB.prepare(
     `SELECT j.*, co.name AS courier_name, co.depot_name,
-            (SELECT status FROM job_events ev WHERE ev.job_id = j.id ORDER BY ev.id DESC LIMIT 1) AS last_event
+            (SELECT status FROM job_events ev WHERE ev.job_id = j.id ORDER BY ev.id DESC LIMIT 1) AS last_event,
+            (SELECT paused_at IS NOT NULL FROM payments p WHERE p.job_id = j.id AND p.kind = 'booking_deposit' AND p.status = 'pending' ORDER BY p.id DESC LIMIT 1) AS reprompt_paused
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
       WHERE j.sender_phone = ?1 AND j.id < ?2
       ORDER BY j.id DESC LIMIT ?3`,
@@ -4500,6 +4501,39 @@ app.delete('/push/register', async (c) => {
   return c.json({ ok: true, removed: res.meta.changes ?? 0 });
 });
 
+// Pause/resume DropOff's payment reminders for a job — the sender realised
+// the money is not there right now, so we stop sending anything new. USSD
+// pushes already on the handset are out of app control (we never pretend
+// otherwise). Paused rows are excluded from the advance-prompt reuse check,
+// so resuming re-arms a fresh prompt on the next deliberate tap.
+app.post('/jobs/:ref/payment/pause-reprompt', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const job = await c.env.DB.prepare(
+    `SELECT j.id, j.sender_phone,
+            (SELECT paused_at IS NOT NULL FROM payments p
+              WHERE p.job_id = j.id AND p.kind = 'booking_deposit' AND p.status = 'pending'
+              ORDER BY p.id DESC LIMIT 1) AS paused
+       FROM jobs j WHERE ref = ?1`,
+  ).bind(c.req.param('ref')).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  const isStaff = isAdmin(c) || c.get('role') === 'ops';
+  if (!isStaff && job.sender_phone !== phone) return c.json({ error: 'not found' }, 404);
+  const body = await c.req.json().catch(() => ({} as any));
+  const paused = body?.paused !== false; // default = pause
+  await c.env.DB.prepare(
+    `UPDATE payments SET paused_at = ${paused ? "datetime('now')" : 'NULL'}
+     WHERE job_id = ?1 AND kind = 'booking_deposit' AND status = 'pending'`,
+  ).bind(job.id).run();
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)`,
+    ).bind(job.id, paused ? 'reprompt_paused' : 'reprompt_resumed',
+      paused ? 'Payment reminders paused by the sender — booking stays HELD.' : 'Payment reminders resumed by the sender.').run();
+  } catch { /* audit must never block the toggle */ }
+  return c.json({ ok: true, paused });
+});
+
 /* ------------------- ride float (rider/ops COD float) ---------------------- */
 // NOT A WALLET: customers never hold stored value — prepayment is per parcel.
 // This ledger only tracks rider/ops COD float: topup +, job charge -,
@@ -4572,7 +4606,7 @@ app.post('/payments', async (c) => {
     // same delivery.
     const pendingAdvance = await c.env.DB.prepare(
       `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status FROM payments
-        WHERE job_id = ?1 AND kind = 'booking_deposit' AND status IN ('pending','success')
+        WHERE job_id = ?1 AND kind = 'booking_deposit' AND status IN ('pending','success') AND paused_at IS NULL
         ORDER BY id DESC LIMIT 1`,
     ).bind(job.id).first<any>();
     if (pendingAdvance) {
@@ -8743,16 +8777,21 @@ app.post('/ai/address', async (c) => {
     return c.json({ fallback: true, parsed: fallback(), detail: 'AI unavailable (neither Workers AI binding nor HF_API_KEY set).' });
   }
   // PRIMARY: free Workers AI. FALLBACK: optional paid HF Mistral.
+  // Tidy canonicalises against the zones Zambia actually books in (all cities
+  // the app can name + top Lusaka delivery districts) so typos snap — "kabvata"
+  // -> "Kabwata" — instead of being passed through verbatim.
+  const zones = 'Lusaka, Lusaka districts: Kabwata, Kabulonga, Northmead, Rhodes Park, Roma, Woodlands, Avondale, Chalala, Garden, Kalingalinga, Mtendere, Kanyama, Libala, Thornpark, Chilenje, Matero, Chelstone, Chalimbana, Chibolya, Longacres, Chilanga, Ndola, Kitwe, Kabwe, Kapiri Mposhi, Livingstone, Chingola, Choma, Chipata, Solwezi, Kasama, Mongu, Mufulira, Luanshya, Kalulushi, Chililabombwe, Kasumbalesa, Mpongwe, Mumbwa, Mkushi, Serenje, Kafue, Mazabuka, Monze, Chinsali, Nakonde, Mpika, Mansa, Samfya, Chilanga, Chongwe, Katete, Petauke, Nyimba, Chadiza, Mbala, Kaputa, Isoka, Mafinga, Zambezi, Mufumbwe, Kasempa, Kalabo, Sesheke, Kazungula, Shangombo, Namwala, Itezhi-Tezhi, Kalomo, Zimba, Milenge, Nchelenge, Mwense, Chembe, Lufwanyama, Chingambwe.';
+  const sys = 'You are Tidy, the DropOff address AI for Zambia. Normalise messy Zambian delivery addresses (senders type fast). Fix obvious spelling typos and abbreviations ONLY by snapping to the zones below. Reply with a SINGLE JSON object only, no markdown, exactly: {"street":"","area":"","city":"","landmark":"","phone":"","notes":"","plus_code":"","confidence":"high"}. Zones: ' + zones + '. Rules: never invent a street, area or town that is absent; when unsure keep the sender text untouched with confidence=low; if the text contains a plus code (e.g. 8FQ4+22 Lusaka), echo it EXACTLY into plus_code; city must be one of the zones when recognisable.';
   let out: any = await runAi(c.env, LLM_MODEL, {
     messages: [
-      { role: 'system', content: 'You normalise Zambian (Lusaka) delivery addresses. Reply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}. Never invent details that are absent.' },
+      { role: 'system', content: sys },
       { role: 'user', content: `Address: ${text}` },
     ],
-    max_tokens: 220,
+    max_tokens: 300,
   });
   if (!out && (c.env as any).HF_API_KEY) {
     const hfRaw = await hfText(c.env, HF_TEXT_MODEL,
-      `You normalise Zambian (Lusaka) delivery addresses. Never invent details that are absent. Output ONLY JSON. Address: ${text}\nReply with a single JSON object only, no markdown: {"street":"","area":"","landmark":"","phone":"","notes":""}`, 220);
+      `${sys}\nAddress: ${text}`, 300);
     if (hfRaw) out = { response: hfRaw };
   }
   if (!out) {

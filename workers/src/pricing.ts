@@ -30,11 +30,21 @@ export const VEHICLE_MULTIPLIER: Record<VehicleClass, number> = {
   truck: 2.0,
 };
 
-// Owner directive (2026-11-12): motorcycles carry at least 5 parcels; cars,
-// vans and trucks have no practical parcel limit (they house whole batches).
+// Owner directive (2026-11-13): cars, vans and trucks have no practical parcel
+// limit (they house whole batches). Motorcycles cap by parcel SIZE:
+//   small × 10 · medium × 5 · large × 1  — then the rider bumps vehicle.
+// Applies the same size-aware numbers as the Flutter estimate (app/lib/screens).
+export const MOTORCYCLE_MAX_PARCELS = { small: 10, medium: 5, large: 1 } as const;
 export const VEHICLE_UNLIMITED = 9999;
+export function parcelCapFor(vehicleClass: VehicleClass, parcelSize?: string): number {
+  if (vehicleClass !== 'motorcycle') return VEHICLE_UNLIMITED;
+  const k = String(parcelSize ?? '').toLowerCase().trim();
+  if (k === 'small') return MOTORCYCLE_MAX_PARCELS.small;
+  if (k === 'large') return MOTORCYCLE_MAX_PARCELS.large;
+  return MOTORCYCLE_MAX_PARCELS.medium;
+}
 export const VEHICLE_MAX_PARCELS: Record<VehicleClass, number> = {
-  motorcycle: 5,
+  motorcycle: MOTORCYCLE_MAX_PARCELS.medium, // legacy flat fallback (medium)
   car: VEHICLE_UNLIMITED,
   van: VEHICLE_UNLIMITED,
   truck: VEHICLE_UNLIMITED,

@@ -802,7 +802,7 @@ class _RiderReviewsCardState extends State<_RiderReviewsCard> {
                     if ('${r['comment'] ?? ''}'.trim().isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 3),
-                        child: Text('“${r['comment']}”', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, height: 1.35)),
+                        child: Text('“${r['comment']}”', style: const TextStyle(fontSize: 11.5, height: 1.35)),
                       ),
                   ]),
                 )),

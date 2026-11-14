@@ -8,7 +8,6 @@ import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
 import 'account_screen.dart';
-import 'booking_screen.dart';
 
 /// Collect a parcel from a courier's point in Lusaka and deliver it to the
 /// recipient's door. No counter fare and no branch picking — the parcel is
@@ -36,7 +35,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   bool _saving = false;
   bool _aiBusy = false;
 
-  /// AI tidy-up of a free-text address (best-effort; never blocks).
+  /// ✨ Tidy — normalises a free-text address (best-effort; never blocks).
   Future<void> _aiTidy(TextEditingController ctl) async {
     final text = ctl.text.trim();
     if (text.length < 5) return _message('Type the address first, then tap AI.');
@@ -246,7 +245,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             hintText: points.isEmpty ? 'e.g. Longacres counter' : points.first,
             prefixIcon: const Icon(Icons.location_on_outlined),
             helperText: points.isEmpty ? 'Ask the courier which counter holds it.' : 'Popular: ${points.take(2).join(' · ')}',
-            suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_point), child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')),
+            suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_point), child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('✨ Tidy')),
           ),
         ),
         const SizedBox(height: 20),
