@@ -44,3 +44,8 @@ workers/backups/
 
 app/android/.kotlin/
 
+
+# Scratch audit tooling (never commit)
+.scale_tmp/
+.opencode_tmp/
+
