@@ -83,17 +83,30 @@ Rules
   previous pass — no price claims in UI copy outside the fee checker, where the figure is
   computed live from the distance band.
 
-## E. Backlog (next pass — UI render decisions, needs review)
+## E. Done in the follow-up pass (2026-11-15, commit series 0cec60a+)
 
-- **Empty-state heroes**: bookings-empty gets the display line + single CTA treatment.
-- **Icon austerity**: remove decorative icons from section headers; nouns only.
-- **Waybill print copy**: "Hand this screen to the counter." (done, waybill_screen)
-- **App icon + Play store**: type-only lockup, no illustrative background.
-- **Reduce Roboto weights to Regular + Bold** (halves the font payload).
-- Ink-over-muted pass on the remaining ~170 caption-size sites (< 12px) — only after render
-  review; blind flipping would wreck caption hierarchy.
+- **Empty states are typographic heroes**: `EmptyState` (`common.dart`) no longer renders a
+  76px decorative icon bubble — eyebrow + display line + one short sentence + one CTA. Both
+  call sites (bookings, operations) rewritten to match.
+- **Icon austerity on section notes**: the `info_outline` adornments on the three "we never
+  control the courier's operation" note blocks are gone (booking_screen, couriers_screen ×2).
+  Section headers themselves were already icon-free; the remaining ~80 icons in the app are
+  nouns doing scan work (phone, fingerprint, support chat) — deleting them blind would hurt,
+  not help.
+- **Roboto weight reduction: not applicable** — the app bundles NO Roboto assets; it uses the
+  system font (Windows/Android have Roboto; iOS maps). Nothing to halve. Correction to earlier
+  note.
+- **Caption pass applied through 12px** (88 field edits, ink at ≥12.5px, radius family
+  unified); the <12px caption layer intentionally stays muted.
 
-## F. Pass/fail checklist for any new screen
+## F. Still open (render decisions, owner sign-off needed)
+
+- **Play-store lockup**: type-only logo mark + wordmark for store listing. I do not design
+  bitmap assets — needs a designer or a generative pass with review.
+- **Icon audit across list rows** (90 sites): whether service icons add scan value or noise on
+  screen — needs a screenshot walk-through with the owner.
+- **Empty-state hero pair for couriers/tracking screens** (typography could go bigger).
+
 
 - [ ] One word answers "what is this screen?" — said at Display/Title size
 - [ ] Running text is ink on white, ≥ 12.5px

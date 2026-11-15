@@ -442,11 +442,11 @@ class OperationsScreen extends StatelessWidget {
         const SizedBox(height: 8),
         if (store.riders.isEmpty) ...[
           EmptyState(
-            icon: Icons.directions_bike,
-            title: 'No riders yet',
+            eyebrow: 'TEAM',
+            title: 'No riders yet.',
             message: canAddRiders
-                ? 'Tap + Add to register your first rider or driver. They’ll appear in the shared team once saved.'
-                : 'Only the owner and admins can add riders. They’ll appear here once added.',
+                ? 'Tap + Add to register your first rider or driver. They appear in the shared team once saved.'
+                : 'Only the owner and admins can add riders. They appear here once added.',
             action: canAddRiders
                 ? FilledButton.icon(
                     onPressed: () => _addRider(context),

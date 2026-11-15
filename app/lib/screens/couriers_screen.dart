@@ -312,16 +312,10 @@ class _LiveDepotsSection extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(13),
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
-            child: const Row(children: [
-              Icon(Icons.info_outline, size: 16, color: AppColors.muted),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'DropOff covers the first mile (your pickup → depot) and last mile (depot → recipient). What happens with your nominated courier between depots is their own operation — we never control their route, timing or depot handling.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
-                ),
-              ),
-            ]),
+            child: const Text(
+              'DropOff covers the first mile (your pickup → depot) and last mile (depot → recipient). What happens with your nominated courier between depots is their own operation — we never control their route, timing or depot handling.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+            ),
           ),
           const SizedBox(height: 8),
           const InfoPill(icon: Icons.info_outline, label: 'In-app courier payment & live parcel scanning — coming soon. Pay the depot at drop-off.'),
@@ -473,16 +467,10 @@ class CourierDetailScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(13),
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
-            child: const Row(children: [
-              Icon(Icons.info_outline, size: 16, color: AppColors.muted),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'DropOff covers the first mile (your pickup → depot) and last mile (depot → recipient). What happens with your nominated courier between depots is their own operation — we never control their route, timing or depot handling.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
-                ),
-              ),
-            ]),
+            child: const Text(
+              'DropOff covers the first mile (your pickup → depot) and last mile (depot → recipient). What happens with your nominated courier between depots is their own operation — we never control their route, timing or depot handling.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+            ),
           ),
         ]),
       );

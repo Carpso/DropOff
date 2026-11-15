@@ -141,10 +141,10 @@ class _BookingsScreenState extends State<BookingsScreen> {
                 ],
                 if (bookings.isEmpty)
                   EmptyState(
-                    icon: Icons.inventory_2_outlined,
-                    title: _incoming.isEmpty ? 'No parcels yet' : 'No parcels you sent yet',
+                    eyebrow: _incoming.isEmpty ? 'NOTHING IN TRANSIT' : 'AWAITING YOU',
+                    title: _incoming.isEmpty ? 'Nothing in transit.' : 'Nothing you sent yet.',
                     message: _incoming.isEmpty
-                        ? 'Book your first home-to-depot pickup. Your tracking timeline will appear here.'
+                        ? 'Book your first home-to-depot pickup. Your tracking timeline appears here.'
                         : 'Everything below is addressed to you. When you send a parcel yourself it will appear here too.',
                     action: FilledButton.icon(
                       onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen())),

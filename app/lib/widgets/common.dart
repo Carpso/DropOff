@@ -49,28 +49,27 @@ class InfoPill extends StatelessWidget {
       );
 }
 
+/// Typographic empty state (Scher discipline): no icon bubble — an eyebrow,
+/// one display-scale line, one short sentence, one CTA. If a screen has
+/// nothing to show, it says so with type, not clip-arts.
 class EmptyState extends StatelessWidget {
-  final IconData icon;
+  final String eyebrow;
   final String title;
   final String message;
   final Widget? action;
-  const EmptyState({super.key, required this.icon, required this.title, required this.message, this.action});
+  const EmptyState({super.key, this.eyebrow = 'DROPOFF', required this.title, required this.message, this.action});
 
   @override
   Widget build(BuildContext context) => Center(
         child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              width: 76, height: 76,
-              decoration: const BoxDecoration(color: Color(0xFFE8EEE9), shape: BoxShape.circle),
-              child: Icon(icon, size: 34, color: AppColors.forest),
-            ),
-            const SizedBox(height: 18),
-            Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
-            Text(message, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.5)),
-            if (action != null) ...[const SizedBox(height: 20), action!],
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('DROPOFF', style: AppType.eyebrow),
+            const SizedBox(height: 10),
+            Text(title, style: AppType.title),
+            const SizedBox(height: 10),
+            Text(message, style: AppType.body),
+            if (action != null) ...[const SizedBox(height: 22), action!],
           ]),
         ),
       );

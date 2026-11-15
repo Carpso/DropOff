@@ -1104,16 +1104,10 @@ class _BookingScreenState extends State<BookingScreen> {
         Container(
           padding: const EdgeInsets.all(13),
           decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
-          child: const Row(children: [
-            Icon(Icons.info_outline, size: 16, color: AppColors.muted),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Your rider takes the parcel to the nearest depot of the courier you choose — no branch to pick.',
-                style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
-              ),
-            ),
-          ]),
+          child: const Text(
+            'Your rider takes the parcel to the nearest depot of the courier you choose — no branch to pick.',
+            style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+          ),
         ),
         const Padding(
           padding: EdgeInsets.only(top: 8),
