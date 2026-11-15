@@ -282,7 +282,7 @@ class _AccountScreenState extends State<AccountScreen> {
                 ]),
                 const SizedBox(height: 6),
                 const Text('Every phone/tablet this account has opened DropOff from. Tap revoke to sign that device out — it cannot be used again until re-authenticated.',
-                    style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+                    style: AppType.caption),
                 const SizedBox(height: 10),
                 if (rows.isEmpty)
                   const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('No devices on record yet — once you sign in on something, it shows here.', style: TextStyle(color: AppColors.muted, fontSize: 12)))
@@ -623,7 +623,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   Text('Privacy & sign-in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
                 ]),
                 const SizedBox(height: 2),
-                Text(_biomeDescription, style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
+                Text(_biomeDescription, style: AppType.caption),
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1422,7 +1422,7 @@ class _PackCodeCardState extends State<_PackCodeCard> {
               Expanded(child: Text('Have a plan code?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             ]),
             const SizedBox(height: 4),
-            const Text('Bought a plan from an agent or at a market day? Redeem the code — it activates instantly on your number.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+            const Text('Bought a plan from an agent or at a market day? Redeem the code — it activates instantly on your number.', style: AppType.caption),
             const SizedBox(height: 12),
             TextField(
               controller: _code,
@@ -1483,7 +1483,7 @@ class _AdminGateState extends State<_AdminGate> {
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Admin console', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
                 SizedBox(height: 2),
-                Text('Payroll, turnover tax, riders, depot branches, moderation and SMS.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.3)),
+                Text('Payroll, turnover tax, riders, depot branches, moderation and SMS.', style: AppType.caption),
               ])),
               Icon(Icons.chevron_right, color: AppColors.muted),
             ]),
@@ -1560,7 +1560,7 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
                       ? 'Cap reached — extra parcels now pay your tier discount (auto-applied at booking).'
                       : 'Cap reached — extra parcels now bill at pay-as-you-go rates.')
                   : 'Each parcel counts as one. Cycle renews $renews.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35),
+              style: AppType.caption,
             ),
           ]),
         );

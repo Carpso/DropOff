@@ -453,7 +453,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           ]),
         ),
         const SizedBox(height: 12),
-        const Text('Rider controls update this device. Photo proof, courier waybill upload and seller notifications run through the linked backend.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
+        const Text('Rider controls update this device. Photo proof, courier waybill upload and seller notifications run through the linked backend.', textAlign: TextAlign.center, style: AppType.caption),
       ]),
     );
   }
@@ -871,7 +871,7 @@ class _RatingCardState extends State<_RatingCard> {
           const SizedBox(height: 4),
           const Text(
             'Score the driver, the courier and — if you were the recipient — the seller. Comments are optional but help everyone.',
-            style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
+            style: AppType.caption,
           ),
           const SizedBox(height: 14),
           for (final target in targets) ...[
@@ -882,7 +882,7 @@ class _RatingCardState extends State<_RatingCard> {
             const SizedBox(height: 14),
             const Text(
               'Sellers are rated by recipients — share the tracking link so the buyer can score you here.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35),
+              style: AppType.caption,
             ),
           ],
           const SizedBox(height: 16),
@@ -1139,7 +1139,7 @@ class _PrepayCardState extends State<_PrepayCard> {
             ]),
             const SizedBox(height: 4),
             const Text('You asked us not to prompt for payment right now. Nothing new goes out to your phone (pushes already on it can\'t be recalled). The booking stays saved and held — no rider until you pay.',
-                style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+                style: AppType.caption),
             const SizedBox(height: 10),
             FilledButton.icon(
               onPressed: _pausing ? null : () => _togglePause(false),
@@ -1171,7 +1171,7 @@ class _PrepayCardState extends State<_PrepayCard> {
           Text(held
                   ? 'The mobile-money prompt could not start, so no rider is assigned yet. Pay now to dispatch — the booking stays saved.'
                   : 'Approve the momo prompt to dispatch your rider. Not received? Pay now resends it.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+              style: AppType.caption),
           const SizedBox(height: 10),
           FilledButton.icon(
             onPressed: _busy ? null : _payNow,
@@ -1263,7 +1263,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
           const SizedBox(height: 4),
           Text('Your rider paid the depot counter out of their own pocket. The receipts below are YOURS — revealed when you pay — and the rider gets reimbursed.'
               '${(widget.booking.counterReceipts.length > 1) ? ' The depot split the batch into ${widget.booking.counterReceipts.length} receipts; you repay the exact total DropOff computed from them.' : ''}',
-              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+              style: AppType.caption),
           // REAL receipt photo (owner directive): the rider's actual depot
           // receipt is served to the sender, but rendered blurred behind a
           // lock until the depot bill is cleared — never a placeholder.

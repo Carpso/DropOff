@@ -370,7 +370,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   const SizedBox(width: 8),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('${a['type']} · ${a['phone']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
-                    Text('${a['detail']}', style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.3)),
+                    Text('${a['detail']}', style: AppType.caption),
                   ])),
                   TextButton(
                     onPressed: () async { await DropOffApi.ackAlert((a['id'] as num).toInt()); _load(); },
@@ -485,7 +485,7 @@ class _AdminScreenState extends State<AdminScreen> {
           ]),
           const SizedBox(height: 6),
           Text('K3,000/rider/month incl. K300/week fuel (K1,800 base), weekly K750 per Light cycle. Pace-gated by delivery. This is the real cost of your roster.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+              style: AppType.caption),
           const SizedBox(height: 10),
           Wrap(spacing: 10, runSpacing: 10, children: [
             _metricTile('Riders on books', '$riders', 'verified, active', Icons.groups),
@@ -504,7 +504,7 @@ class _AdminScreenState extends State<AdminScreen> {
           ],
           const SizedBox(height: 4),
           Text('A full-time rider pays for themselves at ~$sustain PAYG trips/day (K45 each). Plans speed up the cash equation — but trips, not promos, measure pace.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
+              style: AppType.caption),
           if (growth.isNotEmpty) ...[
             const SizedBox(height: 12),
             const Text("What's next — headcount headache kept simple", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
@@ -820,7 +820,7 @@ class _AdminScreenState extends State<AdminScreen> {
             ]),
             const SizedBox(height: 4),
             const Text('Push an offer to app users by audience. Title ≤ 80 chars, body ≤ 140 chars. Delivered on devices that previously signed in to the app.',
-                style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+                style: AppType.caption),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: _pushAudience,
@@ -1400,7 +1400,7 @@ class _UsersCardState extends State<_UsersCard> {
           ]),
           const SizedBox(height: 4),
           const Text('As the owner you decide who is who. Roles you can grant: customer (regular sender/seller), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves), cfo (finances only — payroll, turnover tax and filings; never moves money on their own).',
-              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+              style: AppType.caption),
           const SizedBox(height: 8),
           if (_loading)
             const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
@@ -1768,7 +1768,7 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
             'E.g. door → depot: Kabulonga → Platinum (Lusaka) — our rider fee for that leg. '
             'E.g. depot → door: Icypeed (Lusaka) → Kabulonga — our collection fee. '
             'No counter fares here — depot fares stay at the counter. Locations come from what app users type (most used shown).',
-            style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+            style: AppType.caption,
           ),
           const SizedBox(height: 12),
           Wrap(spacing: 8, children: [
@@ -1953,7 +1953,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
               TextButton(onPressed: _copyAll, child: const Text('Copy all')),
           ]),
           const SizedBox(height: 4),
-          const Text('Sell plans at the counter or to agents. The seller redeems the code in the app — no payment prompt, the plan goes live instantly.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          const Text('Sell plans at the counter or to agents. The seller redeems the code in the app — no payment prompt, the plan goes live instantly.', style: AppType.caption),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
@@ -2148,7 +2148,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
             const SizedBox(height: 2),
-            Text(blurb, style: const TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.35)),
+            Text(blurb, style: AppType.caption),
           ]),
         ),
         const SizedBox(width: 8),
@@ -2265,7 +2265,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
           ]),
           const SizedBox(height: 2),
           const Text('Off hides the offer from sellers instantly (new subscriptions stop; existing subscribers keep their cycle benefit). Edit every field below — price, parcels/day, parcels/month, cycle length, discount, tag.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+              style: AppType.caption),
           const SizedBox(height: 10),
           const Row(children: [
             Icon(Icons.toggle_on_outlined, size: 16, color: AppColors.forest),
@@ -2416,7 +2416,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
           ]),
           const SizedBox(height: 2),
           const Text('3 strikes in 14 days parks new bookings. Clear one or all from this list.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+              style: AppType.caption),
           const SizedBox(height: 10),
           if (_rows.isEmpty && !_loading)
             const Text('No strikes on file — nobody is parked right now.',
@@ -2585,7 +2585,7 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
           ]),
           const SizedBox(height: 2),
           const Text('Up the incentive for a period (Christmas Bonus, Year-End Sprint…). Toggle to promote or retire — flows through the same payroll confirmation chain as salary, never as cash-in-app.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+              style: AppType.caption),
           if (_active != null)
             Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -2748,7 +2748,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
               style: TextStyle(fontWeight: FontWeight.w800, color: faceVerdict.isEmpty ? AppColors.muted : faceColor)),
           if (faceNote.isNotEmpty) ...[
             const SizedBox(height: 2),
-            Text('AI note: $faceNote', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3)),
+            Text('AI note: $faceNote', style: AppType.caption),
           ],
           if (faceMatch != null) ...[
             const SizedBox(height: 4),
@@ -2757,7 +2757,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
             if ('${faceMatch['note'] ?? ''}'.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Text('AI note: ${faceMatch['note']}', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3)),
+                child: Text('AI note: ${faceMatch['note']}', style: AppType.caption),
               ),
           ],
           const SizedBox(height: 10),
@@ -2818,7 +2818,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
             IconButton(visualDensity: VisualDensity.compact, onPressed: _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
           Text('$pending pending review - $verified verified. Daily target is 30 parcels; month pace carries any missed day.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+              style: AppType.caption),
           const SizedBox(height: 12),
           Wrap(spacing: 6, runSpacing: 6, children: [
             ChoiceChip(selected: !_showAll, label: Text('Pending only ($pending)'), onSelected: (v) => setState(() => _showAll = !v)),
@@ -2853,7 +2853,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
                   ]),
                   const SizedBox(height: 2),
                   Text('${rider['phone'] ?? ''} - ${rider['vehicle'] ?? ''} ${rider['vehicle_class'] ?? ''}',
-                      style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+                      style: AppType.caption),
                   const SizedBox(height: 4),
                   Text('Plate: ${_orDash(rider['plate_number'])}   NRC: ${_orDash(rider['nrc_number'])}   ${_orDash(rider['vehicle_make'])} ${_orDash(rider['vehicle_color'])}',
                       style: const TextStyle(fontSize: 11.5, height: 1.4)),
@@ -3290,7 +3290,7 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
               ],
             ),
             const SizedBox(height: 8),
-            Text('${_data?['basis'] ?? ''}', style: const TextStyle(color: AppColors.muted, fontSize: 9.5, height: 1.3)),
+            Text('${_data?['basis'] ?? ''}', style: AppType.caption),
           ],
         ]),
       ),

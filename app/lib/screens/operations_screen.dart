@@ -360,7 +360,7 @@ class OperationsScreen extends StatelessWidget {
             child: ListTile(
               leading: Icon(store.linked ? Icons.verified_user : Icons.link_outlined, color: AppColors.forest),
               title: Text(store.linked ? 'Linked as ${store.linkedPhone}' : 'Device not linked', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-              subtitle: const Text('This number is your rider identity — jobs and COD are keyed to it.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+              subtitle: const Text('This number is your rider identity — jobs and COD are keyed to it.', style: AppType.caption),
               trailing: TextButton(onPressed: () => _linkDevice(context), child: const Text('Manage')),
             ),
           ),
@@ -468,7 +468,7 @@ class OperationsScreen extends StatelessWidget {
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(rider.isOwner ? '${rider.name} (You)' : rider.name, style: const TextStyle(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 3),
-                  Text('${rider.vehicle} • ${rider.phone}', style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
+                  Text('${rider.vehicle} • ${rider.phone}', style: AppType.caption),
                 ])),
                 if (rider.isOwner)
                   const InfoPill(icon: Icons.verified, label: 'OWNER')
@@ -632,7 +632,7 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
             on
                 ? 'ON — when you take a job the sender\'s tracking link cannot see prices, but it can show them exactly where you are on the map.'
                 : 'Off — senders will see your name, vehicle and ETA only; never your live coordinates.',
-            style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+            style: AppType.caption,
           ),
           if (_lastStatus != null) ...[
             const SizedBox(height: 6),
@@ -788,7 +788,7 @@ class _RiderReviewsCardState extends State<_RiderReviewsCard> {
           if (n == 0)
             const Padding(
               padding: EdgeInsets.only(top: 6),
-              child: Text('No ratings yet — sellers and recipients rate you after each delivery; they show up here.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+              child: Text('No ratings yet — sellers and recipients rate you after each delivery; they show up here.', style: AppType.caption),
             )
           else
             ...reviews.take(2).map((r) => Padding(
@@ -1112,7 +1112,7 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
                 targetBonus['target_met'] == true
                     ? 'K200 completion locked ✓  ·  +K${(targetBonus['over_target_bonus_zmw'] ?? 0).toStringAsFixed(0)} over target so far (${targetBonus['counted_extra'] ?? 0} parcels)  ·  K150 stretch at 1.25× target'
                     : 'Hit the month target ($monthTarget parcels) and you bank K200 + K5 per parcel beyond it (max K675) + K150 stretch at 1.25× target.',
-                style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+                style: AppType.caption,
               ),
             ],
           ],
@@ -1407,7 +1407,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
           if (!_collapsed) ...[
           const SizedBox(height: 4),
           const Text('Your NRC, licence, plate and vehicle photos. The owner/admin verifies these before you can be assigned jobs.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+              style: AppType.caption),
           if (rejected && note.isNotEmpty) ...[
             const SizedBox(height: 8),
             Container(
@@ -1436,7 +1436,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
                     Text('Verification submitted', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: AppColors.forest)),
                   ]),
                   SizedBox(height: 6),
-                  Text('Your documents are in the owner/admin review queue. You will be notified once verified.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+                  Text('Your documents are in the owner/admin review queue. You will be notified once verified.', style: AppType.caption),
                 ]),
               ),
               const SizedBox(height: 10),
@@ -1593,7 +1593,7 @@ class _SelfieBannerState extends State<_SelfieBanner> {
               Text("Sellers can't see you yet", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
               SizedBox(height: 3),
               Text('Add your photo - the person collecting their parcel should be a face, not an icon.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+                  style: AppType.caption),
             ]),
           ),
           const SizedBox(width: 10),

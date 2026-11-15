@@ -314,7 +314,7 @@ class _LiveDepotsSection extends StatelessWidget {
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
             child: const Text(
               'DropOff covers the first mile (your pickup → depot) and last mile (depot → recipient). What happens with your nominated courier between depots is their own operation — we never control their route, timing or depot handling.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+              style: AppType.caption,
             ),
           ),
           const SizedBox(height: 8),
@@ -469,7 +469,7 @@ class CourierDetailScreen extends StatelessWidget {
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
             child: const Text(
               'DropOff covers the first mile (your pickup → depot) and last mile (depot → recipient). What happens with your nominated courier between depots is their own operation — we never control their route, timing or depot handling.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+              style: AppType.caption,
             ),
           ),
         ]),

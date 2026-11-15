@@ -897,7 +897,7 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 10),
           TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Your door — where the parcel comes back', prefixIcon: Icon(Icons.house_outlined))),
           const SizedBox(height: 6),
-          const Text('The return ride (depot → your door) is confirmed at the counter before the return starts.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+          const Text('The return ride (depot → your door) is confirmed at the counter before the return starts.', style: AppType.caption),
         ],
         const SizedBox(height: 16),
         const InfoPill(icon: Icons.two_wheeler, label: 'DropOff rider fee K55 / K75 / K95 by band — shown before you book'),
@@ -926,7 +926,7 @@ class _BookingScreenState extends State<BookingScreen> {
         ),
         const Padding(
           padding: EdgeInsets.only(top: 4, bottom: 4),
-          child: Text('A clear photo of the parcel protects you - the rider\'s depot drop-off photo is checked against it.', style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+          child: Text('A clear photo of the parcel protects you - the rider\'s depot drop-off photo is checked against it.', style: AppType.caption),
         ),
         const SizedBox(height: 10),
         TextField(
@@ -1106,7 +1106,7 @@ class _BookingScreenState extends State<BookingScreen> {
           decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
           child: const Text(
             'Your rider takes the parcel to the nearest depot of the courier you choose — no branch to pick.',
-            style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+            style: AppType.caption,
           ),
         ),
         const Padding(
@@ -1253,7 +1253,7 @@ class _BookingScreenState extends State<BookingScreen> {
                       _slotClosed(entry.key)
                           ? 'Book by ${slotCopy[entry.key]!.cutoff} passed — next window still available'
                           : '${slotCopy[entry.key]!.benefit} · Book by ${slotCopy[entry.key]!.cutoff}',
-                      style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.3),
+                      style: AppType.caption,
                     ),
                   ])),
                   if (_pickupWindow == entry.key && !_slotClosed(entry.key))
@@ -1268,7 +1268,7 @@ class _BookingScreenState extends State<BookingScreen> {
           alignment: Alignment.centerLeft,
           child: Text(
             'Riders sweep Lusaka in these windows; each slot locks 30 minutes before it starts. Closed slots reopen for tomorrow.',
-            style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+            style: AppType.caption,
           ),
         ),
         const SizedBox(height: 4),
@@ -1301,7 +1301,7 @@ class _BookingScreenState extends State<BookingScreen> {
               Text('Mobile money — prepayment at booking', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
               SizedBox(height: 2),
               Text('The prompt pays for your parcel delivery (trip price + processing fee) and dispatches your rider on approval. No cash; riders never handle money.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35)),
+                  style: AppType.caption),
             ])),
           ]),
         ),
@@ -1340,7 +1340,7 @@ class _BookingScreenState extends State<BookingScreen> {
               const SizedBox(height: 4),
               const Text(
                 'You never pay the rider payout — that is settled between DropOff and the rider, not added to your fare.',
-                style: TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.4),
+                style: AppType.caption,
               ),
           ]);
           }),
@@ -1607,7 +1607,7 @@ class _CounterReminder extends StatelessWidget {
           'Last time to ${last.toCity} you paid K${(last.counterReceiptZmw ?? 0).toStringAsFixed(2)} at the $courierName counter ($when).'
           '${parcelsSeen > 1 ? ' Across ${hits.length} paid trip${hits.length == 1 ? '' : 's'} ($parcelsSeen parcels) since you started booking there.' : ''}'
           ' Expect a similar depot amount — your rider fronts it and you repay exactly what the receipt says.',
-          style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+          style: AppType.caption,
         ),
       ]),
     );
@@ -1642,7 +1642,7 @@ class _PlanBannerState extends State<_PlanBanner> {
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
             child: const Text(
               'Pay-as-you-go — rider fee per trip. The Daily Rider pass (K49/day, 1 parcel) bundles the rider fee into the plan parcel.',
-              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
+              style: AppType.caption,
             ),
           );
         }
@@ -1667,7 +1667,7 @@ class _PlanBannerState extends State<_PlanBanner> {
               covered
                   ? 'This trip deducts ${widget.parcels} parcel${widget.parcels == 1 ? '' : 's'} — $remaining left. Renews $renews.'
                   : 'Only $remaining left on your $tier plan — this trip pays your tier discount ($pct% off pay-as-you-go). Renews $renews.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.35),
+              style: AppType.caption,
             ),
           ]),
         );

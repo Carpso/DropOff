@@ -244,7 +244,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, height: 1.2)),
             const SizedBox(height: 3),
-            Text(body, style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35)),
+            Text(body, style: AppType.caption),
           ]),
         ),
         const SizedBox(width: 8),
@@ -430,7 +430,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
                 const SizedBox(height: 3),
-                Text(savingsLine(rec), style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3)),
+                Text(savingsLine(rec), style: AppType.caption),
                 const SizedBox(height: 10),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -446,12 +446,12 @@ class _BusinessScreenState extends State<BusinessScreen> {
             const SizedBox(height: 12),
             Text(
               'Shipping in bursts? The Daily Rider pass (K49/day, 1 parcel included) likely beats a monthly plan — ${daily['days_needed']} day(s) ≈ K${daily['cost_zmw']}.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+              style: AppType.caption,
             ),
           ],
           const SizedBox(height: 8),
           if (basis.isNotEmpty)
-            Text(basis, style: const TextStyle(color: AppColors.muted, fontSize: 9.5, height: 1.3)),
+            Text(basis, style: AppType.caption),
         ]),
       ),
     );
@@ -566,7 +566,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
             used >= cap
                 ? 'Extra parcels now pay your tier discount — auto-applied at booking. Renews $renews.'
                 : 'Each parcel counts as one — even several in one trip. Cycle renews $renews.',
-            style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35),
+            style: AppType.caption,
           ),
         ]),
       ),

@@ -34,7 +34,7 @@ class CoverageScreen extends StatelessWidget {
         ]),
         const SizedBox(height: 20),
         const Text('Outside covered cities: the DropOff rider delivers to any courier counter, but the fare is quoted at the counter and confirmation may be manual.',
-            style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+            style: AppType.caption),
       ]),
     );
   }

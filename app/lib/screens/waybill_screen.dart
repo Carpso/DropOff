@@ -338,7 +338,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
             const Text(
               'Portable receipt printers (58 mm Bluetooth). Pair the printer in Android Settings first.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.35),
+              style: AppType.caption,
             ),
           ],
           const SizedBox(height: 10),
@@ -351,7 +351,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
           const Text(
             'Share and save capture the receipt card only — buttons and this note are not included.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35),
+            style: AppType.caption,
           ),
         ],
       ),
@@ -653,7 +653,7 @@ class _ReceiptCard extends StatelessWidget {
                   const Text(
                     'The courier / depot fare is paid directly at the counter — DropOff never collects partner money. Cover shown above is quoted protection, not insurance, until legal and commercial sign-off. Keep this waybill until the parcel is lodged at the depot.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.muted, fontSize: 9.5, height: 1.45),
+                    style: AppType.caption,
                   ),
                   const SizedBox(height: 6),
                   const Text(
@@ -692,7 +692,7 @@ class _ReceiptCard extends StatelessWidget {
           children: [
             SizedBox(
               width: 118,
-              child: Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.4)),
+              child: Text(label, style: AppType.caption),
             ),
             const SizedBox(width: 10),
             Expanded(

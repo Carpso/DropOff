@@ -387,12 +387,12 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               ]),
               SizedBox(height: 3),
               Text('Approve the momo prompt on this number and a rider collects for you; no cash, riders never handle the money.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+                  style: AppType.caption),
             ]),
           );
         }),
         const SizedBox(height: 6),
-        const Text('The exact fee is on the momo prompt — no hidden charges. The courier’s own fare is paid at the depot.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.45)),
+        const Text('The exact fee is on the momo prompt — no hidden charges. The courier’s own fare is paid at the depot.', style: AppType.caption),
         const SizedBox(height: 18),
         FilledButton(
           onPressed: _saving ? null : _submit,
