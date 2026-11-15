@@ -2600,6 +2600,7 @@ app.post('/jobs/:ref/events', async (c) => {
             j.counter_receipt_zmw, j.counter_receipt_paid,
             j.total_zmw, j.wait_minutes, j.wait_fee_zmw, j.pay_method, j.paid,
             j.courier_id, j.from_city, j.dest_city, j.weight_class, j.service,
+            j.dropoff_photo_url, j.pod_pickup_url, j.pod_delivery_url,
             r.phone AS rider_phone
        FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
       WHERE j.ref = ?1`,
@@ -2867,11 +2868,38 @@ app.post('/jobs/:ref/events', async (c) => {
       vals.push(b.branch.trim().slice(0, 80));
     }
     if (b.photo_url) {
-      sets.push('dropoff_photo_url = ' + nextParam()); vals.push(b.photo_url);
-      // Proof-of-delivery stages: the pickup photo and the handover photo each
-      // land in their own evidence column (false-parcel disputability).
-      if (b.stage === 'pickup' && status === 'picked_up') { sets.push('pod_pickup_url = ' + nextParam()); vals.push(b.photo_url); }
-      else if (b.stage === 'delivery' && status === 'delivered') { sets.push('pod_delivery_url = ' + nextParam()); vals.push(b.photo_url); }
+      const photo = String(b.photo_url).trim();
+      const stage = String(b.stage ?? '');
+      const override = isAdminKey || isOpsKey;
+      // FIRST-WRITE-WINS evidence lock (owner directive 2026-11-15): once a
+      // lodgement / pickup / handover photo is on file, neither the rider nor
+      // a dropped network retry can swap it for a different one — evidence of
+      // a bad delivery freezes the moment it exists. Staff keys keep an
+      // override for genuine mis-submissions.
+      if (!override) {
+        const locked = (cur: unknown) => typeof cur === 'string' && cur.trim().length > 0 && cur.trim() !== photo;
+        if (locked(job.dropoff_photo_url)) return c.json({
+          error: 'photo_locked',
+          detail: 'Lodgement photo already on file — the photo is the evidence. Ops can correct a genuine mis-submission.',
+        }, 409);
+        if (stage === 'pickup' && status === 'picked_up' && locked(job.pod_pickup_url)) return c.json({
+          error: 'photo_locked',
+          detail: 'Pickup photo already on file — evidence frozen. Ops can correct it.',
+        }, 409);
+        if (stage === 'delivery' && status === 'delivered' && locked(job.pod_delivery_url)) return c.json({
+          error: 'photo_locked',
+          detail: 'Handover photo already on file — evidence frozen. Ops can correct it.',
+        }, 409);
+      }
+      if (override) {
+        sets.push('dropoff_photo_url = ' + nextParam()); vals.push(photo);
+        if (stage === 'pickup' && status === 'picked_up') { sets.push('pod_pickup_url = ' + nextParam()); vals.push(photo); }
+        else if (stage === 'delivery' && status === 'delivered') { sets.push('pod_delivery_url = ' + nextParam()); vals.push(photo); }
+      } else {
+        if (!job.dropoff_photo_url) { sets.push('dropoff_photo_url = ' + nextParam()); vals.push(photo); }
+        if (stage === 'pickup' && status === 'picked_up' && !job.pod_pickup_url) { sets.push('pod_pickup_url = ' + nextParam()); vals.push(photo); }
+        else if (stage === 'delivery' && status === 'delivered' && !job.pod_delivery_url) { sets.push('pod_delivery_url = ' + nextParam()); vals.push(photo); }
+      }
     }
     dbStatements.push(c.env.DB.prepare(
       `UPDATE jobs SET ${sets.join(', ')} WHERE id = ?1`).bind(...vals));
@@ -8051,12 +8079,17 @@ async function applySelfie(c: any, rawUrl: unknown) {
     'SELECT id, verification_status FROM riders WHERE phone = ?1 AND active = 1',
   ).bind(phone).first<any>();
   if (rider && face) await persistFaceCheck(db, rider.id, face);
-  const demote = Boolean(rider) && verdict === 'fail' && rider.verification_status === 'verified';
+  // IMMUTABILITY OF VERIFIED IDENTITY (owner directive 2026-11-15): a verified
+  // rider may NOT silently swap the selfie admins approved — any change drops
+  // them to pending re-review, exactly like re-uploading the KYC documents.
+  // Pre-fix: demotion was only on AI fail, so a judged "pass" selfie swap
+  // stayed dispatchable with a different face.
+  const demote = Boolean(rider) && rider.verification_status === 'verified';
   if (rider) {
     await db.prepare(
       `UPDATE riders SET photo_url = ?2, submitted_at = datetime('now'),
           verification_status = CASE WHEN ?3 THEN 'pending' ELSE verification_status END,
-          verification_note = CASE WHEN ?3 THEN 'Selfie failed automatic face review - re-verify before assignment.' ELSE NULL END,
+          verification_note = CASE WHEN ?3 THEN 'Selfie changed after approval — re-verify before assignment.' ELSE NULL END,
           verified_by = CASE WHEN ?3 THEN NULL ELSE verified_by END,
           verified_at = CASE WHEN ?3 THEN NULL ELSE verified_at END
         WHERE id = ?1`,
@@ -8070,7 +8103,7 @@ async function applySelfie(c: any, rawUrl: unknown) {
     verification_status: rider ? (demote ? 'pending' : rider.verification_status) : null,
     photo_url: url,
     detail: demote
-      ? 'This photo does not look like one person - an admin will re-verify you before assignments resume.'
+      ? 'Your selfie changed after approval — an admin must re-verify you before assignments resume. A verified rider’s photo is frozen evidence, never silently swappable.'
       : 'Photo saved.',
   };
 }
