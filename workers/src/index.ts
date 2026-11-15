@@ -119,6 +119,25 @@ async function plans(db: D1Database, opts?: { forExistingSubscribers?: boolean }
   } catch { /* tiers table not migrated yet — constants rule */ }
   return merged;
 }
+
+/* --------------------------- platform feature flags -------------------------- */
+// Flags live in the D1 `app_settings` table (migration 0061) so the owner can
+// flip them from the admin console WITHOUT a deploy. Both default to OFF.
+async function getSetting(db: D1Database, key: string): Promise<string | null> {
+  try {
+    const row = await db.prepare('SELECT value FROM app_settings WHERE key = ?1').bind(key).first<{ value: string | null }>();
+    return row?.value ?? null;
+  } catch {
+    return null; // table absent — treat as off
+  }
+}
+async function setSetting(db: D1Database, key: string, value: string, by: string): Promise<void> {
+  await db.prepare(
+    `INSERT INTO app_settings (key, value, updated_by) VALUES (?1, ?2, ?3)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now'), updated_by = excluded.updated_by`,
+  ).bind(key, value, by).run();
+}
+const flagOn = (v: string | null) => v === '1' || v === 'true' || v === 'on';
 const PLATFORM_TAKE = 0.10;           // of the rider fee, on pay-as-you-go
 // Sweep riders are salaried, not per-parcel: K3,000/month INCLUSIVE of a
 // weekly fuel allowance of K300/week (4 weeks = K1,200), so the base wage is
@@ -1811,6 +1830,9 @@ app.post('/jobs', async (c) => {
     ).bind(senderPhone).first<any>();
     if (activeSub) {
       const packs = await plans(c.env.DB, { forExistingSubscribers: true });
+      // Tier overage discount is OFF platform-wide unless the owner re-enables
+      // it in the admin console (migration 0061 — the model is already lean).
+      const overageOn = flagOn(await getSetting(c.env.DB, 'overage_discount_enabled'));
       const plan = packs[activeSub.tier as PlanTier];
       if (plan && activeSub.period_start && activeSub.period_end) {
         const used = await c.env.DB.prepare(
@@ -1840,7 +1862,7 @@ app.post('/jobs', async (c) => {
         } else {
           packInclusion = 'payg';
           riderFee = tierOverageFee(activeSub.tier,
-            baseRiderFee(fromCity, Number(b.pickup_lat ?? 0), Number(b.pickup_lng ?? 0), vehicleClass), plan.overage_discount_pct);
+            baseRiderFee(fromCity, Number(b.pickup_lat ?? 0), Number(b.pickup_lng ?? 0), vehicleClass), overageOn ? plan.overage_discount_pct : 0);
         }
       }
     }
@@ -2246,6 +2268,7 @@ app.post('/collections', async (c) => {
   let planCap = 0;
   if (activeSub) {
     const planCatalogue = await plans(c.env.DB, { forExistingSubscribers: true });
+    const overageOn = flagOn(await getSetting(c.env.DB, 'overage_discount_enabled'));
     const plan = planCatalogue[activeSub.tier as PlanTier];
     if (plan && activeSub.period_start && activeSub.period_end) {
       const used = await c.env.DB.prepare(
@@ -2269,7 +2292,7 @@ app.post('/collections', async (c) => {
         planInclusion = 'pack';
       } else {
         planInclusion = 'payg';
-        riderFee = tierOverageFee(activeSub.tier, baseRiderFee('Lusaka', 0, 0, vehicleClass), plan.overage_discount_pct);
+        riderFee = tierOverageFee(activeSub.tier, baseRiderFee('Lusaka', 0, 0, vehicleClass), overageOn ? plan.overage_discount_pct : 0);
       }
     }
   }
@@ -5393,10 +5416,15 @@ app.post('/webhooks/lipila', async (c) => {
 /* ------------------------- seller subscription packs ----------------------- */
 app.get('/plans', async (c) => {
   // Driver economics are for drivers and admins only — sellers/customers get
-  // the tier catalogue alone.
+  // the tier catalogue alone. Flags let the app hide dark features (the
+  // owner flips them from /admin/settings without a deploy).
   const privileged = c.get('role') === 'ops' || isAdmin(c);
   return c.json({
     plans: await plans(c.env.DB),
+    feature_flags: {
+      overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
+      door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
+    },
     ...(privileged ? { driver_monthly_pay_zmw: DRIVER_MONTHLY_PAY_ZMW, driver_daily_target: DRIVER_DAILY_TARGET, platform_take: PLATFORM_TAKE } : {}),
   });
 });
@@ -5606,6 +5634,29 @@ app.get('/admin/tiers', async (c) => {
     };
   });
   return c.json({ tiers });
+});
+
+// Platform feature flags, owner-flippable WITHOUT a deploy. Keys are
+// whitelisted; every value is a '0'/'1' string. Read-only for staff.
+const SETTING_KEYS = new Set(['door_to_door_enabled', 'overage_discount_enabled']);
+app.get('/admin/settings', async (c) => {
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
+  return c.json({
+    settings: {
+      door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
+      overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
+    },
+  });
+});
+app.post('/admin/settings', async (c) => {
+  // Owner/superadmin only — these flags gate paid surfaces.
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const key = String(b?.key ?? '').trim().toLowerCase();
+  if (!SETTING_KEYS.has(key)) return c.json({ error: `unknown setting (allowed: ${[...SETTING_KEYS].join(', ')})` }, 400);
+  const on = b?.enabled === true || String(b?.value ?? '') === '1';
+  await setSetting(c.env.DB, key, on ? '1' : '0', c.get('phone') ?? 'admin-key');
+  return c.json({ ok: true, key, enabled: on });
 });
 // Full plan edit OR toggle: every field of a plan is editable here — the
 // same endpoint handles "set off" (active: 0) without wiping its config.
@@ -6698,6 +6749,10 @@ app.get('/subscriptions/:phone?', async (c) => {
     remaining_this_period: plan ? Math.max(0, effectiveCap - usedThisPeriod) : null,
     effective_cap: plan ? effectiveCap : null,
     rollover_parcels: rollover,
+    feature_flags: {
+      overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
+      door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
+    },
   });
 });
 
@@ -9917,6 +9972,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
       if (sub?.period_start && sub?.period_end) {
         const packs = await plans(env.DB, { forExistingSubscribers: true });
         const planInfo = packs[sub.tier as PlanTier];
+        const overageOn = flagOn(await getSetting(env.DB, 'overage_discount_enabled'));
         if (planInfo) {
           const used = await env.DB.prepare(
             `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
@@ -9936,7 +9992,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
           } else {
             // Over cap: the standing order still gets the tier's overage
             // discount on the PAYG leg — same math as a normal booking.
-            riderFee = tierOverageFee(sub.tier, base, planInfo.overage_discount_pct);
+            riderFee = tierOverageFee(sub.tier, base, overageOn ? planInfo.overage_discount_pct : 0);
           }
         }
       }

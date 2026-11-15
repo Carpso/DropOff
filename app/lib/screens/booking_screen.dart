@@ -717,12 +717,16 @@ class _BookingScreenState extends State<BookingScreen> {
     } else if (booking.dispatched && depositRequired && DropOffApi.enabled && store.linked && due != null && due > 0) {
       // The server already sent the momo prompt at booking; PayJob reuses
       // that exact prompt (idempotent server-side) and polls until it lands.
-      // Plan-cap overage keeps the tier discount — the message says so.
+      // Discount copy follows the platform flag — sellers never see a
+      // discount the platform switch has hidden.
+      final overageOffered = (_planSnap?['feature_flags']?['overage_discount_enabled'] as bool?) ?? false;
       final overCap = inclusion == 'payg' && used != null && cap != null && used >= cap;
       if (mounted) {
-        _message(overCap
+        _message(overCap && overageOffered
             ? 'Your plan cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.'
-            : 'Approve the prepayment prompt for K${due.toStringAsFixed(2)} sent to ${_senderPhone.text} — your rider dispatches the moment it lands. You pay DropOff only; the courier counter fare stays with the depot.');
+            : overCap
+                ? 'Your plan cap is reached — this trip is billed pay-as-you-go. Pay K${due.toStringAsFixed(2)} to dispatch.'
+                : 'Approve the prepayment prompt for K${due.toStringAsFixed(2)} sent to ${_senderPhone.text} — your rider dispatches the moment it lands. You pay DropOff only; the courier counter fare stays with the depot.');
       }
       final outcome = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
       if (!mounted) return;

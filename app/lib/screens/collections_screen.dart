@@ -392,7 +392,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           );
         }),
         const SizedBox(height: 6),
-        const Text('Rider fee from K45 · processing fee added. The courier’s own charges are paid to them directly — we only run the local collection.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+        const Text('The exact fee is on the momo prompt — no hidden charges. The courier’s own fare is paid at the depot.', style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.45)),
         const SizedBox(height: 18),
         FilledButton(
           onPressed: _saving ? null : _submit,

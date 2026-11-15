@@ -1,6 +1,7 @@
 import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/dropoff_api.dart';
@@ -2081,6 +2082,10 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
   String? _error;
   List<Map<String, dynamic>> _plans = const [];
   List<Map<String, dynamic>> _couriers = const [];
+  // Platform switches — owner flips live, superadmin-only server-side.
+  bool _doorToDoor = false;
+  bool _overageDiscount = false;
+  bool _flagBusy = false;
 
   static const _tierLabels = {
     'rider_daily': 'Daily Rider',
@@ -2100,17 +2105,56 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
     setState(() => _loading = true);
     final tiers = await DropOffApi.adminTiers();
     final couriers = await DropOffApi.adminCouriers();
+    final settings = await DropOffApi.adminSettings();
     if (!mounted) return;
     setState(() {
       _plans = ((tiers?['tiers'] as List?) ?? const []).cast<Map<String, dynamic>>();
       _couriers = ((couriers?['couriers'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      final flags = (settings?['settings'] as Map?) ?? const {};
+      _doorToDoor = flags['door_to_door_enabled'] == true;
+      _overageDiscount = flags['overage_discount_enabled'] == true;
       _error = tiers == null ? 'Plans/courier catalogue needs an admin sign-in on this device.' : null;
       _loading = false;
     });
   }
 
+  Future<void> _toggleFlag(String key, bool on) async {
+    setState(() => _flagBusy = true);
+    final res = await DropOffApi.adminSetSetting(key, on);
+    if (!mounted) return;
+    setState(() => _flagBusy = false);
+    _snack(res.ok
+        ? (key == 'door_to_door_enabled'
+            ? (on ? 'Door-to-door drop-off ON — sellers see the option.' : 'Door-to-door OFF — collection points only.')
+            : (on ? 'Overage discount ON — tiers apply on PAYG overage.' : 'Overage discount OFF — overage bills at full PAYG.'))
+        : 'Could not flip the switch (${res.error ?? 'superadmin required'})');
+    unawaited(Future.delayed(const Duration(milliseconds: 400), _load));
+  }
+
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Widget _flagRow(String title, String blurb, bool value, ValueChanged<bool> onChanged) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+            const SizedBox(height: 2),
+            Text(blurb, style: const TextStyle(color: AppColors.muted, fontSize: 10.5, height: 1.35)),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        Switch(value: value, onChanged: _flagBusy ? null : onChanged),
+      ]),
+    );
   }
 
   Future<void> _togglePlan(Map<String, dynamic> t, bool on) async {
@@ -2222,6 +2266,27 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
           const SizedBox(height: 2),
           const Text('Off hides the offer from sellers instantly (new subscriptions stop; existing subscribers keep their cycle benefit). Edit every field below — price, parcels/day, parcels/month, cycle length, discount, tag.',
               style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4)),
+          const SizedBox(height: 10),
+          const Row(children: [
+            Icon(Icons.toggle_on_outlined, size: 16, color: AppColors.forest),
+            SizedBox(width: 6),
+            Expanded(child: Text('Platform switches — live, no deploy (superadmin)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
+          ]),
+          const SizedBox(height: 6),
+          _flagRow(
+            'Door-to-door drop-off',
+            'Sender’s door → recipient’s door, plans or pay-as-you-go. Off by default — collections are courier-point pickups and the first-mile model stays subscription-first.',
+            _doorToDoor,
+            (v) => _toggleFlag('door_to_door_enabled', v),
+          ),
+          const SizedBox(height: 6),
+          _flagRow(
+            'Tier overage discount',
+            'Silver 15% / Gold 25% / Platinum 35% off PAYG overage. Off — the model is already lean. Every seller sees plans without the discount until this is flipped.',
+            _overageDiscount,
+            (v) => _toggleFlag('overage_discount_enabled', v),
+          ),
+          const Divider(height: 18),
           if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 11.5))),
           const SizedBox(height: 10),
           for (final t in _plans)

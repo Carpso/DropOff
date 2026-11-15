@@ -271,7 +271,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
         padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
         children: [
           const Text(
-            'What the depot counter needs to lodge this parcel. Show this screen before handing it over.',
+            'Hand this screen to the counter — it is everything lodging needs.',
             style: TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 12),

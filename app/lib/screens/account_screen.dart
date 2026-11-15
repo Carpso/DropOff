@@ -1513,7 +1513,11 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
         final sub = snap.data?['subscription'] as Map<String, dynamic>?;
         final plan = snap.data?['plan'] as Map<String, dynamic>?;
         if (sub == null || plan == null || sub['status'] != 'active') return const SizedBox.shrink();
-        final cap = (plan['parcels_per_month'] as num?)?.toInt() ?? 0;
+        final dayCap = (plan['cycle_days'] as num?)?.toInt() ?? 30;
+        final isDayCycle = dayCap <= 1;
+        final cap = isDayCycle
+            ? ((plan['parcels_per_day'] as num?)?.toInt() ?? 0)
+            : ((plan['parcels_per_month'] as num?)?.toInt() ?? ((plan['parcels_per_day'] as num?)?.toInt() ?? 0));
         final used = (snap.data?['usage_this_period'] as num?)?.toInt() ?? 0;
         final remaining = (snap.data?['remaining_this_period'] as num?)?.toInt() ?? 0;
         if (cap <= 0) return const SizedBox.shrink();
@@ -1552,7 +1556,9 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
             const SizedBox(height: 7),
             Text(
               used >= cap
-                  ? 'Cap reached — extra parcels now pay your tier discount (auto-applied at booking).'
+                  ? ((snap.data?['feature_flags']?['overage_discount_enabled'] as bool?) ?? false
+                      ? 'Cap reached — extra parcels now pay your tier discount (auto-applied at booking).'
+                      : 'Cap reached — extra parcels now bill at pay-as-you-go rates.')
                   : 'Each parcel counts as one. Cycle renews $renews.',
               style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.35),
             ),

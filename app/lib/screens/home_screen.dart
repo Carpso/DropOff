@@ -507,7 +507,7 @@ class _FareCheckerState extends State<_FareChecker> {
                     style: TextStyle(color: AppColors.muted, fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6)),
                 const SizedBox(height: 2),
                 Text(feeAmount,
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 26, color: AppColors.forest, height: 1.15)),
+                    style: AppType.price),
                 const SizedBox(height: 4),
                 Text(feeDetail, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, height: 1.35)),
                 const SizedBox(height: 4),

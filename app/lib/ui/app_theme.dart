@@ -1,5 +1,21 @@
 import 'package:flutter/material.dart';
 
+/// DropOff type scale (docs/DESIGN_UIUX_AUDIT.md) — seven steps, jumps are
+/// deliberate, weights are roles (w900 only for the top two, w600/w500 for
+/// running text). Any text the rider must act on is >= 12.5px ink-on-white.
+abstract final class AppType {
+  static const display = TextStyle(fontSize: 32, height: 34 / 32, fontWeight: FontWeight.w900, letterSpacing: -0.8, color: AppColors.ink);
+  static const title = TextStyle(fontSize: 22, height: 26 / 22, fontWeight: FontWeight.w900, letterSpacing: -0.6, color: AppColors.ink);
+  static const subhead = TextStyle(fontSize: 16, height: 21 / 16, fontWeight: FontWeight.w800, letterSpacing: -0.1, color: AppColors.ink);
+  static const callout = TextStyle(fontSize: 13, height: 17 / 13, fontWeight: FontWeight.w700, color: AppColors.ink);
+  static const body = TextStyle(fontSize: 12.5, height: 17 / 12.5, fontWeight: FontWeight.w500, color: AppColors.ink);
+  static const bodyStrong = TextStyle(fontSize: 12.5, height: 17 / 12.5, fontWeight: FontWeight.w600, color: AppColors.ink);
+  static const caption = TextStyle(fontSize: 10.5, height: 15 / 10.5, fontWeight: FontWeight.w600, color: AppColors.muted);
+  static const price = TextStyle(fontSize: 22, height: 26 / 22, fontWeight: FontWeight.w900, color: AppColors.forest, fontFeatures: [FontFeature.tabularFigures()]);
+  static const priceSmall = TextStyle(fontSize: 16, height: 20 / 16, fontWeight: FontWeight.w900, color: AppColors.forest, fontFeatures: [FontFeature.tabularFigures()]);
+  static const eyebrow = TextStyle(fontSize: 10, height: 12 / 10, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: AppColors.muted);
+}
+
 abstract final class AppColors {
   static const forest = Color(0xFF123C32);
   static const forestLight = Color(0xFF1C5445);

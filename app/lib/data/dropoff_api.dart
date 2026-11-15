@@ -1028,6 +1028,13 @@ class DropOffApi {
   static Future<ApiResponse> adminCourierToggle(int id, bool active) =>
       post('/admin/couriers', {'id': id, 'active': active ? 1 : 0}, admin: true);
 
+  /// Platform feature flags (owner-flippable without a deploy): door-to-door
+  /// service and the tier overage discount. GET is staff-visible; POST is
+  /// superadmin-only server-side.
+  static Future<Map<String, dynamic>?> adminSettings() => getAdmin('/admin/settings');
+  static Future<ApiResponse> adminSetSetting(String key, bool enabled) =>
+      post('/admin/settings', {'key': key, 'enabled': enabled}, admin: true);
+
   /// Rider incentive programmes — admin creates/edits with a title, toggles on/off.
   static Future<Map<String, dynamic>?> adminIncentives() => getAdmin('/admin/incentives');
 

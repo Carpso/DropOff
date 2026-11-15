@@ -209,7 +209,8 @@ class _BusinessScreenState extends State<BusinessScreen> {
       );
     }
     if (cap > 0 && used >= cap) {
-      final pct = (plan?['overage_discount_pct'] as num?)?.toInt() ?? 0;
+      final overageOffered = (_sub?['feature_flags']?['overage_discount_enabled'] as bool?) ?? false;
+      final pct = overageOffered ? ((plan?['overage_discount_pct'] as num?)?.toInt() ?? 0) : 0;
       final idx = _tierLadder.indexOf(tier);
       final nextTier = idx >= 0 && idx + 1 < _tierLadder.length ? _tierLadder[idx + 1] : null;
       final next = nextTier == null ? null : _planOf(nextTier);
@@ -217,8 +218,10 @@ class _BusinessScreenState extends State<BusinessScreen> {
         icon: Icons.savings_outlined,
         title: 'You outgrew the $tier plan this cycle',
         body: next == null
-            ? 'Extra parcels keep your ${pct > 0 ? '$pct% overage discount' : 'tier discount'} — you never pay full PAYG price.'
-            : '${next['tag'] ?? nextTier!.toUpperCase()} adds ${(next['parcels_per_month'] as num?)?.toInt() ?? 0} parcels for K${(next['fee_zmw'] as num?)?.toStringAsFixed(0) ?? ''} —${pct > 0 ? ' and overages stay $pct% off' : ' pro-rated to the day'}. One tap in Manage.',
+            ? (overageOffered
+                ? 'Extra parcels keep your ${pct > 0 ? '$pct% overage discount' : 'tier discount'} — you never pay full PAYG price.'
+                : 'Extra parcels bill at pay-as-you-go price — no discount while this shipper runs.')
+            : '${next['tag'] ?? nextTier!.toUpperCase()} adds ${(next['parcels_per_month'] as num?)?.toInt() ?? 0} parcels for K${(next['fee_zmw'] as num?)?.toStringAsFixed(0) ?? ''} —${overageOffered && pct > 0 ? ' and overages stay $pct% off' : ' pro-rated to the day'}. One tap in Manage.',
         cta: next == null ? 'Manage' : 'See $nextTier',
         onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
       );
