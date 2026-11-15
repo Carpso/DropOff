@@ -140,7 +140,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Padding(padding: const EdgeInsets.all(14), child: Text(l10n.riderStopTitle,
-            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            style: AppType.subhead)),
           ListTile(
             leading: const Icon(Icons.local_shipping_outlined),
             title: Text(l10n.riderPickedUp),
@@ -210,7 +210,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
-          title: Text('Depot drop — $ref', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+          title: Text('Depot drop — $ref', style: AppType.subhead),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Photograph EVERY parcel in the batch, then file EVERY depot receipt the depot wrote — each receipt photographed with the EXACT amount written on it. Never add receipts up yourself: DropOff totals the photographed documents.',
@@ -412,7 +412,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
-          title: Text('Handover — $ref', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+          title: Text('Handover — $ref', style: AppType.subhead),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(AppLocalizations.of(context).handoverCodeWarning,
               style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),

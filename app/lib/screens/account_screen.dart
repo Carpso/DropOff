@@ -217,7 +217,7 @@ class _AccountScreenState extends State<AccountScreen> {
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Create account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
             const SizedBox(height: 4),
-            const Text('Your phone is the mobile-money identity for refunds, and the address parcels find you by — every parcel sent to this number appears automatically. Email is the sign-in key.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+            const Text('Your phone is the mobile-money identity for refunds, and the address parcels find you by — every parcel sent to this number appears automatically. Email is the sign-in key.', style: AppType.body),
             const SizedBox(height: 14),
             TextField(controller: _cEmail, keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email], decoration: const InputDecoration(labelText: 'Email')),
             const SizedBox(height: 12),
@@ -767,7 +767,7 @@ class _AccountScreenState extends State<AccountScreen> {
               _creating
                   ? 'Your phone number is the mobile-money identity for refunds and payouts — the email is just the key.'
                   : 'Signing in restores your plans and booking history from the server.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.5),
+              style: AppType.caption,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
@@ -816,7 +816,7 @@ class _AccountScreenState extends State<AccountScreen> {
               padding: EdgeInsets.symmetric(horizontal: 6),
               child: Text(
                 'Offline build: this device was compiled without the server key, so accounts are unavailable. Bookings still save locally.',
-                style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.5),
+                style: AppType.caption,
                 textAlign: TextAlign.center,
               ),
             ),
@@ -965,7 +965,7 @@ class _RecurringCardState extends State<_RecurringCard> {
             TextButton.icon(onPressed: _addPlan, icon: const Icon(Icons.add, size: 18), label: const Text('Add')),
           ]),
           const SizedBox(height: 2),
-          const Text('Weekly/biweekly/monthly repeat drops at your depot door. We remember, you tap once to book.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+          const Text('Weekly/biweekly/monthly repeat drops at your depot door. We remember, you tap once to book.', style: AppType.body),
           const SizedBox(height: 10),
           if (_loading)
             const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 12), child: CircularProgressIndicator(strokeWidth: 2)))
@@ -1338,7 +1338,7 @@ class _TiersCardState extends State<_TiersCard> {
                                                   ? 'Upgrade'
                                                   : 'Choose',
                                           textAlign: TextAlign.center,
-                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                                          style: AppType.callout,
                                         ),
                                 ),
                               ]),

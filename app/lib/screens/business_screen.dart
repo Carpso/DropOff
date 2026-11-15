@@ -523,7 +523,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
           Row(children: [
             const Icon(Icons.workspace_premium_outlined, color: AppColors.forest),
             const SizedBox(width: 10),
-            Expanded(child: Text('$tier plan', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            Expanded(child: Text('$tier plan', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppType.subhead)),
             FilledButton.tonal(
               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),

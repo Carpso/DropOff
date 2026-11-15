@@ -249,7 +249,7 @@ class _TrustItem extends StatelessWidget {
   Widget build(BuildContext context) => Column(children: [
         Icon(icon, color: AppColors.forest, size: 25),
         const SizedBox(height: 8),
-        Text(title, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+        Text(title, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppType.callout),
         const SizedBox(height: 3),
         Text(subtitle, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: AppColors.muted)),
       ]);

@@ -235,7 +235,7 @@ class _TrackScreenState extends State<TrackScreen> {
           const SizedBox(height: 10),
           const Text(
             'Create your account with the number the parcel was sent to and every parcel addressed to you appears here automatically.',
-            style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+            style: AppType.caption,
           ),
         ]),
       ),

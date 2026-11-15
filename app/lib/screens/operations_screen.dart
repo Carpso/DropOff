@@ -330,7 +330,7 @@ class OperationsScreen extends StatelessWidget {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Your riding day', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
               const SizedBox(height: 3),
-              Text('Signed in as ${store.linkedPhone} — jobs assigned to you land here automatically.', style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+              Text('Signed in as ${store.linkedPhone} — jobs assigned to you land here automatically.', style: AppType.caption),
             ])),
           ]),
           const SizedBox(height: 12),
@@ -992,7 +992,7 @@ class _RiderPayCard extends StatelessWidget {
             ]),
             SizedBox(height: 6),
             Text('Your salary: K3,000/month inclusive of K300/week fuel. Paid weekly on Sundays (16:00 CAT) or monthly on the 1st. Pace target: 30 trips/day. No per-parcel or per-trip payment — your salary does not change with rides taken.',
-                style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+                style: AppType.caption),
           ]),
         ),
       );

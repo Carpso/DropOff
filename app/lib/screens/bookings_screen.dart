@@ -200,7 +200,7 @@ class BookingCard extends StatelessWidget {
                   (booking.branch?.isNotEmpty == true)
                       ? '${booking.fromCity} → ${booking.branch}'
                       : '${booking.fromCity} → ${booking.toCity}',
-                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                  style: AppType.subhead,
                 ),
                 const SizedBox(height: 3),
                 Text(
@@ -461,7 +461,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   Widget _detailRow(String label, String value) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(width: 95, child: Text(label, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.3))),
+          SizedBox(width: 95, child: Text(label, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppType.caption)),
           const SizedBox(width: 10),
           Expanded(child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.35))),
         ]),
@@ -652,7 +652,7 @@ class _AutoAssignCardState extends State<_AutoAssignCard> {
             assigned
                 ? 'The algorithm assigned ${widget.booking.riderName}. Status moves on its own as the rider acts.'
                 : 'No rider yet. Dispatch runs the nearest-available-rider algorithm — the server also retries automatically every minute.',
-            style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+            style: AppType.caption,
           ),
           if (_note != null) ...[
             const SizedBox(height: 8),
@@ -718,7 +718,7 @@ class _TrackingLinkCardState extends State<_TrackingLinkCard> {
             const SizedBox(height: 8),
             const Text(
               'Send the recipient a live link with the parcel status and rider location. No account needed — it never exposes prices or your phone number.',
-              style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+              style: AppType.caption,
             ),
             const SizedBox(height: 12),
             FilledButton.tonalIcon(

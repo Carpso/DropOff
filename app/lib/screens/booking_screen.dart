@@ -1065,7 +1065,7 @@ class _BookingScreenState extends State<BookingScreen> {
                 SizedBox(height: 8),
                 Text(
                   'DropOff’s partner depot network is live in Lusaka. Nationwide courier coverage launches shortly — your city will appear here once it does.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+                  style: AppType.caption,
                 ),
               ]),
             ),
@@ -1117,7 +1117,7 @@ class _BookingScreenState extends State<BookingScreen> {
         ),
         const Padding(
           padding: EdgeInsets.only(top: 8),
-          child: Text('The courier fare is heard at the counter — the same conversation for every route, Lusaka or elsewhere.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+          child: Text('The courier fare is heard at the counter — the same conversation for every route, Lusaka or elsewhere.', style: AppType.caption),
         ),
       ];
 
@@ -1538,7 +1538,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
                   icon: _busy
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.payments_outlined),
-                  label: Text(_busy ? 'Sending prompt…' : 'Pay now — dispatch rider', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                  label: Text(_busy ? 'Sending prompt…' : 'Pay now — dispatch rider', style: AppType.subhead),
                 ),
               ),
               if (!paused) const SizedBox(height: 4),

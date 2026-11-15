@@ -1242,7 +1242,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('Ticket #${widget.threadId}',
-                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                      style: AppType.subhead),
                   Text(widget.customerName ?? widget.phone,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
@@ -1760,7 +1760,7 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
             const Icon(Icons.menu_book_outlined, size: 18, color: AppColors.forest),
             const SizedBox(width: 8),
             Expanded(child: Text('Chargebook — DropOff legs ($coverage on file)',
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+                style: AppType.subhead)),
           ]),
           const SizedBox(height: 6),
           const Text(
@@ -3050,7 +3050,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
             if (ops == null)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 6),
-                child: Text('Could not load operational KPIs — worker endpoint /admin/analytics/ops may not be deployed yet.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+                child: Text('Could not load operational KPIs — worker endpoint /admin/analytics/ops may not be deployed yet.', style: AppType.caption),
               )
             else ...[
               Row(children: [
@@ -3086,7 +3086,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
             if (kpi == null)
               const Text('Could not load usage telemetry (GET /admin/analytics/kpi).', style: TextStyle(color: AppColors.muted, fontSize: 12))
             else if (total == 0 && features.isEmpty)
-              const Text('No usage events yet — they flush every 5 minutes while the app is open. Check back after the next use.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
+              const Text('No usage events yet — they flush every 5 minutes while the app is open. Check back after the next use.', style: AppType.caption)
             else ...[
               Row(children: [
                 Expanded(child: _KpiMetric('Events', '$total', Icons.event_note)),
@@ -3244,7 +3244,7 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
                 : '≈ ${totals['predicted_7d_parcels'] ?? 0} parcels predicted'
                   '${totals['busiest_branch'] != null ? ' · busiest: ${totals['busiest_branch']}' : ''}'
                   '${totals['busiest_window'] != null ? ' · window ${totals['busiest_window']}' : ''}',
-            style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+            style: AppType.caption,
           ),
           const SizedBox(height: 12),
           if (_loading)
