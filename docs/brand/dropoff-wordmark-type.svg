@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 512" width="1024" height="512">
+  <desc>DropOff — type-only wordmark. Forest ink on off-white; amber parcel dot above the capital O. Export at 1024x257 for Play listing.</desc>
+  <rect width="1024" height="512" fill="#F5F5F0"/>
+  <text x="512" y="330"
+        text-anchor="middle"
+        font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="150"
+        font-weight="800"
+        letter-spacing="2"
+        fill="#123C32">DropOff</text>
+  <!-- amber parcel dot sits above the capital O (x≈512 center of the O) -->
+  <circle cx="548" cy="196" r="13" fill="#F6B73C"/>
+</svg>

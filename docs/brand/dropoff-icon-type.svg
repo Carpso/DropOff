@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <desc>DropOff — app icon, type-only. Off-white "D" monogram on forest; amber parcel dot. Export at 512x512 for Play.</desc>
+  <rect width="512" height="512" fill="#123C32"/>
+  <text x="256" y="365"
+        text-anchor="middle"
+        font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="260"
+        font-weight="800"
+        fill="#F5F5F0">D</text>
+  <circle cx="343" cy="145" r="34" fill="#F6B73C"/>
+</svg>
