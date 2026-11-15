@@ -9,8 +9,10 @@
 ## 1. What every plan is
 
 A plan **pre-buys your DropOff legs** — the rider runs from your door to the
-courier depot. One trip (booking) consumes one plan parcel, no matter how many
-parcels ride in it. The courier's **counter fare is never part of a plan** —
+courier depot. Every parcel consumes one plan slot: a booking with 3 parcels
+uses 3 slots. A trip only rides the plan when ALL of its parcels still fit
+under your remaining cap — otherwise the whole trip is billed at your tier
+overage discount. The courier's **counter fare is never part of a plan** —
 depot money stays at the depot, as always.
 
 | Plan | Price | Covers | Cycle | If you go over |

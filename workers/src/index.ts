@@ -55,12 +55,14 @@ const app = new Hono<{ Bindings: Env; Variables: { phone?: string; email?: strin
 type PlanTier = 'rider_daily' | 'weekly' | 'silver' | 'gold' | 'platinum';
 interface PlanDef { fee_zmw: number; windows: string[]; parcels_per_day: number; parcels_per_month: number; rider_fee_zmw: number; overage_discount_pct: number; cycle_days: number; tag?: string | null }
 // Editable live in D1 via /admin/tiers. These are the fallback/seed values.
-// One trip (booking) consumes ONE plan slot no matter how many parcels are in it.
-// Cycle = cycle_days from activation (daily pass = 1 day, weekly = 7, monthly
-// packs = 30); overage keeps the tier discount off PAYG.
+// Editable live in D1 via /admin/tiers. These are the fallback/seed values.
+// Every parcel counts as one plan slot (owner decision 2026-11-15) — a trip
+// rides the plan only when ALL its parcels fit under the cap; otherwise the
+// whole trip pays the tier overage discount off PAYG. Cycle = cycle_days
+// from activation (daily = 1 day, weekly = 7, monthly packs = 30).
 const PLANS: Record<PlanTier, PlanDef> = {
   // Daily Rider: on-demand, Yango-style casual use. Activates instantly on
-  // payment, lasts 24h, includes 2 parcels, overage stays discounted.
+  // payment, lasts 24h, 1 parcel per day, Day-day overage stays undiscounted.
   // (The old Daily Dash was removed per product decision; this is a different,
   // leaner product re-introduced at the owner's request.)
   rider_daily: { fee_zmw: 49, windows: ['now', '06:00', '10:00', '14:00'], parcels_per_day: 1, parcels_per_month: 0, rider_fee_zmw: 0, overage_discount_pct: 0, cycle_days: 1, tag: 'Daily Rider' },
@@ -1838,7 +1840,7 @@ app.post('/jobs', async (c) => {
         } else {
           packInclusion = 'payg';
           riderFee = tierOverageFee(activeSub.tier,
-            baseRiderFee(fromCity, Number(b.pickup_lat ?? 0), Number(b.pickup_lng ?? 0), vehicleClass));
+            baseRiderFee(fromCity, Number(b.pickup_lat ?? 0), Number(b.pickup_lng ?? 0), vehicleClass), plan.overage_discount_pct);
         }
       }
     }
@@ -2267,7 +2269,7 @@ app.post('/collections', async (c) => {
         planInclusion = 'pack';
       } else {
         planInclusion = 'payg';
-        riderFee = tierOverageFee(activeSub.tier, baseRiderFee('Lusaka', 0, 0, vehicleClass));
+        riderFee = tierOverageFee(activeSub.tier, baseRiderFee('Lusaka', 0, 0, vehicleClass), plan.overage_discount_pct);
       }
     }
   }
@@ -2295,10 +2297,7 @@ app.post('/collections', async (c) => {
   // (in-cap, rider fee K0) ride their prepaid subscription. Deposit settles
   // the parcel's prepayment directly (job marked paid on approval) and
   // dispatches the rider.
-  const completedEver = (await c.env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND status IN ('delivered','ready_for_collection')`,
-  ).bind(phone).first<any>())?.n ?? 0;
-  const depositRequired = !staffEyes && planInclusion !== 'pack' && completedEver >= 0 && riderFee > 0;
+  const depositRequired = !staffEyes && planInclusion !== 'pack' && riderFee > 0;
   const depositAmount = round2(riderFee + round2(platformFee(riderFee)) + MOMO_COLLECTION_FEE);
   let depositRef: string | null = null;
   let depositInitFailed = false;
@@ -6669,7 +6668,12 @@ app.get('/subscriptions/:phone?', async (c) => {
   if (!sub) return c.json({ subscription: null });
   const plan = (await plans(c.env.DB, { forExistingSubscribers: true }))[sub.tier as PlanTier] ?? null;
   let usedThisPeriod = 0;
-  let effectiveCap = plan?.parcels_per_month ?? 0;
+  let effectiveCap = (() => {
+    const cycleDays = Number(plan?.cycle_days ?? 30) || 30;
+    return cycleDays <= 1
+      ? (Number(plan?.parcels_per_day ?? 0) || Number(plan?.parcels_per_month ?? 0))
+      : (Number(plan?.parcels_per_month ?? 0) || Number(plan?.parcels_per_day ?? 0));
+  })();
   let rollover = 0;
   if (sub.period_start && sub.period_end) {
     // Every parcel counts: usage is the sum of parcels across the cycle's trips.
@@ -6682,7 +6686,10 @@ app.get('/subscriptions/:phone?', async (c) => {
             AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
     ).bind(phone, sub.period_start, sub.period_end).first<any>())?.n ?? 0;
     rollover = 0; // no rollover — unused parcels expire with the cycle
-    effectiveCap = (plan?.parcels_per_month ?? 0);
+    const cycleDays = Number(plan?.cycle_days ?? 30) || 30;
+    effectiveCap = cycleDays <= 1
+      ? (Number(plan?.parcels_per_day ?? 0) || Number(plan?.parcels_per_month ?? 0))
+      : (Number(plan?.parcels_per_month ?? 0) || Number(plan?.parcels_per_day ?? 0));
   }
   return c.json({
     subscription: sub,
@@ -9923,7 +9930,14 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
           const cap = cycleDays <= 1
             ? (planInfo.parcels_per_day || planInfo.parcels_per_month)
             : (planInfo.parcels_per_month || planInfo.parcels_per_day);
-          if (((used?.n ?? 0) + 1) <= cap) { riderFee = planInfo.rider_fee_zmw; planCovered = true; }
+          if (((used?.n ?? 0) + 1) <= cap) {
+            riderFee = planInfo.rider_fee_zmw;
+            planCovered = true;
+          } else {
+            // Over cap: the standing order still gets the tier's overage
+            // discount on the PAYG leg — same math as a normal booking.
+            riderFee = tierOverageFee(sub.tier, base, planInfo.overage_discount_pct);
+          }
         }
       }
       const totals = computeJobTotals({

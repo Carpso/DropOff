@@ -1,10 +1,14 @@
 // DropOff pricing engine — kwacha (ZMW), 2-decimal money.
 //
 // MODEL (post-reprice):
-//   • Plans are monthly: Silver K250 / 10 trips, Gold K500 / 25 trips,
-//     Platinum K750 / 50 trips. Each trip (booking) consumes ONE plan slot no
-//     matter how many parcels are inside it. Cycle = 30 days from activation.
+//   • Plans are cycle-based subscriptions: Daily Rider K49/day (1 parcel),
+//     Weekly Sprint K399 / 20 parcels / 7 days, Silver K250 / 10 parcels /
+//     30 days, Gold K500 / 25 parcels / 30 days, Platinum K750 / 50 parcels.
+//     EVERY parcel in a trip consumes one plan slot (owner decision
+//     2026-11-15) — a 3-box booking consumes 3 slots.
 //   • Inside the cap the sender pays no per-trip rider fee (bundled).
+//   • A trip rides the plan only when ALL its parcels still fit under the
+//     cap — otherwise the whole trip pays the tier overage fee.
 //   • After the cap, the seller keeps the plan's discount off pay-as-you-go:
 //     Silver 15%, Gold 25%, Platinum 35% off the normal rider fee.
 //   • Truck runs cost more (big cargo: fridges, sofas). Multipliers apply to
@@ -79,7 +83,13 @@ export function baseRiderFee(city: string, lat: number, lng: number,
 }
 
 /** Per-trip rider fee after the plan cap, keeping the tier discount off PAYG. */
-export function tierOverageFee(tier: string, walkUpFeeZmw: number): number {
+export function tierOverageFee(tier: string, walkUpFeeZmw: number, discountPct?: number | null): number {
+  // A live tiers row (editable in /admin/tiers) wins; the hardcoded table is
+  // only the fallback for DBs without the overage_discount_pct column.
+  if (discountPct != null && Number.isFinite(Number(discountPct))) {
+    const pct = Math.max(0, Math.min(100, Number(discountPct)));
+    return round2(Math.max(0, walkUpFeeZmw * (1 - pct / 100)));
+  }
   const discount: Record<string, number> = { weekly: 10, rider_daily: 0, silver: 15, gold: 25, platinum: 35 };
   const pct = discount[tier] ?? 0;
   return round2(Math.max(0, walkUpFeeZmw * (1 - pct / 100)));
