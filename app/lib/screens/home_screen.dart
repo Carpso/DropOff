@@ -383,7 +383,8 @@ class _FareCheckerState extends State<_FareChecker> {
       return;
     }
     setState(() => _feeChecked = true);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✓ Fee checked — book when you are ready.')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('✓ Fee checked — your rider fee is on the card. Book when ready.')));
   }
 
   /// Check the rider fee → Book: carry over EVERYTHING the sender already
@@ -405,6 +406,15 @@ class _FareCheckerState extends State<_FareChecker> {
   Widget build(BuildContext context) {
     final km = (_lat != null && _lng != null) ? _haversineKm(_lat!, _lng!, _anchorLat, _anchorLng) : null;
     final fee = km != null ? _fee(km) : null;
+    // Checked-fee result: exact fee when pinned, honest band list for the
+    // chosen vehicle when the pickup is not pinned yet.
+    String feeAmount = 'K${_fee(3).toStringAsFixed(0)} / K${_fee(8).toStringAsFixed(0)} / K${_fee(20).toStringAsFixed(0)}';
+    String feeDetail = 'Distance bands ≤5 km / ≤12 km / beyond — pin your pickup for your exact fee (it locks at booking).';
+    if (fee != null) {
+      final k = km!;
+      feeAmount = 'K${fee.toStringAsFixed(0)}';
+      feeDetail = 'Pickup → depot, ${k.toStringAsFixed(1)} km (${k <= 5 ? '≤5 km' : k <= 12 ? '≤12 km' : 'beyond 12 km'} band) — the exact amount booking will charge.';
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -456,23 +466,23 @@ class _FareCheckerState extends State<_FareChecker> {
             label: Text(_locating ? 'Pinning…' : (_lat != null ? 'Pickup pinned ✓ — tap to re-pin' : 'Use my current location')),
           ),
           const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(
-                fee != null
-                    ? 'DropOff rider leg: K${fee.toStringAsFixed(0)} — pickup, band price (${km!.toStringAsFixed(1)} km) — same number you will see at booking'
-                    : 'DropOff rider leg: K55 / K75 / K95 by distance band — pin your pickup for your exact fee, it matches booking exactly (momo prepaid)',
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
-              ),
-              const SizedBox(height: 4),
-              const Text('Courier fare: heard at the counter on drop-off.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
-            ]),
-          ),
-          const SizedBox(height: 10),
           if (!_feeChecked) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  fee != null
+                      ? 'DropOff rider leg: K${fee.toStringAsFixed(0)} — pickup, band price (${km!.toStringAsFixed(1)} km) — same number you will see at booking'
+                      : 'DropOff rider leg: K55 / K75 / K95 by distance band — pin your pickup for your exact fee, it matches booking exactly (momo prepaid)',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                ),
+                const SizedBox(height: 4),
+                const Text('Courier fare: heard at the counter on drop-off.',
+                    style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
+              ]),
+            ),
+            const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: _checkFee,
               icon: const Icon(Icons.calculate_outlined, size: 18),
@@ -481,12 +491,37 @@ class _FareCheckerState extends State<_FareChecker> {
             const SizedBox(height: 6),
             const Text('The booking button unlocks after you have seen your price.',
                 style: TextStyle(color: AppColors.muted, fontSize: 10.5)),
-          ] else
+          ] else ...[
+            // Price FIRST, then the option to book — "Check fee" must end with
+            // the sender seeing their fee, never a bare Book button.
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.forest.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.forest.withValues(alpha: 0.35)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('YOUR DROPOFF RIDER FEE',
+                    style: TextStyle(color: AppColors.muted, fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6)),
+                const SizedBox(height: 2),
+                Text(feeAmount,
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 26, color: AppColors.forest, height: 1.15)),
+                const SizedBox(height: 4),
+                Text(feeDetail, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, height: 1.35)),
+                const SizedBox(height: 4),
+                const Text('Courier fare: heard at the counter on drop-off.',
+                    style: TextStyle(color: AppColors.muted, fontSize: 11)),
+              ]),
+            ),
+            const SizedBox(height: 10),
             FilledButton.icon(
               onPressed: _book,
               icon: const Icon(Icons.arrow_forward, size: 18),
               label: const Text('Book the pickup — fee checked ✓'),
             ),
+          ],
         ]),
       ),
     );

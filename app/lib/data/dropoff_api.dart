@@ -1140,6 +1140,12 @@ class DropOffApi {
   static Future<ApiResponse> assignJob({required String jobRef, required String riderPhone}) =>
       post('/admin/jobs/$jobRef/assign', {'phone': riderPhone}, admin: true);
 
+  /// DISPATCH AUTOMATION (owner directive 2026-11-15): staff never hand-pick a
+  /// rider by default — the server's algorithm picks the nearest AVAILABLE,
+  /// verified rider with free capacity (ties broken by load).
+  static Future<Map<String, dynamic>?> autoAssignJob(String jobRef) =>
+      post('/jobs/$jobRef/auto-assign', const {}).then((r) => r.ok ? r.body : null);
+
   static Future<ApiResponse> payout({
     required String phone,
     required double amountZmw,

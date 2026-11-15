@@ -100,6 +100,7 @@ class _TrackScreenState extends State<TrackScreen> {
   Widget build(BuildContext context) {
     AnalyticsService.instance.trackScreenView('track');
     final gated = _data?['requires_account'] == true;
+    final held = _data?['payment_held'] == true;
     return Scaffold(
       appBar: AppBar(title: const Text('Track a parcel', style: TextStyle(fontWeight: FontWeight.w900))),
       body: ListView(
@@ -122,7 +123,8 @@ class _TrackScreenState extends State<TrackScreen> {
           if (_error != null)
             Text(_error!, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
           if (gated) _accountCard(),
-          if (_data != null && !gated) ...[
+          if (held) _heldCard(),
+          if (_data != null && !gated && !held) ...[
             _statusHeader(_data!),
             if (AppScope.of(context).linked) ...[
               const SizedBox(height: 14),
@@ -162,6 +164,33 @@ class _TrackScreenState extends State<TrackScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Payment-held parcel (owner directive 2026-11-15): the sender's prepayment
+  /// has not settled, so tracking stays locked — no timeline, no rider, no
+  /// live location. The server flips it open itself the moment payment lands.
+  Widget _heldCard() {
+    final hint = '${_data?['hint'] ?? ''}';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.lock_clock, color: AppColors.amber),
+            SizedBox(width: 10),
+            Expanded(child: Text('Tracking is locked — payment pending',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16))),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            hint.isEmpty
+                ? 'Prepayment pending — tracking opens once the sender’s payment is approved.'
+                : hint,
+            style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
+          ),
+        ]),
       ),
     );
   }

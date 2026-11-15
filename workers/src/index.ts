@@ -627,6 +627,21 @@ async function issueTrackingToken(env: Env, jobId: number, jobRef: string, phone
 const trackingUrl = (env: Env, token: string) =>
   `${(env.APP_URL ?? '').replace(/\/$/, '')}/track/${token}`;
 
+/** Payment-HELD job (owner directive 2026-11-15 — "no tracking while payment
+ *  is held"): the prepayment never settled at booking (paid = 0) and the job
+ *  still carries the advance/prepayment-pending event written at booking time.
+ *  Settlement flips paid = 1, so this test self-clears the moment payment
+ *  lands — no manual un-holding, ever. */
+async function jobPaymentHeld(db: D1Database, jobId: number): Promise<boolean> {
+  const row = await db.prepare(
+    `SELECT 1 AS held FROM jobs j
+      WHERE j.id = ?1 AND j.paid = 0
+        AND EXISTS (SELECT 1 FROM job_events e
+                     WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))`,
+  ).bind(jobId).first<{ held: number }>();
+  return !!row;
+}
+
 /** The signed-in user's profile name (for NOT NULL job sender columns). Falls
  *  back to null; callers always layer a final 'DropOff customer' default. */
 async function senderProfileName(db: D1Database, phone: string): Promise<string | null> {
@@ -1802,8 +1817,17 @@ app.post('/jobs', async (c) => {
         ).bind(senderPhone, activeSub.period_start, activeSub.period_end).first<any>();
         planUsed = used?.n ?? 0;
         // No rollover: unused parcels expire with the cycle.
-        // Daily passes (parcels_per_day > 0) cap per day; monthly plans cap per cycle.
-        planCap = plan.parcels_per_day > 0 ? plan.parcels_per_day : plan.parcels_per_month;
+        // CAP SEMANTICS (fix 2026-11-15): a DAY-cycle plan (24h pass) caps per
+        // day; multi-day plans (weekly/monthly packs) cap per CYCLE — the
+        // seller-facing contract in docs/PLANS_BENEFITS.md ("10 parcels / 30
+        // days"). The old `parcels_per_day > 0 ? day : cycle` compared
+        // cycle-long usage against the day cap and overage-charged monthly
+        // subscribers (Silver 1/day column) from their SECOND parcel of the
+        // whole month. The day column now governs day-cycles only.
+        const cycleDays = Number(plan.cycle_days ?? 30) || 30;
+        planCap = cycleDays <= 1
+          ? (plan.parcels_per_day || plan.parcels_per_month)
+          : (plan.parcels_per_month || plan.parcels_per_day);
         if (planUsed + parcels <= planCap) {
           riderFee = plan.rider_fee_zmw;
           packInclusion = 'pack';
@@ -1985,20 +2009,9 @@ app.post('/jobs', async (c) => {
         .catch(() => {}),
     );
 
-    // Handover proof code (anti-false-parcel): recipient-only 4-digit code,
-    // SMSed with the tracking link; the rider must supply it on delivery.
-    const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
-    await c.env.DB.prepare(
-      'UPDATE jobs SET delivery_otp_hash = ?2 WHERE ref = ?1',
-    ).bind(ref, await handoverOtpHash(c.env, ref, deliveryOtp)).run();
-
-    // Recipient tracking link (no account): SMS the buyer a live status page.
-    const trackingToken = await issueTrackingToken(c.env, meta.last_row_id, ref, recipientPhone);
-    const trackUrl = trackingUrl(c.env, trackingToken);
-    c.executionCtx.waitUntil(
-      sendSms(c.env, recipientPhone,
-      `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {}),
-    );
+    // Recipient tracking link: NOT minted here anymore (owner directive
+    // 2026-11-15) — the mint moved below the deposit decision so a
+    // payment-held booking never holds a live tracking token at all.
 
     if (pickupAt) {
       await c.env.DB.prepare(
@@ -2100,6 +2113,36 @@ app.post('/jobs', async (c) => {
       );
     }
 
+    // Recipient tracking link (no account): minted ONLY when the parcel is
+    // actually moving (owner directive 2026-11-15) — pack-covered and staff
+    // bookings dispatch immediately, so they mint here; a payment-held
+    // booking mints NOTHING until settlement (sendRecipientTrackingSms), so
+    // no held parcel ever carries a live tracking link (waybill/share).
+    let trackingToken: string | null = null;
+    if (!depositRequired && !depositInitFailed) {
+      trackingToken = await issueTrackingToken(c.env, meta.last_row_id, ref, recipientPhone);
+    }
+    const trackUrl = trackingToken ? trackingUrl(c.env, trackingToken) : '';
+
+    // Handover proof + recipient tracking SMS (owner directive 2026-11-15):
+    // sent ONLY when the parcel is actually moving. Pack-covered and staff
+    // bookings dispatch immediately, so the recipient gets the tracking link
+    // + handover code right here. A payment-held booking (prompt waiting, or
+    // the provider was down) gets BOTH at settlement — settlePaymentSuccess
+    // → sendRecipientTrackingSms — never before the money lands. The OTP is
+    // generated at that moment too (only its hash is stored, so it cannot be
+    // re-sent from booking time).
+    if (!depositRequired && !depositInitFailed) {
+      const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
+      await c.env.DB.prepare(
+        'UPDATE jobs SET delivery_otp_hash = ?2 WHERE ref = ?1',
+      ).bind(ref, await handoverOtpHash(c.env, ref, deliveryOtp)).run();
+      c.executionCtx.waitUntil(
+        sendSms(c.env, recipientPhone,
+        `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {}),
+      );
+    }
+
     // Smart auto-assign: bookings get a rider immediately unless a deposit is
     // waiting (momo) or the caller opts out. Coords are optional — dispatch
     // falls back to the Lusaka centre when the sender typed an address only.
@@ -2127,7 +2170,7 @@ app.post('/jobs', async (c) => {
       deposit_init_failed: depositInitFailed,
       pack_inclusion: packInclusion, pay_method: payMethod,
       auto_assigned: autoAssigned,
-      tracking_token: trackingToken, tracking_url: trackUrl,
+      tracking_token: trackingToken, tracking_url: trackingToken ? trackUrl : null,
       parcels, vehicle_class: vehicleClass,
       plan_used: activeSub ? planUsed + (packInclusion === 'pack' ? parcels : 0) : null,
       plan_cap: activeSub ? planCap : null,
@@ -2222,7 +2265,13 @@ app.post('/collections', async (c) => {
            AND created_at >= ?2 AND created_at < ?3`,
       ).bind(phone, activeSub.period_start, activeSub.period_end).first<any>();
       planUsed = used?.n ?? 0;
-      planCap = plan.parcels_per_day > 0 ? plan.parcels_per_day : plan.parcels_per_month;
+      // CAP SEMANTICS (fix 2026-11-15): day-cycles cap per day, multi-day
+      // plans cap per cycle (see the /jobs booking note — the old daily-cap
+      // comparison overage-charged monthly subscribers from parcel 2).
+      const cycleDays = Number(plan.cycle_days ?? 30) || 30;
+      planCap = cycleDays <= 1
+        ? (plan.parcels_per_day || plan.parcels_per_month)
+        : (plan.parcels_per_month || plan.parcels_per_day);
       if (planUsed + parcels <= planCap) {
         riderFee = plan.rider_fee_zmw;
         planInclusion = 'pack';
@@ -2236,8 +2285,6 @@ app.post('/collections', async (c) => {
   const total = round2(riderFee + processing);
   const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
   const senderName = String(b.sender_name ?? '').trim() || phoneName || 'DropOff customer';
-  const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000)); // handover proof (anti-false-parcel)
-  const deliveryOtpHash = await handoverOtpHash(c.env, ref, deliveryOtp);
   // Seller parcel capture at booking (same evidence chain as /jobs bookings).
   const parCell = String(b.parcel_photo_url ?? '').trim();
   const parcelUrl = parCell ? parCell.slice(0, 300) : null;
@@ -2265,6 +2312,13 @@ app.post('/collections', async (c) => {
   const depositAmount = round2(riderFee + round2(platformFee(riderFee)) + MOMO_COLLECTION_FEE);
   let depositRef: string | null = null;
   let depositInitFailed = false;
+  // Handover proof (anti-false-parcel): minted at booking for trips that move
+  // immediately (plan-covered / staff). A prepayment-held collection gets its
+  // code + tracking SMS at settlement instead (owner directive 2026-11-15) —
+  // the recipient must never hold tracking for a booking whose prepayment is
+  // still pending, so the hash stays NULL until the money lands.
+  const deliveryOtp = depositRequired ? null : String(Math.floor(1000 + Math.random() * 9000)); // handover proof (anti-false-parcel)
+  const deliveryOtpHash = deliveryOtp ? await handoverOtpHash(c.env, ref, deliveryOtp) : null;
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
@@ -2292,11 +2346,16 @@ app.post('/collections', async (c) => {
     ).bind(meta.last_row_id, 'Slot booked for tomorrow 6:00 — 7:30 AM sweep (after today\'s last window)').run();
   }
 
-  // Handover proof SMS — the recipient (never the sender) holds the code
-  c.executionCtx.waitUntil(
-    sendSms(c.env, recipientPhone,
-    `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
-  );
+  // Handover proof SMS — the recipient (never the sender) holds the code.
+  // PAYMENT-HELD collections send nothing to the recipient yet (owner
+  // directive 2026-11-15): the code + tracking link go out at settlement,
+  // once the prepayment is approved.
+  if (!depositRequired) {
+    c.executionCtx.waitUntil(
+      sendSms(c.env, recipientPhone,
+      `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
+    );
+  }
 
   // Ghost-booking deposit for first ride collections (same as /jobs bookings)
   if (depositRequired) {
@@ -2379,10 +2438,11 @@ app.get('/jobs', async (c) => {
   const after = c.req.query('after') ? Number(c.req.query('after')) : null;
   const afterBind = after != null && Number.isFinite(after) ? after : 9007199254740991;
   const { results } = await c.env.DB.prepare(
-    `SELECT j.*, co.name AS courier_name, co.depot_name,
+    `SELECT j.*, co.name AS courier_name, co.depot_name, r.full_name AS rider_name,
             (SELECT status FROM job_events ev WHERE ev.job_id = j.id ORDER BY ev.id DESC LIMIT 1) AS last_event,
             (SELECT paused_at IS NOT NULL FROM payments p WHERE p.job_id = j.id AND p.kind = 'booking_deposit' AND p.status = 'pending' ORDER BY p.id DESC LIMIT 1) AS reprompt_paused
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
+        LEFT JOIN riders r ON r.id = j.rider_id
       WHERE j.sender_phone = ?1 AND j.id < ?2
       ORDER BY j.id DESC LIMIT ?3`,
   ).bind(phone, afterBind, limit + 1).all();
@@ -3165,6 +3225,16 @@ app.get('/track/:token', async (c) => {
       WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
   ).bind(c.req.param('token')).first<any>();
   if (!row) return c.json({ error: 'not found' }, 404);
+  // Payment-held parcels show a held notice instead of live status (owner
+  // directive 2026-11-15) — even a token minted before payment can't carry
+  // live tracking until the prepayment settles.
+  if (await jobPaymentHeld(c.env.DB, row.job_id)) {
+    return c.json({
+      payment_held: true,
+      ref: row.ref,
+      hint: 'Prepayment pending — tracking opens once the sender\'s payment is approved.',
+    });
+  }
   // Public page: timeline statuses only — NEVER internal notes (referral,
   // fraud, payment) and never prices or sender details.
   const { results: events } = await c.env.DB.prepare(
@@ -3221,6 +3291,9 @@ app.get('/track/incoming', async (c) => {
   const limit = pageLimit(c.req.query('limit'));
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.status, j.created_at, j.dest_city, j.recipient_name,
+            (j.paid = 0 AND EXISTS (
+               SELECT 1 FROM job_events e
+                WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))) AS payment_held,
             co.name AS courier_name, co.depot_name AS courier_depot,
             t.token AS tracking_token
        FROM jobs j
@@ -3233,8 +3306,9 @@ app.get('/track/incoming', async (c) => {
   const parcels = [] as any[];
   for (const row of results as any[]) {
     let token: string | null = row.tracking_token ?? null;
-    if (!token) {
+    if (!token && !row.payment_held) {
       // Parcel predates tracking-token issuance - mint one on first read.
+      // Held parcels mint nothing: tracking is locked until payment settles.
       const jobRow = await c.env.DB.prepare('SELECT id, ref FROM jobs WHERE ref = ?1')
         .bind(row.ref).first<any>();
       if (jobRow) token = await issueTrackingToken(c.env, jobRow.id, jobRow.ref, phone);
@@ -3243,7 +3317,7 @@ app.get('/track/incoming', async (c) => {
       ref: row.ref, status: row.status, created_at: row.created_at,
       dest_city: row.dest_city, recipient_name: row.recipient_name,
       courier: row.courier_name, depot: row.courier_depot,
-      tracking_url: token ? `${APP_URL}/track/${token}` : null,
+      tracking_url: token && !row.payment_held ? `${APP_URL}/track/${token}` : null,
     });
   }
   return c.json({ parcels });
@@ -3257,6 +3331,13 @@ app.post('/jobs/:ref/tracking-link', async (c) => {
   if (!job) return c.json({ error: 'not found' }, 404);
   if (c.get('role') === 'customer' && c.get('phone') !== job.sender_phone && c.get('phone') !== job.recipient_phone) {
     return c.json({ error: 'not found' }, 404);
+  }
+  // PAYMENT-HELD JOBS NEVER MINT OR SERVE TRACKING (owner directive
+  // 2026-11-15): "Track this delivery" / "Share" against a booking whose
+  // prepayment is still pending gets 402, not a live link. It unlocks
+  // itself at settlement (paid = 1) — no manual step.
+  if (await jobPaymentHeld(c.env.DB, job.id)) {
+    return c.json({ error: 'payment_required', hint: 'Prepayment pending — tracking opens once payment is approved.' }, 402);
   }
   const existing = await c.env.DB.prepare(
     'SELECT token FROM tracking_tokens WHERE job_id = ?1 ORDER BY created_at DESC LIMIT 1',
@@ -4781,6 +4862,34 @@ async function counterFareFees(env: Env, phone: string, receipt: number) {
   };
 }
 
+// Recipient tracking SMS, deferred edition (owner directive 2026-11-15):
+// payment-held bookings mint their handover code + tracking link ONLY when
+// the prepayment actually lands — never "share tracking" a held parcel.
+// Called from settlePaymentSuccess for the job's OWN payment approval. The
+// no-op guard is the OTP hash: bookings that dispatched immediately already
+// hashed a code at booking time (and SMSed it), so they are skipped here.
+async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> {
+  const job = await env.DB.prepare(
+    `SELECT j.ref, j.recipient_phone, j.delivery_otp_hash, t.token AS tracking_token
+       FROM jobs j LEFT JOIN tracking_tokens t ON t.job_id = j.id
+      WHERE j.id = ?1 ORDER BY t.id DESC LIMIT 1`,
+  ).bind(jobId).first<any>();
+  if (!job?.ref || !job.recipient_phone || job.delivery_otp_hash) return;
+  const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
+  await env.DB.prepare(
+    'UPDATE jobs SET delivery_otp_hash = ?2 WHERE ref = ?1',
+  ).bind(job.ref, await handoverOtpHash(env, job.ref, deliveryOtp)).run();
+  let token: string | null = job.tracking_token ?? null;
+  if (!token) {
+    // The booking minted nothing (payment was held at booking time) — mint
+    // NOW, at settlement, so the paid parcel's first-ever link is a live one.
+    token = await issueTrackingToken(env, jobId, job.ref, job.recipient_phone);
+  }
+  const trackUrl = trackingUrl(env, token);
+  await sendSms(env, job.recipient_phone,
+    `DropOff: parcel ${job.ref} is booked and paid. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {});
+}
+
 // Idempotent settlement: the `settled` flag is flipped in the same batch as the
 // ledger rows; webhook + status-poll can race safely. Subscription rows renew.
 async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: string): Promise<void> {  if (finalStatus !== 'success') return;
@@ -4856,6 +4965,8 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     // came back) — dispatch now, on THIS approval. dispatchToNearestRider is
     // idempotent (skips already-assigned jobs), so a duplicate webhook is safe.
     if (job) await dispatchToNearestRider(env, job.ref);
+    // Payment-held bookings only NOW earn their tracking link + handover code.
+    await sendRecipientTrackingSms(env, pay.job_id);
     await sendToPhone(env, pay.phone, {
       title: 'Payment received',
       body: 'Confirmed! Your parcel is booked — follow every step in Bookings.',
@@ -4888,6 +4999,8 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     if (job) {
       await dispatchToNearestRider(env, job.ref);
     }
+    // Payment-held bookings only NOW earn their tracking link + handover code.
+    await sendRecipientTrackingSms(env, pay.job_id);
   } else if (pay.kind === 'counter_fare' && pay.job_id) {
     // Sender paid the depot counter fare (+ processing) through DropOff.
     // Unlock the receipt photo for them, then reimburse the rider the EXACT
@@ -5746,6 +5859,12 @@ async function dispatchToNearestRider(
     await env.DB.prepare(
       `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
     ).bind(pick.rider.id).run();
+    // Algorithmic assignment is AUDITED (owner directive 2026-11-15: the
+    // algorithm picks from available riders — never a default owner). The
+    // event also drives the tracking page's "Rider assigned" timeline step.
+    await env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rider_assigned', ?2)`,
+    ).bind(job.id, `SYSTEM: nearest available rider auto-assigned — ${pick.rider.full_name} (${round2(pick.km)} km away, ETA ~${etaMin} min).`).run();
     await sendToPhone(env, job.sender_phone, {
       title: 'Rider assigned',
       body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup — track live in Bookings.`,
@@ -9436,6 +9555,30 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
   return { canceled };
 }
 
+/* ------------ cron: auto-dispatch paid-but-unassigned jobs ----------------- */
+// Operator-free dispatch (owner directive 2026-11-15): when a prepayment
+// settles while every rider is busy (or a plan-covered booking was made
+// during a rider gap), the nearest-available-rider algorithm picks the job
+// up on the next minute sweep — nobody re-assigns it by hand. HELD bookings
+// (prompt waiting / provider down) are excluded: no dispatch on credit.
+async function redispatchUnassignedPaidJobs(env: Env): Promise<number> {
+  const { results } = await env.DB.prepare(
+    `SELECT j.ref FROM jobs j
+      WHERE j.rider_id IS NULL AND j.status = 'created'
+        AND j.created_at > datetime('now', '-2 days')
+        AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
+        AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.status IN ('pending', 'failed'))
+        AND (j.paid = 1 OR NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.job_id = j.id AND p2.kind IN ('booking_deposit', 'job')))
+      LIMIT 20`,
+  ).all<any>();
+  let dispatched = 0;
+  for (const row of (results ?? []) as any[]) {
+    const pick = await dispatchToNearestRider(env, String(row.ref));
+    if (pick) dispatched++;
+  }
+  return dispatched;
+}
+
 /* ------------------- cron: drift detection --------------------------------- */
 // If a rider was assigned more than 2h ago and there's no pickup/depot event,
 // or the job went to pickup but never reached the depot, flag it for ops review.
@@ -9696,6 +9839,7 @@ export default {
           await cancelStaleOrders(env);
           await checkTimedPickups(env);
           await detectDrift(env);
+          await redispatchUnassignedPaidJobs(env);
           await notifyCapNudges(env);
           await notifyExpiryNudges(env);
           return;

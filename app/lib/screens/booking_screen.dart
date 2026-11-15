@@ -684,56 +684,63 @@ class _BookingScreenState extends State<BookingScreen> {
     final used = store.lastBookingPlanUsed;
     final cap = store.lastBookingPlanCap;
     final justParcels = store.lastBookingParcels ?? _parcels;
+    // SERVER DECISION (owner directive 2026-11-15): the booking flow collects
+    // exactly what the server demanded — a momo deposit (deposit_required) or
+    // a booking HELD because the prompt never started (deposit_init_failed).
+    // Plan-covered ('pack') and staff/ops bookings ride free; the client
+    // never invents a payment from plan inclusion alone.
+    final depositRequired = store.lastBookingDepositRequired;
+    final depositInitFailed = store.lastBookingDepositInitFailed;
     // 'free' = nothing to pay (plan pack / offline-covered); 'paid' = prepayment confirmed;
     // 'held' = prepayment due and NOT confirmed — booking saved but held, no rider.
     // A booking that never reached the server counts as held: no green check without money.
     String paymentOutcome = booking.dispatched ? 'free' : 'held';
-    if (booking.dispatched && inclusion == 'pack') {
+    if (booking.dispatched && !depositRequired && !depositInitFailed) {
+      // Nothing to collect: plan-covered, staff/ops booking or a zero-fee leg.
       if (mounted) {
-        final remaining = (used != null && cap != null) ? cap - used : null;
+        final remaining = (inclusion == 'pack' && used != null && cap != null) ? cap - used : null;
         _message(
           remaining != null && remaining >= 0
               ? 'Covered by your plan — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted ($remaining left on your plan). No payment due.'
-              : 'Covered by your plan — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted. No payment due.',
+              : remaining != null
+                  ? 'Covered by your plan — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted. No payment due.'
+                  : 'Booking dispatched — no payment due.',
         );
       }
-    } else if (booking.dispatched && inclusion == 'payg' && used != null && cap != null && used >= cap) {
-      // Plan cap reached: tier overage applied server-side — still collect.
-      if (_payment == 'Mobile money' && DropOffApi.enabled && store.linked && due != null && due > 0) {
-        if (mounted) {
-          _message('Your plan cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.');
-        }
-        final outcome = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
-        if (!mounted) return;
-        paymentOutcome = outcome == 'success' ? 'paid' : 'held';
-        if (outcome.startsWith('error:')) {
-          _message('Payment could not start now (${outcome.substring(6)}); the booking is saved and HELD — tap Pay now on the booking screen to retry.');
-        } else {
-          _message(_payResultMessage(outcome));
-        }
-      } else if (mounted) {
-        _message(due != null && due > 0
-            ? 'Your plan cap is reached — approve the momo prompt for K${due.toStringAsFixed(2)} to pay this leg and dispatch your rider.'
-            : 'Plan cap reached — approve the momo prompt to dispatch your rider (tier discount applied to this leg).');
-        if (due != null && due > 0) paymentOutcome = 'held';
+    } else if (booking.dispatched && depositInitFailed) {
+      // The provider was down at booking: HELD, and only the sender's
+      // deliberate Pay now starts a prompt.
+      if (mounted) {
+        _message('Payment could not start now; the booking is saved and HELD — no rider until prepayment lands. Tap Pay now on the booking screen to retry.');
       }
-    } else if (booking.dispatched && DropOffApi.enabled && _payment == 'Mobile money' && store.linked) {
-      _message('Sending a Lipila prompt${due != null ? ' for K${due.toStringAsFixed(2)}' : ''} to ${_senderPhone.text}…\nYou pay DropOff only — the courier counter fare stays with the depot.');
+      paymentOutcome = 'held';
+    } else if (booking.dispatched && depositRequired && DropOffApi.enabled && store.linked && due != null && due > 0) {
+      // The server already sent the momo prompt at booking; PayJob reuses
+      // that exact prompt (idempotent server-side) and polls until it lands.
+      // Plan-cap overage keeps the tier discount — the message says so.
+      final overCap = inclusion == 'payg' && used != null && cap != null && used >= cap;
+      if (mounted) {
+        _message(overCap
+            ? 'Your plan cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.'
+            : 'Approve the prepayment prompt for K${due.toStringAsFixed(2)} sent to ${_senderPhone.text} — your rider dispatches the moment it lands. You pay DropOff only; the courier counter fare stays with the depot.');
+      }
       final outcome = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
       if (!mounted) return;
+      paymentOutcome = outcome == 'success' ? 'paid' : 'held';
       if (outcome.startsWith('error:')) {
-        _message('Payment could not start now (${outcome.substring(6)}); the booking is saved and HELD — no rider until prepayment lands. Tap Pay now on the booking screen to retry.');
-        paymentOutcome = 'held';
+        _message('Payment could not start now (${outcome.substring(6)}); the booking is saved and HELD — tap Pay now on the booking screen to retry.');
       } else {
-        paymentOutcome = outcome == 'success' ? 'paid' : 'held';
         _message(_payResultMessage(outcome));
       }
     } else if (booking.dispatched && due != null && due > 0 && mounted) {
-      // Covered by the advance prompt (or offline mode): the sender
+      // Deposit required but no live prompt on this device: the sender
       // approves the momo prompt that was sent at booking time.
       _message('DropOff leg: K${due.toStringAsFixed(2)} — approve the prepayment prompt sent to your momo at booking; your rider dispatches on approval. Courier counter fare is separate.');
       paymentOutcome = 'held';
     }
+    // In-flow approval releases the HELD gate at once (share/track cards and
+    // the Pay-now card follow the booking's paymentHeld flag).
+    if (paymentOutcome == 'paid') await store.clearPaymentHeld(booking.id);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute<void>(builder: (_) => BookingSuccessScreen(bookingId: booking.id, paymentHeld: paymentOutcome == 'held')));
     AnalyticsService.instance.track(

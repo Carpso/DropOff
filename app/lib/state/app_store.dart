@@ -437,6 +437,15 @@ class AppStore extends ChangeNotifier {
   int? lastBookingPlanUsed;
   int? lastBookingPlanCap;
   int? lastBookingParcels;
+  /// The SERVER's own prepayment decision (owner directive 2026-11-15): the
+  /// booking flow pays only when the server demanded a deposit or the prompt
+  /// could not start — never inferred client-side from plan inclusion.
+  bool lastBookingDepositRequired = false;
+  bool lastBookingDepositInitFailed = false;
+  /// The rider the dispatch algorithm picked for the last booking (server
+  /// response). Replaces the old hard-coded "Owner" default.
+  String? lastBookingAutoRiderName;
+  int? lastBookingAutoRiderId;
   String? lastBookingError;
   String? lastBookingErrorDetail;
 
@@ -653,6 +662,14 @@ class AppStore extends ChangeNotifier {
     lastBookingPlanUsed = (response.body['plan_used'] as num?)?.toInt();
     lastBookingPlanCap = (response.body['plan_cap'] as num?)?.toInt();
     lastBookingParcels = (response.body['parcels'] as num?)?.toInt() ?? parcels;
+    lastBookingDepositRequired = (response.body['deposit_required'] as bool?) ?? ((response.body['deposit_required'] as num?)?.toInt() == 1);
+    lastBookingDepositInitFailed = (response.body['deposit_init_failed'] as bool?) ?? ((response.body['deposit_init_failed'] as num?)?.toInt() == 1);
+    // The algorithm picks the rider (nearest available, load-balanced) — the
+    // app NEVER defaults a booking to the owner pseudo-rider (owner directive
+    // 2026-11-15). No assignment yet = empty riderId + null riderName.
+    final autoAssigned = response.body['auto_assigned'] as Map<String, dynamic>?;
+    lastBookingAutoRiderId = (autoAssigned?['rider_id'] as num?)?.toInt();
+    lastBookingAutoRiderName = autoAssigned?['rider'] as String?;
 
     final booking = Booking(
       id: id,
@@ -676,7 +693,12 @@ class AppStore extends ChangeNotifier {
       serverRef: serverRef,
       promoCode: promoApplied ?? (promoCode?.trim().isEmpty ?? true ? null : promoCode?.trim().toUpperCase()),
       promoDiscount: promoDiscount,
-      riderId: owner.id,
+      // Algorithm-assigned rider only (never a default owner): when the server
+      // dispatched nobody yet, riderId stays empty and the UI shows
+      // "Awaiting rider assignment".
+      riderId: lastBookingAutoRiderId != null ? '$lastBookingAutoRiderId' : '',
+      riderName: lastBookingAutoRiderName,
+      paymentHeld: lastBookingDepositRequired || lastBookingDepositInitFailed,
       roundTrip: roundTrip,
       returnCity: returnCity,
       returnAddress: returnAddress,
@@ -696,18 +718,35 @@ class AppStore extends ChangeNotifier {
     return booking;
   }
 
-  Future<void> advanceBooking(String id) async {
-    final index = _bookings.indexWhere((booking) => booking.id == id);
-    if (index < 0 || _bookings[index].stage >= _bookings[index].timeline.length - 1) return;
-    _bookings[index] = _bookings[index].copyWith(stage: _bookings[index].stage + 1);
+  // Booking stages are AUTOMATED (owner directive 2026-11-15 — manual
+  // "Operator: mark" buttons are gone): the server advances a job through
+  // rider events, payment settlement and the cron sweeps, and
+  // [syncJobsFromServer] mirrors that progress into the local list.
+
+  /// Algorithm-assigned rider lands here after dispatch (owner directive
+  /// 2026-11-15): both the roster id and the rider's real name move together,
+  /// replacing the old owner-defaulted local assignment.
+  /// Manual rider assignment was removed with the "Operator: mark" flow —
+  /// [setBookingRider] below is the only rider-write left, fed by the server's
+  /// auto-assign response and synced jobs.
+  Future<void> setBookingRider(String bookingId, {String? riderId, String? riderName}) async {
+    final index = _bookings.indexWhere((booking) => booking.id == bookingId);
+    if (index < 0) return;
+    _bookings[index] = _bookings[index].copyWith(
+      riderId: riderId ?? _bookings[index].riderId,
+      riderName: riderName ?? _bookings[index].riderName,
+    );
     await _saveBookings();
     notifyListeners();
   }
 
-  Future<void> assignRider(String bookingId, String riderId) async {
+  /// In-flow prepayment approved — the booking is no longer HELD. The
+  /// Pay-now gate and the recipient tracking/share cards unlock immediately
+  /// (the next [syncJobsFromServer] confirms with the server's events).
+  Future<void> clearPaymentHeld(String bookingId) async {
     final index = _bookings.indexWhere((booking) => booking.id == bookingId);
-    if (index < 0) return;
-    _bookings[index] = _bookings[index].copyWith(riderId: riderId);
+    if (index < 0 || !_bookings[index].paymentHeld) return;
+    _bookings[index] = _bookings[index].copyWith(paymentHeld: false);
     await _saveBookings();
     notifyListeners();
   }
@@ -852,10 +891,28 @@ class AppStore extends ChangeNotifier {
         final stage = _stageFromJobStatus('${j['status']}', door);
         final existing = _bookings.where((b) => b.serverRef == ref).firstOrNull;
         if (existing != null) {
-          if (existing.stage < stage) {
-            final i = _bookings.indexWhere((b) => b.id == existing.id);
-            if (i >= 0) _bookings[i] = _bookings[i].copyWith(stage: stage);
-            dirty = true;
+          final i = _bookings.indexWhere((b) => b.id == existing.id);
+          if (i >= 0) {
+            final lastEvent = '${j['last_event'] ?? ''}';
+            final riderName = j['rider_name'] as String?;
+            final held = lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending';
+            var changed = false;
+            if (existing.stage < stage) {
+              _bookings[i] = _bookings[i].copyWith(stage: stage);
+              changed = true;
+            }
+            // Payment state and the algorithm-assigned rider ride along on
+            // every sync so held bookings re-gate their Pay-now/share cards
+            // and real rider names replace any placeholder.
+            if (lastEvent.isNotEmpty && lastEvent != existing.lastEvent) {
+              _bookings[i] = _bookings[i].copyWith(lastEvent: lastEvent, paymentHeld: held);
+              changed = true;
+            }
+            if (riderName != null && riderName.isNotEmpty && riderName != existing.riderName) {
+              _bookings[i] = _bookings[i].copyWith(riderName: riderName);
+              changed = true;
+            }
+            if (changed) dirty = true;
           }
           continue;
         }
@@ -899,6 +956,8 @@ class AppStore extends ChangeNotifier {
     };
     final door = (j['last_mile'] ?? 0) == 1 || ((j['leg2_fee_zmw'] as num?) ?? 0) > 0;
     final timelineMax = door ? 6 : 4;
+    final lastEvent = j['last_event'] as String?;
+    final riderNameRaw = '${j['rider_name'] ?? ''}'.trim();
     return Booking(
       id: 'srv-${j['id']}',
       reference: '${j['ref']}',
@@ -920,7 +979,10 @@ class AppStore extends ChangeNotifier {
       pickupWindow: '${j['pickup_window'] ?? 'now'}',
       serverRef: '${j['ref']}',
       stage: stage.clamp(0, timelineMax),
+      // Algorithm-assigned rider from the server (never a default owner).
       riderId: '',
+      riderName: riderNameRaw.isEmpty ? null : riderNameRaw,
+      paymentHeld: lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending',
       parcels: (j['parcels'] as num?)?.toInt() ?? 1,
       vehicleClass: '${j['vehicle_class'] ?? 'motorcycle'}',
       branch: j['branch'] as String?,

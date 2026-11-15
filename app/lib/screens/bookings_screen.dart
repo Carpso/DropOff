@@ -228,14 +228,29 @@ class BookingCard extends StatelessWidget {
   }
 }
 
-class BookingDetailScreen extends StatelessWidget {
+class BookingDetailScreen extends StatefulWidget {
   final String bookingId;
   const BookingDetailScreen({super.key, required this.bookingId});
+  @override
+  State<BookingDetailScreen> createState() => _BookingDetailScreenState();
+}
+
+class _BookingDetailScreenState extends State<BookingDetailScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // AUTOMATION (owner directive 2026-11-15): opening a booking pulls the
+    // server's latest job state — the timeline, the algorithm-assigned rider
+    // and the payment-held gate move on their own. No manual marking.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppScope.of(context).syncJobsFromServer();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
-    final matches = store.bookings.where((item) => item.id == bookingId);
+    final matches = store.bookings.where((item) => item.id == widget.bookingId);
     if (matches.isEmpty) return const Scaffold(body: Center(child: Text('Booking not found')));
     final booking = matches.first;
     final courier = courierById(booking.courierId);
@@ -285,7 +300,9 @@ class BookingDetailScreen extends StatelessWidget {
           _detailRow('Sender', '${booking.senderName}\n${booking.senderPhone}'),
           _detailRow('Recipient', '${booking.recipientName}\n${booking.recipientPhone}'),
           _detailRow('Payment', booking.paymentMethod),
-          _detailRow('Rider', rider?.name ?? 'DropOff Owner'),
+          // The rider the dispatch ALGORITHM picked — never a default
+          // "Owner" (owner directive 2026-11-15). Null = nobody assigned yet.
+          _detailRow('Rider', rider?.name ?? booking.riderName ?? 'Awaiting rider assignment'),
           _detailRow('DropOff rider fee', kwacha(booking.riderFee)),
           _detailRow('Courier fare', kwacha(booking.courierFare)),
           if (booking.lastMileFee > 0) _detailRow('Last-mile fee', kwacha(booking.lastMileFee)),
@@ -297,9 +314,12 @@ class BookingDetailScreen extends StatelessWidget {
         const SizedBox(height: 20),
         // PREPAY GATE (owner directive): a booking that never got its momo
         // prepayment approved is HELD — surface it loudly with a working
-        // Pay now. Plan-covered bookings never carry these events.
-        if (booking.dispatched && !complete &&
-            (booking.lastEvent == 'prepayment_pending' || booking.lastEvent == 'advance_pending'))
+        // Pay now. [paymentHeld] is the server's own deposit decision,
+        // mirrored on every sync; plan-covered bookings never carry it.
+        if (booking.dispatched && !complete && booking.paymentHeld &&
+            (booking.lastEvent == null ||
+                booking.lastEvent == 'prepayment_pending' ||
+                booking.lastEvent == 'advance_pending'))
           _PrepayCard(booking: booking),
         // DEPOT COUNTER FLOW (owner directive 2026-11-12): the rider fronted
         // the depot's counter fare — the sender repays the exact receipt
@@ -308,27 +328,16 @@ class BookingDetailScreen extends StatelessWidget {
           _CounterReceiptCard(booking: booking),
         if (booking.dispatched && booking.counterReceiptPaid && booking.counterReceiptUrl?.isNotEmpty == true)
           _CounterReceiptPaidCard(booking: booking),
-        // Operator controls (assign rider / advance status) are staff-only —
-        // sellers and recipients never see the fleet console on a job card.
-        if (store.isStaff && store.riders.where((item) => item.active).length > 1) ...[
-          DropdownButtonFormField<String>(
-            initialValue: booking.riderId,
-            decoration: const InputDecoration(labelText: 'Assign rider / driver', prefixIcon: Icon(Icons.two_wheeler)),
-            items: [for (final item in store.riders.where((item) => item.active)) DropdownMenuItem(value: item.id, child: Text('${item.name} • ${item.vehicle}'))],
-            onChanged: (value) { if (value != null) store.assignRider(booking.id, value); },
-          ),
+        // DISPATCH IS AUTOMATED (owner directive 2026-11-15): the manual
+        // "Operator: mark …" status buttons are gone, and there is no rider
+        // dropdown defaulting to the owner. Staff may only ask the server to
+        // run its nearest-available-rider algorithm on an unassigned job.
+        if (store.isStaff && booking.dispatched && !complete && !booking.paymentHeld) ...[
+          _AutoAssignCard(booking: booking),
           const SizedBox(height: 14),
         ],
-        if (store.isStaff && booking.stage < booking.timeline.length - 1)
-          FilledButton.icon(
-            onPressed: () => store.advanceBooking(booking.id),
-            icon: const Icon(Icons.update),
-            label: Text('Operator: mark “${booking.timeline[booking.stage + 1]}”'),
-          )
-        else if (!store.isStaff && booking.stage >= booking.timeline.length - 1)
-          const InfoPill(icon: Icons.check_circle, label: 'Journey complete')
-        else if (!store.isStaff)
-          const SizedBox.shrink(),
+        if (!store.isStaff && booking.stage >= booking.timeline.length - 1)
+          const InfoPill(icon: Icons.check_circle, label: 'Journey complete'),
         if (booking.dispatched && DropOffApi.enabled && store.linked) ...[
           const SizedBox(height: 20),
           Row(children: [
@@ -340,8 +349,13 @@ class BookingDetailScreen extends StatelessWidget {
               label: const Text('Chat about this delivery'),
             )),
           ]),
-          const SizedBox(height: 20),
-          _TrackingLinkCard(jobRef: booking.serverRef!),
+          // RECIPIENT TRACKING (owner directive 2026-11-15): the share card
+          // exists only once the prepayment is confirmed — a HELD booking
+          // never sends "track this delivery" links.
+          if (!booking.paymentHeld) ...[
+            const SizedBox(height: 20),
+            _TrackingLinkCard(jobRef: booking.serverRef!),
+          ],
         ],
         if (booking.dispatched && DropOffApi.enabled && complete) ...[
           const SizedBox(height: 20),
@@ -575,6 +589,82 @@ class _TimelineRow extends StatelessWidget {
           )),
         ]),
       );
+}
+
+/// STAFF DISPATCH CARD (owner directive 2026-11-15): staff never hand-pick a
+/// rider and nothing defaults to the owner — this asks the server to run its
+/// nearest-available-rider algorithm (verified, active, free capacity,
+/// emptiest-rider tie-break) on an unassigned job.
+class _AutoAssignCard extends StatefulWidget {
+  final Booking booking;
+  const _AutoAssignCard({required this.booking});
+
+  @override
+  State<_AutoAssignCard> createState() => _AutoAssignCardState();
+}
+
+class _AutoAssignCardState extends State<_AutoAssignCard> {
+  bool _busy = false;
+  String? _note;
+
+  Future<void> _run() async {
+    setState(() { _busy = true; _note = null; });
+    final res = await DropOffApi.autoAssignJob(widget.booking.serverRef!);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _note = res == null
+          ? 'No verified rider available right now — the server keeps retrying automatically.'
+          : null;
+    });
+    if (res != null) {
+      final store = AppScope.of(context);
+      await store.setBookingRider(
+        widget.booking.id,
+        riderId: '${res['rider_id'] ?? ''}',
+        riderName: res['rider'] as String?,
+      );
+      AppToast.success(context, 'Rider ${res['rider'] ?? ''} assigned — ETA ${res['eta_minutes'] ?? '?'} min.');
+    } else {
+      AppToast.warning(context, 'No rider available — the server retries automatically.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final assigned = widget.booking.riderName?.trim().isNotEmpty == true;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.two_wheeler, color: AppColors.forest),
+            const SizedBox(width: 10),
+            Expanded(child: Text(assigned ? 'Rider assigned' : 'Dispatch', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            assigned
+                ? 'The algorithm assigned ${widget.booking.riderName}. Status moves on its own as the rider acts.'
+                : 'No rider yet. Dispatch runs the nearest-available-rider algorithm — the server also retries automatically every minute.',
+            style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+          ),
+          if (_note != null) ...[
+            const SizedBox(height: 8),
+            Text(_note!, style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          ],
+          const SizedBox(height: 12),
+          FilledButton.tonalIcon(
+            onPressed: _busy ? null : _run,
+            icon: _busy
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.auto_mode),
+            label: Text(_busy ? 'Dispatching…' : (assigned ? 'Re-run algorithm' : 'Dispatch nearest rider')),
+          ),
+        ]),
+      ),
+    );
+  }
 }
 
 class _TrackingLinkCard extends StatefulWidget {

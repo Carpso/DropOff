@@ -169,7 +169,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       reference: booking.reference,
       dispatchRef: booking.serverRef?.isNotEmpty == true ? booking.serverRef! : '',
       bookedAt: DateFormat('d MMM yyyy · HH:mm').format(booking.createdAt),
-      rider: rider?.name ?? '',
+      rider: rider?.name ?? booking.riderName ?? '',
       trackingUrl: _trackingUrl != null ? 'https://dropoff-api.godfreymoseskalambo.workers.dev/t/${_trackingUrl!}' : null,
     );
     await ThermalWaybill.print(context, data);
@@ -286,7 +286,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
                   booking: booking,
                   courierName: courier.name,
                   courierId: courier.id,
-                  riderName: rider?.name,
+                  riderName: rider?.name ?? booking.riderName,
                   branchInfo: branchInfo,
                   declaredValue: declaredValue,
                   cover: cover,

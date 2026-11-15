@@ -76,6 +76,13 @@ class _BusinessScreenState extends State<BusinessScreen> {
   Future<void> _track(Map<String, dynamic> job) async {
     final ref = '${job['ref'] ?? ''}';
     if (ref.isEmpty) return;
+    // Payment-held parcels never open tracking (owner directive 2026-11-15) —
+    // mirrors the server, which answers 402 payment_required for held jobs.
+    final lastEvent = '${job['last_event'] ?? ''}';
+    if (lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending') {
+      AppToast.show(context, 'Payment is held — pay for this parcel to unlock tracking.');
+      return;
+    }
     AppToast.show(context, 'Opening tracking…');
     final link = await DropOffApi.trackingLink(ref);
     if (!mounted) return;
