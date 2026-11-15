@@ -1062,6 +1062,7 @@ class DropOffApi {
     int parcels = 1,
     String vehicleClass = 'motorcycle',
     String payMethod = 'mobile_money',
+    String? parcelSize,
   }) =>
       post('/collections', {
         'courier_id': courierId,
@@ -1075,6 +1076,13 @@ class DropOffApi {
         'parcels': parcels,
         'vehicle_class': vehicleClass,
         'pay_method': payMethod,
+        if (parcelSize != null && parcelSize.isNotEmpty) 'parcel_size': parcelSize,
+        if (parcelSize != null && parcelSize.isNotEmpty)
+          'weight_class': switch (parcelSize) {
+            'small' => '0-5kg',
+            'large' => '15kg+',
+            _ => '5-15kg',
+          },
       });
 
   /// Pay the signed-in seller's plan activation/renewal via Lipila. Poll with

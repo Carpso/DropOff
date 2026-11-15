@@ -6,8 +6,9 @@ without breaking the no-quoting rule or the counter-receipt flow.
 ## The rule: exact receipts only — one photo, one amount, never a rider sum
 
 - A sender books **one trip** carrying up to the vehicle's parcel limit:
-  motorcycle **3**, car **6**, van **10**, truck **15** (`_maxParcelsByVehicle`
-  in `booking_screen.dart`, clamped server-side by `VEHICLE_MAX_PARCELS`).
+  motorcycle **10 small / 5 medium / 1 large** (by parcel size), car/van/truck
+  **no practical limit** (`parcelCapFor` in `workers/src/pricing.ts`, size-aware;
+  the app mirrors with the typed "no limit" field for those vehicles).
 - The rider photographs **every parcel** in the batch (multiple parcel photos
   are supported) and files **every depot receipt** the depot wrote — each
   receipt photographed with the EXACT amount written on it

@@ -630,6 +630,13 @@ class AppStore extends ChangeNotifier {
         ParcelSize.medium => '5-15kg',
         ParcelSize.large => '15kg+',
       },
+      // Drives the server's size-aware motorcycle caps (10/5/1); weight_class
+      // stays for records and quote lookup.
+      'parcel_size': switch (parcelSize) {
+        ParcelSize.small => 'small',
+        ParcelSize.medium => 'medium',
+        ParcelSize.large => 'large',
+      },
       'service': service ?? 'standard',
       'pickup_window': pickupWindow,
       'pickup_time': pickupWindow,

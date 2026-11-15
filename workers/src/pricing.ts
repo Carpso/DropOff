@@ -43,17 +43,12 @@ export const VEHICLE_UNLIMITED = 9999;
 export function parcelCapFor(vehicleClass: VehicleClass, parcelSize?: string): number {
   if (vehicleClass !== 'motorcycle') return VEHICLE_UNLIMITED;
   const k = String(parcelSize ?? '').toLowerCase().trim();
-  if (k === 'small') return MOTORCYCLE_MAX_PARCELS.small;
-  if (k === 'large') return MOTORCYCLE_MAX_PARCELS.large;
+  // Current apps send kg-style weight_class ('0-5kg'); tolerate both until
+  // every installed version sends parcel_size as well.
+  if (k === 'small' || k === '0-5kg' || k === '0-5') return MOTORCYCLE_MAX_PARCELS.small;
+  if (k === 'large' || k === '15kg+' || k === '15kg') return MOTORCYCLE_MAX_PARCELS.large;
   return MOTORCYCLE_MAX_PARCELS.medium;
 }
-export const VEHICLE_MAX_PARCELS: Record<VehicleClass, number> = {
-  motorcycle: MOTORCYCLE_MAX_PARCELS.medium, // legacy flat fallback (medium)
-  car: VEHICLE_UNLIMITED,
-  van: VEHICLE_UNLIMITED,
-  truck: VEHICLE_UNLIMITED,
-};
-
 export const TRUCK_MIN_FEE_ZMW = 100;
 
 const depotLat = -15.4255;

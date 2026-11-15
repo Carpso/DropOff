@@ -31,6 +31,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   String _window = '10:00';
   final String _payment = 'Mobile money';
   String _vehicleClass = 'motorcycle';
+  String _size = 'medium'; // drives the server's size-aware motorcycle cap
   int _parcels = 1;
   bool _saving = false;
   bool _aiBusy = false;
@@ -59,7 +60,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     '14:00': '2:00 – 3:30 PM',
   };
   static const Map<String, String> _cutoffs = {'06:00': '05:30', '10:00': '09:30', '14:00': '13:30'};
-  static const Map<String, int> _maxParcels = {'motorcycle': 3, 'car': 6, 'van': 10, 'truck': 15};
+  static const Map<String, int> _motorcycleParcelCap = {'small': 10, 'medium': 5, 'large': 1};
+  static int _parcelCapFor(String vehicleClass, String size) =>
+      vehicleClass == 'motorcycle' ? (_motorcycleParcelCap[size] ?? 5) : 9999;
+  static const Map<String, String> _sizeLabels = {
+    'small': 'Small (0–5kg)',
+    'medium': 'Medium (5–15kg)',
+    'large': 'Large (15kg+)',
+  };
   static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
   @override
@@ -122,6 +130,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       parcels: _parcels,
       vehicleClass: _vehicleClass,
       payMethod: 'mobile_money',
+      parcelSize: _size,
     );
     if (!mounted) return;
     if (!res.ok) {
@@ -267,17 +276,35 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'Vehicle', prefixIcon: Icon(Icons.directions)),
             items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _maxParcels[v]!) _parcels = _maxParcels[v]!; setState(() {}); } },
+            onChanged: (v) { if (v != null) { _vehicleClass = v; final cap = _parcelCapFor(v, _size); if (_parcels > cap) _parcels = cap; setState(() {}); } },
           )),
           const SizedBox(width: 12),
-          Expanded(child: DropdownButtonFormField<int>(
-            initialValue: _parcels.clamp(1, _maxParcels[_vehicleClass]!),
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Parcels', prefixIcon: Icon(Icons.inventory)),
-            items: List.generate(_maxParcels[_vehicleClass]!, (i) => i + 1).map((i) => DropdownMenuItem(value: i, child: Text('$i', maxLines: 1))).toList(),
-            onChanged: (v) { if (v != null) setState(() => _parcels = v); },
-          )),
+          Expanded(child: _vehicleClass == 'motorcycle'
+              ? DropdownButtonFormField<int>(
+                  initialValue: _parcels.clamp(1, _parcelCapFor(_vehicleClass, _size)),
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Parcels', prefixIcon: Icon(Icons.inventory)),
+                  items: List.generate(_parcelCapFor(_vehicleClass, _size), (i) => i + 1).map((i) => DropdownMenuItem(value: i, child: Text('$i', maxLines: 1))).toList(),
+                  onChanged: (v) { if (v != null) setState(() => _parcels = v); },
+                )
+              // Cars, vans and trucks: no practical limit — type any number.
+              : TextFormField(
+                  initialValue: '$_parcels',
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Parcels (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+                  onChanged: (v) {
+                    final n = int.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
+                    setState(() => _parcels = (n == null || n < 1) ? 1 : n);
+                  },
+                )),
         ]),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          initialValue: _size,
+          decoration: const InputDecoration(labelText: 'Parcel size', prefixIcon: Icon(Icons.straighten_outlined)),
+          items: _sizeLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+          onChanged: (v) { if (v != null) { final cap = _parcelCapFor(_vehicleClass, v); setState(() { _size = v; if (_parcels > cap) _parcels = cap; }); } },
+        ),
         const SizedBox(height: 18),
         const Text('Collection window', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),

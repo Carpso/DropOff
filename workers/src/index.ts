@@ -17,7 +17,7 @@ import {
 } from './auth';
 import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
 import { PRIVACY_MD, PRIVACY_TITLE, mdToHtml } from './legal';
-import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VEHICLE_MAX_PARCELS, VehicleClass, parcelCapFor } from './pricing';
+import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { sendSms } from './sms';
 import { sendToPhone } from './push';
@@ -1800,7 +1800,7 @@ app.post('/jobs', async (c) => {
     // still fit under the cap; otherwise the whole trip pays the tier overage.
     const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class)
       ? b.vehicle_class : 'motorcycle';
-    const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, b.parcel_size)));
+    const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, (b.parcel_size ?? b.weight_class) as string | undefined)));
     let riderFee = baseRiderFee(fromCity, Number(b.pickup_lat ?? 0), Number(b.pickup_lng ?? 0), vehicleClass);
     let packInclusion: 'pack' | 'payg' | 'none' = 'none';
     let planUsed = 0;
@@ -2219,7 +2219,7 @@ app.post('/collections', async (c) => {
     pickupAt = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1, 4, 0)).toISOString();
   }
   const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class) ? b.vehicle_class : 'motorcycle';
-  const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, b.parcel_size)));
+  const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, (b.parcel_size ?? b.weight_class) as string | undefined)));
   // PREPAID POLICY (owner directive): no cash — everything is paid in advance
   // at booking by momo; plans ride prepaid via their subscription.
   const payMethod = b.pay_method === 'cash' ? 'cash' : 'mobile_money';
