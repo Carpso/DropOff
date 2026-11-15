@@ -1188,7 +1188,7 @@ class _TiersCardState extends State<_TiersCard> {
       setState(() => _busyTier = null);
       AppToast.show(context, _moneyErrorText(pay,
           pay.error == 'lipila_init_failed'
-              ? 'Mobile-money prompt was rejected by Lipila — payments are down; the plan did not start.'
+              ? 'Mobile-money prompt was rejected by Lipila — payments are down; the plan did not start. Verify your momo balance is enough for the prompt, then tap Pay now again.'
               : 'Could not start the mobile-money prompt'));
       return;
     }
@@ -1210,7 +1210,7 @@ class _TiersCardState extends State<_TiersCard> {
       'success' when tier == 'rider_daily' => 'Daily Rider is LIVE — today\'s parcel is covered.',
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
       'success' => '$tier plan is LIVE — your monthly parcels are ready.',
-      'failed' => 'The mobile-money prompt was rejected — pay again from this screen.',
+      'failed' => 'The mobile-money prompt was rejected — verify your momo balance has the funds, then tap Pay now again.',
       _ => 'Payment still pending — the plan activates the moment it lands.',
     });
   }

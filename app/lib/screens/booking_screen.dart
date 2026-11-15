@@ -369,7 +369,7 @@ class _BookingScreenState extends State<BookingScreen> {
   /// Shared copy for the post-prompt verdict (both pay paths use it).
   String _payResultMessage(String outcome) => switch (outcome) {
         'success' => 'Lipila payment received. Your rider is being dispatched.',
-        'failed' => 'The mobile-money request was rejected — check your momo balance and try again, or tap Pay now to resend the prompt.',
+        'failed' => 'The mobile-money request was rejected — verify your momo balance has the funds, then tap Pay now to resend the prompt.',
         _ => 'Payment still pending — the rider sweep confirms when your money lands.',
       };
 
@@ -711,7 +711,7 @@ class _BookingScreenState extends State<BookingScreen> {
       // The provider was down at booking: HELD, and only the sender's
       // deliberate Pay now starts a prompt.
       if (mounted) {
-        _message('Payment could not start now; the booking is saved and HELD — no rider until prepayment lands. Tap Pay now on the booking screen to retry.');
+        _message('Payment could not start now; the booking is saved and HELD — no rider until prepayment lands. Verify your momo balance, then tap Pay now on the booking screen to retry.');
       }
       paymentOutcome = 'held';
     } else if (booking.dispatched && depositRequired && DropOffApi.enabled && store.linked && due != null && due > 0) {
@@ -732,7 +732,7 @@ class _BookingScreenState extends State<BookingScreen> {
       if (!mounted) return;
       paymentOutcome = outcome == 'success' ? 'paid' : 'held';
       if (outcome.startsWith('error:')) {
-        _message('Payment could not start now (${outcome.substring(6)}); the booking is saved and HELD — tap Pay now on the booking screen to retry.');
+        _message('Payment could not start now (${outcome.substring(6)}); the booking is saved and HELD — verify your momo balance, then tap Pay now on the booking screen to retry.');
       } else {
         _message(_payResultMessage(outcome));
       }
@@ -1456,7 +1456,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
         unawaited(AppScope.of(context).syncJobsFromServer());
         break;
       case 'failed':
-        AppToast.show(context, 'The momo prompt was rejected — check your balance and tap Pay now again.');
+        AppToast.show(context, 'The momo prompt was rejected — verify your mobile-money balance has the funds, then tap Pay now again.');
         break;
       default:
         if (outcome.startsWith('error:')) {

@@ -155,7 +155,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         if (!mounted) return;
         _message(switch (status) {
           'success' => 'Paid — a rider will collect from $_courierId point.',
-          'failed' => 'The mobile-money prompt was rejected — check your momo balance and try again, or contact DropOff support.',
+          'failed' => 'The mobile-money prompt was rejected — verify your momo balance has the funds, then try again. Tap Pay now to resend the prompt, or contact DropOff support.',
           _ => 'Payment still pending — the rider sweep confirms when your money lands.',
         });
       }

@@ -2101,7 +2101,7 @@ app.post('/jobs', async (c) => {
           'Prepayment could not start (mobile-money provider unreachable). Booking HELD — no rider is assigned until the DropOff leg is prepaid. Retry payment to dispatch.').run();
         c.executionCtx.waitUntil(
           sendSms(c.env, senderPhone,
-          `DropOff: booking ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — open Bookings and tap Pay now to dispatch.`).catch(() => {}),
+          `DropOff: booking ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`).catch(() => {}),
         );
       }
     }
@@ -2397,7 +2397,7 @@ app.post('/collections', async (c) => {
         'Prepayment could not start (mobile-money provider unreachable). Collection HELD — no rider is assigned until the DropOff leg is prepaid. Retry payment to dispatch.').run();
       c.executionCtx.waitUntil(
         sendSms(c.env, phone,
-        `DropOff: collection ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — open Bookings and tap Pay now to dispatch.`).catch(() => {}),
+        `DropOff: collection ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`).catch(() => {}),
       );
     }
   }
@@ -8529,7 +8529,17 @@ app.get('/jobs/:ref/evidence', async (c) => {
     declared_value_zmw: job.declared_value_zmw,
     cover: { opt_in: Number(job.cover_opt_in ?? 0) === 1, fee_zmw: job.cover_fee_zmw, status: job.cover_status },
     evidence,
-    timeline: (events ?? []).map((e: any) => ({ status: e.status, at: e.created_at, note: e.note })),
+    timeline: (events ?? []).map((e: any) => {
+      const riderStatuses = new Set(['picked_up', 'at_depot', 'delivered', 'ready_for_collection']);
+      const who = riderStatuses.has(e.status) ? 'rider' : e.status === 'partner_confirmed' ? 'partner' : 'system';
+      return {
+        status: e.status,
+        at: e.created_at,
+        note: e.note,
+        who,
+        actor: who === 'rider' ? (job.rider_name ?? 'rider') : null,
+      };
+    }),
   });
 });
 
@@ -10072,7 +10082,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
             await env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
               .bind(meta.last_row_id, 'prepayment_pending', 'Standing order created but the prepayment prompt could not start — HELD; open Bookings and tap Pay now to dispatch.').run();
             await sendSms(env, plan.phone,
-              `DropOff: standing order ${ref} saved but the prepayment prompt could not start. Your rider is HELD — open Bookings and tap Pay now to dispatch.`).catch(() => {});
+              `DropOff: standing order ${ref} saved but the prepayment prompt could not start. Your rider is HELD — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`).catch(() => {});
           }
         }
         created++;

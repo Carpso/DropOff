@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
+import 'keys.dart';
 
 /// Severity used to pick the colour + icon. [inferLog] is also used when the
 /// caller doesn't pass a type — it guesses from the message text.
@@ -65,7 +66,9 @@ class AppToast {
       AppToastType.warning => (const Color(0xFF8A5A00), Icons.warning_amber_rounded),
       AppToastType.error => (const Color(0xFFB3261E), Icons.error_rounded),
     };
-    final messenger = ScaffoldMessenger.of(context);
+    // Root-scope messenger: renders above sheets, dialogs and route transitions
+    // (a nearest-ScaffoldMessenger would be BELOW them).
+    final messenger = scaffoldMessengerKey.currentState ?? ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(SnackBar(
       behavior: SnackBarBehavior.floating,

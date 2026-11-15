@@ -9,7 +9,7 @@ String moneyErrorText(ApiResponse r, String fallback) {
   if (err == 'network_error') return 'Mobile-money service unreachable right now — check your connection and retry.';
   if (err == 'lipila_init_failed') {
     final tail = detail.length > 90 ? '${detail.substring(0, 90)}…' : detail;
-    return 'Lipila rejected the prompt${tail.isEmpty ? '' : ' ($tail)'} — the plan did not start.';
+    return 'Lipila rejected the prompt${tail.isEmpty ? '' : ' ($tail)'} — verify your momo balance has the funds, then tap Pay now again. The plan did not start.';
   }
   if (err == 'payment_already_pending') return 'A prompt is already waiting on your phone — approve it first.';
   if (err == 'too_many_requests') return 'Too many attempts — wait a minute and try again.';

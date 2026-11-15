@@ -106,8 +106,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// navigate by the address text as a fallback — never leave the rider
   /// guessing how to find the sender.
   void _navigateToStop(Map<String, dynamic> s, String app) {
-    final lat = (s['lat'] as num?)?.toDouble();
-    final lng = (s['lng'] as num?)?.toDouble();
+    // Server ships pickup_lat/pickup_lng — the pin is authoritative. Fall back
+    // to the legacy lat/lng aliases, then to the typed address.
+    final lat = (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble();
+    final lng = (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble();
     if (lat != null && lng != null) {
       if (app == 'waze') {
         openInApp('https://waze.com/ul?ll=$lat,$lng&navigate=yes&follow_deep=1');
@@ -129,6 +131,26 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     } else {
       openInApp('https://maps.google.com/?q=${Uri.encodeComponent(query)}');
     }
+  }
+
+  Widget _navBtn(String label, String tooltip, Color bg, IconData icon, VoidCallback onTap) {
+    return Tooltip(
+      message: tooltip,
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          backgroundColor: bg,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          shape: const StadiumBorder(),
+          minimumSize: Size.zero,
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 15, color: Colors.white),
+          const SizedBox(width: 5),
+          Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11)),
+        ]),
+      ),
+    );
   }
 
   Future<void> _advanceStop(Map<String, dynamic> s) async {
@@ -568,18 +590,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       Text('Seller: ${s['seller']} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${s['status']}'.replaceAll('_', ' '),
                           style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                     ])),
-                    IconButton(
-                      tooltip: 'Navigate to pickup (Waze)',
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.navigation_rounded, color: AppColors.forest),
-                      onPressed: () => _navigateToStop(s, 'waze'),
-                    ),
-                    IconButton(
-                      tooltip: 'Open in Google Maps',
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.map_outlined, color: AppColors.forest),
-                      onPressed: () => _navigateToStop(s, 'gmaps'),
-                    ),
+                    _navBtn('Waze', 'Navigate to pickup (Waze)', const Color(0xFF00C1DE), Icons.navigation_rounded, () => _navigateToStop(s, 'waze')),
+                    _navBtn('Maps', 'Open in Google Maps', const Color(0xFF4285F4), Icons.place_rounded, () => _navigateToStop(s, 'gmaps')),
                     IconButton(
                       tooltip: 'Update stop',
                       visualDensity: VisualDensity.compact,

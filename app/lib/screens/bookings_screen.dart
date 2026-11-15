@@ -11,6 +11,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/analytics_service.dart';
@@ -284,10 +285,12 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         ),
         const SizedBox(height: 24),
         const SectionTitle('Journey'),
+        const SizedBox(height: 2),
+        const Text('Tap any step — see who updated it and when.', style: AppType.caption),
         const SizedBox(height: 8),
         Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(children: [
           for (var i = 0; i < booking.timeline.length; i++)
-            _TimelineRow(title: booking.timeline[i], complete: i <= booking.stage, current: i == booking.stage, last: i == booking.timeline.length - 1),
+            _TimelineRow(title: booking.timeline[i], complete: i <= booking.stage, current: i == booking.stage, last: i == booking.timeline.length - 1, onTap: () => _showMovementLog(context, booking)),
         ]))),
         const SizedBox(height: 24),
         const SectionTitle('Booking details'),
@@ -468,6 +471,90 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       );
 }
 
+Future<void> _showMovementLog(BuildContext context, Booking booking) async {
+  final ref = booking.serverRef?.isNotEmpty == true ? booking.serverRef! : booking.reference;
+  final data = await DropOffApi.jobEvidence(ref);
+  if (!context.mounted) return;
+  final timeline = (data?['timeline'] as List?)?.cast<Map<String, dynamic>>() ?? const <Map<String, dynamic>>[];
+  String labelFor(String status) => switch (status) {
+        'created' => 'Booking placed',
+        'rider_assigned' => 'Rider assigned',
+        'partner_confirmed' => 'Courier depot accepted the parcel',
+        'picked_up' => 'Parcel collected',
+        'at_depot' => 'At courier depot',
+        'departed' => 'Dispatched from depot',
+        'arrived' => 'Arrived at destination depot',
+        'delivered' => 'Delivered',
+        'ready_for_collection' => 'Ready for collection',
+        'deposit_paid' => 'Prepayment approved',
+        'counter_fare_paid' => 'Depot counter fare paid',
+        'refund_pending' => 'Refund pending',
+        'auto_canceled_no_show' => 'Auto-canceled — no-show',
+        'hold_expired' => 'Prepayment window expired',
+        'reprompt_paused' => 'Reminders paused by sender',
+        'reprompt_resumed' => 'Reminders resumed',
+        _ => status.replaceAll('_', ' '),
+      };
+  String humanAt(String raw) {
+    final parsed = DateTime.tryParse(raw.contains('T') ? raw : '${raw.replaceFirst(' ', 'T')}Z');
+    if (parsed == null) return raw;
+    return DateFormat('d MMM · HH:mm').format(parsed);
+  }
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+          child: ListView(shrinkWrap: true, children: [
+            const Row(children: [
+              Icon(Icons.swap_horiz_rounded, color: AppColors.forest),
+              SizedBox(width: 10),
+              Expanded(child: Text('How this parcel moved', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: -0.2))),
+            ]),
+            const SizedBox(height: 4),
+            const Text('Every update on this job — who recorded it and when.', style: AppType.body),
+            const SizedBox(height: 14),
+            if (timeline.isEmpty)
+              const Text('No updates yet — they appear here the moment the parcel moves.', style: AppType.body),
+            for (final e in timeline)
+              () {
+                final who = '${e['who'] ?? 'system'}';
+                final actor = '${e['actor'] ?? ''}';
+                final status = '${e['status'] ?? ''}';
+                final at = humanAt('${e['at'] ?? ''}');
+                final note = '${e['note'] ?? ''}'.trim();
+                final (icon, byline) = switch (who) {
+                  'rider' => (Icons.two_wheeler, 'Marked updated by rider${actor.isEmpty || actor == 'rider' ? '' : ' — $actor'}'),
+                  'partner' => (Icons.storefront_outlined, 'Marked updated by the courier depot'),
+                  _ => (Icons.bolt_outlined, 'Recorded automatically'),
+                };
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Icon(icon, size: 18, color: AppColors.forest),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(labelFor(status), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+                      Text('$byline · $at', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(note, style: const TextStyle(fontSize: 12, height: 1.4, color: AppColors.ink)),
+                      ],
+                    ])),
+                  ]),
+                );
+              }(),
+          ]),
+        ),
+      ),
+    ),
+  );
+}
+
 Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   final l10n = AppLocalizations.of(context);
   final ref = booking.serverRef ?? booking.reference;
@@ -578,21 +665,32 @@ class _TimelineRow extends StatelessWidget {
   final bool complete;
   final bool current;
   final bool last;
-  const _TimelineRow({required this.title, required this.complete, required this.current, required this.last});
+  final VoidCallback? onTap;
+  const _TimelineRow({required this.title, required this.complete, required this.current, required this.last, this.onTap});
 
   @override
-  Widget build(BuildContext context) => IntrinsicHeight(
-        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Column(children: [
-            Icon(complete ? Icons.check_circle : Icons.circle_outlined, size: 22, color: complete ? AppColors.forest : AppColors.line),
-            if (!last) Expanded(child: Container(width: 2, color: complete ? AppColors.forest : AppColors.line)),
+  Widget build(BuildContext context) => InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: IntrinsicHeight(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Column(children: [
+              Icon(complete ? Icons.check_circle : Icons.circle_outlined, size: 22, color: complete ? AppColors.forest : AppColors.line),
+              if (!last) Expanded(child: Container(width: 2, color: complete ? AppColors.forest : AppColors.line)),
+            ]),
+            const SizedBox(width: 13),
+            Expanded(child: Padding(
+              padding: EdgeInsets.only(bottom: last ? 2 : 24, top: 1),
+              child: Row(children: [
+                Expanded(child: Text(title, style: TextStyle(fontSize: 14, fontWeight: current ? FontWeight.w900 : FontWeight.w600, color: complete ? AppColors.ink : AppColors.muted))),
+                Opacity(
+                  opacity: onTap == null ? 0 : 0.5,
+                  child: const Icon(Icons.chevron_right, size: 18, color: AppColors.muted),
+                ),
+              ]),
+            )),
           ]),
-          const SizedBox(width: 13),
-          Expanded(child: Padding(
-            padding: EdgeInsets.only(bottom: last ? 2 : 24, top: 1),
-            child: Text(title, style: TextStyle(fontSize: 14, fontWeight: current ? FontWeight.w900 : FontWeight.w600, color: complete ? AppColors.ink : AppColors.muted)),
-          )),
-        ]),
+        ),
       );
 }
 
@@ -1095,11 +1193,11 @@ class _PrepayCardState extends State<_PrepayCard> {
     AppToast.show(context, outcome == 'success'
         ? 'Prepayment received — your rider is being dispatched.'
         : outcome == 'failed'
-            ? 'The momo prompt was rejected. Check your balance and tap Pay now again.'
+            ? 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.'
             : outcome.startsWith('error:')
                 ? (outcome.contains('already paid')
                     ? 'This delivery is already paid.'
-                    : 'Payment could not start (${outcome.substring(6)}) — check your connection and retry.')
+                    : 'Payment could not start (${outcome.substring(6)}) — verify your momo balance and connection, then retry.')
                 : 'Prompt sent — approve it on your phone to dispatch your rider.');
     unawaited(store.syncJobsFromServer());
   }
@@ -1169,8 +1267,8 @@ class _PrepayCardState extends State<_PrepayCard> {
           ]),
           const SizedBox(height: 4),
           Text(held
-                  ? 'The mobile-money prompt could not start, so no rider is assigned yet. Pay now to dispatch — the booking stays saved.'
-                  : 'Approve the momo prompt to dispatch your rider. Not received? Pay now resends it.',
+                  ? 'The mobile-money prompt could not start, so no rider is assigned yet. Verify your momo balance covers the DropOff leg, then tap Pay now to dispatch — the booking stays saved.'
+                  : 'Approve the momo prompt to dispatch your rider. Not received? Verify your momo balance — Pay now resends it.',
               style: AppType.caption),
           const SizedBox(height: 10),
           FilledButton.icon(
@@ -1221,7 +1319,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
       setState(() => _busy = false);
       AppToast.show(context, switch (res.error) {
         'counter_fare_already_paid' => 'This counter fare is already paid — the receipt is revealed in Bookings.',
-        _ => 'Payment could not start (${res.error ?? 'network'}) — check your connection and retry.',
+        _ => 'Payment could not start (${res.error ?? 'network'}) — verify your momo balance and connection, then retry.',
       });
       return;
     }
@@ -1236,7 +1334,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
     setState(() => _busy = false);
     AppToast.show(context, switch (status) {
       'success' => 'Counter fare paid — your depot receipt is revealed below.',
-      'failed' => 'The momo prompt was rejected. Check your balance and tap Pay now again.',
+      'failed' => 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.',
       _ => total != null
           ? 'Prompt sent for K${total.toStringAsFixed(2)} — approve it on your phone to reveal the receipt.'
           : 'Prompt sent — approve it on your phone to reveal the receipt.',

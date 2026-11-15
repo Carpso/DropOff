@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'l10n/app_localizations.dart';
+import 'ui/keys.dart';
 import 'data/catalog.dart' as cat;
 import 'screens/couriers_screen.dart';
 import 'screens/track_screen.dart';
@@ -201,6 +202,7 @@ class DropOffApp extends StatelessWidget {
           animation: store,
           builder: (context, _) => MaterialApp(
             navigatorKey: navigatorKey,
+            scaffoldMessengerKey: scaffoldMessengerKey,
             onGenerateTitle: (ctx) => AppLocalizations.of(ctx).appTitle,
             debugShowCheckedModeBanner: false,
             theme: buildAppTheme(),
