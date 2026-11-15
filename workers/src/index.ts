@@ -6092,17 +6092,34 @@ async function dispatchToNearestRider(
 
 async function nearestAvailableRider(env: Env, lat: number, lng: number): Promise<{ rider: any; km: number } | null> {
   const riders = await env.DB.prepare(
-    `SELECT id, phone, full_name, vehicle, last_lat, last_lng, status, active, capacity, current_load, photo_url
+    `SELECT id, phone, full_name, vehicle, last_lat, last_lng, last_seen_at, status, active, capacity, current_load, photo_url
        FROM riders WHERE active = 1 AND status IN ('available', 'on_route')
         AND verification_status = 'verified'`
   ).all<any>();
+  // Freshness tiers (owner directive: algorithm picks riders actually available
+  // NOW — never a rider coasting on a stale CBD default):
+  //   tier 0: pinged in <= 10 minutes — scored by true distance
+  //   tier 1: pinged in <= 60 minutes — +12-50 km penalty (stale-but-verified
+  //           riders still surface when nothing fresher exists)
+  //   tier 2: never pinged / null GPS — +40 km penalty (dispatchable last)
+  const nowMs = Date.now();
+  const freshnessPenalty = (seenAt: string | null): number => {
+    if (!seenAt) return 40;
+    const mins = (nowMs - Date.parse(String(seenAt).replace(' ', 'T') + 'Z')) / 60_000;
+    if (!Number.isFinite(mins)) return 40;
+    if (mins <= 10) return 0;
+    if (mins <= 60) return Math.min(50, 12 + ((mins - 10) / 50) * 38);
+    return 60;
+  };
   let best: { rider: any; km: number } | null = null;
+  let bestScore = Infinity;
   for (const r of (riders.results ?? [])) {
     const load = Number(r.current_load ?? 0), cap = Number(r.capacity ?? 8);
     if (load >= cap) continue;
+    const penalty = freshnessPenalty(r.last_seen_at);
     const km = haversine(lat, lng, Number(r.last_lat ?? -15.4255), Number(r.last_lng ?? 28.2805));
-    const score = km + load * 0.5; // prefer nearer, then emptier
-    if (!best || score < best.km + Number(best.rider.current_load ?? 0) * 0.5) best = { rider: r, km };
+    const score = km + penalty + load * 0.5; // near, then fresh, then emptier
+    if (!best || score < bestScore) { best = { rider: r, km }; bestScore = score; }
   }
   return best;
 }
@@ -7054,31 +7071,10 @@ app.post('/admin/riders', async (c) => {
   return c.json({ ok: true, id: rider?.id, vehicle_class: vc });
 });
 
-app.post('/admin/jobs/:ref/assign', async (c) => {
-  // Forced assignment is superadmin-only AND never on a payment-held job
-  // (owner directive: no dispatch on credit). The algorithm stays the
-  // default path; this escape hatch exists for ops recovery only.
-  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
-  const ref = c.req.param('ref');
-  const heldRow = await c.env.DB.prepare('SELECT id FROM jobs WHERE ref = ?1').bind(ref).first<any>();
-  if (heldRow && await jobPaymentHeld(c.env.DB, heldRow.id)) {
-    return c.json({ error: 'payment_required', hint: 'Prepayment pending — assignment unlocks once payment is approved.' }, 402);
-  }
-  const b: any = await c.req.json().catch(() => null);
-  const phone = normalizeZmPhone(b?.phone ?? '');
-  if (!phone) return c.json({ error: 'phone required' }, 400);
-  const rider = await c.env.DB.prepare('SELECT id, active, verification_status FROM riders WHERE phone = ?1').bind(phone).first<any>();
-  if (!rider || !rider.active) return c.json({ error: 'rider not found or inactive' }, 404);
-  if (rider.verification_status !== 'verified') return c.json({ error: 'rider_not_verified', detail: 'Verify this driver in the Rider verification queue first.' }, 409);
-  const job = await c.env.DB.prepare('SELECT id FROM jobs WHERE ref = ?1').bind(c.req.param('ref')).first<any>();
-  if (!job) return c.json({ error: 'job not found' }, 404);
-  await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE jobs SET rider_id = ?2 WHERE id = ?1').bind(job.id, rider.id),
-    c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rider_assigned', ?2)`)
-      .bind(job.id, `Rider ${phone} assigned`),
-  ]);
-  return c.json({ ok: true, rider_id: rider.id });
-});
+// Manual rider assignment and the whole override route were REMOVED (owner
+// directive 2026-11-15): every dispatch flows through nearestAvailableRider().
+// No human picks a rider — not even with the superadmin key. Ops recovery
+// calls dispatchToNearestRider, which is post-payment and algorithmic.
 
 // Promote an email account to a partner shop tied to a courier row.
 // Partner then signs in with that email and uses /partner/* or /partner/console.
