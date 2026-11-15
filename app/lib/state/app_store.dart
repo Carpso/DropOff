@@ -535,7 +535,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> unlink() async {
     await PushService.unregister();
-    DropOffApi.clearCaches();
+    DropOffApi.clearCaches(); // wipes persisted /me /subscriptions cache too
+    // Queued offline ratings belong to the signing-out account — discard them
+    // rather than let them flush into the next user's session.
+    unawaited(DropOffApi.clearRatingOutbox());
+    unawaited(AnalyticsService.instance.clearPendingForSignOut());
     final prev = _account;
     _token = null;
     _linkedPhone = null;
@@ -543,7 +547,7 @@ class AppStore extends ChangeNotifier {
     _photoUrl = null;
     _fullName = null;
     _superadmin = false;
-    // A different rider may link this phone next — do not leak this GPS.
+    // A different rider/seller links this phone next — do NOT leak GPS or language.
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_shareLocationKey, false);
     _shareLocationOn = false;
@@ -552,10 +556,29 @@ class AppStore extends ChangeNotifier {
     _outbox.clear();
     DropOffApi.token = null;
     await _secureStorage.delete(key: _secureTokenKey);
+    // Locale is an account preference, not a device one — wipe it so the next
+    // account never inherits the last user's language.
+    if (prev != 'anon') {
+      await prefs.remove(_scoped('locale'));
+    }
+    _localeCode = null;
+    // Biometric enrollment is tied to the account that turned it on — the next
+    // account must opt in explicitly, never inherit a pass.
+    _biometricEnabled = false;
+    await prefs.remove(_biometricKey);
+    // Remember-me opt-in is per-account — next sign-in must choose fresh.
+    await prefs.remove(_rememberKey);
     final preferences = await SharedPreferences.getInstance();
     if (prev != 'anon') {
-      for (final name in const ['bookings', 'riders', 'outbox', 'jwt', 'jwt_mirror', 'jwt_legacy_mirror', 'phone', 'email']) {
+      // Enumerate every scoped key we track...
+      for (final name in const ['bookings', 'riders', 'outbox', 'jwt', 'jwt_mirror', 'jwt_legacy_mirror', 'phone', 'email', 'locale']) {
         await preferences.remove(_scoped(name));
+      }
+      // ...then ALSO sweep any residue under the same account prefix — belt and
+      // braces so a future scoped key added elsewhere can never linger.
+      final prefix = '${_accountKey}_${prev}_';
+      for (final key in preferences.getKeys().where((k) => k.startsWith(prefix)).toList()) {
+        await preferences.remove(key);
       }
       await preferences.remove(_accountKey);
     }

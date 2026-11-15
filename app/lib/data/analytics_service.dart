@@ -100,6 +100,20 @@ class AnalyticsService {
     }
   }
 
+  /// Sign-out: drop everything buffered for the account that was active —
+  /// events flushed AFTER sign-out would otherwise attribute an earlier
+  /// user's activity to the next person who signs in on this device.
+  Future<void> clearPendingForSignOut() async {
+    _pending.clear();
+    _viewedScreens.clear();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_outboxKey);
+    } catch (_) {
+      /* best-effort */
+    }
+  }
+
   /// Push all pending events to the server. Safe to call repeatedly; in-flight
   /// flushes are deduplicated. Best-effort: failures leave events in the
   /// outbox for the next attempt.

@@ -595,6 +595,18 @@ class DropOffApi {
   static const _ratingOutboxKey = 'dropoff_rating_outbox_v1';
   static bool _flushingRatings = false;
 
+  /// Sign-out: discard any queued offline ratings. They were queued by the
+  /// previous account; the next signed-in user must not inherit them (they
+  /// would flush under a DIFFERENT session for a job they may not own).
+  static Future<void> clearRatingOutbox() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_ratingOutboxKey);
+    } catch (_) {
+      /* best-effort */
+    }
+  }
+
   static Future<void> _queueRating(Map<String, dynamic> item) async {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getString(_ratingOutboxKey) == null
