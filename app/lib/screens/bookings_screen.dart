@@ -321,6 +321,11 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                 booking.lastEvent == 'prepayment_pending' ||
                 booking.lastEvent == 'advance_pending'))
           _PrepayCard(booking: booking),
+        // SERVER-SIDE CANCELLATION (hold expired / no-show): the server died
+        // this booking on its own — say so instead of a silent stage-0 ghost.
+        if (booking.dispatched && !complete &&
+            (booking.lastEvent == 'hold_expired' || booking.lastEvent == 'auto_canceled_no_show'))
+          _ExpiredCard(booking: booking),
         // DEPOT COUNTER FLOW (owner directive 2026-11-12): the rider fronted
         // the depot's counter fare — the sender repays the exact receipt
         // amount + processing; the receipt photo unlocks after payment.
@@ -1037,6 +1042,35 @@ class _ParcelsForYou extends StatelessWidget {
 /// at booking time); 'advance_pending' = a prompt is live on the sender's
 /// phone. Pay now reuses the live prompt or issues a fresh one; approval
 /// settles the payment server-side and dispatches the rider.
+/// The server canceled this booking on its own (prepayment never approved, or
+/// the parcel never moved) — surfaced so the sender is not left staring at a
+/// silent stage-0 booking. Nothing was charged; they can rebook freely.
+class _ExpiredCard extends StatelessWidget {
+  final Booking booking;
+  const _ExpiredCard({required this.booking});
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Row(children: [
+              Icon(Icons.event_busy, color: AppColors.muted),
+              SizedBox(width: 10),
+              Expanded(child: Text('Booking canceled', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            ]),
+            const SizedBox(height: 6),
+            Text(
+              booking.lastEvent == 'hold_expired'
+                  ? 'The prepayment was never approved within 24 hours, so this booking was canceled. No money was taken. Book again in the app when you are ready.'
+                  : 'This booking was canceled by the system (the parcel never moved). Any unspent prepayment is returned to your momo automatically.',
+              style: const TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4),
+            ),
+          ]),
+        ),
+      );
+}
+
 class _PrepayCard extends StatefulWidget {
   final Booking booking;
   const _PrepayCard({required this.booking});

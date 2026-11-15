@@ -1812,8 +1812,12 @@ app.post('/jobs', async (c) => {
       const plan = packs[activeSub.tier as PlanTier];
       if (plan && activeSub.period_start && activeSub.period_end) {
         const used = await c.env.DB.prepare(
-          `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs WHERE sender_phone = ?1
-            AND created_at >= ?2 AND created_at < ?3`,
+          `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
+            WHERE sender_phone = ?1
+            AND created_at >= ?2 AND created_at < ?3
+            AND status NOT IN ('cancelled', 'canceled')
+            AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
+            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
         ).bind(senderPhone, activeSub.period_start, activeSub.period_end).first<any>();
         planUsed = used?.n ?? 0;
         // No rollover: unused parcels expire with the cycle.
@@ -2020,34 +2024,9 @@ app.post('/jobs', async (c) => {
       ).bind(ref, senderPhone, recipientPhone, pickupAt).run();
     }
 
-    // referral reward: the REFERRED party just booked — create the referrer's
-    // single-use promo. Claim is a guarded UPDATE so two concurrent bookings
-    // can never mint two rewards (second UPDATE matches 0 rows → bail).
-    try {
-      const payoutRefId = meta.last_row_id;
-      const claimed = await c.env.DB.prepare(
-        `UPDATE referrals SET status='rewarded', referred_job_id = ?2, rewarded_at = datetime('now')
-          WHERE referred_phone = ?1 AND status = 'pending'`,
-      ).bind(senderPhone, payoutRefId).run();
-      if (claimed.meta.changes > 0) {
-        const refRow = await c.env.DB.prepare(
-          'SELECT id, referrer_phone FROM referrals WHERE referred_phone = ?1',
-        ).bind(senderPhone).first() as any;
-        const rewardCode = `FRIEND${randomCode(5)}`;
-        const pct = REF_REWARD_PCT;
-        await c.env.DB.batch([
-          c.env.DB.prepare(
-            `INSERT INTO promo_codes (code, discount_pct, note, uses_left, active)
-             VALUES (?1, ?2, ?3, 1, 1)`,
-          ).bind(rewardCode, pct, `Referral reward — ${senderPhone} joined via your code`),
-          c.env.DB.prepare(
-            `UPDATE referrals SET reward_code = ?2 WHERE id = ?1`,
-          ).bind(refRow.id, rewardCode),
-          c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'referral_rewarded', ?2)`)
-            .bind(payoutRefId, `Referrer ${refRow.referrer_phone} gets ${rewardCode} (${pct}% off, single-use)`),
-        ]);
-      }
-    } catch { /* referral logging must never block a booking */ }
+    // Referral reward: deferred to rewardReferralOnBooking below / at
+    // settlement (owner directive 2026-11-15) — a payment-held booking that
+    // never pays must never mint the referrer's promo.
 
     // Fees ride on the payer leg only: pack parcels carry no per-parcel fees
     // (the pack renewal prompt charges the processing fee on the pack price),
@@ -2111,6 +2090,13 @@ app.post('/jobs', async (c) => {
         sendSms(c.env, senderPhone,
         `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`).catch(() => {}),
       );
+    }
+
+    // Referral reward only for bookings that are actually going live — held
+    // bookings earn theirs at settlement (settlePaymentSuccess calls the same
+    // helper). At most one reward per referred booking, guarded atomically.
+    if (!depositRequired && !depositInitFailed) {
+      try { await rewardReferralOnBooking(c.env, meta.last_row_id, senderPhone); } catch { /* referral logging must never block a booking */ }
     }
 
     // Recipient tracking link (no account): minted ONLY when the parcel is
@@ -2261,8 +2247,12 @@ app.post('/collections', async (c) => {
     const plan = planCatalogue[activeSub.tier as PlanTier];
     if (plan && activeSub.period_start && activeSub.period_end) {
       const used = await c.env.DB.prepare(
-        `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs WHERE sender_phone = ?1
-           AND created_at >= ?2 AND created_at < ?3`,
+        `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
+            WHERE sender_phone = ?1
+            AND created_at >= ?2 AND created_at < ?3
+            AND status NOT IN ('cancelled', 'canceled')
+            AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
+            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
       ).bind(phone, activeSub.period_start, activeSub.period_end).first<any>();
       planUsed = used?.n ?? 0;
       // CAP SEMANTICS (fix 2026-11-15): day-cycles cap per day, multi-day
@@ -2426,12 +2416,15 @@ app.get('/promo/check', async (c) => {
 app.get('/jobs', async (c) => {
   const role = c.get('role');
   let phone: string | null = null;
-  if (role === 'customer' || role === 'partner') {
-    // Partners list only their own jobs — never another seller's.
+  if (role === 'customer' || role === 'partner' || role === 'rider') {
+    // Partners list only their own jobs; riders have no reason to browse the
+    // whole book — everyone non-staff is pinned to their OWN phone.
     phone = c.get('phone') ?? '';
-  } else {
-    // ops/admin: must specify whose jobs
+  } else if (role === 'ops' || role === 'admin' || role === 'cfo' || isAdmin(c)) {
+    // ops/admin/cfo: must specify whose jobs
     try { phone = normalizeZmPhone(c.req.query('phone') ?? ''); } catch { phone = ''; }
+  } else {
+    phone = ''; // everyone else: no listing at all
   }
   if (!phone) return c.json({ error: 'missing phone' }, 400);
   const limit = pageLimit(c.req.query('limit'));
@@ -3506,7 +3499,7 @@ app.get('/predict/seller', async (c) => {
     `SELECT strftime('%Y-%m', datetime(created_at, '+2 hours')) AS ym,
             COALESCE(SUM(parcels), COUNT(*)) AS n
        FROM jobs
-      WHERE sender_phone = ?1 AND created_at >= datetime('now', '-183 days') AND status != 'cancelled'
+      WHERE sender_phone = ?1 AND created_at >= datetime('now', '-183 days') AND status NOT IN ('cancelled', 'canceled')
       GROUP BY ym`,
   ).bind(phone).all<any>();
   const byMonth = new Map<string, number>();
@@ -3535,7 +3528,7 @@ app.get('/predict/seller', async (c) => {
 
   const active = await db.prepare(
     `SELECT COUNT(*) AS k, AVG(rider_fee_zmw) AS avg_fee
-       FROM jobs WHERE sender_phone = ?1 AND created_at >= datetime('now', '-90 days') AND status != 'cancelled'`,
+       FROM jobs WHERE sender_phone = ?1 AND created_at >= datetime('now', '-90 days') AND status NOT IN ('cancelled', 'canceled')`,
   ).bind(phone).first<any>();
   const sample = Number(active?.k ?? 0);
   const avgFee = Number(active?.avg_fee ?? 45) || 45;
@@ -3632,7 +3625,7 @@ app.get('/admin/demand-forecast', async (c) => {
             COUNT(*) AS trips,
             COALESCE(SUM(parcels), COUNT(*)) AS parcels
        FROM jobs
-      WHERE created_at >= datetime('now', '-56 days') AND status != 'cancelled'
+      WHERE created_at >= datetime('now', '-56 days') AND status NOT IN ('cancelled', 'canceled')
       GROUP BY 1, 2, 3`,
   ).all<any>();
   // Trailing 56 days = exactly 8 occurrences of each weekday -> divide by 8.
@@ -4703,6 +4696,27 @@ app.post('/payments', async (c) => {
       await saveIdempotent(c.env, idemKey, 'payment', phone, 200, reused);
       return c.json(reused);
     }
+    // SAME GUARD for the Pay-now path (owner directive 2026-11-15): a rapid
+    // double-tap can only ever leave ONE kind='job' prompt live — the second
+    // tap reuses it instead of collecting the sender twice.
+    const pendingJobPay = await c.env.DB.prepare(
+      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status FROM payments
+        WHERE job_id = ?1 AND kind = 'job' AND status = 'pending'
+        ORDER BY id DESC LIMIT 1`,
+    ).bind(job.id).first<any>();
+    if (pendingJobPay) {
+      const reused = {
+        ok: true,
+        payment_id: pendingJobPay.id,
+        lipila_reference: pendingJobPay.lipila_reference ?? null,
+        amount_zmw: pendingJobPay.amount_zmw,
+        platform_fee_zmw: pendingJobPay.platform_fee_zmw ?? 0,
+        lipila_fee_zmw: pendingJobPay.lipila_fee_zmw ?? 0,
+        reused_job_prompt: true,
+      };
+      await saveIdempotent(c.env, idemKey, 'payment', phone, 200, reused);
+      return c.json(reused);
+    }
     // DropOff NEVER holds partner money: charge ONLY the DropOff leg
     // (rider fee + door leg + its processing) and platform processing fees.
     // The courier counter fare is paid directly at the depot. Counter fare is
@@ -4892,6 +4906,74 @@ async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> 
 
 // Idempotent settlement: the `settled` flag is flipped in the same batch as the
 // ledger rows; webhook + status-poll can race safely. Subscription rows renew.
+// Give the money back — NEVER keep a payment the sender should not have made
+// (owner directive 2026-11-15, same class as cancel-before-pickup refunds):
+// the parcel was already canceled, or a second prompt for the same parcel
+// was approved after another payment already paid it. Auto-refunds to the
+// sender's momo; on provider failure it leaves a loud job event for manual
+// /admin/payments/:id/refund.
+async function refundSettledPayment(
+  env: Env,
+  pay: { id: number; phone: string; amount_zmw: number; job_id: number | null; kind: string },
+  jobRef: string | null,
+  reason: string,
+): Promise<void> {
+  const jobId = pay.job_id;
+  const refundRef = `refund-${pay.id}-${Date.now().toString(36)}`;
+  const disb = await lipilaDisburse(env, pay.phone, pay.amount_zmw, refundRef,
+    `DropOff ${reason} ${jobRef ?? ''}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+  if (disb.ok) {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
+           lipila_fee_zmw, lipila_reference, status, channel, kind, refund_of_payment_id, refunded_at)
+         VALUES (?1,?2,?3,?4,0,0,0,?5,'pending','merchant','refund',?6,datetime('now'))`,
+      ).bind(jobId, pay.phone, 'lipila', pay.amount_zmw, refundRef, pay.id),
+      ...(jobId ? [env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'payment_refunded', ?2)`,
+      ).bind(jobId, `${reason} — K${pay.amount_zmw.toFixed(2)} returned to the sender's momo automatically.`)] : []),
+    ]);
+    await sendSms(env, pay.phone,
+      `DropOff: K${pay.amount_zmw.toFixed(2)} was returned to your momo — ${reason}. ${jobRef ? `${jobRef} will not be dispatched.` : ''}`).catch(() => {});
+    return;
+  }
+  if (jobId) {
+    await env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'refund_failed', ?2)`,
+    ).bind(jobId, `${reason} — auto-refund of K${pay.amount_zmw.toFixed(2)} FAILED (provider unreachable / insufficient float). Refund manually via /admin/payments/:id/refund.`).run().catch(() => {});
+  }
+}
+
+// Referral reward (owner directive 2026-11-15): the referrer's single-use
+// promo is minted — idempotently, off the same guarded UPDATE — only when the
+// booking is real. Held bookings earn theirs at settlement (this helper is
+// also called from settlePaymentSuccess); a booking that never pays earns
+// nothing.
+async function rewardReferralOnBooking(env: Env, jobId: number, senderPhone: string): Promise<void> {
+  const claimed = await env.DB.prepare(
+    `UPDATE referrals SET status='rewarded', referred_job_id = ?2, rewarded_at = datetime('now')
+      WHERE referred_phone = ?1 AND status = 'pending'`,
+  ).bind(senderPhone, jobId).run();
+  if (claimed.meta.changes === 0) return;
+  const refRow = await env.DB.prepare(
+    'SELECT id, referrer_phone FROM referrals WHERE referred_phone = ?1',
+  ).bind(senderPhone).first<any>();
+  if (!refRow) return;
+  const rewardCode = `FRIEND${randomCode(5)}`;
+  const pct = REF_REWARD_PCT;
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO promo_codes (code, discount_pct, note, uses_left, active)
+       VALUES (?1, ?2, ?3, 1, 1)`,
+    ).bind(rewardCode, pct, `Referral reward — ${senderPhone} joined via your code`),
+    env.DB.prepare(
+      `UPDATE referrals SET reward_code = ?2 WHERE id = ?1`,
+    ).bind(refRow.id, rewardCode),
+    env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'referral_rewarded', ?2)`)
+      .bind(jobId, `Referrer ${refRow.referrer_phone} gets ${rewardCode} (${pct}% off, single-use)`),
+  ]);
+}
+
 async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: string): Promise<void> {  if (finalStatus !== 'success') return;
   const claim = await env.DB.prepare(
     `UPDATE payments SET status = 'success', settled = 1, paid_at = datetime('now')
@@ -4957,20 +5039,38 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     });
   } else if (pay.kind === 'job' && pay.job_id) {
     // direct mobile-money job payment: mark paid (no wallet rows — customers have no wallet)
-    await env.DB.batch([
-      env.DB.prepare(`UPDATE jobs SET paid = 1 WHERE id = ?1 AND paid = 0`).bind(pay.job_id),
-    ]);
-    const job = await env.DB.prepare('SELECT ref FROM jobs WHERE id = ?1').bind(pay.job_id).first<{ ref: string }>();
+    const jobRow = await env.DB.prepare('SELECT id, ref, status, promo_code FROM jobs WHERE id = ?1').bind(pay.job_id).first<any>();
+    const jobRef = jobRow?.ref ?? null;
+    if (jobRow && (jobRow.status === 'canceled' || jobRow.status === 'cancelled')) {
+      // The parcel died before the money landed (hold expired / canceled) —
+      // never keep the payment: it goes straight back to the sender's momo,
+      // and the single-use promo the booking burned is restored.
+      await refundSettledPayment(env, pay, jobRef, 'Parcel canceled before payment landed — refund');
+      if (jobRow.promo_code) {
+        await env.DB.prepare(
+          `UPDATE promo_codes SET uses_left = COALESCE(uses_left, 0) + 1 WHERE code = ?1 AND uses_left IS NOT NULL`,
+        ).bind(jobRow.promo_code).run().catch(() => {});
+      }
+      return;
+    }
+    const paidClaim = await env.DB.prepare(`UPDATE jobs SET paid = 1 WHERE id = ?1 AND paid = 0`).bind(pay.job_id).run();
+    if (!paidClaim.meta.changes) {
+      // Two live prompts for one parcel (rapid double-tap Pay now): the
+      // second approval is a DUPLICATE charge — give the money straight back.
+      await refundSettledPayment(env, pay, jobRef, 'Duplicate payment for the same parcel — refund');
+      return;
+    }
     // The sender retried a HELD booking (Lipila down at booking time, then
     // came back) — dispatch now, on THIS approval. dispatchToNearestRider is
     // idempotent (skips already-assigned jobs), so a duplicate webhook is safe.
-    if (job) await dispatchToNearestRider(env, job.ref);
+    if (jobRow) await dispatchToNearestRider(env, jobRow.ref);
     // Payment-held bookings only NOW earn their tracking link + handover code.
     await sendRecipientTrackingSms(env, pay.job_id);
+    if (jobRef) await rewardReferralOnBooking(env, pay.job_id, pay.phone).catch(() => {});
     await sendToPhone(env, pay.phone, {
       title: 'Payment received',
       body: 'Confirmed! Your parcel is booked — follow every step in Bookings.',
-      data: { job_ref: job?.ref ?? '', kind: 'payment' },
+      data: { job_ref: jobRef ?? '', kind: 'payment' },
     });
   } else if (pay.kind === 'topup') {
     // Rider/ops COD float only — customers never hold stored value.
@@ -4987,12 +5087,30 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     // back to the sender's momo on cancel-before-pickup. Coords are optional;
     // jobs from typed addresses fall back to the city anchor.
     const job = await env.DB.prepare(
-      'SELECT id, ref, sender_phone FROM jobs WHERE id = ?1',
+      'SELECT id, ref, sender_phone, status, promo_code FROM jobs WHERE id = ?1',
     ).bind(pay.job_id).first<any>();
+    if (job && (job.status === 'canceled' || job.status === 'cancelled')) {
+      // Prepayment landed after the parcel was canceled — never keep it:
+      // straight back to the sender's momo, promo use restored.
+      await refundSettledPayment(env, pay, job.ref ?? null, 'Parcel canceled before prepayment landed — refund');
+      if (job.promo_code) {
+        await env.DB.prepare(
+          `UPDATE promo_codes SET uses_left = COALESCE(uses_left, 0) + 1 WHERE code = ?1 AND uses_left IS NOT NULL`,
+        ).bind(job.promo_code).run().catch(() => {});
+      }
+      return;
+    }
+    // Duplicate guard: the sender may have already paid via the Pay-now
+    // retry (kind='job') while this original at-booking prompt was pending —
+    // this approval is then a DUPLICATE, and the money goes straight back.
+    const paidClaim = await env.DB.prepare(`UPDATE jobs SET paid = 1 WHERE id = ?1 AND paid = 0`).bind(pay.job_id).run();
+    if (!paidClaim.meta.changes) {
+      await refundSettledPayment(env, pay, job?.ref ?? null, 'Duplicate prepayment for the same parcel — refund');
+      return;
+    }
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'deposit', ?3)`)
         .bind(pay.phone, pay.amount_zmw, pay.job_id),
-      env.DB.prepare(`UPDATE jobs SET paid = 1 WHERE id = ?1 AND paid = 0`).bind(pay.job_id),
       env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'deposit_paid', ?2)`)
         .bind(pay.job_id, 'Prepayment approved — rider dispatch in flight.'),
     ]);
@@ -5001,6 +5119,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     }
     // Payment-held bookings only NOW earn their tracking link + handover code.
     await sendRecipientTrackingSms(env, pay.job_id);
+    if (job?.ref) await rewardReferralOnBooking(env, pay.job_id, pay.phone).catch(() => {});
   } else if (pay.kind === 'counter_fare' && pay.job_id) {
     // Sender paid the depot counter fare (+ processing) through DropOff.
     // Unlock the receipt photo for them, then reimburse the rider the EXACT
@@ -5249,8 +5368,14 @@ app.post('/webhooks/lipila', async (c) => {
   if (!pay) return c.json({ ok: true });
 
   if (pay.kind === 'cod_remit' || pay.kind === 'rider_reimbursement') {
-    // our own disbursements — only mark the audit event, settle flag not needed
-    if (pay.status !== 'success') await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, 'success').run();
+    // Our own disbursements: the body is UNVERIFIED. Without the shared
+    // secret we never flip a payout to success from a bare POST — the
+    // disbursement caller already records the final status from Lipila's
+    // own response. With the secret configured, the origin check at the
+    // top of this handler has passed, so upgrading to success is sound.
+    if (c.env.LIPILA_WEBHOOK_SECRET && pay.status !== 'success') {
+      await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, 'success').run();
+    }
     return c.json({ ok: true });
   }
 
@@ -5411,9 +5536,15 @@ app.post('/webhooks/partner-status', async (c) => {
   const ref = String(b.ref ?? '').trim();
   if (!waybill && !ref) return c.json({ error: 'waybill or ref required' }, 400);
   let job: any = null;
-  if (waybill) job = await c.env.DB.prepare('SELECT id, ref FROM jobs WHERE courier_waybill = ?1 LIMIT 1').bind(waybill).first();
-  if (!job && ref) job = await c.env.DB.prepare('SELECT id, ref FROM jobs WHERE ref = ?1 LIMIT 1').bind(ref).first();
+  // A partner key is scoped to ITS depot only — a key for courier A says
+  // nothing about courier B's parcels, however they were addressed.
+  if (waybill) job = await c.env.DB.prepare('SELECT id, ref FROM jobs WHERE courier_waybill = ?1 AND courier_id = ?2 LIMIT 1').bind(waybill, pk.courier_id).first();
+  if (!job && ref) job = await c.env.DB.prepare('SELECT id, ref FROM jobs WHERE ref = ?1 AND courier_id = ?2 LIMIT 1').bind(ref, pk.courier_id).first();
   if (!job) return c.json({ error: 'unknown_waybill' }, 404);
+  // Held (unpaid) parcels never arrive at a depot — refuse confirmations.
+  if (await jobPaymentHeld(c.env.DB, job.id)) {
+    return c.json({ error: 'payment_pending', detail: 'Parcel is held until its prepayment is approved.' }, 409);
+  }
   const since = new Date(Date.now() - 5 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
   const dup = await c.env.DB.prepare(
     'SELECT id FROM job_events WHERE job_id = ?1 AND status = ?2 AND created_at > ?3 LIMIT 1',
@@ -5907,6 +6038,10 @@ app.post('/jobs/:ref/auto-assign', async (c) => {
   ).bind(ref).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
   if (job.rider_id) return c.json({ error: 'already assigned', rider_id: job.rider_id }, 409);
+  // Payment-held parcels never get a rider — not even via ops (owner directive).
+  if (await jobPaymentHeld(c.env.DB, job.id)) {
+    return c.json({ error: 'payment_required', hint: 'Prepayment pending — assignment unlocks once payment is approved.' }, 402);
+  }
   const result = await dispatchToNearestRider(c.env, ref);
   if (!result) return c.json({ error: 'no verified rider available right now' }, 404);
   const pick = result.rider;
@@ -6539,8 +6674,12 @@ app.get('/subscriptions/:phone?', async (c) => {
   if (sub.period_start && sub.period_end) {
     // Every parcel counts: usage is the sum of parcels across the cycle's trips.
     usedThisPeriod = (await c.env.DB.prepare(
-      `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs WHERE sender_phone = ?1
-        AND created_at >= ?2 AND created_at < ?3`,
+      `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
+            WHERE sender_phone = ?1
+            AND created_at >= ?2 AND created_at < ?3
+            AND status NOT IN ('cancelled', 'canceled')
+            AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
+            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
     ).bind(phone, sub.period_start, sub.period_end).first<any>())?.n ?? 0;
     rollover = 0; // no rollover — unused parcels expire with the cycle
     effectiveCap = (plan?.parcels_per_month ?? 0);
@@ -6729,6 +6868,7 @@ app.use('/admin/*', async (c, next) => {
 // A bare {id, active} pair is the on/off TOGGLE — it flips availability
 // without touching the profile. Full bodies edit the profile too.
 app.get('/admin/couriers', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const { results } = await c.env.DB.prepare(
     `SELECT id, name, city, depot_name, lat, lng, website, price_status, note, active
        FROM couriers ORDER BY active DESC, name`,
@@ -6736,6 +6876,7 @@ app.get('/admin/couriers', async (c) => {
   return c.json({ couriers: results });
 });
 app.post('/admin/couriers', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const b: any = await c.req.json().catch(() => null);
   // Toggle-only request: { id, active } — bare toggle, no full profile needed.
   if (b?.id && b.name == null && b.active !== undefined) {
@@ -6766,6 +6907,7 @@ app.post('/admin/couriers', async (c) => {
 // `source` is provenance only: 'ops' (keyed in by staff) or 'recorded'
 // (learned automatically from the rider's depot-counter reading).
 app.post('/admin/quotes', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const b: any = await c.req.json().catch(() => null);
   const required = ['courier_id', 'from_city', 'to_city', 'weight_class', 'service', 'counter_price_zmw'];
   for (const k of required) if (b?.[k] === undefined) return c.json({ error: `${k} required` }, 400);
@@ -6790,6 +6932,7 @@ app.post('/admin/quotes', async (c) => {
 
 // Chargebook listing for the ops console (coverage + freshness at a glance).
 app.get('/admin/quotes', async (c) => {
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   const courierId = Number(c.req.query('courier_id') ?? '0');
   const { results } = await c.env.DB.prepare(
     `SELECT q.id, q.courier_id, co.name AS courier_name, q.from_city, q.to_city,
@@ -6822,6 +6965,15 @@ app.post('/admin/riders', async (c) => {
 });
 
 app.post('/admin/jobs/:ref/assign', async (c) => {
+  // Forced assignment is superadmin-only AND never on a payment-held job
+  // (owner directive: no dispatch on credit). The algorithm stays the
+  // default path; this escape hatch exists for ops recovery only.
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const ref = c.req.param('ref');
+  const heldRow = await c.env.DB.prepare('SELECT id FROM jobs WHERE ref = ?1').bind(ref).first<any>();
+  if (heldRow && await jobPaymentHeld(c.env.DB, heldRow.id)) {
+    return c.json({ error: 'payment_required', hint: 'Prepayment pending — assignment unlocks once payment is approved.' }, 402);
+  }
   const b: any = await c.req.json().catch(() => null);
   const phone = normalizeZmPhone(b?.phone ?? '');
   if (!phone) return c.json({ error: 'phone required' }, 400);
@@ -7073,6 +7225,9 @@ export async function updateTaxPeriod(env: Env, ym: string): Promise<void> {
 /* ------------------------ payroll + tax endpoints ------------------------- */
 
 app.post('/admin/payouts', async (c) => {
+  // Money path: superadmin only (owner/admin key). A leaked ledger write
+  // here is how fake ride-float balances are born.
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
   const b: any = await c.req.json().catch(() => null);
   const kind: string = ['rider_earning', 'rider_payout'].includes(b?.kind) ? b.kind : 'rider_earning';
   const phone = normalizeZmPhone(b?.phone ?? '');
@@ -9084,6 +9239,7 @@ app.post('/admin/payments/:id/refund', async (c) => {
 
 // Growth dashboard: tiers, paygo regulars (target: 100 paying sellers/mo)
 app.get('/admin/stats', async (c) => {
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   const db = c.env.DB;
   const one = async (sql: string, ...bind: unknown[]) => (await db.prepare(sql).bind(...bind).first<any>())?.n ?? 0;
   const tiers = await db.prepare(
@@ -9501,6 +9657,46 @@ async function addStrike(env: Env, phone: string, jobId: number, reason: string)
   } catch { /* strike bookkeeping must never break a cron */ }
 }
 
+// ------------------- cron: expire abandoned payment holds -------------------
+// A HELD booking the sender never paid (prompt ignored, provider down, left
+// the app) used to sit 'created' forever: it counted toward plan capacity,
+// kept its single-use promo burned, and stayed on the books as a ghost. After
+// 24 hours the hold expires — the booking dies, the promo use comes back, and
+// the sender gets one clear SMS. NO strike: a failed prepayment is not a
+// no-show. If the momo prompt is approved AFTER expiry, settlePaymentSuccess
+// sees the canceled status and refunds it automatically.
+async function cancelExpiredHolds(env: Env): Promise<number> {
+  const { results } = await env.DB.prepare(
+    `SELECT j.id, j.ref, j.sender_phone, j.promo_code
+       FROM jobs j
+      WHERE j.status = 'created' AND j.paid = 0
+        AND j.created_at < datetime('now', '-24 hours')
+        AND EXISTS (SELECT 1 FROM job_events e
+                     WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
+      LIMIT 20`,
+  ).all<any>();
+  for (const job of (results ?? []) as any[]) {
+    try {
+      const refundPromo = job.promo_code
+        ? [env.DB.prepare(
+            `UPDATE promo_codes SET uses_left = COALESCE(uses_left, 0) + 1 WHERE code = ?1 AND uses_left IS NOT NULL`,
+          ).bind(job.promo_code)]
+        : [];
+      await env.DB.batch([
+        env.DB.prepare(
+          `UPDATE jobs SET status = 'canceled' WHERE id = ?1 AND status = 'created' AND paid = 0`,
+        ).bind(job.id),
+        env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'hold_expired', ?2)`)
+          .bind(job.id, 'Prepayment was never approved within 24 hours — booking canceled. No money was taken; book again anytime.'),
+        ...refundPromo,
+      ]);
+      await sendSms(env, job.sender_phone,
+        `DropOff: booking ${job.ref} was canceled — the prepayment was never approved within 24 hours. No rider was sent and no money was taken. Book again in the app when ready.`).catch(() => {});
+    } catch { /* never break the minute cron */ }
+  }
+  return (results ?? []).length;
+}
+
 async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
   let canceled = 0;
   // A) assigned rides that never entered 'picked_up' within 3 hours
@@ -9628,7 +9824,8 @@ async function checkTimedPickups(env: Env): Promise<void> {
         WHERE sp.status = 'pending'
           AND sp.pickup_at <= datetime('now', '+30 minutes')
           AND sp.pickup_at > datetime('now', '-10 minutes')
-          AND (j.status IS NULL OR j.status NOT IN ('delivered','ready_for_collection'))`,
+           AND (j.status IS NULL OR j.status NOT IN ('delivered','ready_for_collection','canceled','cancelled'))
+           AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))`,
     ).all<{ job_ref: string; phone: string; rider_phone: string | null; pickup_at: string; pickup_address: string | null; dest_city: string | null; ref: string }>();
     const rows = (due.results ?? []) as any[];
     for (const r of rows) {
@@ -9699,13 +9896,43 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
             AND updated_at >= datetime('now', '-90 days')`,
       ).bind(plan.courier_id, fromCity, plan.dest_city, plan.weight_class ?? '0-5kg').first<any>();
       if (!quote) { skipped++; continue; }
+      // STANDING-ORDER PARITY (owner directive 2026-11-15): a standing order
+      // is a real parcel — it rides the sender's plan when there is capacity,
+      // otherwise the DropOff leg is PREPAID BEFORE any rider is dispatched.
+      // No plan → no prompt sent → never dispatched on credit.
+      const base = baseRiderFee(fromCity, 0, 0, 'motorcycle');
+      let riderFee = base;
+      let planCovered = false;
+      const sub = await env.DB.prepare(
+        `SELECT tier, period_start, period_end FROM subscriptions WHERE phone = ?1 AND status = 'active'
+           AND period_end IS NOT NULL AND period_end > datetime('now')`,
+      ).bind(plan.phone).first<any>();
+      if (sub?.period_start && sub?.period_end) {
+        const packs = await plans(env.DB, { forExistingSubscribers: true });
+        const planInfo = packs[sub.tier as PlanTier];
+        if (planInfo) {
+          const used = await env.DB.prepare(
+            `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
+              WHERE sender_phone = ?1
+                AND created_at >= ?2 AND created_at < ?3
+                AND status NOT IN ('cancelled', 'canceled')
+                AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
+                AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
+          ).bind(plan.phone, sub.period_start, sub.period_end).first<any>();
+          const cycleDays = Number(planInfo.cycle_days ?? 30) || 30;
+          const cap = cycleDays <= 1
+            ? (planInfo.parcels_per_day || planInfo.parcels_per_month)
+            : (planInfo.parcels_per_month || planInfo.parcels_per_day);
+          if (((used?.n ?? 0) + 1) <= cap) { riderFee = planInfo.rider_fee_zmw; planCovered = true; }
+        }
+      }
       const totals = computeJobTotals({
         counterPriceZmw: Number(quote.counter_price_zmw),
-        riderFeeZmw: baseRiderFee(fromCity, 0, 0, 'motorcycle'),
+        riderFeeZmw: riderFee,
       });
       const ref = `DRO-${todayIso.replace(/-/g, '')}-${randomCode(5)}`;
       try {
-        await env.DB.prepare(
+        const { meta } = await env.DB.prepare(
           `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
              recipient_name, recipient_phone, dest_city, description, weight_class,
              counter_price_zmw, rider_fee_zmw, total_zmw, pay_method)
@@ -9715,8 +9942,40 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
           plan.recipient_name ?? null, plan.recipient_phone ?? null, plan.dest_city,
           plan.description ?? (freqLabel(plan.frequency) + ' standing order'),
           plan.weight_class ?? '0-5kg',
-          Number(quote.counter_price_zmw), baseRiderFee(fromCity, 0, 0, 'motorcycle'), totals.total_zmw,
+          Number(quote.counter_price_zmw), riderFee, totals.total_zmw,
         ).run();
+        if (planCovered) {
+          await env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
+            .bind(meta.last_row_id, 'created', 'Standing order created — covered by plan, no prepayment required.').run();
+          const pick = await dispatchToNearestRider(env, ref);
+          if (!pick) {
+            await env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
+              .bind(meta.last_row_id, 'created', 'Standing order created — no verified rider available; the minute cron retries dispatch.').run();
+          }
+        } else {
+          const depAmount = round2(riderFee + round2(platformFee(riderFee)) + MOMO_COLLECTION_FEE);
+          const collect = await lipilaCollect(env, plan.phone, depAmount,
+            `adv-${ref}`, `DropOff advance ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+          if (collect.ok) {
+            await env.DB.batch([
+              env.DB.prepare(
+                `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
+                   lipila_fee_zmw, lipila_reference, status, channel, kind)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 'merchant', 'booking_deposit')`,
+              ).bind(meta.last_row_id, plan.phone, providerFromPhone(plan.phone), depAmount, depAmount,
+                round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, collect.lipilaReference ?? `adv-${ref}`),
+              env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
+                .bind(meta.last_row_id, 'advance_pending', 'Advance payment prompt sent for this standing order — dispatch at settlement.'),
+            ]);
+            await sendSms(env, plan.phone,
+              `DropOff: your standing order for ${plan.dest_city} (${ref}) is due now — approve the K${depAmount.toFixed(2)} prepayment to dispatch your rider.`).catch(() => {});
+          } else {
+            await env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
+              .bind(meta.last_row_id, 'prepayment_pending', 'Standing order created but the prepayment prompt could not start — HELD; open Bookings and tap Pay now to dispatch.').run();
+            await sendSms(env, plan.phone,
+              `DropOff: standing order ${ref} saved but the prepayment prompt could not start. Your rider is HELD — open Bookings and tap Pay now to dispatch.`).catch(() => {});
+          }
+        }
         created++;
         await env.DB.prepare('UPDATE recurring_plans SET last_created_at = ?2 WHERE id = ?1')
           .bind(plan.id, todayIso).run();
@@ -9837,6 +10096,7 @@ export default {
         }
         if (event.cron === '* * * * *') {
           await cancelStaleOrders(env);
+          await cancelExpiredHolds(env);
           await checkTimedPickups(env);
           await detectDrift(env);
           await redispatchUnassignedPaidJobs(env);
