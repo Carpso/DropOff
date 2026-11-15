@@ -101,7 +101,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
           _QuoteAnswer(query: _query),
           _LiveDepotsSection(query: _query),
           const SizedBox(height: 26),
-          const Text('FEATURED — partner depots', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.muted)),
+          const Text('FEATURED — partner depots', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.ink)),
           const SizedBox(height: 12),
           ...filtered.map((courier) {
             final live = courier.isLusakaLive;
@@ -229,7 +229,7 @@ class _LiveDepotsSection extends StatelessWidget {
           return name.contains(q) || city.contains(q);
         }).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('LIVE PARTNER DEPOTS (${filtered.length})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.muted)),
+          Text('LIVE PARTNER DEPOTS (${filtered.length})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.ink)),
           const SizedBox(height: 12),
           ...filtered.map<Widget>((c) {
             final isLusaka = '${c['city'] ?? ''}'.trim().toLowerCase() == 'lusaka';
@@ -344,7 +344,7 @@ class CourierDetailScreen extends StatelessWidget {
         body: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 30), children: [
           Container(
             padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(color: Color(courier.colorValue), borderRadius: BorderRadius.circular(24)),
+            decoration: BoxDecoration(color: Color(courier.colorValue), borderRadius: BorderRadius.circular(20)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               CourierAvatar(courier: courier, size: 56),
               const SizedBox(height: 20),
@@ -416,7 +416,7 @@ class CourierDetailScreen extends StatelessWidget {
                             Text(branch.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
                             if (branch.address.isNotEmpty) ...[
                               const SizedBox(height: 3),
-                              Text(branch.address, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+                              Text(branch.address, style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
                             ],
                             const SizedBox(height: 3),
                             Text(
@@ -466,7 +466,7 @@ class CourierDetailScreen extends StatelessWidget {
             const SizedBox(height: 10),
             GestureDetector(
               onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ReceiptViewer(asset: 'assets/images/platinum_offices.jpeg', title: 'Platinum countrywide offices'))),
-              child: ClipRRect(borderRadius: BorderRadius.circular(18), child: Image.asset('assets/images/platinum_offices.jpeg', height: 250, fit: BoxFit.cover)),
+              child: ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.asset('assets/images/platinum_offices.jpeg', height: 250, fit: BoxFit.cover)),
             ),
           ],
           const SizedBox(height: 20),

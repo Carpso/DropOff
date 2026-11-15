@@ -68,23 +68,30 @@ Rules
    amber primary, white secondary, text tertiary.
 10. **Small caps only for the eyebrow** (11px, +1 ls). No faux-bold caps elsewhere.
 
-## D. What was changed (2026-11-15, worker-side placeholders excluded)
+## D. Sweep applied 2026-11-15 (same commit series)
 
-- Card helper/microcopy consolidated; running text promoted from muted → ink
-  where it carried instructions; money promoted to 16–22px w900 on price cards.
-- All remaining `res.error` raw leaks in end-user toasts on booking / pay /
-  share / subscribe paths now render through the plain-language mapper.
-- Hero copy kept verbatim (it's the one line Scher would keep); one declarative
-  line tightened in collections ("Rider fee from K45" → fee-check pattern).
+- **Radius unified to 20/16/14/12/999** — 55+ ~90 of ~110 raw `circular()` calls now sit in the
+  family (raw `10`, `13`, `18`, `22`, `24` eliminated; 22 kept only on bottom-sheet tops; 28 kept
+  for the home hero and 40 for the avatar tap target — deliberate, documented exceptions).
+- **Grey → ink for instructions** — every `muted + fontSize ≥ 12.5` promoted to `AppColors.ink`;
+  raw `12px` helpers routed to `AppType` (fontSize now 12.5 ink). 11.5px and below stay
+  `AppColors.muted` by design (captions must stay captions).
+- **AppType on 26+ call sites** (account, admin, bookings, booking, business, home, operations,
+  rider_queue, track) — caption / callout / subhead / title now used directly instead of ad-hoc
+  `TextStyle(fontWeight, fontSize)`.
+- **Hard-coded K-price marketing strings** (`K45`, `K55 from…` etc.) were already removed in the
+  previous pass — no price claims in UI copy outside the fee checker, where the figure is
+  computed live from the distance band.
 
-## E. Backlog (next pass, not in this commit)
+## E. Backlog (next pass — UI render decisions, needs review)
 
-- Radius unification 20/16/12/999 across cards/CTA/inputs/pills.
-- Icon austerity: remove decorative Icons from section headers; nouns only.
-- Empty states: one monumental display line + one CTA (bookings-empty hero).
-- Waybill print copy: "Hand this screen to the counter." (4 words).
-- App icon + Play store: type-only lockup, no illustrative background.
-- Reduce Roboto weights to Regular + Bold (halve the font payload).
+- **Empty-state heroes**: bookings-empty gets the display line + single CTA treatment.
+- **Icon austerity**: remove decorative icons from section headers; nouns only.
+- **Waybill print copy**: "Hand this screen to the counter." (done, waybill_screen)
+- **App icon + Play store**: type-only lockup, no illustrative background.
+- **Reduce Roboto weights to Regular + Bold** (halves the font payload).
+- Ink-over-muted pass on the remaining ~170 caption-size sites (< 12px) — only after render
+  review; blind flipping would wreck caption hierarchy.
 
 ## F. Pass/fail checklist for any new screen
 

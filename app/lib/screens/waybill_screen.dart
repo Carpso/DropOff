@@ -272,7 +272,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
         children: [
           const Text(
             'Hand this screen to the counter — it is everything lodging needs.',
-            style: TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
+            style: TextStyle(color: AppColors.ink, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 12),
 
@@ -470,7 +470,7 @@ class _ReceiptCard extends StatelessWidget {
     final counterReceipt = this.counterReceipt;
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
         width: double.infinity,
         color: Colors.white,

@@ -218,7 +218,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
         const Text('Where is the parcel waiting?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.4)),
         const SizedBox(height: 4),
-        const Text('Your parcel already arrived at the courier in Lusaka. A rider picks it up and brings it to your recipient’s door.', style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4)),
+        const Text('Your parcel already arrived at the courier in Lusaka. A rider picks it up and brings it to your recipient’s door.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4)),
         const SizedBox(height: 16),
         const Text('Courier', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
@@ -312,7 +312,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: InkWell(
-              borderRadius: BorderRadius.circular(13),
+              borderRadius: BorderRadius.circular(12),
               onTap: () {
                 if (_slotClosed(entry.key)) return _message('${entry.value} closed — the counter can’t hand over in time. Pick another window.');
                 setState(() => _window = entry.key);
@@ -321,7 +321,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
                 decoration: BoxDecoration(
                   color: _window == entry.key ? const Color(0xFFE9F0EB) : Colors.white,
-                  borderRadius: BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: _window == entry.key ? AppColors.forest : AppColors.line, width: _window == entry.key ? 1.5 : 1),
                 ),
                 child: Row(children: [
@@ -337,13 +337,13 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: InkWell(
-            borderRadius: BorderRadius.circular(13),
+            borderRadius: BorderRadius.circular(12),
             onTap: () => setState(() => _window = 'tomorrow:06:00'),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
               decoration: BoxDecoration(
                 color: _window == 'tomorrow:06:00' ? const Color(0xFFE9F0EB) : Colors.white,
-                borderRadius: BorderRadius.circular(13),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: _window == 'tomorrow:06:00' ? AppColors.forest : AppColors.line, width: _window == 'tomorrow:06:00' ? 1.5 : 1),
               ),
               child: Row(children: [

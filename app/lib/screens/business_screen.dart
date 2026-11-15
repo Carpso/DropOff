@@ -378,7 +378,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
         : '≈ $forecast parcels in the next 30 days';
     return Card(
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         side: BorderSide(color: AppColors.forest.withValues(alpha: 0.28), width: 1.3),
       ),
       child: Padding(
@@ -490,7 +490,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                         Text(
                           'Subscription plans bundle your DropOff legs — Daily Rider K49/day, Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.',
                           softWrap: true,
-                          style: TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4),
+                          style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4),
                         ),
                       ],
                     ),
@@ -718,7 +718,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                 'Nothing on the road right now.',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+                style: TextStyle(color: AppColors.ink, fontSize: 12.5),
               ),
               const SizedBox(height: 10),
               FilledButton(
@@ -731,7 +731,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
             ...flying.map((job) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                     onTap: () => _track(job),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),

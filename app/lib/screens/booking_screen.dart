@@ -946,7 +946,7 @@ class _BookingScreenState extends State<BookingScreen> {
           Container(
             margin: const EdgeInsets.only(top: 2, bottom: 4),
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.amber.withValues(alpha: 0.6))),
+            decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.amber.withValues(alpha: 0.6))),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(AppLocalizations.of(context).coverTosTitle, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
               const SizedBox(height: 4),
@@ -1018,9 +1018,9 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 26),
         Text('Choose the courier', style: TextStyle(fontSize: scaleText(context, 18), fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
-        const Text('Your rider takes the parcel to this company’s depot.', style: TextStyle(color: AppColors.muted, fontSize: 13)),
+        const Text('Your rider takes the parcel to this company’s depot.', style: TextStyle(color: AppColors.ink, fontSize: 13)),
         const SizedBox(height: 12),
-        const Text('Search couriers', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.muted)),
+        const Text('Search couriers', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.ink)),
         const SizedBox(height: 6),
         TextField(
           controller: _courierSearchCtl,
@@ -1319,7 +1319,7 @@ class _BookingScreenState extends State<BookingScreen> {
         Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('$_from → $_to', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
           const SizedBox(height: 4),
-          Text('${courier.name} • ${_size.label} parcel • ${pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+          Text('${courier.name} • ${_size.label} parcel • ${pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.ink, fontSize: 13)),
           const Divider(height: 28),
           if (_planLeg == 'pack')
             _priceLine('DropOff leg (sender → depot)', 'Covered by plan')
@@ -1384,7 +1384,7 @@ class _BookingScreenState extends State<BookingScreen> {
           Expanded(
             child: Text(
               covered ? 'Plan covers this trip' : 'Estimated total you pay DropOff',
-              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
             ),
           ),
           const SizedBox(width: 8),
@@ -1661,7 +1661,7 @@ class _PlanBannerState extends State<_PlanBanner> {
         final covered = remaining >= widget.parcels;
         return Container(
           padding: const EdgeInsets.all(13),
-          decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(13), border: Border.all(color: AppColors.forest.withValues(alpha: 0.35))),
+          decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.forest.withValues(alpha: 0.35))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Icon(Icons.card_membership, size: 17, color: AppColors.forest),

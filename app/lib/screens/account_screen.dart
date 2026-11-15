@@ -583,8 +583,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   ],
                   const SizedBox(height: 2),
                   Text(store.fullName ?? store.email ?? store.linkedPhone ?? 'Linked device', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest)),
-                  if (store.fullName != null && store.email != null) Text(store.email!, style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
-                  if (store.linkedPhone != null && store.email != null) Text(store.linkedPhone!, style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
+                  if (store.fullName != null && store.email != null) Text(store.email!, style: const TextStyle(color: AppColors.ink, fontSize: 12.5)),
+                  if (store.linkedPhone != null && store.email != null) Text(store.linkedPhone!, style: const TextStyle(color: AppColors.ink, fontSize: 12.5)),
                 ])),
                 if (_photoBusy) const Padding(padding: EdgeInsets.only(left: 6), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
               ]),
@@ -646,7 +646,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.language, color: AppColors.forest),
                   title: Text(AppLocalizations.of(context).selectLanguage, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  subtitle: Text(_localeLabel(AppLocalizations.of(context), store.localeCode), style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                  subtitle: Text(_localeLabel(AppLocalizations.of(context), store.localeCode), style: const TextStyle(fontSize: 12.5, color: AppColors.ink)),
                   trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
                   onTap: () => _showLanguagePicker(store),
                 ),
@@ -691,7 +691,7 @@ class _AccountScreenState extends State<AccountScreen> {
             ],
             if (_otpMsg != null) ...[
               const SizedBox(height: 10),
-              Text(_otpMsg!, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+              Text(_otpMsg!, style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
             ],
             const SizedBox(height: 20),
             TextField(
@@ -719,7 +719,7 @@ class _AccountScreenState extends State<AccountScreen> {
             ),
             const SizedBox(height: 10),
             Row(children: [
-              const Expanded(child: Text("Don't have an account?", style: TextStyle(color: AppColors.muted, fontSize: 13))),
+              const Expanded(child: Text("Don't have an account?", style: TextStyle(color: AppColors.ink, fontSize: 13))),
               TextButton(onPressed: _showCreateAccountSheet, child: const Text('Create account', style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest))),
             ]),
             if (_error != null) ...[
@@ -735,7 +735,7 @@ class _AccountScreenState extends State<AccountScreen> {
               ),
               const SizedBox(width: 4),
               const Expanded(
-                child: Text('Remember me on this device', style: TextStyle(fontSize: 13, color: AppColors.muted)),
+                child: Text('Remember me on this device', style: TextStyle(fontSize: 13, color: AppColors.ink)),
               ),
             ]),
             const SizedBox(height: 8),
@@ -876,7 +876,7 @@ class _RecurringCardState extends State<_RecurringCard> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             const Text('Standing order', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
             const SizedBox(height: 4),
-            const Text('Pre-load a repeat drop — tap to book it with one tap when due.', style: TextStyle(color: AppColors.muted, fontSize: 13)),
+            const Text('Pre-load a repeat drop — tap to book it with one tap when due.', style: TextStyle(color: AppColors.ink, fontSize: 13)),
             const SizedBox(height: 14),
             if (errorText != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(errorText, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 12))),
             ValueListenableBuilder<String>(
@@ -1062,13 +1062,13 @@ class _ReferralCardState extends State<_ReferralCard> {
           const Text('Invite sellers — earn', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
           const SizedBox(height: 4),
           const Text('When a seller books their first pickup through your code, you get a single-use 20% promo for your own next drop-off.',
-              style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.45)),
+              style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.45)),
           const SizedBox(height: 12),
           Row(children: [
             if (code != null)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(color: const Color(0xFF10312A), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(color: const Color(0xFF10312A), borderRadius: BorderRadius.circular(12)),
                 child: Text(code, style: const TextStyle(color: Color(0xFFF6B73C), fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 16)),
               )
             else
@@ -1230,7 +1230,7 @@ class _TiersCardState extends State<_TiersCard> {
               const SizedBox(height: 4),
                const Text(
                 'Plans bundle the rider into ONE mobile-money prompt — a 7-day Weekly Sprint, or a monthly Silver / Gold / Platinum plan. Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.',
-                style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.45),
+                style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.45),
               ),
               const SizedBox(height: 12),
               _PlanUsageMeter(key: ValueKey(_usageCycle)),
@@ -1306,7 +1306,7 @@ class _TiersCardState extends State<_TiersCard> {
                                 ]),
                                 const SizedBox(height: 4),
                                 Text(entry.value.blurb,
-                                    style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+                                    style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
                                 const SizedBox(height: 2),
                                 Text(_windowLabel(models[entry.key]?['windows']),
                                     style: const TextStyle(color: AppColors.forest, fontSize: 11, height: 1.35, fontWeight: FontWeight.w600)),
@@ -1526,7 +1526,7 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
         return Container(
           margin: const EdgeInsets.only(bottom: 14),
           padding: const EdgeInsets.all(13),
-          decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.07), borderRadius: BorderRadius.circular(13)),
+          decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.07), borderRadius: BorderRadius.circular(12)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Icon(Icons.inventory_2_outlined, size: 16, color: AppColors.forest),

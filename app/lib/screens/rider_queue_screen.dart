@@ -214,7 +214,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Photograph EVERY parcel in the batch, then file EVERY depot receipt the depot wrote — each receipt photographed with the EXACT amount written on it. Never add receipts up yourself: DropOff totals the photographed documents.',
-                  style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),
+                  style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
               const SizedBox(height: 12),
               // ── Parcel photos (one or more) ──
               Text('PARCEL PHOTOS (${parcelPhotos.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
@@ -363,7 +363,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: AppColors.amber.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.amber.withValues(alpha: 0.4)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -415,7 +415,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           title: Text('Handover — $ref', style: AppType.subhead),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(AppLocalizations.of(context).handoverCodeWarning,
-              style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),
+              style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
             const SizedBox(height: 12),
             TextField(
               controller: otpCtrl,
@@ -593,7 +593,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
                 child: Row(children: [
                   const Icon(Icons.flag_outlined, size: 16, color: AppColors.forest),
                   const SizedBox(width: 8),

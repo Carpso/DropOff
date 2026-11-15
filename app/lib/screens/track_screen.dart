@@ -121,7 +121,7 @@ class _TrackScreenState extends State<TrackScreen> {
           const SizedBox(height: 14),
           if (_loading) const Center(child: Padding(padding: EdgeInsets.all(22), child: CircularProgressIndicator())),
           if (_error != null)
-            Text(_error!, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+            Text(_error!, style: const TextStyle(color: AppColors.ink, fontSize: 13)),
           if (gated) _accountCard(),
           if (held) _heldCard(),
           if (_data != null && !gated && !held) ...[
@@ -188,7 +188,7 @@ class _TrackScreenState extends State<TrackScreen> {
             hint.isEmpty
                 ? 'Prepayment pending — tracking opens once the sender’s payment is approved.'
                 : hint,
-            style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
+            style: const TextStyle(color: AppColors.ink, fontSize: 13, height: 1.4),
           ),
         ]),
       ),
@@ -214,7 +214,7 @@ class _TrackScreenState extends State<TrackScreen> {
             hint.isEmpty
                 ? 'This parcel opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Sign in or create your account, then open the link again.'
                 : 'This parcel opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Try the number ending $hint.',
-            style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
+            style: const TextStyle(color: AppColors.ink, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 14),
           Row(children: [
@@ -267,7 +267,7 @@ class _TrackScreenState extends State<TrackScreen> {
     final dropoffIsBranch = branch.isNotEmpty;
     return Container(
         padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(24)),
+        decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(20)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('${d['status'] ?? ''}'.replaceAll('_', ' ').toUpperCase(),
               style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 1)),

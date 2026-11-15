@@ -80,7 +80,7 @@ class _InboxScreenState extends State<InboxScreen> {
               Text(
                 '${t['last_message'] ?? 'No messages yet'}',
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: AppColors.muted, fontSize: 12, fontWeight: unread > 0 ? FontWeight.w700 : FontWeight.w400),
+                style: TextStyle(color: AppColors.ink, fontSize: 12.5, fontWeight: unread > 0 ? FontWeight.w700 : FontWeight.w400),
               ),
             ])),
             const SizedBox(width: 8),

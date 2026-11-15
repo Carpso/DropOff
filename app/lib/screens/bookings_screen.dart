@@ -207,7 +207,7 @@ class BookingCard extends StatelessWidget {
                   (booking.branch?.isNotEmpty == true)
                       ? '${courier.name} · onward to ${booking.toCity}'
                       : courier.name,
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted, height: 1.35),
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.ink, height: 1.35),
                 ),
               ])),
               const Icon(Icons.chevron_right, color: AppColors.muted),
@@ -261,7 +261,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       body: ListView(padding: const EdgeInsets.fromLTRB(20, 6, 20, 28), children: [
         Container(
           padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(24)),
+          decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(20)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(booking.timeline[booking.stage].toUpperCase(), style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 1)),
             const SizedBox(height: 12),
@@ -508,7 +508,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(l10n.evidenceShare, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
-          const Text('Proof-of-condition timeline (booking, pickup, dropoff, parcel check, confirmation). Share only with trusted parties.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+          const Text('Proof-of-condition timeline (booking, pickup, dropoff, parcel check, confirmation). Share only with trusted parties.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
           const SizedBox(height: 12),
           Flexible(
             child: SingleChildScrollView(
@@ -970,7 +970,7 @@ class _ParcelsForYou extends StatelessWidget {
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         side: BorderSide(color: AppColors.forest.withValues(alpha: 0.35), width: 1.4),
       ),
       color: AppColors.forest.withValues(alpha: 0.04),
@@ -988,7 +988,7 @@ class _ParcelsForYou extends StatelessWidget {
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(12)),
               child: Text('${parcels.length}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12)),
             ),
           ]),
@@ -1064,7 +1064,7 @@ class _ExpiredCard extends StatelessWidget {
               booking.lastEvent == 'hold_expired'
                   ? 'The prepayment was never approved within 24 hours, so this booking was canceled. No money was taken. Book again in the app when you are ready.'
                   : 'This booking was canceled by the system (the parcel never moved). Any unspent prepayment is returned to your momo automatically.',
-              style: const TextStyle(color: AppColors.muted, fontSize: 12.5, height: 1.4),
+              style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4),
             ),
           ]),
         ),
@@ -1270,7 +1270,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
           if (url != null && url.isNotEmpty) ...[
             const SizedBox(height: 10),
             ClipRRect(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               child: AspectRatio(
                 aspectRatio: 1.4,
                 child: Stack(fit: StackFit.expand, children: [
@@ -1352,7 +1352,7 @@ class _CounterReceiptPaidCard extends StatelessWidget {
           for (var i = 0; i < receipts.length; i++) ...[
             if (i > 0) const SizedBox(height: 8),
             ClipRRect(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 260),
                 child: Stack(alignment: Alignment.topRight, children: [

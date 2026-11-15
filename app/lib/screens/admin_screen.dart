@@ -241,7 +241,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   Text(_financeOnly
                       ? 'Salaries, turnover, payroll run-rate and ZRA filings. Two signatures release money.'
                       : 'Live stats, security, fraud, depot branches and messaging.',
-                      style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+                      style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
                 ])),
               ]),
             ),
@@ -327,7 +327,7 @@ class _AdminScreenState extends State<AdminScreen> {
           ]),
           if (tiers.isNotEmpty) ...[
             const SizedBox(height: 12),
-            const Text('Active plans', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+            const Text('Active plans', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
             const SizedBox(height: 6),
             Wrap(spacing: 8, runSpacing: 6, children: [
               for (final t in tiers)
@@ -360,7 +360,7 @@ class _AdminScreenState extends State<AdminScreen> {
             ]),
             const SizedBox(height: 8),
             if (_alerts.isEmpty)
-              const Text('No alerts. Quiet is good.', style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+              const Text('No alerts. Quiet is good.', style: TextStyle(color: AppColors.ink, fontSize: 12.5)),
             for (final a in _alerts.take(10))
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 5),
@@ -394,7 +394,7 @@ class _AdminScreenState extends State<AdminScreen> {
             ]),
             const SizedBox(height: 8),
             if (_flags.isEmpty)
-              const Text('Nothing flagged.', style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+              const Text('Nothing flagged.', style: TextStyle(color: AppColors.ink, fontSize: 12.5)),
             for (final f in _flags.take(10))
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 5),
@@ -730,7 +730,7 @@ class _AdminScreenState extends State<AdminScreen> {
             ]),
             const SizedBox(height: 8),
             if (_chatReports.isEmpty)
-              const Text('No open chat reports.', style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+              const Text('No open chat reports.', style: TextStyle(color: AppColors.ink, fontSize: 12.5)),
             for (final r in _chatReports.take(10))
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 5),
@@ -793,7 +793,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   child: Row(children: [
                     Expanded(child: Text(
                       '${_maskAdminPhone('${s['phone'] ?? ''}')} · ${s['strikes'] ?? 0} strikes${s['suspended_until'] != null ? ' · suspended until ${'${s['suspended_until']}'.split(' ').first}' : ''}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
                     )),
                     TextButton(
                       onPressed: () async {
@@ -1034,7 +1034,7 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
           if (_loading)
             const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
           else if (_threads.isEmpty)
-            const Text('No tickets. Everyone is happy.', style: TextStyle(color: AppColors.muted, fontSize: 12.5))
+            const Text('No tickets. Everyone is happy.', style: TextStyle(color: AppColors.ink, fontSize: 12.5))
           else
             ..._threads.take(12).map((t) {
               final unread = (t['unread'] as num?)?.toInt() ?? 0;
@@ -1044,7 +1044,7 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   onTap: () => _open(t),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
@@ -1062,7 +1062,7 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
                       if (unread > 0)
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(10)),
+                          decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(12)),
                           child: Text('$unread', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11)),
                         ),
                     ]),
@@ -1405,7 +1405,7 @@ class _UsersCardState extends State<_UsersCard> {
           if (_loading)
             const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
           else if (_users.isEmpty)
-            const Text('No accounts found.', style: TextStyle(color: AppColors.muted, fontSize: 12.5))
+            const Text('No accounts found.', style: TextStyle(color: AppColors.ink, fontSize: 12.5))
           else
             ..._users.take(60).map((u) {
               final role = '${u['role'] ?? 'customer'}';
@@ -1820,7 +1820,7 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
             ),
             if (_quotes.isNotEmpty) ...[
               const SizedBox(height: 14),
-              Text('Latest entries', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              Text('Latest entries', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
               const SizedBox(height: 6),
               ..._quotes.take(5).map((q) => Padding(
                 padding: const EdgeInsets.only(bottom: 4),
@@ -2039,7 +2039,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
                     width: double.infinity,
                     margin: const EdgeInsets.only(bottom: 6),
                     padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.line)),
                     child: Row(children: [
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text(code, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: 1.0, color: AppColors.ink)),
@@ -2140,7 +2140,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.line),
       ),
       child: Row(children: [
@@ -2293,7 +2293,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             Container(
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.line)),
               child: Row(children: [
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(_tierLabels['${t['tier']}'] ?? '${t['tier']}',
@@ -2319,7 +2319,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             Container(
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.line)),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.line)),
               child: Row(children: [
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('${c['name']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
@@ -2427,7 +2427,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
                 color: row['on_hold'] == true ? AppColors.danger.withValues(alpha: 0.05) : Colors.white,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: row['on_hold'] == true ? AppColors.danger.withValues(alpha: 0.4) : AppColors.line),
               ),
               child: Row(children: [
@@ -2604,7 +2604,7 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
                 color: row['active'] == 1 || row['active'] == true ? AppColors.forest.withValues(alpha: 0.08) : Colors.white,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: row['active'] == 1 || row['active'] == true ? AppColors.forest.withValues(alpha: 0.45) : AppColors.line),
               ),
               child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
@@ -3045,7 +3045,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
           if (_loading)
             const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
           else ...[
-            const Text('Operations — the real work (live data)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+            const Text('Operations — the real work (live data)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.ink)),
             const SizedBox(height: 6),
             if (ops == null)
               const Padding(
@@ -3081,7 +3081,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
                   style: const TextStyle(color: AppColors.muted, fontSize: 11)),
             ],
             const SizedBox(height: 14),
-            const Text('App usage — telemetry', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.muted)),
+            const Text('App usage — telemetry', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.ink)),
             const SizedBox(height: 6),
             if (kpi == null)
               const Text('Could not load usage telemetry (GET /admin/analytics/kpi).', style: TextStyle(color: AppColors.muted, fontSize: 12))
@@ -3094,7 +3094,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
                 Expanded(child: _KpiMetric('Active days', '${dau.length}', Icons.today)),
               ]),
               const SizedBox(height: 10),
-              const Text('Most used features', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              const Text('Most used features', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
               const SizedBox(height: 6),
               ...features.take(6).map((f) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
@@ -3106,7 +3106,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
                 ]),
               )),
               const SizedBox(height: 8),
-              const Text('Most visited screens', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              const Text('Most visited screens', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
               const SizedBox(height: 6),
               if (screens.isEmpty)
                 const Text('No screen views recorded yet.', style: TextStyle(color: AppColors.muted, fontSize: 12))
@@ -3131,7 +3131,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
                 ]),
               ],
               const SizedBox(height: 8),
-              const Text('Conversion funnel (unique users)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              const Text('Conversion funnel (unique users)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
               const SizedBox(height: 6),
               ...funnel.take(5).map((f) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
@@ -3250,11 +3250,11 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
           if (_loading)
             const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
           else if (days.isEmpty)
-            const Text('No bookings in the last 8 weeks to learn from yet.', style: TextStyle(color: AppColors.muted, fontSize: 12.5))
+            const Text('No bookings in the last 8 weeks to learn from yet.', style: TextStyle(color: AppColors.ink, fontSize: 12.5))
           else ...[
             // branch x window heat grid for the busiest branches (top 12)
             if (branches.isNotEmpty) ...[
-              const Text('By depot branch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+              const Text('By depot branch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
               const SizedBox(height: 6),
               for (final b in branches.take(8))
                 Padding(
@@ -3270,7 +3270,7 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
                 ),
             ],
             const SizedBox(height: 12),
-            const Text('Per day (all branches)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.muted)),
+            const Text('Per day (all branches)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
             const SizedBox(height: 6),
             Table(
               defaultColumnWidth: const IntrinsicColumnWidth(),

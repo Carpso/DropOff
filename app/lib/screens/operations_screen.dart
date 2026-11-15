@@ -218,13 +218,13 @@ class OperationsScreen extends StatelessWidget {
           if (openCount > 0)
             Container(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(12)),
               child: Text('Blocked by condition: $openCount open booking(s) are still assigned to this rider. Reassign/complete them or deactivate the rider instead.',
                 style: const TextStyle(fontSize: 12.5, height: 1.35, color: Color(0xFF7A4A00))),
             )
           else
             const Text('If this rider has historical deliveries, removal is only allowed when no open jobs are assigned (server-checked). Consider deactivating instead if unsure.',
-              style: TextStyle(fontSize: 12.5, height: 1.35, color: AppColors.muted)),
+              style: TextStyle(fontSize: 12.5, height: 1.35, color: AppColors.ink)),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -429,7 +429,7 @@ class OperationsScreen extends StatelessWidget {
           child: ListTile(
             leading: const Icon(Icons.my_location, color: AppColors.forest),
             title: const Text('Rider live position', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-            subtitle: const Text('Broadcast your GPS once so senders of your jobs can open a live map.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+            subtitle: const Text('Broadcast your GPS once so senders of your jobs can open a live map.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
             trailing: FilledButton.tonal(
               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), minimumSize: const Size(0, 36)),
               onPressed: () => _pingMyLocation(context),
@@ -674,7 +674,7 @@ class _TaskQueueCard extends StatelessWidget {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text("Today's task queue", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
               SizedBox(height: 3),
-              Text('Slot batches with stop times, parcel counts and target depot drop-off.', style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35)),
+              Text('Slot batches with stop times, parcel counts and target depot drop-off.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
             ])),
             Icon(Icons.chevron_right, color: AppColors.muted),
           ]),
@@ -695,7 +695,7 @@ class _Metric extends StatelessWidget {
     Icon(icon, color: AppColors.forest),
     const SizedBox(height: 14),
     Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
-    Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+    Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, color: AppColors.ink)),
   ])));
 }
 
@@ -1314,7 +1314,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
       preview = const Icon(Icons.add_a_photo_outlined, color: AppColors.muted);
     }
     return InkWell(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(12),
       onTap: busy ? null : () => _pick(field),
       child: Column(children: [
         Container(
@@ -1323,7 +1323,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: AppColors.line.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.line),
           ),
           child: preview,
@@ -1356,7 +1356,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1413,7 +1413,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: const Color(0xFFB3261E).withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: const Color(0xFFB3261E).withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12)),
               child: Text('Reviewer: $note', style: const TextStyle(color: Color(0xFFB3261E), fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600)),
             ),
           ],
@@ -1582,7 +1582,7 @@ class _SelfieBannerState extends State<_SelfieBanner> {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: AppColors.amber.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(color: AppColors.amber.withValues(alpha: 0.4)),
         ),
         child: Row(children: [

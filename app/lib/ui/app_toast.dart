@@ -75,7 +75,7 @@ class AppToast {
       margin: const EdgeInsets.fromLTRB(14, 0, 14, 22),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       backgroundColor: bg,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       content: Row(mainAxisSize: MainAxisSize.min, children: [
         Container(
           padding: const EdgeInsets.all(5),
