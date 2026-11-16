@@ -13,8 +13,13 @@ class RiderMap extends StatefulWidget {
   final LatLng? depot;
 
   /// Optional route to draw as a polyline (e.g. rider → pickup → drop-off).
-  /// Points with no bearing between them render as-is; no road snapping yet.
+  /// Road-following when the caller resolved one (OSRM); a straight line is
+  /// fine for overview but the caller must label it as such.
   final List<LatLng>? route;
+
+  /// True when [route] is a straight line (routing engine unreachable) —
+  /// draws it dashed so it never masquerades as a road route.
+  final bool routeIsStraightLine;
 
   /// Extra labelled pins (e.g. batched pickup stops 1..n).
   final List<Map<String, dynamic>>? stops;
@@ -25,6 +30,7 @@ class RiderMap extends StatefulWidget {
     required this.rider,
     this.depot,
     this.route,
+    this.routeIsStraightLine = false,
     this.stops,
   });
 
@@ -48,6 +54,7 @@ class RiderMap extends StatefulWidget {
 class _RiderMapState extends State<RiderMap> {
   late final Future<PmTilesVectorTileProvider> _provider =
       PmTilesVectorTileProvider.fromSource(RiderMap.tileUrl);
+  final MapController _mapCtl = MapController();
 
   LatLngBounds? get _bounds {
     final pts = widget._points;
@@ -86,8 +93,17 @@ class _RiderMapState extends State<RiderMap> {
             : null;
         final center = widget.rider ?? widget.pickup ?? widget.depot ?? firstStop ?? RiderMap.chibolya;
         final bounds = _bounds;
+        // Route casing: dark outline under the green core — the route reads
+        // on any basemap style and on sunny-screen glare.
+        final casing = widget.route != null && widget.route!.length > 1
+            ? Polyline(points: widget.route!, strokeWidth: 7.5, color: const Color(0xFF0F3B2D))
+            : null;
+        final core = widget.route != null && widget.route!.length > 1
+            ? Polyline(points: widget.route!, strokeWidth: 4.5, color: const Color(0xFF1F9E6B))
+            : null;
         return Stack(children: [
           FlutterMap(
+            mapController: _mapCtl,
             options: MapOptions(
               initialCenter: center,
               initialZoom: 13.5,
@@ -97,16 +113,13 @@ class _RiderMapState extends State<RiderMap> {
               VectorTileLayer(
                 theme: ProtomapsThemes.lightV4(),
                 tileProviders: TileProviders({'protomaps': snap.data!}),
-                fileCacheTtl: const Duration(days: 7),
+                fileCacheTtl: const Duration(days: 30),
               ),
-              if (widget.route != null && widget.route!.length > 1)
-                PolylineLayer(polylines: [
-                  Polyline(
-                    points: widget.route!,
-                    strokeWidth: 4.5,
-                    color: const Color(0xFF17855F),
-                  ),
-                ]),
+              if (casing != null && core != null)
+                PolylineLayer(polylines: widget.routeIsStraightLine
+                    ? [Polyline(points: widget.route!, strokeWidth: 4, color: const Color(0xFF1F9E6B),
+                        pattern: StrokePattern.dashed(segments: const [12.0, 9.0]))]
+                    : [casing, core]),
               MarkerLayer(markers: [
                 if (widget.pickup != null)
                   Marker(
@@ -145,6 +158,22 @@ class _RiderMapState extends State<RiderMap> {
               ]),
             ],
           ),
+          // Zoom + re-fit controls — our map, our chrome.
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 8, top: 64),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                _mapBtn(icon: Icons.add, onTap: () => _zoomBy(1)),
+                const SizedBox(height: 6),
+                _mapBtn(icon: Icons.remove, onTap: () => _zoomBy(-1)),
+                if (bounds != null) ...[
+                  const SizedBox(height: 6),
+                  _mapBtn(icon: Icons.fit_screen, onTap: () => _refit(bounds)),
+                ],
+              ]),
+            ),
+          ),
           const Positioned(
             right: 6,
             bottom: 6,
@@ -156,9 +185,50 @@ class _RiderMapState extends State<RiderMap> {
               ),
             ),
           ),
+          if (widget.routeIsStraightLine)
+            const Positioned(
+              left: 8,
+              bottom: 8,
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(6))),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Text('Straight-line — road routing unreachable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
+                ),
+              ),
+            ),
         ]);
       },
     );
+  }
+
+  Widget _mapBtn({required IconData icon, required VoidCallback onTap}) => Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: Color(0xFF123C32), width: 1.2)),
+        elevation: 2,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: SizedBox(width: 38, height: 38, child: Icon(icon, size: 20, color: const Color(0xFF123C32))),
+        ),
+      );
+
+  void _zoomBy(double delta) {
+    try {
+      _mapCtl.move(_mapCtl.camera.center, (_mapCtl.camera.zoom + delta).clamp(3, 18).toDouble());
+    } catch (_) {
+      /* camera not ready — ignore */
+    }
+  }
+
+  void _refit(LatLngBounds bounds) {
+    try {
+      final fitted = CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(28), maxZoom: 16)
+          .fit(_mapCtl.camera);
+      _mapCtl.move(fitted.center, fitted.zoom);
+    } catch (_) {
+      /* camera not ready — ignore */
+    }
   }
 
   Widget _offlineFallback(String message) => Container(

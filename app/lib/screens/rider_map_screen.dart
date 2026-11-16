@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../data/dropoff_api.dart';
+import '../data/map_services.dart';
 import '../ui/app_theme.dart';
 import '../widgets/rider_map.dart';
 
-/// Sender-side live rider screen: PMTiles Zambia map, fresh fix every 12s while open.
+/// Sender-side live rider screen: the DropOff map (Protomaps Zambia/Zimbabwe/Malawi/Mozambique on our R2), fresh fix every 12 s while open, road-following route line when OSRM answers.
 class RiderMapScreen extends StatefulWidget {
   final String jobRef;
   const RiderMapScreen({super.key, required this.jobRef});
@@ -41,6 +42,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
       _live = live;
       _error = live == null ? 'No live connection — rider fix may be stale.' : '';
     });
+    await _maybeRoute();
   }
 
   LatLng? get _pickup =>
@@ -52,6 +54,26 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
       (_live?['lat'] != null && _live?['lng'] != null)
           ? LatLng((_live!['lat'] as num).toDouble(), (_live!['lng'] as num).toDouble())
           : null;
+
+  RouteResult? _route;
+  LatLng? _routeOrigin;
+
+  /// Road-following rider→pickup route (OSRM). Refetched when the rider
+  /// moves >150 m so the line tracks the drive, not a stale snapshot.
+  Future<void> _maybeRoute() async {
+    final me = _rider, dest = _pickup;
+    if (me == null || dest == null) return;
+    if (_route != null && _routeOrigin != null &&
+        const Distance().as(LengthUnit.Meter, _routeOrigin!, me) < 150) {
+      return;
+    }
+    final route = await MapServices.route(me, dest);
+    if (!mounted) return;
+    setState(() {
+      _route = route;
+      _routeOrigin = me;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +89,9 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
           RiderMap(
             pickup: _pickup,
             rider: _rider,
-            route: (_rider != null && _pickup != null) ? [_rider!, _pickup!] : null,
+            route: _route?.points ??
+                ((_rider != null && _pickup != null) ? [_rider!, _pickup!] : null),
+            routeIsStraightLine: _route == null,
           ),
           if (_live == null || _live!['lat'] == null)
             Positioned(

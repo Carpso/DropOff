@@ -1,6 +1,6 @@
 # Play Store release checklist
 
-App id: `zm.dropoff.dropoff` - current version `0.5.27+38` (`pubspec.yaml`).
+App id: `zm.dropoff.dropoff` - current version `0.5.28+39` (`pubspec.yaml`).
 
 ## 1. Upload keystore (one-time)
 
@@ -81,8 +81,8 @@ mirrors its in-app copy.)
 5. **Countries**: Zambia (plus any market the pricebook covers).
 6. **Release production**:
    - *Promote track -> Production, countries -> Zambia, release name
-     "0.5.27 (38) — Held bookings unmissable + fully in-app map"*.
-   - Upload `dist/DropOff-0.5.27-release.aab` into a NEW production release.
+     "0.5.28 (39) — Held bookings unmissable + fully in-app map"*.
+   - Upload `dist/DropOff-0.5.28-release.aab` into a NEW production release.
    - Choose **staged rollout 10%** first (small user base: 10% of <100 is
      statistically silent — either pick 10% for caution or 100% given testers
      already validated 0.5.0; for a first production release, 100% in Zambia
@@ -163,18 +163,16 @@ Questions? support@carpsosolutions.store
 5. Recipient tracking page (SMS link) showing handover code hint.
 6. Task queue (rider) with proof-of-delivery dialog.
 
-### Release notes (0.5.27+38)
+### Release notes (0.5.28+39)
 ```
 * Bookings held for prepayment now show as "Booking held — payment pending"
   on My Bookings, with the pay path one tap away. No rider until it clears.
-* The DropOff live map is now fully in-app: live rider tracking, the
-  recipient tracking page and rider navigation all run on our own map —
-  no more broken Waze or Google Maps links.
-* Customers can ask for a booking to be deleted (support chat, one tap);
-  only DropOff staff can delete a booking or an account. Your history
-  stays unless staff act.
-* Waybill/depot receipt unlocks only after payment; delivery-time hints
-  show measured averages only.
+* The DropOff map is now fully ours: road-following routes (OSRM) with a
+  turn-by-turn A→Z cue sheet, place search (Photon) biased to Zambia, live
+  rider tracking with a green route line, recipient live map and in-app
+  navigation — no Waze or Google Maps links anywhere.
+* Held bookings, unpaid delivery-time hints and the waybill stay locked
+  until payment; delivery-time hints show measured averages only.
 ```
 
 ## 6. Verify before promoting
@@ -206,7 +204,7 @@ Questions? support@carpsosolutions.store
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 9. What is new in 0.5.27+38
+## 9. What is new in 0.5.28+39
 
 - **Payment-held bookings are unmissable** — My Bookings shows a red
   "Booking held — payment pending" banner with the one-tap pay path; the
@@ -214,10 +212,14 @@ Questions? support@carpsosolutions.store
   themselves see the same path.
 - **Fully in-app map** — DropOff's own Protomaps PMTiles basemap (Zambia /
   Zimbabwe / Malawi / Mozambique, R2-hosted) replaces every Waze/Google Maps
-  deep-link: sender live map with rider→pickup route line, recipient watch
-  page, rider in-app navigator with distance + city-pace ETA, batched stops
-  with numbered pins. Turn-by-turn voice routing is a routing-engine decision
-  and stays on the roadmap — nothing external is load-bearing anymore.
+  deep-link. New this release: road-following routes via OSRM with a green
+  cased line (dashed straight line + label when the engine is unreachable —
+  never a fake road), turn-by-turn A→Z cue sheet bottom sheet, Photon
+  type-ahead place search biased to Zambia, live rider tracking with a
+  route line that re-routs as the rider moves, numbered batched stop pins,
+  zoom controls and one-tap re-fit. OSM-aligned attribution on every map.
+  Self-hosted OSRM + crowd-sourced traffic (à la ChurchOnApp) remain on the
+  roadmap.
 - **Deletes are staff-only** — customers cannot delete a booking; a
   "Request deletion" one-tap opens support chat with the ref prefilled.
   Admins delete bookings in the console (soft delete; payments and audit
