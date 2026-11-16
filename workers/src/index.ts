@@ -799,6 +799,66 @@ app.use('GET /plans', cacheFor(30));
 /* --------------------------------- health --------------------------------- */
 app.get('/health', (c) => c.json({ ok: true, ts: Date.now() }));
 
+// Road routing for the in-app navigator (riders). Signed-in accounts only;
+// results are cached by 5dp coordinate pair for 15 minutes. The ORS key lives
+// server-side — no routing key ever ships inside the app binary. Set it with:
+//   wrangler secret put ORS_API_KEY   (free key: https://openrouteservice.org, 2,000 directions/day)
+// Until it is set the endpoint answers 503 router_not_configured and the app
+// falls back to a labelled straight line.
+app.get('/maps/route', async (c) => {
+  const parsePair = (raw: string | undefined) => String(raw ?? '').split(',').map(Number);
+  const validPair = (n: number[]) => n.length === 2 && n.every((x) => Number.isFinite(x)) && Math.abs(n[0]) <= 180 && Math.abs(n[1]) <= 90;
+  const from = parsePair(c.req.query('from')); // lng,lat
+  const to = parsePair(c.req.query('to'));
+  if (!validPair(from) || !validPair(to)) return c.json({ error: 'bad_coords', detail: 'from/to must be "lng,lat".' }, 400);
+  const fmt = (n: number[]) => n.map((x) => x.toFixed(5)).join(',');
+  const f = fmt(from), t = fmt(to);
+  const cacheKey = new Request(`https://route.internal/${f};${t}`);
+  try {
+    const hit = await caches.default.match(cacheKey);
+    if (hit) {
+      const cached = await hit.text();
+      return new Response(cached, { headers: { 'content-type': 'application/json', 'x-route-cache': 'hit' } });
+    }
+  } catch { /* cache unavailable — fall through */ }
+  const key = (c.env as any).ORS_API_KEY as string | undefined;
+  if (!key) return c.json({ error: 'router_not_configured' }, 503);
+  try {
+    const res = await fetch(
+      `https://api.openrouteservice.org/v2/directions/driving-car/geojson?start=${f}&end=${t}`,
+      { headers: { Authorization: key, 'User-Agent': 'DropOff/1.0' }, signal: AbortSignal.timeout(9000) },
+    );
+    if (!res.ok) return c.json({ error: 'router_upstream_failed', status: res.status }, 502);
+    const data: any = await res.json();
+    const feat = data?.features?.[0];
+    if (!feat) return c.json({ error: 'router_empty' }, 502);
+    const props = feat.properties ?? {};
+    const summary = props.summary ?? {};
+    const coords: [number, number][] = feat.geometry?.coordinates ?? [];
+    if (coords.length < 2) return c.json({ error: 'router_empty' }, 502);
+    const steps = (props.segments ?? []).flatMap((seg: any) =>
+      (seg.steps ?? []).map((s: any) => ({
+        instruction: String(s.instruction ?? ''),
+        distance_m: Number(s.distance ?? 0),
+        duration_s: Number(s.duration ?? 0),
+        road: s.name ? String(s.name) : null,
+        type: s.type ?? null,
+      })),
+    );
+    const body = JSON.stringify({
+      points: coords.map(([lng, lat]) => [lat, lng]), // app expects [lat,lng]
+      distance_m: Number(summary.distance ?? 0),
+      duration_s: Number(summary.duration ?? 0),
+      steps,
+    });
+    const out = new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=900' } });
+    try { c.executionCtx.waitUntil(caches.default.put(cacheKey, out.clone())); } catch { /* best-effort */ }
+    return out;
+  } catch {
+    return c.json({ error: 'router_upstream_failed' }, 502);
+  }
+});
+
 /* ----------------------------- legal (Play needs a live privacy URL) ------- */
 // Public, no auth. The middleware skips '/legal' (regex below includes it).
 const PRIVACY_HTML =

@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+import 'dropoff_api.dart';
+
 /// One routing/search service for everything drawn on the DropOff map.
 ///
 /// Routing: public OSRM demo server (router.project-osrm.org) — free, no
@@ -69,9 +71,13 @@ class MapServices {
   static const _photonBase = 'https://photon.komoot.io/api/';
   static const Duration _timeout = Duration(seconds: 8);
 
-  /// Road-following route between two points; null when the engine fails —
-  /// the caller decides between straight line and retry.
+  /// Routing order: DropOff Worker proxy (ORS key server-side, cached) →
+  /// public OSRM demo (evaluation-grade, works at launch volume) → null
+  /// (caller draws a labelled straight line). Riders always get *some*
+  /// directions; quality upgrades with one server-side secret.
   static Future<RouteResult?> route(LatLng from, LatLng to) async {
+    final viaWorker = await _routeViaWorker(from, to);
+    if (viaWorker != null) return viaWorker;
     try {
       final url = Uri.parse(
           '$_osrmBase${from.longitude},${from.latitude};${to.longitude},${to.latitude}'
@@ -105,6 +111,43 @@ class MapServices {
         points: coords,
         distanceMetres: (r['distance'] as num?)?.toDouble() ?? 0,
         durationSeconds: (r['duration'] as num?)?.toDouble() ?? 0,
+        steps: steps,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Road route via OUR worker — the ORS API key never ships in the binary,
+  /// and identical coordinate pairs are cached server-side.
+  static Future<RouteResult?> _routeViaWorker(LatLng from, LatLng to) async {
+    if (!DropOffApi.enabled || DropOffApi.token == null) return null;
+    try {
+      final f = '${from.longitude.toStringAsFixed(5)},${from.latitude.toStringAsFixed(5)}';
+      final t = '${to.longitude.toStringAsFixed(5)},${to.latitude.toStringAsFixed(5)}';
+      final res = await http.get(
+        Uri.parse('${DropOffApi.baseUrl}/maps/route?from=$f&to=$t'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (DropOffApi.apiKey.isNotEmpty) 'X-Api-Key': DropOffApi.apiKey,
+          'Authorization': 'Bearer ${DropOffApi.token}',
+          if (DropOffApi.deviceId.isNotEmpty) 'X-Device-Id': DropOffApi.deviceId,
+        },
+      ).timeout(_timeout);
+      if (res.statusCode != 200) return null; // 503 not configured / 502 upstream — fall back to OSRM demo
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final pts = ((data['points'] as List?) ?? const [])
+          .map((p) => LatLng((p[0] as num).toDouble(), (p[1] as num).toDouble()))
+          .toList();
+      if (pts.length < 2) return null;
+      final steps = ((data['steps'] as List?) ?? const [])
+          .map((s) => RouteStep('${s['instruction'] ?? ''}', (s['distance_m'] as num?)?.toDouble() ?? 0))
+          .where((s) => s.instruction.isNotEmpty)
+          .toList();
+      return RouteResult(
+        points: pts,
+        distanceMetres: (data['distance_m'] as num?)?.toDouble() ?? 0,
+        durationSeconds: (data['duration_s'] as num?)?.toDouble() ?? 0,
         steps: steps,
       );
     } catch (_) {
