@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../ui/app_theme.dart';
-import '../widgets/common.dart';
 
 /// Full-text help behind a "?" icon — every screen carries no narration,
 /// only one short line + "?" opens this. Nothing is deleted, only moved.

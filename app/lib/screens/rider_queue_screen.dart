@@ -18,6 +18,7 @@ import '../l10n/app_localizations.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../ui/in_app_browser.dart';
+import 'in_app_navigator_screen.dart';
 
 /// The rider's day as slot-batched task queues:
 ///   BATCH: 10:00 AM SLOT · TOTAL PARCELS: 6 · DESTINATION: Mercury — Kabulonga
@@ -102,36 +103,32 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     AppToast.show(context, msg);
   }
 
-  /// One-tap navigation to the stop's pickup. Pinned bookings (sender tapped
-  /// "use my location") navigate by exact coordinates; typed addresses
-  /// navigate by the address text as a fallback — never leave the rider
-  /// guessing how to find the sender.
-  void _navigateToStop(Map<String, dynamic> s, String app) {
+  /// One-tap navigation to the stop's pickup. Pinned bookings open our
+  /// in-app navigator (map + rider position + straight route line); a stop
+  /// without any pin falls back to opening the typed address in the device's
+  /// maps app — the only in-app path needs coordinates.
+  void _navigateToStop(Map<String, dynamic> s) {
     // Server ships pickup_lat/pickup_lng — the pin is authoritative. Fall back
     // to the legacy lat/lng aliases, then to the typed address.
     final lat = (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble();
     final lng = (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble();
+    final addr = '${s['address'] ?? ''}'.trim();
+    final label = '${s['ref'] ?? 'Stop'} — $addr'.trim();
     if (lat != null && lng != null) {
-      if (app == 'waze') {
-        openInApp('https://waze.com/ul?ll=$lat,$lng&navigate=yes&follow_deep=1');
-      } else {
-        openInApp('https://maps.google.com/?q=$lat,$lng');
-      }
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => InAppNavigatorScreen(destLat: lat, destLng: lng, label: label),
+      ));
       return;
     }
-    // No pin on the booking — fall back to the typed address text.
+    // No pin on the booking — fall back to the typed address text in the
+    // device default maps app. Planned fix: sender pins every pickup.
     final city = '${s['from_city'] ?? ''}'.trim();
-    final addr = '${s['address'] ?? ''}'.trim();
     final query = addr.isEmpty ? '' : '$addr${city.isNotEmpty ? ', $city' : ''}';
     if (query.isEmpty) {
       _snack('This stop has no pin or address yet — refresh, or ask ops.');
       return;
     }
-    if (app == 'waze') {
-      openInApp('https://waze.com/ul?q=${Uri.encodeComponent(query)}&navigate=yes');
-    } else {
-      openInApp('https://maps.google.com/?q=${Uri.encodeComponent(query)}');
-    }
+    openInApp('https://maps.google.com/?q=${Uri.encodeComponent(query)}');
   }
 
   Widget _navBtn(String label, String tooltip, Color bg, IconData icon, VoidCallback onTap) {
@@ -595,8 +592,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       Text('Seller: ${s['seller']} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${s['status']}'.replaceAll('_', ' '),
                           style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                     ])),
-                    _navBtn('Waze', 'Navigate to pickup (Waze)', const Color(0xFF00C1DE), Icons.navigation_rounded, () => _navigateToStop(s, 'waze')),
-                    _navBtn('Maps', 'Open in Google Maps', const Color(0xFF4285F4), Icons.place_rounded, () => _navigateToStop(s, 'gmaps')),
+                    _navBtn('Navigate', 'Navigate to pickup in the DropOff map', const Color(0xFF17855F), Icons.navigation_rounded, () => _navigateToStop(s)),
                     IconButton(
                       tooltip: 'Update stop',
                       visualDensity: VisualDensity.compact,

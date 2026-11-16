@@ -21,15 +21,20 @@ import 'track_screen.dart';
 class ChatScreen extends StatefulWidget {
   const ChatScreen.job(this.jobRef, {super.key})
       : token = null,
+        prefill = null,
         support = false;
   const ChatScreen.token(this.token, {super.key})
       : jobRef = null,
+        prefill = null,
         support = false;
-  const ChatScreen.supportThread({super.key})
+  const ChatScreen.supportThread({super.key, this.prefill})
       : jobRef = null,
         token = null,
         support = true;
 
+  /// Optional message prefilled into the input (used by "request booking
+  /// deletion" — the customer taps it, the message is typed, they hit send).
+  final String? prefill;
   final String? jobRef;
   final String? token;
   final bool support;
@@ -62,6 +67,9 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.prefill != null && widget.prefill!.isNotEmpty) {
+      _input.text = widget.prefill!;
+    }
     _refresh();
     _schedulePoll();
   }
@@ -206,7 +214,8 @@ class _ChatScreenState extends State<ChatScreen> {
         _loading = false;
       });
       _scrollToEnd();
-      if (_threadId != null) _connectWs(_threadId!);
+      final tid = _threadId;
+      if (tid != null) _connectWs(tid);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }

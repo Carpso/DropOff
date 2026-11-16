@@ -5,7 +5,6 @@ import 'package:latlong2/latlong.dart';
 
 import '../data/dropoff_api.dart';
 import '../ui/app_theme.dart';
-import '../ui/in_app_browser.dart';
 import '../widgets/rider_map.dart';
 
 /// Sender-side live rider screen: PMTiles Zambia map, fresh fix every 12s while open.
@@ -65,7 +64,11 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
       ),
       body: Column(children: [
         Expanded(child: Stack(children: [
-          RiderMap(pickup: _pickup, rider: _rider, depot: RiderMap.chibolya),
+          RiderMap(
+            pickup: _pickup,
+            rider: _rider,
+            route: (_rider != null && _pickup != null) ? [_rider!, _pickup!] : null,
+          ),
           if (_live == null || _live!['lat'] == null)
             Positioned(
               left: 12, right: 12, bottom: 12,
@@ -94,28 +97,11 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(_error, style: const TextStyle(color: AppColors.muted, fontSize: 11)),
               ),
-              const SizedBox(height: 10),
-              Row(children: [
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    icon: const Icon(Icons.navigation_rounded),
-                    label: const Text('Navigate to route', maxLines: 1, overflow: TextOverflow.ellipsis),
-                    onPressed: _rider == null
-                        ? null
-                        : () => openInApp('https://waze.com/ul?ll=${_rider!.latitude},${_rider!.longitude}&navigate=yes'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton.icon(
-                    icon: const Icon(Icons.map_outlined),
-                    label: const Text('Google Maps', maxLines: 1, overflow: TextOverflow.ellipsis),
-                    onPressed: _rider == null
-                        ? null
-                        : () => openInApp(_live?['maps_link'] as String? ?? 'https://maps.google.com/?q=${_rider!.latitude},${_rider!.longitude}'),
-                  ),
-                ),
-              ]),
+              const SizedBox(height: 8),
+              const Text(
+                'This is the DropOff live map — no Waze or Google Maps link needed. The rider pin refreshes every 12 seconds while this screen is open.',
+                style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
+              ),
             ]),
           ),
         ),

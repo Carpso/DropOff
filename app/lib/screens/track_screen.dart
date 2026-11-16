@@ -4,9 +4,9 @@ import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
-import '../ui/in_app_browser.dart';
 import '../widgets/common.dart';
 import 'chat_screen.dart';
+import 'rider_map_screen.dart';
 import '../screens/account_screen.dart';
 
 /// Recipient parcel tracking — the same view the SMS link opens, reachable
@@ -405,9 +405,11 @@ class _TrackScreenState extends State<TrackScreen> {
           ])),
           if (loc != null && loc['lat'] != null)
             IconButton(
-              tooltip: 'Open in Maps',
+              tooltip: 'Watch live on the map',
               icon: const Icon(Icons.map_outlined, color: AppColors.forest),
-              onPressed: () => openInApp('https://maps.google.com/?q=${loc['lat']},${loc['lng']}'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => RiderMapScreen(jobRef: d['ref'] as String),
+              )),
             ),
         ]),
       ),

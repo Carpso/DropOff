@@ -25,6 +25,7 @@ import '../ui/tidy.dart';
 import '../widgets/common.dart';
 import '../widgets/help_sheet.dart';
 import '../l10n/app_localizations.dart';
+import 'in_app_navigator_screen.dart';
 import 'account_screen.dart';
 import 'bookings_screen.dart';
 import 'waybill_screen.dart';
@@ -463,20 +464,32 @@ class _BookingScreenState extends State<BookingScreen> {
     setState(() {
       _plusCode = c;
       // Carry the code inside the pickup address — the rider, the depot
-      // waybill, Google Maps (via Open in Maps) and the SMS all see it.
+      // waybill and the SMS all see it.
       if (!_pickup.text.toLowerCase().contains(c.toLowerCase())) {
         _pickup.text = _pickup.text.trim().isEmpty ? c : '${_pickup.text.trim()} ($c)';
       }
-      _tidyPinLabel = 'Plus code pinned — tap Open in Maps for the rider pin';
+      _tidyPinLabel = 'Plus code pinned — tap View this pin for where it sits';
     });
   }
 
-  /// Open the raw pickup text (or plus code) in Google Maps — the app already
-  /// deep-links Maps for navigation; Tidy rides the same rail.
+  /// See the pinned pickup on the DropOff map. With GPS/Tidy coordinates this
+  /// opens in-app; a raw plus code needs a map lookup, so it falls back to the
+  /// device default maps app (kept, relabeled honestly).
   void _openInMaps() {
+    final lat = _pickupLat, lng = _pickupLng;
+    if (lat != null && lng != null) {
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => InAppNavigatorScreen(
+          destLat: lat,
+          destLng: lng,
+          label: 'Pickup pin — this is where the rider comes to',
+        ),
+      ));
+      return;
+    }
     final q = (_plusCode != null && _plusCode!.isNotEmpty) ? _plusCode! : _pickup.text.trim();
     if (q.isEmpty) return;
-    openInApp('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(q)}');
+    openInApp('https://maps.google.com/?q=${Uri.encodeComponent(q)}');
   }
 
   Future<void> _captureLocation() async {
@@ -599,9 +612,11 @@ class _BookingScreenState extends State<BookingScreen> {
       _message('Enter a valid recipient name and Zambian phone number first.');
       return;
     }
-    final res = await DropOffApi.saveRecipient({'name': name, 'phone': phone, 'city': _to});
+    final res = await AppScope.of(context).saveRecipient(name: name, phone: phone, city: _to);
     if (!mounted) return;
-    _message(res.ok ? l10n.recipientSaved : 'Could not save recipient (${res.error ?? 'try again'}).');
+    _message(res
+      ? l10n.recipientSaved
+      : 'Could not save recipient — check your connection and try again.');
   }
 
   Future<void> _submit() async {
@@ -870,7 +885,7 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 4),
           Row(children: [
             Expanded(child: Text(_tidyPinLabel!, style: const TextStyle(color: AppColors.forest, fontSize: 10.5, height: 1.3))),
-            if (_plusCode != null) TextButton(onPressed: _openInMaps, child: const Text('Open in Maps', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.forest))),
+            if (_plusCode != null) TextButton(onPressed: _openInMaps, child: const Text('View this pin', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.forest))),
           ]),
         ],
         if (_pickupLat != null && _pickupLng != null) ...[
@@ -1648,7 +1663,7 @@ class _PlanBannerState extends State<_PlanBanner> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
             child: const Text(
-              'Pay-as-you-go — rider fee per trip. The Daily Rider pass (K49/day, 1 parcel) bundles the rider fee into the plan parcel.',
+              'Pay-as-you-go — rider fee billed per trip.',
               style: AppType.caption,
             ),
           );
@@ -1729,10 +1744,13 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
       builder: (context, snap) {
         final data = snap.data;
         final p50 = (data?['minutes_p50'] as num?)?.toInt();
+        final p90 = ((data?['minutes_p90'] as num?)?.toInt() ?? p50 ?? 45).toString();
         if (p50 == null) return const SizedBox.shrink(); // no data yet — stay quiet
-        final p90 = ((data?['minutes_p90'] as num?)?.toInt() ?? p50).toString();
-        final n = (data?['sample_count'] as num?)?.toInt() ?? 0;
+        // Hide the advertised fallback — sellers reading "~50 min" are being
+        // told a fabricated number. Show only real measured averages.
         final fallback = data?['fallback'] == true;
+        final n = (data?['sample_count'] as num?)?.toInt() ?? 0;
+        if (fallback || n < 5) return const SizedBox.shrink();
         return Container(
           margin: const EdgeInsets.only(top: 8),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1746,9 +1764,7 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                fallback
-                    ? 'Delivery IQ (advertised): this courier usually reaches the depot in ~$p50 min; busy days up to $p90 min. Measured averages appear from the first pickups.'
-                    : 'Delivery IQ: this courier usually reaches the depot in ~$p50 min; busy days up to $p90 min (from $n recent pickups).',
+                'Delivery IQ: this courier usually reaches the depot in ~$p50 min; busy days up to $p90 min (from $n recent pickups).',
                 style: const TextStyle(color: AppColors.forest, fontSize: 11.5, height: 1.35),
               ),
             ),

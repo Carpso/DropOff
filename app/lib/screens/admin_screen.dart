@@ -282,6 +282,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _BranchManagerCard(),
               const SizedBox(height: 18),
+              const _BookingDeleteCard(),
+              const SizedBox(height: 18),
               const _BookingStrikesCard(),
               const SizedBox(height: 18),
               const _CounterQuoteCard(),
@@ -1369,6 +1371,40 @@ class _UsersCardState extends State<_UsersCard> {
     });
   }
 
+  Future<void> _deleteUser(Map<String, dynamic> user) async {
+    final phone = '${user['phone'] ?? ''}';
+    if (phone.isEmpty) return;
+    final name = '${user['full_name'] ?? user['email'] ?? phone}';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this account?'),
+        content: Text('Permanently remove $name ($phone) and every device session and push token.\n\nJob history, payments and audit events are kept — this is a compliance de-listing, not a data shred. The owner account cannot be deleted.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete account'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final res = await DropOffApi.deleteUser(phone, confirm: true);
+    if (!mounted) return;
+    AppToast.show(context, res.ok
+        ? '$name was deleted. Their sessions are dead.'
+        : 'Failed: ${res.error == 'superadmin_required' ? 'only the owner can delete accounts' : res.error == 'cannot_delete_owner' ? 'the owner account cannot be deleted' : res.error}');
+    if (res.ok) {
+      _load();
+      AnalyticsService.instance.track(
+        feature: 'admin_users', action: 'delete_user', context: 'admin_users',
+        meta: {'phone': phone},
+      );
+    }
+  }
+
   Future<void> _setRole(Map<String, dynamic> user, String role) async {
     final email = '${user['email'] ?? ''}';
     if (email.isEmpty || role == '${user['role'] ?? ''}') return;
@@ -1436,7 +1472,7 @@ class _UsersCardState extends State<_UsersCard> {
                         style: const TextStyle(color: AppColors.muted, fontSize: 11)),
                   ])),
                   if (superadmin) const Chip(visualDensity: VisualDensity.compact, label: Text('SUPERADMIN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)))
-                  else
+                  else ...[
                     PopupMenuButton<String>(
                       tooltip: 'Change role',
                       initialValue: role,
@@ -1454,9 +1490,120 @@ class _UsersCardState extends State<_UsersCard> {
                         label: Text(role, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                       ),
                     ),
-                ]),
+                    IconButton(
+                      tooltip: 'Delete account',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFB3261E)),
+                      onPressed: () => _deleteUser(u),
+                    ),
+                    ]]),
               );
             }),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Admin booking delete: the soft-delete the ops console has no button for.
+/// Customers can never delete bookings — only the owner/admins can, and the
+/// job stays in the DB for payments & audit (every listing filters on
+/// status != 'deleted').
+class _BookingDeleteCard extends StatefulWidget {
+  const _BookingDeleteCard();
+
+  @override
+  State<_BookingDeleteCard> createState() => _BookingDeleteCardState();
+}
+
+class _BookingDeleteCardState extends State<_BookingDeleteCard> {
+  final _ref = TextEditingController();
+  bool _busy = false;
+
+  Future<void> _delete() async {
+    final ref = _ref.text.trim().toUpperCase();
+    if (ref.isEmpty) {
+      AppToast.show(context, 'Enter the job ref (e.g. DRO-2026-000123).');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this booking?'),
+        content: Text('Remove $ref from every user-facing list (sender, recipient, rider, dispatch queues). Payments, history and audit events are kept. Collections and courier counter fares are untouched.\n\nThis cannot be undone from the app.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete booking'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => _busy = true);
+    final res = await DropOffApi.deleteJob(ref);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (res.ok) {
+      _ref.clear();
+      AppToast.show(context, 'Booking $ref deleted from all lists.');
+      AnalyticsService.instance.track(
+        feature: 'admin_jobs', action: 'delete_booking', context: 'admin_delete_booking',
+        meta: {'ref': ref},
+      );
+    } else {
+      AppToast.show(context, res.error == 'admin_required'
+          ? 'Admins only.'
+          : 'Failed: ${res.error ?? 'try again'}');
+    }
+  }
+
+  @override
+  void dispose() {
+    _ref.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.delete_outline, color: Color(0xFFB3261E)),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Delete a booking', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          ]),
+          const SizedBox(height: 4),
+          const Text('Only the owner and admins can delete a booking. Customers see a request-delete button that messages support — their data stays unless staff act on it. Deleting keeps payments and audit events for the books.',
+              style: AppType.caption),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _ref,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  labelText: 'Job ref',
+                  hintText: 'DRO-2026-000123',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+              onPressed: _busy ? null : _delete,
+              icon: _busy
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.delete_outline, size: 18),
+              label: const Text('Delete'),
+            ),
+          ]),
         ]),
       ),
     );

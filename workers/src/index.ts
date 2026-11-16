@@ -693,7 +693,9 @@ async function trackAccess(c: any, token: string): Promise<TrackAccess> {
   const job = await db.prepare(
     `SELECT t.job_id, j.sender_phone, j.recipient_phone, j.recipient_name
        FROM tracking_tokens t JOIN jobs j ON j.id = t.job_id
-      WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+      WHERE t.token = ?1
+        AND COALESCE(j.status, '') != 'deleted'
+        AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
   ).bind(token).first<any>();
   const base = {
     jobId: job ? (job.job_id as number) : null,
@@ -2459,6 +2461,7 @@ app.get('/jobs', async (c) => {
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
         LEFT JOIN riders r ON r.id = j.rider_id
       WHERE j.sender_phone = ?1 AND j.id < ?2
+         AND COALESCE(j.status, '') != 'deleted'
       ORDER BY j.id DESC LIMIT ?3`,
   ).bind(phone, afterBind, limit + 1).all();
   const hasMore = results.length > limit;
@@ -3265,7 +3268,9 @@ app.get('/track/:token', async (c) => {
        JOIN jobs j ON j.id = t.job_id
        LEFT JOIN couriers co ON co.id = j.courier_id
        LEFT JOIN riders r ON r.id = j.rider_id
-      WHERE t.token = ?1 AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
+      WHERE t.token = ?1
+         AND COALESCE(j.status, '') != 'deleted'
+         AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))`,
   ).bind(c.req.param('token')).first<any>();
   if (!row) return c.json({ error: 'not found' }, 404);
   // Payment-held parcels show a held notice instead of live status (owner
@@ -3343,6 +3348,7 @@ app.get('/track/incoming', async (c) => {
        LEFT JOIN couriers co ON co.id = j.courier_id
        LEFT JOIN tracking_tokens t ON t.job_id = j.id
       WHERE j.recipient_phone = ?1
+         AND COALESCE(j.status, '') != 'deleted'
       ORDER BY j.id DESC LIMIT ?2`,
   ).bind(phone, limit).all();
   const APP_URL = (c.env.APP_URL ?? '').replace(/\/$/, '');
@@ -7857,6 +7863,49 @@ app.delete('/admin/riders/:id', async (c) => {
     c.env.DB.prepare(`DELETE FROM riders WHERE id = ?1`).bind(id),
   ]);
   return c.json({ ok: true, deleted: true, id, name: existing.full_name });
+});
+
+// Soft-delete a booking: status='deleted' + audit event. Every normal queue /
+// cron / dispatch query filters on status NOT IN (...) so the booking is
+// invisible instantly, with payments & events retained for audit.
+app.post('/admin/jobs/:ref/delete', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const ref = String(c.req.param('ref') ?? '').trim();
+  if (!ref) return c.json({ error: 'ref required' }, 400);
+  const row = await c.env.DB.prepare(
+    `SELECT id, ref, status FROM jobs WHERE ref = ?1`,
+  ).bind(ref).first<any>();
+  if (!row) return c.json({ error: 'not found' }, 404);
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE jobs SET status = 'deleted' WHERE id = ?1`).bind(row.id),
+    c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'admin_deleted', 'Booking deleted by admin')`).bind(row.id),
+  ]);
+  return c.json({ ok: true, ref: row.ref });
+});
+
+// Admin DELETE user (superadmin only): wipe the auth row, push tokens and
+// device sessions so no session survives. Job history is kept (jobs have
+// sender_phone referencing the phone) — this is a compliance de-listing, not
+// a data shred. Refuses to delete the owner account.
+app.delete('/admin/users/:phone', async (c) => {
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const phone = String(c.req.param('phone') ?? '').trim();
+  if (!phone) return c.json({ error: 'phone required' }, 400);
+  if (phone === ownerPhone(c.env)) return c.json({ error: 'cannot_delete_owner' }, 403);
+  const target = await c.env.DB.prepare(
+    'SELECT phone FROM auth_users WHERE phone = ?1',
+  ).bind(phone).first<any>();
+  if (!target) return c.json({ error: 'not found' }, 404);
+  const b: any = await c.req.json().catch(() => ({}));
+  if (b?.confirm !== true && b?.confirm !== 'DELETE') {
+    return c.json({ error: 'confirm_required', detail: 'Pass {"confirm": true} to delete a user.' }, 400);
+  }
+  await c.env.DB.batch([
+    c.env.DB.prepare(`DELETE FROM auth_users WHERE phone = ?1`).bind(phone),
+    c.env.DB.prepare(`DELETE FROM push_tokens WHERE phone = ?1`).bind(phone),
+    c.env.DB.prepare(`DELETE FROM device_sessions WHERE phone = ?1`).bind(phone),
+  ]);
+  return c.json({ ok: true, deleted: true, phone });
 });
 
 app.post('/admin/riders/:id/verify', async (c) => {

@@ -1,6 +1,6 @@
 # Play Store release checklist
 
-App id: `zm.dropoff.dropoff` - current version `0.5.1+12` (`pubspec.yaml`).
+App id: `zm.dropoff.dropoff` - current version `0.5.27+38` (`pubspec.yaml`).
 
 ## 1. Upload keystore (one-time)
 
@@ -35,7 +35,7 @@ powershell -File tools\build_release.ps1
 
 (cleans first, runs analyze/test, builds APK + AAB, copies to `dist/`)
 
-Output: `dist/DropOff-0.5.1-release.aab`.
+Output: `dist/DropOff-<version>-release.aab` (matches `pubspec.yaml`).
 
 Do **not** pass `DROPOFF_API_KEY` in a store build — the ops key must never ship
 to customers. Only `DROPOFF_API_URL` belongs in the Play build.
@@ -81,8 +81,8 @@ mirrors its in-app copy.)
 5. **Countries**: Zambia (plus any market the pricebook covers).
 6. **Release production**:
    - *Promote track -> Production, countries -> Zambia, release name
-     "0.5.1 (12) — Handover codes & proof of delivery"*.
-   - Upload `dist/DropOff-0.5.1-release.aab` into a NEW production release.
+     "0.5.27 (38) — Held bookings unmissable + fully in-app map"*.
+   - Upload `dist/DropOff-0.5.27-release.aab` into a NEW production release.
    - Choose **staged rollout 10%** first (small user base: 10% of <100 is
      statistically silent — either pick 10% for caution or 100% given testers
      already validated 0.5.0; for a first production release, 100% in Zambia
@@ -163,18 +163,18 @@ Questions? support@carpsosolutions.store
 5. Recipient tracking page (SMS link) showing handover code hint.
 6. Task queue (rider) with proof-of-delivery dialog.
 
-### Release notes (0.5.1+12)
+### Release notes (0.5.27+38)
 ```
-* Handover codes: recipients now get a 4-digit DropOff code for door
-  deliveries — the delivery only completes with the right code. Protects
-  sellers from false-parcel claims.
-* Proof-of-delivery photos on every leg from the rider queue.
-* Parcels can now carry a declared value (K1-K1,000,000) for quoted-protection
-  cover (never insurance — payout is at DropOff's discretion) and compliance.
-* Book a pickup for tomorrow morning (06:00 sweep) directly from the app.
-* Subscriptions renamed to Packs — clearer pricing, easier upgrades.
-* Camera capture fixes on profile & rider KYC; text scaling fixed on all
-  screens.
+* Bookings held for prepayment now show as "Booking held — payment pending"
+  on My Bookings, with the pay path one tap away. No rider until it clears.
+* The DropOff live map is now fully in-app: live rider tracking, the
+  recipient tracking page and rider navigation all run on our own map —
+  no more broken Waze or Google Maps links.
+* Customers can ask for a booking to be deleted (support chat, one tap);
+  only DropOff staff can delete a booking or an account. Your history
+  stays unless staff act.
+* Waybill/depot receipt unlocks only after payment; delivery-time hints
+  show measured averages only.
 ```
 
 ## 6. Verify before promoting
@@ -206,17 +206,34 @@ Questions? support@carpsosolutions.store
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 9. What is new in 0.5.1+12
+## 9. What is new in 0.5.27+38
 
-- **Handover codes + proof of delivery** — recipients get a 4-digit code; door
-  deliveries require it; riders file evidence photos per leg (this run).
-- Booking a collection - precise errors instead of silent failures.
-- Declared parcel value per booking, cloned on repeat bookings.
-- Tomorrow 06:00 slots on jobs + collections.
-- Account-scoped local storage (privacy fix), email login, biometric unlock.
-- Device-security alerts name the exact device; PBKDF2 fixed for Workers.
-- Lipila narration sanitisation + production base switch (chisomo playbook).
+- **Payment-held bookings are unmissable** — My Bookings shows a red
+  "Booking held — payment pending" banner with the one-tap pay path; the
+  prepayment card stays inside the booking as before. Riders booking for
+  themselves see the same path.
+- **Fully in-app map** — DropOff's own Protomaps PMTiles basemap (Zambia /
+  Zimbabwe / Malawi / Mozambique, R2-hosted) replaces every Waze/Google Maps
+  deep-link: sender live map with rider→pickup route line, recipient watch
+  page, rider in-app navigator with distance + city-pace ETA, batched stops
+  with numbered pins. Turn-by-turn voice routing is a routing-engine decision
+  and stays on the roadmap — nothing external is load-bearing anymore.
+- **Deletes are staff-only** — customers cannot delete a booking; a
+  "Request deletion" one-tap opens support chat with the ref prefilled.
+  Admins delete bookings in the console (soft delete; payments and audit
+  kept); deleting an account is owner-only and removes sessions, push
+  tokens and the auth row (history kept). The owner account is refused.
+- **Truth in UI** — waybill/depot receipt appears only after payment;
+  Delivery IQ shows measured p50/p90 with n≥5 only (advertised fallback
+  hidden); counter-fare wording matches the depot.
+- **Soft-delete for jobs** — every user-facing listing (sender timeline,
+  recipient incoming, tracking token resolve) filters out `status='deleted'`.
+- Typo scale (AppType) across the app; EmptyState redesigned; help copy
+  moved behind "?" in help sheets.
 
-Historical (0.4.x) notes: mail/OTP hardening, rider selfie AI review,
-media prefix-scoping, recipient auto-claimed parcels, DropOff Predict,
-Daily Rider plan, subscription-plan usage across all normal deliveries.
+Historical (0.5.1+12, 0.5.26+37 and earlier) highlights: handover codes +
+proof of delivery, Tidy address pinning, algorithmic rider dispatch,
+plan caps for day-cycles, Live Lipila collect with pending-prompt display,
+tracking lock for unpaid bookings, payment reminders pause/resume,
+admin bearer-key gates on every /admin route, `/admin/jobs/:ref/delete`
+and `/admin/users/:phone` endpoints.

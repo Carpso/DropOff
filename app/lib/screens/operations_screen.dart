@@ -12,7 +12,7 @@ import '../data/dropoff_api.dart';
 import '../state/app_store.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
-import '../ui/in_app_browser.dart';
+import 'in_app_navigator_screen.dart';
 import '../widgets/common.dart';
 import 'rider_queue_screen.dart';
 
@@ -941,7 +941,13 @@ class _SmartRouteCardState extends State<_SmartRouteCard> {
                       IconButton(
                         icon: const Icon(Icons.navigation_rounded, color: AppColors.forest),
                         tooltip: 'Navigate this stop',
-                        onPressed: () => openInApp('https://waze.com/ul?ll=${stops[i]['lat']},${stops[i]['lng']}&navigate=yes&follow_deep=1'),
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                          builder: (_) => InAppNavigatorScreen(
+                            destLat: (stops[i]['lat'] as num).toDouble(),
+                            destLng: (stops[i]['lng'] as num).toDouble(),
+                            label: '${stops[i]['ref'] ?? 'Stop ${i + 1}'} — ${stops[i]['address'] ?? ''}',
+                          ),
+                        )),
                       ),
                     ]),
                   ),

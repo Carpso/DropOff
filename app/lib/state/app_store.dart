@@ -27,6 +27,7 @@ class AppStore extends ChangeNotifier {
   String get _bookingsKey => _scoped('bookings');
   String get _ridersKey => _scoped('riders');
   String get _outboxKey => _scoped('outbox');
+  String get _recipientsOutboxKey => _scoped('recipients_outbox');
   String get _secureTokenKey => _scoped('jwt');
   String get _fallbackTokenKey => _scoped('jwt_mirror');
   String get _tokenKey => _scoped('jwt_legacy_mirror');
@@ -36,6 +37,7 @@ class AppStore extends ChangeNotifier {
   final List<Booking> _bookings = [];
   final List<Rider> _riders = [];
   final List<Map<String, dynamic>> _outbox = [];
+  final List<Map<String, dynamic>> _recipientsOutbox = [];
   bool _ready = false;
   String? _token;
   String? _linkedPhone;
@@ -319,6 +321,47 @@ class AppStore extends ChangeNotifier {
     }
     unawaited(DropOffApi.flushRatingOutbox());
     unawaited(AnalyticsService.instance.flush());
+    await flushRecipientsOutbox();
+  }
+
+  /// Queue or send a recipient right now, depending on connectivity. Returns
+  /// true iff the server (or the outbox) has it.
+  Future<bool> saveRecipient({required String name, required String phone, required String city}) async {
+    if (!DropOffApi.enabled) return false;
+    final payload = {'name': name, 'phone': phone, 'city': city};
+    final res = await DropOffApi.saveRecipient(payload);
+    if (res.ok) return true;
+    if (res.error == 'network_error' || res.error == 'offline_demo_mode') {
+      _recipientsOutbox.add(payload);
+      await _persistRecipientsOutbox();
+      notifyListeners();
+      return true; // queued locally — syncs later
+    }
+    return false;
+  }
+
+  Future<void> flushRecipientsOutbox() async {
+    if (!DropOffApi.enabled || !linked || _recipientsOutbox.isEmpty) return;
+    final remaining = <Map<String, dynamic>>[];
+    for (final recipient in List<Map<String, dynamic>>.from(_recipientsOutbox)) {
+      final res = await DropOffApi.saveRecipient(recipient);
+      if (!res.ok) {
+        if (res.error == 'network_error' || res.error == 'offline_demo_mode') remaining.add(recipient);
+        // server rejected (e.g. duplicate) — drop it so the outbox doesn't wedge
+      }
+    }
+    if (remaining.length != _recipientsOutbox.length) {
+      _recipientsOutbox
+        ..clear()
+        ..addAll(remaining);
+      await _persistRecipientsOutbox();
+      notifyListeners();
+    }
+  }
+
+  Future<void> _persistRecipientsOutbox() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_recipientsOutboxKey, jsonEncode(_recipientsOutbox));
   }
 
   /// Phone-OTP device link: request the SMS code, then confirm it.
@@ -514,10 +557,15 @@ class AppStore extends ChangeNotifier {
       if (outboxJson != null) {
         _outbox.addAll((jsonDecode(outboxJson) as List).cast<Map<String, dynamic>>());
       }
+      final recipientsJson = preferences.getString(_recipientsOutboxKey);
+      if (recipientsJson != null) {
+        _recipientsOutbox.addAll((jsonDecode(recipientsJson) as List).cast<Map<String, dynamic>>());
+      }
     } catch (_) {
       await preferences.remove(_bookingsKey);
       await preferences.remove(_ridersKey);
       await preferences.remove(_outboxKey);
+      await preferences.remove(_recipientsOutboxKey);
       _bookings.clear();
       _riders.clear();
       _outbox.clear();
@@ -554,6 +602,7 @@ class AppStore extends ChangeNotifier {
     _bookings.clear();
     _riders.clear();
     _outbox.clear();
+    _recipientsOutbox.clear();
     DropOffApi.token = null;
     await _secureStorage.delete(key: _secureTokenKey);
     // Locale is an account preference, not a device one — wipe it so the next
@@ -566,6 +615,13 @@ class AppStore extends ChangeNotifier {
     // account must opt in explicitly, never inherit a pass.
     _biometricEnabled = false;
     await prefs.remove(_biometricKey);
+    // Queued offline recipient saves belong with the signing-out account only.
+    try {
+      await prefs.remove(_recipientsOutboxKey);
+    } catch (_) {
+      /* best-effort */
+    }
+    _recipientsOutbox.clear();
     // Remember-me opt-in is per-account — next sign-in must choose fresh.
     await prefs.remove(_rememberKey);
     final preferences = await SharedPreferences.getInstance();

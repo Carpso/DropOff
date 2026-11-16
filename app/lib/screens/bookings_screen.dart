@@ -215,13 +215,45 @@ class BookingCard extends StatelessWidget {
               const Icon(Icons.chevron_right, color: AppColors.muted),
             ]),
             const SizedBox(height: 16),
+            // UNPAID / HELD booking — the one thing a sender must not miss.
+            // It shows the exact state their money is in and the way to pay,
+            // instead of looking like a normal "placed" parcel.
+            if (booking.paymentHeld) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0x14B3261E),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0x66B3261E)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.lock_clock_outlined, size: 20, color: Color(0xFFB3261E)),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Booking held — payment pending', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: Color(0xFFB3261E))),
+                    const SizedBox(height: 2),
+                    const Text('No rider is assigned until the prepayment lands. Tap to open and pay.', style: TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.35)),
+                  ])),
+                  const Icon(Icons.chevron_right, color: Color(0xFFB3261E)),
+                ]),
+              ),
+            ],
             Row(children: [
               Expanded(child: Text(booking.reference, style: const TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w600))),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: complete ? const Color(0xFFE3EFE6) : const Color(0xFFFFF1D2), borderRadius: BorderRadius.circular(20)),
-                child: Text(booking.timeline[booking.stage], style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: complete ? AppColors.forest : const Color(0xFF7B5710))),
-              ),
+              if (booking.paymentHeld)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(color: const Color(0xFFFFF1D2), borderRadius: BorderRadius.circular(20)),
+                  child: const Text('PAYMENT PENDING', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFFB3261E))),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(color: complete ? const Color(0xFFE3EFE6) : const Color(0xFFFFF1D2), borderRadius: BorderRadius.circular(20)),
+                  child: Text(booking.timeline[booking.stage], style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: complete ? AppColors.forest : const Color(0xFF7B5710))),
+                ),
             ]),
           ]),
         ),
@@ -391,17 +423,21 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             ),
           ]),
         ],
-        // Depot counter receipt / waybill — always available, no network needed.
-        const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: OutlinedButton.icon(
-            icon: const Icon(Icons.receipt_long_outlined),
-            label: const Text('Depot receipt / waybill'),
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => WaybillScreen(bookingId: booking.id),
+        // Depot counter receipt / waybill — only visible after payment lands.
+        // Before the momo/prepayment settles, there is nothing to print yet and
+        // an empty waybill risks misuse.
+        if (!booking.paymentHeld) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              icon: const Icon(Icons.receipt_long_outlined),
+              label: const Text('Depot receipt / waybill'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => WaybillScreen(bookingId: booking.id),
+              )),
             )),
-          )),
-        ]),
+          ]),
+        ],
         const SizedBox(height: 8),
         Center(
           child: Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
@@ -455,6 +491,20 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                 },
               ),
           ]),
+        ),
+        const SizedBox(height: 12),
+        // REQUEST-DELETE (customer): customers can never delete a booking —
+        // deleting drops proof for the depot counter and payments. They ask
+        // support; staff delete it from the admin console if it's granted.
+        Center(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => ChatScreen.supportThread(
+                prefill: 'Please delete booking #${booking.reference} — it is no longer needed. I am the sender.',
+              ),
+            )),
+            child: const Text('Request deletion of this booking', style: TextStyle(fontSize: 12.5, color: AppColors.muted, decoration: TextDecoration.underline)),
+          ),
         ),
         const SizedBox(height: 12),
         const Text('Rider controls update this device. Photo proof, courier waybill upload and seller notifications run through the linked backend.', textAlign: TextAlign.center, style: AppType.caption),

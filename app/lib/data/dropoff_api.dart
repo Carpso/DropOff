@@ -1164,6 +1164,16 @@ class DropOffApi {
   static Future<ApiResponse> deleteRider(int id, {bool confirm = false}) =>
       delete('/admin/riders/$id', body: {'confirm': confirm});
 
+  /// Admin: soft-delete a booking. The job stays (payments/events kept for audit)
+  /// but every user-facing listing excludes it; no real delete exists.
+  static Future<ApiResponse> deleteJob(String ref) =>
+      post('/admin/jobs/$ref/delete', const {}, admin: true);
+
+  /// Superadmin: remove an auth user (and their device sessions + push tokens).
+  /// Owner account is refused server-side.
+  static Future<ApiResponse> deleteUser(String phone, {bool confirm = false}) =>
+      delete('/admin/users/$phone', body: {'confirm': confirm});
+
   /// DISPATCH AUTOMATION (owner directive 2026-11-15): staff never hand-pick a
   /// rider by default — the server's algorithm picks the nearest AVAILABLE,
   /// verified rider with free capacity (ties broken by load).
