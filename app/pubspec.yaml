@@ -4,7 +4,7 @@
 name: dropoff
 description: DropOff - home or shop pickup to your chosen Zambian courier depot.
 publish_to: "none"
-version: 0.5.30+40
+version: 0.5.31+41
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -12,9 +12,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_localizations:
-    sdk: flutter
-  intl: any
   http: ^1.2.2
   shared_preferences: ^2.3.2
   cupertino_icons: ^1.0.8
@@ -64,7 +61,6 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
-  generate: true
   assets:
     - assets/brand/
     - assets/images/

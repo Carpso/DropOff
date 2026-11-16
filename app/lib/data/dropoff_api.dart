@@ -1177,6 +1177,16 @@ class DropOffApi {
   static Future<ApiResponse> deleteUser(String phone, {bool confirm = false}) =>
       delete('/admin/users/$phone', body: {'confirm': confirm});
 
+  /// Admin: edit a user's details — the "add email to a number" flow.
+  /// Setting an email marks it verified (the admin attests it), so the
+  /// account can sign in with password immediately. Admin key's own account
+  /// and other admin accounts are refused server-side.
+  static Future<ApiResponse> adminUpdateUser(String phone, {String? email, String? fullName}) =>
+      post('/admin/users/$phone/update', {
+        if (email != null) 'email': email,
+        if (fullName != null) 'full_name': fullName,
+      }, admin: true);
+
   /// DISPATCH AUTOMATION (owner directive 2026-11-15): staff never hand-pick a
   /// rider by default — the server's algorithm picks the nearest AVAILABLE,
   /// verified rider with free capacity (ties broken by load).

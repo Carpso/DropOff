@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:ui' show Locale;
 
 import 'package:flutter/foundation.dart';
 import '../services/secure_store.dart';
@@ -45,7 +44,6 @@ class AppStore extends ChangeNotifier {
   String? _role;
   String? _photoUrl;
   String? _fullName;
-  String? _localeCode;
   bool _superadmin = false;
   /// Live-position broadcasting defaults ON once a rider signs in. The rider
   /// can flip it off any time; it only fires when GPS is granted anyway.
@@ -68,8 +66,6 @@ class AppStore extends ChangeNotifier {
   /// photo on file — views fall back to initials.
   String? get photoUrl => _photoUrl;
   String? get fullName => _fullName;
-  String? get localeCode => _localeCode == null || _localeCode!.isEmpty ? 'en' : _localeCode;
-  Locale? get locale => Locale(localeCode ?? 'en');
 
   /// Server role for the signed-in identity: customer | partner | admin | ops |
   /// rider. Admin/ops unlock the Team tab and the admin console; rider unlocks
@@ -192,7 +188,6 @@ class AppStore extends ChangeNotifier {
     DropOffApi.token = _token;
     _linkedPhone = preferences.getString(_phoneKey);
     _email = preferences.getString(_emailKey);
-    _localeCode = preferences.getString(_scoped('locale'));
     await _reloadAccountCache();
     // Team roster is the server's list (shared across admins/devices) —
     // sync it on every cold start so it never resets to empty on this device.
@@ -220,21 +215,6 @@ class AppStore extends ChangeNotifier {
     if (DropOffApi.enabled) unawaited(refreshRole());
   }
 
-  Future<void> setLocaleCode(String? code) async {
-    final normalized = (code == null || code.trim().isEmpty) ? null : code.trim().toLowerCase();
-    if (normalized == _localeCode) return;
-    _localeCode = normalized;
-    final preferences = await SharedPreferences.getInstance();
-    if (normalized != null) {
-      await preferences.setString(_scoped('locale'), normalized);
-    } else {
-      await preferences.remove(_scoped('locale'));
-    }
-    notifyListeners();
-    if (DropOffApi.enabled && linked) {
-      await DropOffApi.patchMe({'locale_pref': normalized});
-    }
-  }
 
   /// Pulls the signed-in identity's role from GET /me so the shell can hide
   /// Team/admin surfaces from ordinary sellers and recipients. Runs even
@@ -250,31 +230,15 @@ class AppStore extends ChangeNotifier {
     final photo = me['photo_url'] as String?;
     final name = me['full_name'] as String?;
     final email = me['email'] as String?;
-    final loc = me['locale_pref'] as String?;
-    // The language choice saved ON THIS DEVICE is authoritative: an explicit
-    // pick in the picker must never be silently reverted by a /me refresh
-    // (cold start, sign-in, photo flows) — otherwise the user is stuck in
-    // whatever the server last knew about, e.g. 'ny'. The server only seeds
-    // devices that have no choice saved yet.
     final preferences = await SharedPreferences.getInstance();
-    final localChoice = preferences.getString(_scoped('locale'));
-    final wantedLoc = (localChoice != null && localChoice.isNotEmpty)
-        ? localChoice
-        : ((loc == null || loc.isEmpty) ? null : loc);
-    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email || wantedLoc != _localeCode) {
+    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email) {
       _role = role;
       _superadmin = sa;
       _photoUrl = photo;
       _fullName = name;
-      _localeCode = wantedLoc;
       if (email != null) {
         _email = email;
         await preferences.setString(_emailKey, email);
-      }
-      if (_localeCode != null) {
-        await preferences.setString(_scoped('locale'), _localeCode!);
-      } else {
-        await preferences.remove(_scoped('locale'));
       }
       notifyListeners();
     }
@@ -605,12 +569,6 @@ class AppStore extends ChangeNotifier {
     _recipientsOutbox.clear();
     DropOffApi.token = null;
     await _secureStorage.delete(key: _secureTokenKey);
-    // Locale is an account preference, not a device one — wipe it so the next
-    // account never inherits the last user's language.
-    if (prev != 'anon') {
-      await prefs.remove(_scoped('locale'));
-    }
-    _localeCode = null;
     // Biometric enrollment is tied to the account that turned it on — the next
     // account must opt in explicitly, never inherit a pass.
     _biometricEnabled = false;
@@ -627,7 +585,7 @@ class AppStore extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
     if (prev != 'anon') {
       // Enumerate every scoped key we track...
-      for (final name in const ['bookings', 'riders', 'outbox', 'jwt', 'jwt_mirror', 'jwt_legacy_mirror', 'phone', 'email', 'locale']) {
+      for (final name in const ['bookings', 'riders', 'outbox', 'jwt', 'jwt_mirror', 'jwt_legacy_mirror', 'phone', 'email']) {
         await preferences.remove(_scoped(name));
       }
       // ...then ALSO sweep any residue under the same account prefix — belt and

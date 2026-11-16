@@ -163,19 +163,21 @@ Questions? support@carpsosolutions.store
 5. Recipient tracking page (SMS link) showing handover code hint.
 6. Task queue (rider) with proof-of-delivery dialog.
 
-### Release notes (0.5.29+40)
+### Release notes (0.5.31+41)
 ```
-* Zambian phone numbers fixed — ZICTA's new mobile ranges (057 Airtel,
-  056 MTN, 055 Zamtel, and Beeline 058/078/098) are now accepted at
-  signup, booking, booking creation, collections and SMS. ZICTA's
-  December 2024 numbering plan is honoured.
-* Bookings held for prepayment now show as "Booking held — payment pending"
-  on My Bookings, with the pay path one tap away. No rider until it clears.
-* The DropOff map is ours end-to-end: live rider tracking, recipient map
-  and rider navigation all on our basemap — no Waze or Google Maps links.
-  Road-following routes unlock when the DropOff router is switched on.
-* Held bookings, unpaid delivery-time hints and the waybill stay locked
-  until payment; delivery-time hints show measured averages only.
+* Signed-in errors simply report in. Unhandled app errors now report
+  themselves to DropOff (anonymous, deduped) so crashes get fixed fast —
+  no action needed from you.
+* Admins can edit a user's details — set or fix a customer's email so they
+  can sign in with password, or update their name. Admin-only and audited.
+* Zambian phone numbers fixed (ZICTA's 2024 plan: 057 Airtel, 056 MTN,
+  055 Zamtel, Beeline 058/078/098 all accepted).
+* Bookings held for prepayment show "Booking held — payment pending"
+  one tap away on My Bookings. No rider until it clears.
+* DropOff runs its own map — live rider tracking, recipient tracking and
+  rider navigation, all in-app. No Waze or Google Maps links.
+* Simplified release — English only; the phone settings now cover
+  everything. Stability and polish throughout.
 ```
 
 ## 6. Verify before promoting
@@ -207,36 +209,25 @@ Questions? support@carpsosolutions.store
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 9. What is new in 0.5.29+40
+## 9. What is new in 0.5.31+41
 
-- **ZICTA 2024 numbering plan honoured — book with any live mobile number**:
-  new mobile ranges 055 (Zamtel), 056 (MTN), 057 (Airtel), Beeline 058/078/098
-  and existing 75/76/77/95/96/97 all normalise to 260XXXXXXXXX everywhere
-  (signup, booking, collections, SMS, payments, blocking). VoIP (6x) and
-  premium-rate (90) are rejected; fixed lines were never mobile-charging
-  rails. Source: ITU Operational Bulletin, Communication of 24.XII.2024.
-- **One admin role**: superadmin == admin everywhere — the console no longer
-  distinguishes them; the master account can never be deleted/demoted
-  (server-side, silent).
-- **Payment-held bookings are unmissable** — My Bookings shows a red
-  "Booking held — payment pending" banner with the one-tap pay path; the
-  prepayment card stays inside the booking as before. Riders booking for
-  themselves see the same path.
-- **Fully in-app map** — DropOff's own Protomaps PMTiles basemap (Zambia /
-  Zimbabwe / Malawi / Mozambique, R2-hosted) replaces every Waze/Google Maps
-  deep-link. This release: live rider tracking with a green route line, live
-  route line that re-routs as the rider moves, numbered batched stop pins,
-  zoom controls, re-fit, Photon type-ahead place search biased to Zambia, and
-  turn-by-turn cue sheet scaffolding. Road-following routes via the
-  self-hosted router (infra/router/) — the app never makes unsupported
-  calls; the Worker proxy returns 503 until the router is switched on.
-- **Client crash reporting, in-house**: the app posts unhandled errors to
-  `/client/error` (rate-limited, deduped per device+stack) — visible in the
-  admin console under "Client crashes" per 24h. No third-party account needed.
-- **Monitoring bridge**: the Worker records 5xx/crashes to D1 (`error_events`)
-  and pings the admin on 5xx storms and dead pipelines (daily check inside
-  the 19:00 cron). Africa's Talking STOP is honoured for marketing SMS;
-  transactional SMS is never blocked. Terms live at `/legal/terms`.
+- **DropOff is now English-only** — the ny/bem/toi/loz catalogue (ARB files,
+  generated l10n classes, `l10n.yaml`, `flutter_localizations`/`intl`, the
+  in-app language picker, `locale_pref` sync) is fully removed. Fewer
+  ambiguous machine-translation surfaces; single canonical copy.
+- **Admin edit user details** — Accounts & roles → pencil on a
+  non-admin row → full name + email. Emails set by an admin are marked
+  verified (admin attestation), so the number can sign in with password
+  immediately; server refuses edits to the master admin account and to other
+  admin rows, and checks uniqueness before saving.
+- **Client crash reporting, in-house** — unhandled app errors post to
+  `/client/error` (rate-limited, deduped per device+stack) — visible in
+  admin console "Client crashes".
+
+Engineering notes carried over from the previous waves: ZICTA 2024 numbering,
+one admin role, audit-restore drill completed, 5xx D1 ledger + admin SMS on
+storms, Africa's Talking STOP honoured, terms live, `/legal/terms`.
+
 - **Deletes are staff-only** — customers cannot delete a booking; a
   "Request deletion" one-tap opens support chat with the ref prefilled.
   Admins delete bookings in the console (soft delete; payments and audit

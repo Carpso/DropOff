@@ -8,9 +8,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'l10n/app_localizations.dart';
 import 'ui/keys.dart';
 import 'data/catalog.dart' as cat;
 import 'screens/couriers_screen.dart';
@@ -205,17 +203,9 @@ class DropOffApp extends StatelessWidget {
           builder: (context, _) => MaterialApp(
             navigatorKey: navigatorKey,
             scaffoldMessengerKey: scaffoldMessengerKey,
-            onGenerateTitle: (ctx) => AppLocalizations.of(ctx).appTitle,
+            title: 'DropOff',
             debugShowCheckedModeBanner: false,
             theme: buildAppTheme(),
-            locale: store.locale,
-            localizationsDelegates: const [
-              AppLocalizations.delegate,
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
-            supportedLocales: AppLocalizations.supportedLocales,
             // Universal text-scale clamp: wrap EVERY screen so a large system
             // font can never crush a row/card into a vertical letter-per-line
             // ribbon (Business "No plan yet", Parcels in flight, stats, …).

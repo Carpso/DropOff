@@ -14,7 +14,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
-import '../l10n/app_localizations.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../ui/in_app_browser.dart';
@@ -154,17 +153,16 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Future<void> _advanceStop(Map<String, dynamic> s) async {
     final String ref = '${s['ref']}';
     if (_busyRef != null) return;
-    final l10n = AppLocalizations.of(context);
-    await showModalBottomSheet<void>(
+      await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(padding: const EdgeInsets.all(14), child: Text(l10n.riderStopTitle,
+          Padding(padding: const EdgeInsets.all(14), child: Text('How did the parcel move on?',
             style: AppType.subhead)),
           ListTile(
             leading: const Icon(Icons.local_shipping_outlined),
-            title: Text(l10n.riderPickedUp),
-            subtitle: Text(l10n.riderPickedUpSub),
+            title: Text('Picked up from the seller'),
+            subtitle: Text('File it before leaving the stop'),
             trailing: _busyRef == ref ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
             onTap: () async {
               final photo = await _pickPodPhoto();
@@ -174,7 +172,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               if (!mounted) return;
               setState(() => _busyRef = null);
               Navigator.pop(ctx);
-              await _snack(res.ok ? '$ref ✓ ${l10n.riderPickedUp}' : 'Could not update (${res.error})');
+              await _snack(res.ok ? '$ref ✓ ${'Picked up from the seller'}' : 'Could not update (${res.error})');
               if (res.ok) {
                 AnalyticsService.instance.track(feature: 'rider', action: 'picked_up', context: 'depot_stop');
                 _load();
@@ -190,19 +188,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           // cash from senders, ever.
           ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
-            title: Text(l10n.riderDepotDrop),
-            subtitle: Text(l10n.riderDepotDropSub),
+            title: Text('Dropped at the depot branch'),
+            subtitle: Text('Camera photo marks the handover — no fare to enter'),
             onTap: () => _depotDropWithReceipt(ctx, ref),
           ),
           ListTile(
             leading: const Icon(Icons.home_outlined),
-            title: Text(l10n.riderDoorDrop),
-            subtitle: Text(l10n.riderDoorDropSub),
+            title: Text('Handed to the recipient (door)'),
+            subtitle: Text('Requires their 4-digit DropOff code'),
             onTap: () => _deliverToDoor(ctx, ref),
           ),
           ListTile(
             leading: const Icon(Icons.close),
-            title: Text(l10n.riderNotYet),
+            title: Text('Not yet — go back'),
             onTap: () => Navigator.pop(ctx),
           ),
         ]),
@@ -344,10 +342,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     );
     if (!mounted) return;
     if (res == null) return; // cancelled
-    final l10n = AppLocalizations.of(context);
-    if (res.ok) {
+      if (res.ok) {
       setState(() => _busyRef = null);
-      await _snack('$ref ✓ ${l10n.riderDepotDrop}');
+      await _snack('$ref ✓ ${'Dropped at the depot branch'}');
       AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
       // Best-effort: compare seller's booking photo vs this drop photo.
       final chk = await DropOffApi.parcelCheck(ref);
@@ -438,7 +435,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         builder: (ctx, setDialog) => AlertDialog(
           title: Text('Handover — $ref', style: AppType.subhead),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(AppLocalizations.of(context).handoverCodeWarning,
+            Text('Ask the recipient for their 4-digit DropOff code. Never enter a code the parcel owner hasn\'t shown you.',
               style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
             const SizedBox(height: 12),
             TextField(
@@ -457,7 +454,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             // a door delivery is marked by camera capture like a depot drop.
             TextButton.icon(
               icon: Icon(podUrl == null ? Icons.camera_alt_outlined : Icons.check_circle, size: 18),
-              label: Text(podUrl == null ? AppLocalizations.of(context).riderDoorPhotoAdd : AppLocalizations.of(context).riderDoorPhotoAttached,
+              label: Text(podUrl == null ? 'Add proof photo (required)' : 'Proof photo attached ✓',
                 style: const TextStyle(fontSize: 12.5)),
               onPressed: () async {
                 setDialog(() => podUrl = null); // visual pending state
@@ -476,7 +473,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   return;
                 }
                 if (podUrl == null) {
-                  _snack(AppLocalizations.of(context).riderDoorPhotoRequired);
+                  _snack('Attach the camera photo of the handover to confirm.');
                   return;
                 }
                 final r = await DropOffApi.jobEvent(

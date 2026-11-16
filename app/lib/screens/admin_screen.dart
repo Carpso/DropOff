@@ -1389,6 +1389,70 @@ class _UsersCardState extends State<_UsersCard> {
     }
   }
 
+  Future<void> _editUser(Map<String, dynamic> user) async {
+    final phone = '${user['phone'] ?? ''}';
+    if (phone.isEmpty) return;
+    final nameCtl = TextEditingController(text: '${user['full_name'] ?? ''}');
+    final emailCtl = TextEditingController(text: '${user['email'] ?? ''}');
+    final res = await showModalBottomSheet<_EditUserResult>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 4, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Edit user', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+          const SizedBox(height: 2),
+          Text('Phone $phone — emails set here are marked verified, so the account can sign in with password right away.',
+              style: AppType.caption),
+          const SizedBox(height: 14),
+          TextField(
+            controller: nameCtl,
+            decoration: const InputDecoration(labelText: 'Full name', border: OutlineInputBorder(), isDense: true),
+            textCapitalization: TextCapitalization.words,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: emailCtl,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder(), isDense: true, hintText: 'ada@example.com'),
+            autocorrect: false,
+          ),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel'))),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(ctx).pop(_EditUserResult(nameCtl.text.trim(), emailCtl.text.trim())),
+                icon: const Icon(Icons.save_outlined, size: 18),
+                label: const Text('Save'),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+    if (res == null) return;
+    final unchanged = res.email == '${user['email'] ?? ''}' && res.fullName == '${user['full_name'] ?? ''}';
+    if (unchanged) {
+      AppToast.show(context, 'Nothing changed.');
+      return;
+    }
+    final out = await DropOffApi.adminUpdateUser(phone, email: res.email, fullName: res.fullName);
+    if (!mounted) return;
+    AppToast.show(context, out.ok
+        ? 'User updated.'
+        : 'Failed: ${out.error == 'email_already_used' ? 'that email is already used by another account' : out.error == 'invalid_email' ? 'that email is not valid' : out.error == 'cannot_edit_admin_account' || out.error == 'cannot_edit_master_account' ? 'the admin account cannot be edited' : out.error}');
+    if (out.ok) {
+      _load();
+      AnalyticsService.instance.track(
+        feature: 'admin_users', action: 'edit_user', context: 'admin_users',
+        meta: {'phone': phone},
+      );
+    }
+  }
+
   Future<void> _setRole(Map<String, dynamic> user, String role) async {
     final email = '${user['email'] ?? ''}';
     if (email.isEmpty || role == '${user['role'] ?? ''}') return;
@@ -1461,12 +1525,20 @@ class _UsersCardState extends State<_UsersCard> {
                         label: Text(role, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Delete account',
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFB3261E)),
-                      onPressed: () => _deleteUser(u),
-                    ),
+                    if ('${u['role'] ?? 'customer'}' != 'admin') ...[
+                      IconButton(
+                        tooltip: 'Edit details',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.edit_outlined, size: 18, color: AppColors.forest),
+                        onPressed: () => _editUser(u),
+                      ),
+                      IconButton(
+                        tooltip: 'Delete account',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFB3261E)),
+                        onPressed: () => _deleteUser(u),
+                      ),
+                    ],
                     ]]),
               );
             }),
@@ -3543,4 +3615,11 @@ class _ClientCrashesCardState extends State<_ClientCrashesCard> {
       ),
     );
   }
+}
+
+
+class _EditUserResult {
+  final String fullName;
+  final String email;
+  const _EditUserResult(this.fullName, this.email);
 }

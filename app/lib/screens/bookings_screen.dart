@@ -22,7 +22,6 @@ import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
-import '../l10n/app_localizations.dart';
 import 'account_screen.dart';
 import 'booking_screen.dart';
 import 'chat_screen.dart';
@@ -418,7 +417,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             ),
             TextButton.icon(
               icon: const Icon(Icons.verified_user_outlined),
-              label: Text(AppLocalizations.of(context).evidenceShare),
+              label: Text('Share evidence'),
               onPressed: () => _showEvidenceLocker(context, booking),
             ),
           ]),
@@ -443,7 +442,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           child: Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
             TextButton.icon(
               icon: const Icon(Icons.replay_outlined),
-              label: Text(AppLocalizations.of(context).quickRebook),
+              label: Text('Quick rebook'),
               onPressed: () {
                 BookingScreen.prefill = {
                   'from': booking.fromCity,
@@ -607,7 +606,6 @@ Future<void> _showMovementLog(BuildContext context, Booking booking) async {
 }
 
 Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
-  final l10n = AppLocalizations.of(context);
   final ref = booking.serverRef ?? booking.reference;
   final data = await DropOffApi.jobEvidence(ref);
   if (!context.mounted) return;
@@ -644,7 +642,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(l10n.evidenceShare, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+          Text('Share evidence', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
           const Text('Proof-of-condition timeline (booking, pickup, dropoff, parcel check, confirmation). Share only with trusted parties.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
           const SizedBox(height: 12),
@@ -662,7 +660,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
           Row(children: [
             Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))),
             const SizedBox(width: 10),
-            Expanded(child: FilledButton.icon(onPressed: () async { await Share.share(summary, subject: 'DropOff evidence ${data['ref'] ?? ref}'); }, icon: const Icon(Icons.share_outlined), label: Text(l10n.evidenceShare))),
+            Expanded(child: FilledButton.icon(onPressed: () async { await Share.share(summary, subject: 'DropOff evidence ${data['ref'] ?? ref}'); }, icon: const Icon(Icons.share_outlined), label: Text('Share evidence'))),
           ]),
         ]),
       ),

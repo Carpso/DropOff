@@ -24,7 +24,6 @@ import '../ui/in_app_browser.dart';
 import '../ui/tidy.dart';
 import '../widgets/common.dart';
 import '../widgets/help_sheet.dart';
-import '../l10n/app_localizations.dart';
 import 'in_app_navigator_screen.dart';
 import 'account_screen.dart';
 import 'bookings_screen.dart';
@@ -542,8 +541,7 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Future<void> _openRecipientsPicker() async {
-    final l10n = AppLocalizations.of(context);
-    final list = await DropOffApi.recipients();
+      final list = await DropOffApi.recipients();
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
@@ -553,7 +551,7 @@ class _BookingScreenState extends State<BookingScreen> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(l10n.savedRecipients, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+            Text('Saved recipients', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
             const SizedBox(height: 8),
             if (list.isEmpty)
               const Padding(padding: EdgeInsets.symmetric(vertical: 18), child: Text('No saved recipients yet. Fill in a recipient and tap “Save this recipient”.', style: TextStyle(color: AppColors.muted)))
@@ -610,8 +608,7 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Future<void> _saveCurrentRecipient() async {
-    final l10n = AppLocalizations.of(context);
-    final name = _recipientName.text.trim();
+      final name = _recipientName.text.trim();
     final phone = _recipientPhone.text.trim();
     if (name.length < 2 || !_validPhone(phone)) {
       _message('Enter a valid recipient name and Zambian phone number first.');
@@ -620,13 +617,12 @@ class _BookingScreenState extends State<BookingScreen> {
     final res = await AppScope.of(context).saveRecipient(name: name, phone: phone, city: _to);
     if (!mounted) return;
     _message(res
-      ? l10n.recipientSaved
+      ? 'Recipient saved'
       : 'Could not save recipient — check your connection and try again.');
   }
 
   Future<void> _submit() async {
-    final l10n = AppLocalizations.of(context);
-    final serverCourierId = courierServerIdOf(_courierId);
+      final serverCourierId = courierServerIdOf(_courierId);
     if (serverCourierId == null) {
       return _message('That courier is unavailable right now — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
     }
@@ -637,7 +633,7 @@ class _BookingScreenState extends State<BookingScreen> {
       return _message('Use valid Zambian phone numbers, e.g. 0971234567.');
     }
     if (_coverOptIn && !_coverTosAccepted) {
-      return _message(l10n.coverAcceptTerms);
+      return _message('I accept the cover terms (quoted, not insurance)');
     }
     if (_roundTrip && _returnAddress.text.trim().isEmpty) {
       return _message('Enter the return address for the round trip.');
@@ -679,10 +675,10 @@ class _BookingScreenState extends State<BookingScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       final msg = switch (store.lastBookingError) {
-        'booking_on_hold' => l10n.bookingOnHoldBody,
-        'slot_required' || 'pickup_window_required' => l10n.slotRequiredBody,
-        'cover_tos_required' => l10n.coverTosBody,
-        'declared_value_required_for_cover' => AppLocalizations.of(context).declaredValue,
+        'booking_on_hold' => 'Recent missed pickups put new bookings on hold. Contact DropOff support or ask ops to review your account.',
+        'slot_required' || 'pickup_window_required' => 'Every parcel must be booked onto a Sweep slot (no untimed pickups).',
+        'cover_tos_required' => 'Optional cover is a quoted protection product, NOT automatic insurance. Limits, exclusions, eligibility, and evidence requirements apply. Cover is only active if DropOff confirms it under the applicable terms (legal/commercial sign-off required). By opting in you accept these terms.',
+        'declared_value_required_for_cover' => 'Declared value (ZMW)',
         _ => store.lastBookingErrorDetail?.isNotEmpty == true
             ? store.lastBookingErrorDetail!
             : 'Booking could not be created (${store.lastBookingError}).',
@@ -956,14 +952,14 @@ class _BookingScreenState extends State<BookingScreen> {
         TextField(
           controller: _declaredValue,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(labelText: AppLocalizations.of(context).declaredValue, hintText: 'e.g. 500', prefixIcon: const Icon(Icons.payments_outlined)),
+          decoration: InputDecoration(labelText: 'Declared value (ZMW)', hintText: 'e.g. 500', prefixIcon: const Icon(Icons.payments_outlined)),
         ),
         CheckboxListTile(
           value: _coverOptIn,
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
-          title: Text(AppLocalizations.of(context).parcelCover),
-          subtitle: Text(AppLocalizations.of(context).coverDisclaimer, style: const TextStyle(fontSize: 11, height: 1.3)),
+          title: Text('Parcel cover (optional)'),
+          subtitle: Text('Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed.', style: const TextStyle(fontSize: 11, height: 1.3)),
           onChanged: (v) => setState(() { _coverOptIn = v ?? false; if (!_coverOptIn) _coverTosAccepted = false; }),
         ),
         if (_coverOptIn)
@@ -972,15 +968,15 @@ class _BookingScreenState extends State<BookingScreen> {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.amber.withValues(alpha: 0.6))),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(AppLocalizations.of(context).coverTosTitle, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+              Text('Parcel cover terms', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
               const SizedBox(height: 4),
-              Text(AppLocalizations.of(context).coverTosBody, style: const TextStyle(fontSize: 11, height: 1.35, color: Color(0xFF5D4200))),
+              Text('Optional cover is a quoted protection product, NOT automatic insurance. Limits, exclusions, eligibility, and evidence requirements apply. Cover is only active if DropOff confirms it under the applicable terms (legal/commercial sign-off required). By opting in you accept these terms.', style: const TextStyle(fontSize: 11, height: 1.35, color: Color(0xFF5D4200))),
               CheckboxListTile(
                 value: _coverTosAccepted,
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 controlAffinity: ListTileControlAffinity.leading,
-                title: Text(AppLocalizations.of(context).coverAcceptTerms, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                title: Text('I accept the cover terms (quoted, not insurance)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                 onChanged: (v) => setState(() => _coverTosAccepted = v ?? false),
               ),
             ]),
@@ -1157,12 +1153,12 @@ class _BookingScreenState extends State<BookingScreen> {
           OutlinedButton.icon(
             onPressed: _openRecipientsPicker,
             icon: const Icon(Icons.contacts_outlined, size: 18),
-            label: Text(AppLocalizations.of(context).pickRecipient),
+            label: Text('Pick saved recipient'),
           ),
           TextButton.icon(
             onPressed: _saveCurrentRecipient,
             icon: const Icon(Icons.bookmark_add_outlined, size: 18),
-            label: Text(AppLocalizations.of(context).saveRecipient),
+            label: Text('Save this recipient'),
           ),
         ]),
         const SizedBox(height: 12),
@@ -1199,7 +1195,7 @@ class _BookingScreenState extends State<BookingScreen> {
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Icon(Icons.warning_amber_rounded, color: Color(0xFF7B5710)),
             const SizedBox(width: 10),
-            Expanded(child: Text(AppLocalizations.of(context).skipRideWarningBody, style: const TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
+            Expanded(child: Text('If you miss your rider or don\'t hand over the parcel in time, the booking may be auto-canceled and a no-show strike recorded. 3 strikes in 14 days can pause new bookings.', style: const TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
           ]),
         ),
         const SizedBox(height: 10),
@@ -1212,11 +1208,11 @@ class _BookingScreenState extends State<BookingScreen> {
               final w = '${s['suggested_window'] ?? ''}';
               if (pickupWindows.containsKey(w) && !_slotClosed(w)) {
                 setState(() => _pickupWindow = w);
-                _message('${AppLocalizations.of(context).bestSlot}: $w');
+                _message('${'Best slot for your area'}: $w');
               }
             },
             icon: const Icon(Icons.auto_awesome, size: 16),
-            label: Text(AppLocalizations.of(context).bestSlot, style: const TextStyle(fontSize: 12)),
+            label: Text('Best slot for your area', style: const TextStyle(fontSize: 12)),
           ),
         ]),
         const SizedBox(height: 8),

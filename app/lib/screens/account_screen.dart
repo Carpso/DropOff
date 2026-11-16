@@ -11,7 +11,6 @@ import '../widgets/help_sheet.dart';
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../data/push_service.dart';
-import '../l10n/app_localizations.dart';
 import '../main.dart';
 import '../screens/admin_screen.dart';
 import '../screens/chat_screen.dart';
@@ -367,24 +366,6 @@ class _AccountScreenState extends State<AccountScreen> {
   String get _biomeDescription =>
       'Fingerprint or face sign-in — your call.';
 
-  String _localeLabel(AppLocalizations l10n, String? code) {
-    switch ((code ?? 'en').toLowerCase()) {
-      case 'ny': return l10n.languageNyanja;
-      case 'bem': return l10n.languageBemba;
-      case 'toi': return l10n.languageTongaZambia;
-      case 'loz': return l10n.languageLozi;
-      default: return l10n.languageEnglish;
-    }
-  }
-
-  Future<void> _showLanguagePicker(AppStore store) async {
-    // Full-screen page, not a bottom sheet: a small sheet that nobody notices
-    // is indistinguishable from a greyed-out, dead app (barrier eats every
-    // tap) — this way the picker is unmissable and closable like any page.
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _LanguagePickerPage(store: store)));
-    if (mounted) setState(() {});
-  }
-
   Future<void> _setBiometric(bool on, AppStore store) async {
     if (on) {
       final ok = await DeviceLock.isAvailable;
@@ -653,14 +634,6 @@ class _AccountScreenState extends State<AccountScreen> {
                   ),
                 ),
                 const Divider(height: 20),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.language, color: AppColors.forest),
-                  title: Text(AppLocalizations.of(context).selectLanguage, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  subtitle: Text(_localeLabel(AppLocalizations.of(context), store.localeCode), style: const TextStyle(fontSize: 12.5, color: AppColors.ink)),
-                  trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
-                  onTap: () => _showLanguagePicker(store),
-                ),
               ]))),
             ],
           ] else ...[
@@ -1586,67 +1559,6 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
           ]),
         );
       },
-    );
-  }
-}
-
-/// Full-screen language picker — a page with an AppBar, not a bottom sheet.
-/// A small sheet nobody notices is indistinguishable from a greyed-out, dead
-/// app (its barrier eats every tap). This picker applies the selection and
-/// pops itself, so it can never be left stuck open.
-class _LanguagePickerPage extends StatefulWidget {
-  const _LanguagePickerPage({required this.store});
-
-  final AppStore store;
-
-  @override
-  State<_LanguagePickerPage> createState() => _LanguagePickerPageState();
-}
-
-class _LanguagePickerPageState extends State<_LanguagePickerPage> {
-  String get _selected => widget.store.localeCode ?? 'en';
-
-  Future<void> _pick(String code) async {
-    setState(() {}); // refreshing now so the radio dot moves instantly
-    await widget.store.setLocaleCode(code);
-    if (mounted) Navigator.of(context).pop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final options = <({String code, String label})>[
-      (code: 'en', label: l10n.languageEnglish),
-      (code: 'ny', label: l10n.languageNyanja),
-      (code: 'bem', label: l10n.languageBemba),
-      (code: 'toi', label: l10n.languageTongaZambia),
-      (code: 'loz', label: l10n.languageLozi),
-    ];
-    return Scaffold(
-      appBar: AppBar(title: Text(l10n.selectLanguage, style: const TextStyle(fontWeight: FontWeight.w900))),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-        children: [
-          // RadioGroup owns the selection: each tile forwards its tap to the
-          // group's onChanged, so there is no per-tile state to desync.
-          RadioGroup<String>(
-            groupValue: _selected,
-            onChanged: (v) { if (v != null && v != _selected) _pick(v); },
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              for (final o in options)
-                RadioListTile<String>(
-                  value: o.code,
-                  title: Text(o.label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                ),
-            ]),
-          ),
-          const SizedBox(height: 12),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
-            child: Text('Applies immediately on this device.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
-          ),
-        ],
-      ),
     );
   }
 }
