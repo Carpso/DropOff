@@ -61,7 +61,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     title: 'Plan cap — how it counts',
     rows: [
       (heading: 'One parcel = one slot', body: 'Every parcel consumes one plan slot, even when two parcels share one trip to the same receiver. Your cap is a PARCEL count, not a trip count.'),
-      (heading: 'When you exceed the cap', body: 'The whole trip bills at the tier discount (15% Silver / 25% Gold / 35% Platinum / Daily undiscounted). No overage fee, no penalty — it is simply priced as a one-off.'),
+      (heading: 'When you exceed the cap', body: 'Extra parcels past your pack bill at full PAYG — the pack price applies only inside the pack. The price is always visible before you confirm a booking. Nothing is charged silently.'),
       (heading: 'Cancelled jobs don\'t count', body: 'A booking cancelled before pickup does not consume slots. Payment-held bookings do not consume slots either (no payment = no dispatch = no slot consumed).'),
     ],
   ),
@@ -70,7 +70,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     rows: [
       (heading: 'One momo prompt per cycle', body: 'A 7-day Weekly Sprint, or a monthly Silver (10) / Gold (25) / Platinum (50). Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.'),
       (heading: 'Held ≠ lost', body: 'Plans never hold a booking. If you book without prepayment, the job is saved and waits for the plan\'s momo prompt to land. No money moves until you approve it.'),
-      (heading: 'Discounts', body: 'The tier discount (15%/25%/35%) applies to trips over your cap. Administration of plans is by automated deduction at approval time.'),
+      (heading: 'Pricing truth', body: 'Packs deduct automated at approval. Inside your pack — the trip leg is free; past your pack, it is PAYG at full rate. The momo prompt always shows the exact figure before you approve it.'),
     ],
   ),
   HelpTopic.depotReceipts: (

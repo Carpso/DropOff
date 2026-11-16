@@ -1,3 +1,5 @@
+> **Pricing note (2026-11):** the catalog rebalanced. Weekly Sprint K399 (20/7d), Silver K250 / 10 (30d), Gold K500 / 25, Platinum K750 / 50 are the only live packs; Daily Rider K49 and Daily Dash K69 are retired. Any number contradicting this in the body of this document is stale — `/plans` and `docs/PLANS_BENEFITS.md` are authoritative.
+
 # Growth Runway & Reinvestment Plan — 2026-11-10
 
 Companion to `docs/PLAN_ECONOMICS_2026-11-10.md` (the per-tier money audit). Data basis: D1 snapshot 2026-11-10 — 30 accounts, 4 jobs, **K0 collected revenue to date**, 0 active subscriptions. Low-confidence zone; revisit at 30+ paid jobs.

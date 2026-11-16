@@ -1115,7 +1115,7 @@ class _TiersCardState extends State<_TiersCard> {
   String? _busyTier;
   int _usageCycle = 0;
   Map<String, dynamic>? _current;
-  static const Map<String, int> _tierRank = {'rider_daily': 0, 'weekly': 1, 'silver': 2, 'gold': 3, 'platinum': 4};
+  static const Map<String, int> _tierRank = {'weekly': 0, 'silver': 1, 'gold': 2, 'platinum': 3};
 
   @override
   void initState() {
@@ -1225,7 +1225,6 @@ class _TiersCardState extends State<_TiersCard> {
       meta: {'tier': tier, 'status': status},
     );
       AppToast.show(context, switch (status) {
-      'success' when tier == 'rider_daily' => 'Daily Rider is LIVE — today\'s parcel is covered.',
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
       'success' => '$tier plan is LIVE — your monthly parcels are ready.',
       'failed' => 'The mobile-money prompt was rejected — verify your momo balance has the funds, then tap Pay now again.',
@@ -1260,7 +1259,6 @@ class _TiersCardState extends State<_TiersCard> {
                     return const Text('Tier prices load when the server is reachable.', style: TextStyle(color: AppColors.muted, fontSize: 12));
                   }
                   const display = <String, ({String label, String blurb})>{
-                    'rider_daily': (label: 'DAILY RIDER', blurb: '1 parcel / day — activate only the days you ship'),
                     'weekly': (label: 'WEEKLY SPRINT', blurb: '20 parcels / 7 days — no monthly lock-in'),
                     'silver': (label: 'SILVER', blurb: '10 parcels / month — low-volume senders'),
                     'gold': (label: 'GOLD', blurb: '25 parcels / month — weekly shippers'),
@@ -1269,7 +1267,7 @@ class _TiersCardState extends State<_TiersCard> {
                   final currentTier = '${_current?['tier'] ?? ''}';
                   final currentActive = '${_current?['status'] ?? ''}' == 'active';
                   return Column(children: [
-                    /// Only render tiers the admin/superadmin has toggled ON —
+                    /// Only render tiers an admin has toggled ON —
                     /// a toggled-off plan vanishes from the seller page entirely.
                     for (final entry in display.entries)
                       if (models[entry.key] != null)

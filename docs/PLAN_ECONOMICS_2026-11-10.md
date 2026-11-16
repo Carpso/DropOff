@@ -1,3 +1,5 @@
+> **Pricing note (2026-11):** the catalog rebalanced. Weekly Sprint K399 (20/7d), Silver K250 / 10 (30d), Gold K500 / 25, Platinum K750 / 50 are the only live packs; Daily Rider K49 and Daily Dash K69 are retired. Any number contradicting this in the body of this document is stale — `/plans` and `docs/PLANS_BENEFITS.md` are authoritative.
+
 # Plan Economics Audit — 2026-11-10
 
 Every number here comes from the live D1 database or the fee engine source (`workers/src/fees.ts`, `workers/src/pricing.ts`, `workers/src/index.ts`). No invented fares.

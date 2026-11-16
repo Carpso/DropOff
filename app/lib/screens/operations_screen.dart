@@ -554,13 +554,31 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
   bool _pinging = false;
   String? _lastStatus;
 
+  Timer? _loop;
+
   @override
   void initState() {
     super.initState();
-    // Auto-share when enabled — gentle one-time ping on mount.
+    // Fully automatic: permission allowed + sharing on + linked rider →
+    // continuous live pings every 12s for as long as this screen is open.
+    // The sender tracking their job sees the rider's pin move; nobody presses
+    // a button. Toggle in the card remains, but nothing requires it.
+    _startLoop();
+  }
+
+  void _startLoop() {
+    _loop?.cancel();
     if (widget.store.shareLocationOn && widget.store.linked && widget.store.isRider) {
-      _ping(silent: true);
+      // immediate fix, then keep-alive cadence matching the sender's 12s refresh
+      unawaited(_ping(silent: true));
+      _loop = Timer.periodic(const Duration(seconds: 12), (_) => _ping(silent: true));
     }
+  }
+
+  @override
+  void dispose() {
+    _loop?.cancel();
+    super.dispose();
   }
 
   Future<void> _ping({bool silent = false}) async {
@@ -622,6 +640,7 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
               activeTrackColor: AppColors.forest,
               onChanged: (value) async {
                 await store.setShareLocationOn(value);
+                _startLoop();
                 if (value) await _ping();
                 if (mounted) setState(() {});
               },
@@ -630,7 +649,7 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
           const SizedBox(height: 4),
           Text(
             on
-                ? 'ON — when you take a job the sender\'s tracking link cannot see prices, but it can show them exactly where you are on the map.'
+                ? 'On — automatic while this screen is open. Permission granted = the sender of your active jobs sees your exact pin; nobody presses anything.'
                 : 'Off — senders will see your name, vehicle and ETA only; never your live coordinates.',
             style: AppType.caption,
           ),
@@ -639,16 +658,21 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
             Text(_lastStatus!, style: const TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.3)),
           ],
           const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _pinging ? null : _ping,
-              icon: _pinging
-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.gps_fixed, size: 17),
-              label: Text(on ? 'Re-share my live position now' : 'Enable & share position'),
+          Row(children: [
+            Expanded(
+              child: Text(
+                on ? 'Syncing automatically — GPS granted, sharing every 12s.' : 'Enable to sync automatically.',
+                style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              ),
             ),
-          ),
+            IconButton(
+              tooltip: 'Refresh position now',
+              onPressed: _pinging ? null : () => _ping(),
+              icon: _pinging
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.gps_fixed, size: 18, color: AppColors.forest),
+            ),
+          ]),
         ]),
       ),
     );

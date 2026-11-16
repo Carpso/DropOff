@@ -993,7 +993,7 @@ class DropOffApi {
       (await get('/payments/$paymentId/status'))?['status'] as String?;
 
   /// Seller subscription plans (live prices come from /plans; seeded at Silver
-  /// K250 / Gold K500 / Platinum K750, Weekly K399 and Daily Rider K49).
+  /// Silver K250 / Gold K500 / Platinum K750, Weekly Sprint K399.
   /// Cycle length comes from the plan (1 / 7 / 30 days); every parcel counts
   /// as one — even several in the same trip.
   static Future<Map<String, dynamic>?> plans() => get('/plans');

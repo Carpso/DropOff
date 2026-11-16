@@ -53,7 +53,6 @@ Live tiers (`tiers` table, verified 2026-11-15):
 
 | Tier | Fee | Slots (cap) | Slot rate | PAYG-after-cap discount |
 |---|---|---|---|---|
-| Daily Rider | K49 / 24h | 1 parcel | K49/day | 0% |
 | Weekly Sprint | K399 | 20 / 7d | K19.95 | 10% |
 | Silver | K250 | 10 / 30d | K25.00 | 15% |
 | Gold | K500 | 25 / 30d | K20.00 | 25% |
@@ -79,7 +78,6 @@ salary share ≈ K3.85–6.4 at pace) + platform fee + momo fee.
 | Weekly | K19.95 | −K4.0 | ≈ +K16.0 |
 | Gold | K20.00 | −K4.0 | ≈ +K16.0 |
 | Platinum | K15.00 | −K4.0 | ≈ +K11.0 |
-| Daily Rider | K49/day | −K4.0 | ≈ +K45 (if rider does jobs) |
 
 **Plans are profitable at current prices as long as salary share holds at ~K4/parcel.**
 A rider producing below ~40% pace makes plans cost-negative — that's what the pace gate
@@ -152,7 +150,7 @@ health, (5) fraud/false parcels — all solved or solvable operations, not price
 1. **Actual PAYG K70 average** is 4-job data — re-measure at 30+ paid jobs, or all book economics are fiction.
 2. Fuel/oil/depreciation per parcel — not yet in rider package. Adding a vehicle-owning rider's true cost matters if packages change.
 3. Turnover tax (ZRA TOT) — 0% under K2,500/mo, 5% above. At scale, tax moves the model ~5 points. Accountant sign-off required.
-4. Daily Rider cannibalises PAYG for very light users (K49/day covers them best).
+4. Daily Dash/Rider were retired in the 2026-11 catalog rebalance — Weekly Sprint K399 covers the burst case (~K20/trip at 20 parcels).
 5. 10,000 senders is not 10,000 ACTIVE senders. Cohort modelling before any fleet buy.
 
 ## 6. Immediate next steps (owner)

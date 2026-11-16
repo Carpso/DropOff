@@ -14,7 +14,7 @@ import '../data/dropoff_api.dart';
 ///
 /// Wired at startup: [CrashReporting.init] is called before runApp in main.dart.
 class CrashReporting {
-  static const String _appVersion = '0.5.29+40';
+  static const String _appVersion = '0.5.30+40';
   static bool _initialised = false;
 
   static void init() {

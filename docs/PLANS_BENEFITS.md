@@ -11,17 +11,18 @@
 A plan **pre-buys your DropOff legs** — the rider runs from your door to the
 courier depot. Every parcel consumes one plan slot: a booking with 3 parcels
 uses 3 slots. A trip only rides the plan when ALL of its parcels still fit
-under your remaining cap — otherwise the whole trip is billed at your tier
-overage discount. The courier's **counter fare is never part of a plan** —
+under your remaining cap. Past the cap the whole trip is pay-as-you-go
+(today the plan discount does NOT extend past the cap — the platform
+overage discount is disabled; nothing is charged silently, you see the
+price on the confirm page). The courier's **counter fare is never part of a plan** —
 depot money stays at the depot, as always.
 
 | Plan | Price | Covers | Cycle | If you go over |
 |---|---|---|---|---|
-| Daily Rider | K49/day | 1 parcel | 24 hours | Full PAYG fee per extra trip (no discount) |
 | Weekly Sprint | K399 | 20 parcels | 7 days | 10% off PAYG |
 | Silver | K250 | 10 parcels | 30 days | 15% off PAYG |
 | Gold | K500 | 25 parcels | 30 days | 25% off PAYG |
-| Platinum | K750 | 50 parcels | 30 days | 35% off PAYG |
+| Platinum | K750 | 50 parcels | 30 days | Full PAYG when exhausted (overage discount currently disabled) |
 
 Unused parcels **expire** with the cycle (no rollover) — the plans are priced so
 that finishing the cap beats PAYG; buying more than you ship is on you.
@@ -39,8 +40,10 @@ that finishing the cap beats PAYG; buying more than you ship is on you.
 3. **Prepay without paying every time.** The whole booking system is prepay
    (bogus bookings can't happen). A plan is prepay **in advance, in bulk** —
    one prompt per cycle instead of one per parcel.
-4. **Cap-overage is discounted, not punitive.** exceed your cap and your extra
-   trips still bill at your tier discount (Daily Rider excepted: full PAYG).
+4. **Cap-overage is honest full-PAYG, never punitive.** Extra trips bill
+   at the standard rate when your pack runs dry; the price on the confirm
+   page is exact. Tier discounts inside a pack do not extend past it (the
+   platform overage discount is currently OFF).
 5. **Discounted legs only, never partner money.** Promos and plan discounts
    apply to the DropOff leg only — the courier counter fare is untouched.
 6. **Priority economics, not priority queueing.** Covered trips auto-dispatch
@@ -51,8 +54,8 @@ that finishing the cap beats PAYG; buying more than you ship is on you.
    key off an active plan.
 
 ### Which plan wins for whom
-- **Ship most days?** Daily Rider K49 < one Lusaka PAYG trip (K55) — activate
-  the days you ship.
+- **Ship most days?** Weekly Sprint K399 ≈ K20/trip across 7 days — the
+  best per-trip value on the shelf.
 - **4–6 trips/week?** Weekly Sprint (20 for K399 ≈ K20/trip).
 - **Steady monthly volume?** Silver/Gold/Platinum by cap: K25, K20, K15 per
   parcel respectively — Platinum is cheapest per trip if you'll actually use

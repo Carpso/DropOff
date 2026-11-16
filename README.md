@@ -130,7 +130,6 @@ cut-offs (e.g. Platinum closes ~16:30, so an afternoon sweep still lands same-da
 | Plan | Price | Parcels | Seller cost per parcel | Break-even |
 |---|---|---:|---|---|
 | Pay-as-you-go | K45/pickup | ∞ (on demand) | K45 | — |
-| **Daily Rider** | **K49/day** | 2 / day | **K24.50** at full use | first parcel pays for the day |
 | **Weekly Sprint** | **K399/wk** | 20 / wk | **K19.95** | 9 parcels/wk |
 | **Silver** | **K250/mo** | 10 / mo | **K25.00** | 10 parcels/mo |
 | **Gold** | **K500/mo** | 25 / mo | **K20.00** | 20 parcels/mo |

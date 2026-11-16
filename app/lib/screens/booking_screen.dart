@@ -322,6 +322,11 @@ class _BookingScreenState extends State<BookingScreen> {
 
   int get _overagePct =>
       ((_planSnap?['plan'] as Map<String, dynamic>?)?['overage_discount_pct'] as num?)?.toInt() ?? 0;
+  // The pack discount applies ONLY while the platform re-enables the overage
+  // flag — the default catalogue sells packs as full-KYC rates; overage pays
+  // PAYG in full. Never price a discount nobody authorised.
+  bool get _overageEnabled =>
+      (_planSnap?['feature_flags']?['overage_discount_enabled'] as bool?) ?? false;
 
   /// Server-mirrored base rider fee BEFORE plan math (mirror of baseRiderFee in
   /// workers/src/pricing.ts — the estimate must never lie about the plan fee).
@@ -350,7 +355,7 @@ class _BookingScreenState extends State<BookingScreen> {
   /// pack → plan.rider_fee_zmw 0; overage → tierOverageFee discount).
   double get _riderFeeEstimate {
     if (_planLeg == 'pack') return 0;
-    if (_planLeg == 'overage') return DropOffApi.round2(_goRiderFee * (1 - _overagePct / 100));
+    if (_planLeg == 'overage') return _overageEnabled ? DropOffApi.round2(_goRiderFee * (1 - _overagePct / 100)) : _goRiderFee;
     return _goRiderFee;
   }
 
@@ -1294,7 +1299,7 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
         ),
         const SizedBox(height: 4),
-        _DeliveryIqCard(courierCatalogId: courier.id, window: _pickupWindow),
+        _DeliveryIqCard(courierCatalogId: courier.id, window: _tomorrowMorning ? '06:00' : _pickupWindow),
         const SizedBox(height: 16),
         SwitchListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1335,12 +1340,12 @@ class _BookingScreenState extends State<BookingScreen> {
         Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('$_from → $_to', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
           const SizedBox(height: 4),
-          Text('${courier.name} • ${_size.label} parcel • ${pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.ink, fontSize: 13)),
+          Text('${courier.name} • ${_size.label} parcel • ${_tomorrowMorning ? 'Tomorrow morning sweep (06:00 – 07:30)' : pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.ink, fontSize: 13)),
           const Divider(height: 28),
           if (_planLeg == 'pack')
             _priceLine('DropOff leg (sender → depot)', 'Covered by plan')
           else if (_planLeg == 'overage')
-            _priceLine('DropOff rider fee ($_overagePct% plan discount)', kwacha(_riderFeeEstimate))
+            _priceLine(_overageEnabled ? 'DropOff rider fee ($_overagePct% overage discount)' : 'DropOff rider fee', kwacha(_riderFeeEstimate))
           else
             _priceLine('DropOff rider fee', kwacha(_riderFeeEstimate)),
           if (_lastMile) ...[

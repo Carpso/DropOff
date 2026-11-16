@@ -1,3 +1,5 @@
+> **Pricing note (2026-11):** the catalog rebalanced. Weekly Sprint K399 (20/7d), Silver K250 / 10 (30d), Gold K500 / 25, Platinum K750 / 50 are the only live packs; Daily Rider K49 and Daily Dash K69 are retired. Any number contradicting this in the body of this document is stale — `/plans` and `docs/PLANS_BENEFITS.md` are authoritative.
+
 # DropOff growth, trendiness & moat strategy
 
 How to make DropOff interesting, shareable and hard to copy in Lusaka (and Zambia beyond it), and how to
