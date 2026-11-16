@@ -1558,6 +1558,8 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
                 child: Text('$tier plan — $used of $cap parcels used',
                     style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
               ),
+              const SizedBox(width: 6),
+              HelpIconButton(topic: HelpTopic.planCap, size: 16),
               const SizedBox(width: 8),
               Flexible(
                 child: Text('$remaining left',

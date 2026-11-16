@@ -6,6 +6,7 @@
 // this source code is prohibited.
 // ─────────────────────────────────────────────────────────────────────
 import '../ui/app_toast.dart';
+import '../widgets/help_sheet.dart';
 import '../ui/pay_job.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
@@ -1266,10 +1267,13 @@ class _PrepayCardState extends State<_PrepayCard> {
                 style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
           ]),
           const SizedBox(height: 4),
-          Text(held
-                  ? 'The mobile-money prompt could not start, so no rider is assigned yet. Verify your momo balance covers the DropOff leg, then tap Pay now to dispatch — the booking stays saved.'
-                  : 'Approve the momo prompt to dispatch your rider. Not received? Verify your momo balance — Pay now resends it.',
-              style: AppType.caption),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Text(held
+                ? 'Prompt never started — no rider yet. Verify momo balance, tap Pay now.'
+                : 'Approve the momo prompt to dispatch your rider.',
+                style: AppType.caption)),
+            HelpIconButton(topic: HelpTopic.depositRejection, size: 16),
+          ]),
           const SizedBox(height: 10),
           FilledButton.icon(
             onPressed: _busy ? null : _payNow,
