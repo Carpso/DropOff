@@ -221,7 +221,7 @@ class HomeScreen extends StatelessWidget {
                       const Spacer(),
                       Text(courier.name.replaceAll(' Courier Services', '').replaceAll(' Express Logistics', ''), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, height: 1.2)),
                       const SizedBox(height: 5),
-                      Text('Quoted at counter', style: TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w600)),
+                      const Text('Quoted at counter', style: TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w600)),
                     ]),
                   ),
                 );

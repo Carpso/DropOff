@@ -570,10 +570,10 @@ class _QuoteAnswerState extends State<_QuoteAnswer> {
             ),
           ]),
           const SizedBox(height: 8),
-          Text(
+          const Text(
             'The courier fare is heard at the counter when your parcel arrives — it is the depot’s charge, never published in this app. '
             'Your DropOff rider leg is shown before you book, and the counter never touches your money.',
-            style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.45),
+            style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.45),
           ),
           if (_serving.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -589,7 +589,7 @@ class _QuoteAnswerState extends State<_QuoteAnswer> {
               Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
             },
             icon: const Icon(Icons.two_wheeler, size: 18),
-            label: Text('Book a DropOff rider to ${toLabel}'),
+            label: Text('Book a DropOff rider to $toLabel'),
           ),
         ]),
       ),

@@ -207,6 +207,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
   Future<void> _downloadImage() async {
     final booking = _lookup();
     if (booking == null || _busy) return;
+    final ctx = context;
     setState(() => _busy = true);
     try {
       final bytes = await _capturePng();
@@ -227,7 +228,8 @@ class _WaybillScreenState extends State<WaybillScreen> {
       dir ??= await getApplicationDocumentsDirectory();
       final file = File('${dir.path}${Platform.pathSeparator}$name');
       await file.writeAsBytes(bytes, flush: true);
-      AppToast.show(context, 'Waybill saved to ${file.path}');
+      if (!ctx.mounted) return;
+      AppToast.show(ctx, 'Waybill saved to ${file.path}');
     } catch (_) {
       // Filesystem save failed (permissions / platform) — fall back to the
       // share sheet so the user can still keep the image.
@@ -242,7 +244,8 @@ class _WaybillScreenState extends State<WaybillScreen> {
       } catch (_) {
         // fall through to snackbar below
       }
-      AppToast.error(context, 'Could not save the waybill image — try again.');
+      if (!ctx.mounted) return;
+      AppToast.error(ctx, 'Could not save the waybill image — try again.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -686,19 +689,23 @@ class _ReceiptCard extends StatelessWidget {
       );
 
   Widget _row(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3.5),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 118,
-              child: Text(label, style: AppType.caption),
+            // Nothing truncates — labels and values both wrap so no word is
+            // ever cut in print, share, capture or on screen.
+            Expanded(
+              flex: 5,
+              child: Text(label, softWrap: true, style: AppType.caption),
             ),
             const SizedBox(width: 10),
             Expanded(
+              flex: 7,
               child: Text(
                 value,
                 textAlign: TextAlign.right,
+                softWrap: true,
                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, height: 1.4, color: AppColors.ink),
               ),
             ),

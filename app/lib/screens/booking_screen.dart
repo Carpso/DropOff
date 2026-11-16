@@ -551,7 +551,7 @@ class _BookingScreenState extends State<BookingScreen> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Saved recipients', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+            const Text('Saved recipients', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
             const SizedBox(height: 8),
             if (list.isEmpty)
               const Padding(padding: EdgeInsets.symmetric(vertical: 18), child: Text('No saved recipients yet. Fill in a recipient and tap “Save this recipient”.', style: TextStyle(color: AppColors.muted)))
@@ -941,25 +941,25 @@ class _BookingScreenState extends State<BookingScreen> {
               : Icon(_parcelPhotoUrl == null ? Icons.add_a_photo_outlined : Icons.check_circle, color: _parcelPhotoUrl == null ? null : AppColors.success),
           label: Text(_parcelPhotoUrl == null ? 'Add parcel photo (recommended)' : 'Parcel photo attached'),
         ),
-        Padding(
-          padding: const EdgeInsets.only(top: 4, bottom: 4),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 4),
           child: Row(children: [
             Expanded(child: Text('Photo protects you in disputes.', style: AppType.caption)),
-            const HelpIconButton(topic: HelpTopic.parcelPhoto),
+            HelpIconButton(topic: HelpTopic.parcelPhoto),
           ]),
         ),
         const SizedBox(height: 10),
         TextField(
           controller: _declaredValue,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(labelText: 'Declared value (ZMW)', hintText: 'e.g. 500', prefixIcon: const Icon(Icons.payments_outlined)),
+          decoration: const InputDecoration(labelText: 'Declared value (ZMW)', hintText: 'e.g. 500', prefixIcon: Icon(Icons.payments_outlined)),
         ),
         CheckboxListTile(
           value: _coverOptIn,
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
-          title: Text('Parcel cover (optional)'),
-          subtitle: Text('Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed.', style: const TextStyle(fontSize: 11, height: 1.3)),
+          title: const Text('Parcel cover (optional)'),
+          subtitle: const Text('Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed.', style: TextStyle(fontSize: 11, height: 1.3)),
           onChanged: (v) => setState(() { _coverOptIn = v ?? false; if (!_coverOptIn) _coverTosAccepted = false; }),
         ),
         if (_coverOptIn)
@@ -968,15 +968,15 @@ class _BookingScreenState extends State<BookingScreen> {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.amber.withValues(alpha: 0.6))),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Parcel cover terms', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+              const Text('Parcel cover terms', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
               const SizedBox(height: 4),
-              Text('Optional cover is a quoted protection product, NOT automatic insurance. Limits, exclusions, eligibility, and evidence requirements apply. Cover is only active if DropOff confirms it under the applicable terms (legal/commercial sign-off required). By opting in you accept these terms.', style: const TextStyle(fontSize: 11, height: 1.35, color: Color(0xFF5D4200))),
+              const Text('Optional cover is a quoted protection product, NOT automatic insurance. Limits, exclusions, eligibility, and evidence requirements apply. Cover is only active if DropOff confirms it under the applicable terms (legal/commercial sign-off required). By opting in you accept these terms.', style: TextStyle(fontSize: 11, height: 1.35, color: Color(0xFF5D4200))),
               CheckboxListTile(
                 value: _coverTosAccepted,
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 controlAffinity: ListTileControlAffinity.leading,
-                title: Text('I accept the cover terms (quoted, not insurance)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                title: const Text('I accept the cover terms (quoted, not insurance)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                 onChanged: (v) => setState(() => _coverTosAccepted = v ?? false),
               ),
             ]),
@@ -1129,11 +1129,11 @@ class _BookingScreenState extends State<BookingScreen> {
             style: AppType.caption,
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
           child: Row(children: [
             Expanded(child: Text('Depot fare — asked at the counter. Rider leg is separate.', style: AppType.caption)),
-            const HelpIconButton(topic: HelpTopic.courierFare),
+            HelpIconButton(topic: HelpTopic.courierFare),
           ]),
         ),
       ];
@@ -1153,12 +1153,12 @@ class _BookingScreenState extends State<BookingScreen> {
           OutlinedButton.icon(
             onPressed: _openRecipientsPicker,
             icon: const Icon(Icons.contacts_outlined, size: 18),
-            label: Text('Pick saved recipient'),
+            label: const Text('Pick saved recipient'),
           ),
           TextButton.icon(
             onPressed: _saveCurrentRecipient,
             icon: const Icon(Icons.bookmark_add_outlined, size: 18),
-            label: Text('Save this recipient'),
+            label: const Text('Save this recipient'),
           ),
         ]),
         const SizedBox(height: 12),
@@ -1192,10 +1192,10 @@ class _BookingScreenState extends State<BookingScreen> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.amber)),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Icon(Icons.warning_amber_rounded, color: Color(0xFF7B5710)),
-            const SizedBox(width: 10),
-            Expanded(child: Text('If you miss your rider or don\'t hand over the parcel in time, the booking may be auto-canceled and a no-show strike recorded. 3 strikes in 14 days can pause new bookings.', style: const TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
+          child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFF7B5710)),
+            SizedBox(width: 10),
+            Expanded(child: Text('If you miss your rider or don\'t hand over the parcel in time, the booking may be auto-canceled and a no-show strike recorded. 3 strikes in 14 days can pause new bookings.', style: TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
           ]),
         ),
         const SizedBox(height: 10),
@@ -1212,7 +1212,7 @@ class _BookingScreenState extends State<BookingScreen> {
               }
             },
             icon: const Icon(Icons.auto_awesome, size: 16),
-            label: Text('Best slot for your area', style: const TextStyle(fontSize: 12)),
+            label: const Text('Best slot for your area', style: TextStyle(fontSize: 12)),
           ),
         ]),
         const SizedBox(height: 8),

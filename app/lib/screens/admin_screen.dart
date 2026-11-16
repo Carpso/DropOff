@@ -218,14 +218,14 @@ class _AdminScreenState extends State<AdminScreen> {
               ),
               child: Row(children: [
                 Icon(_financeOnly ? Icons.account_balance : Icons.admin_panel_settings_outlined, color: AppColors.forest),
-                SizedBox(width: 12),
+                const SizedBox(width: 12),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(_financeOnly ? 'Finance (CFO)' : 'Operations overview', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forest)),
-                  SizedBox(height: 2),
+                  Text(_financeOnly ? 'Finance (CFO)' : 'Operations overview', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forest)),
+                  const SizedBox(height: 2),
                   Text(_financeOnly
                       ? 'Salaries, turnover, payroll run-rate and ZRA filings. Two signatures release money.'
                       : 'Live stats, security, fraud, depot branches and messaging.',
-                      style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
+                      style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
                 ])),
               ]),
             ),
@@ -464,13 +464,13 @@ class _AdminScreenState extends State<AdminScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.payments_outlined, color: AppColors.forest),
-            const SizedBox(width: 8),
-            const Expanded(child: Text('Salaries — as the business grows', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          const Row(children: [
+            Icon(Icons.payments_outlined, color: AppColors.forest),
+            SizedBox(width: 8),
+            Expanded(child: Text('Salaries — as the business grows', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
           ]),
           const SizedBox(height: 6),
-          Text('K3,000/rider/month incl. K300/week fuel (K1,800 base), weekly K750 per Light cycle. Pace-gated by delivery. This is the real cost of your roster.',
+          const Text('K3,000/rider/month incl. K300/week fuel (K1,800 base), weekly K750 per Light cycle. Pace-gated by delivery. This is the real cost of your roster.',
               style: AppType.caption),
           const SizedBox(height: 10),
           Wrap(spacing: 10, runSpacing: 10, children: [
@@ -538,11 +538,11 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(width: 8),
               const Expanded(child: Text('Rider payroll (K3,000/mo)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
               if (financeOnly)
-                Chip(visualDensity: VisualDensity.compact, label: const Text('CFO view', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
+                const Chip(visualDensity: VisualDensity.compact, label: Text('CFO view', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800))),
             ]),
             const SizedBox(height: 6),
-            Text('Auto-generated: weekly Sun 16:00 CAT, monthly on the 1st. Two signatures release the money.',
-                style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+            const Text('Auto-generated: weekly Sun 16:00 CAT, monthly on the 1st. Two signatures release the money.',
+                style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 6, children: [
               for (final s in _payrollSummary)
@@ -665,8 +665,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const Expanded(child: Text('ZRA turnover tax', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
               TextButton(onPressed: _taxBusy ? null : () => _taxAction('Refresh', () => DropOffApi.adminTaxRefresh()), child: const Text('Refresh', style: TextStyle(fontSize: 12))),
             ]),
-            Text('Turnover = DropOff income only (jobs + prepaid delivery legs + plans + COD cut). 0% up to K2,500/month, 5% above. File by the 14th of the next month.',
-                style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+            const Text('Turnover = DropOff income only (jobs + prepaid delivery legs + plans + COD cut). 0% up to K2,500/month, 5% above. File by the 14th of the next month.',
+                style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
             const SizedBox(height: 8),
             if (_tax.isEmpty)
               const Text('No tax periods yet — the ledger fills as payments land.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
@@ -799,10 +799,10 @@ class _AdminScreenState extends State<AdminScreen> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              const Icon(Icons.campaign_outlined, color: AppColors.forest),
-              const SizedBox(width: 8),
-              const Expanded(child: Text('Push — marketing broadcast', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            const Row(children: [
+              Icon(Icons.campaign_outlined, color: AppColors.forest),
+              SizedBox(width: 8),
+              Expanded(child: Text('Push — marketing broadcast', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             ]),
             const SizedBox(height: 4),
             const Text('Push an offer to app users by audience. Title ≤ 80 chars, body ≤ 140 chars. Delivered on devices that previously signed in to the app.',
@@ -843,7 +843,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF2D2D2D),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border(left: BorderSide(color: AppColors.amber, width: 3)),
+                  border: const Border(left: BorderSide(color: AppColors.amber, width: 3)),
                 ),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   const Icon(Icons.notifications_active, color: AppColors.amber, size: 18),
@@ -967,6 +967,7 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       AppToast.show(context, 'Could not open ticket #$id: $e');
       return;
     }
@@ -1436,6 +1437,7 @@ class _UsersCardState extends State<_UsersCard> {
     if (res == null) return;
     final unchanged = res.email == '${user['email'] ?? ''}' && res.fullName == '${user['full_name'] ?? ''}';
     if (unchanged) {
+      if (!mounted) return;
       AppToast.show(context, 'Nothing changed.');
       return;
     }
@@ -1615,10 +1617,10 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.delete_outline, color: Color(0xFFB3261E)),
-            const SizedBox(width: 8),
-            const Expanded(child: Text('Delete a booking', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          const Row(children: [
+            Icon(Icons.delete_outline, color: Color(0xFFB3261E)),
+            SizedBox(width: 8),
+            Expanded(child: Text('Delete a booking', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
           ]),
           const SizedBox(height: 4),
           const Text('Only admins can delete a booking. Customers see a request-delete button that messages support — their data stays unless staff act on it. Deleting keeps payments and audit events for the books.',
@@ -2010,7 +2012,7 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
             ),
             if (_quotes.isNotEmpty) ...[
               const SizedBox(height: 14),
-              Text('Latest entries', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
+              const Text('Latest entries', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.ink)),
               const SizedBox(height: 6),
               ..._quotes.take(5).map((q) => Padding(
                 padding: const EdgeInsets.only(bottom: 4),
@@ -2499,10 +2501,10 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
               ]),
             ),
           const Divider(height: 24),
-          Row(children: [
-            const Icon(Icons.local_shipping_outlined, size: 16, color: AppColors.forest),
-            const SizedBox(width: 6),
-            const Text('Couriers — availability for sellers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+          const Row(children: [
+            Icon(Icons.local_shipping_outlined, size: 16, color: AppColors.forest),
+            SizedBox(width: 6),
+            Text('Couriers — availability for sellers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
           ]),
           const SizedBox(height: 8),
           for (final c in _couriers)
@@ -2808,7 +2810,7 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
                 Switch(
                   value: row['active'] == 1 || row['active'] == true,
                   onChanged: (_) => _toggle(row),
-                  activeColor: AppColors.forest,
+                  activeThumbColor: AppColors.forest,
                 ),
                 TextButton(onPressed: () => _edit(row), child: const Text('Edit')),
               ]),

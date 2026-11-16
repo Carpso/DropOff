@@ -93,6 +93,33 @@ class ThermalWaybill {
     }
   }
 
+  /// Split a long line at word boundaries so nothing runs past the printable
+  /// width and nothing is cut off mid-word.
+  static List<String> _wrapWords(String text, int maxLen) {
+    final words = text.split(' ');
+    final out = <String>[];
+    String current = '';
+    for (final w in words) {
+      final next = current.isEmpty ? w : '$current $w';
+      if (next.length <= maxLen) {
+        current = next;
+      } else {
+        if (current.isNotEmpty) out.add(current);
+        // absurdly long single token — hard split so nothing is lost
+        if (w.length > maxLen) {
+          for (var i = 0; i < w.length; i += maxLen) {
+            out.add(w.substring(i, (i + maxLen).clamp(0, w.length)));
+          }
+          current = '';
+        } else {
+          current = w;
+        }
+      }
+    }
+    if (current.isNotEmpty) out.add(current);
+    return out;
+  }
+
   /// ESC/POS bytes for the whole receipt (58 mm default — centred text still
   /// fills an 80 mm roll gracefully).
   static Future<List<int>> buildEscPos(WaybillPrintData d) async {
@@ -192,16 +219,23 @@ class ThermalWaybill {
       try {
         out.addAll(gen.qrcode(d.trackingUrl!.trim(), size: QRSize.size5, cor: QRCorrection.L));
       } catch (_) {
-        out.addAll(gen.text(d.trackingUrl!.trim(), styles: const PosStyles(align: PosAlign.center, fontType: PosFontType.fontB)));
+        for (final line in _wrapWords(d.trackingUrl!.trim(), 38)) {
+          out.addAll(gen.text(line, styles: const PosStyles(align: PosAlign.center, fontType: PosFontType.fontB)));
+        }
       }
     }
 
     out.addAll(gen.hr());
-    out.addAll(gen.text(
-      'The courier / depot fare is paid directly at the counter — DropOff never collects partner money. Cover shown is quoted protection, not insurance. Keep this waybill until the parcel is lodged.',
-      styles: const PosStyles(align: PosAlign.center, fontType: PosFontType.fontB, height: PosTextSize.size1),
-    ));
-    out.addAll(gen.feed(2));
+    for (final line in _wrapWords(
+      'The courier / depot fare is paid directly at the counter. DropOff never collects partner money. Cover shown is quoted protection, not insurance. Keep this waybill until the parcel is lodged.',
+      40,
+    )) {
+      out.addAll(gen.text(line,
+          styles: const PosStyles(align: PosAlign.center, fontType: PosFontType.fontB)));
+    }
+    // Cheap portables ship with a built-in cutter that slices the last printed
+    // line if the feed is too short — give the cutter a clear margin.
+    out.addAll(gen.feed(4));
     try {
       out.addAll(gen.cut());
     } catch (_) {/* some portables lack the cutter — paper tear works */}

@@ -531,7 +531,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 color: AppColors.forest.withValues(alpha: 0.08),
-                child: Row(children: const [
+                child: const Row(children: [
                   Icon(Icons.lock_outline, size: 16, color: AppColors.forest),
                   SizedBox(width: 8),
                   Expanded(child: Text('This conversation is archived — history stays available to everyone.',

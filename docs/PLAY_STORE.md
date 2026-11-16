@@ -163,7 +163,7 @@ Questions? support@carpsosolutions.store
 5. Recipient tracking page (SMS link) showing handover code hint.
 6. Task queue (rider) with proof-of-delivery dialog.
 
-### Release notes (0.5.31+41)
+### Release notes (0.5.32+42)
 ```
 * Signed-in errors simply report in. Unhandled app errors now report
   themselves to DropOff (anonymous, deduped) so crashes get fixed fast —
@@ -209,7 +209,7 @@ Questions? support@carpsosolutions.store
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 9. What is new in 0.5.31+41
+## 9. What is new in 0.5.32+42
 
 - **DropOff is now English-only** — the ny/bem/toi/loz catalogue (ARB files,
   generated l10n classes, `l10n.yaml`, `flutter_localizations`/`intl`, the

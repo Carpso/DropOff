@@ -227,6 +227,9 @@ class PushService {
       }
       // Also refresh on FCM's own token-refresh stream so the server always
       // holds the current token (older ones get 404/410 and are pruned server-side).
+      // NOTE: onRegistered is firebase's FID — NOT the messaging token our
+      // backend needs (it sends via FCM token). Deprecated but intentional.
+      // ignore: deprecated_member_use
       _fcm.onTokenRefresh.listen((newToken) async {
         if (newToken.isEmpty || DropOffApi.token == null) return;
         await DropOffApi.post('/push/register', {'token': newToken, 'platform': defaultTargetPlatform.name});

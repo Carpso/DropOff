@@ -445,7 +445,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
             ),
           ] else if (daily != null) ...[
             const SizedBox(height: 12),
-            Text(
+            const Text(
               'Shipping in bursts? Weekly Sprint covers 20 parcels over 7 days — likely beats a month plan.',
               style: AppType.caption,
             ),

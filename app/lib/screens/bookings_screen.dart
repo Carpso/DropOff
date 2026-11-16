@@ -11,7 +11,6 @@ import '../ui/pay_job.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -227,15 +226,15 @@ class BookingCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: const Color(0x66B3261E)),
                 ),
-                child: Row(children: [
-                  const Icon(Icons.lock_clock_outlined, size: 20, color: Color(0xFFB3261E)),
-                  const SizedBox(width: 10),
+                child: const Row(children: [
+                  Icon(Icons.lock_clock_outlined, size: 20, color: Color(0xFFB3261E)),
+                  SizedBox(width: 10),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const Text('Booking held — payment pending', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: Color(0xFFB3261E))),
-                    const SizedBox(height: 2),
-                    const Text('No rider is assigned until the prepayment lands. Tap to open and pay.', style: TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.35)),
+                    Text('Booking held — payment pending', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: Color(0xFFB3261E))),
+                    SizedBox(height: 2),
+                    Text('No rider is assigned until the prepayment lands. Tap to open and pay.', style: TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.35)),
                   ])),
-                  const Icon(Icons.chevron_right, color: Color(0xFFB3261E)),
+                  Icon(Icons.chevron_right, color: Color(0xFFB3261E)),
                 ]),
               ),
             ],
@@ -417,7 +416,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             ),
             TextButton.icon(
               icon: const Icon(Icons.verified_user_outlined),
-              label: Text('Share evidence'),
+              label: const Text('Share evidence'),
               onPressed: () => _showEvidenceLocker(context, booking),
             ),
           ]),
@@ -442,7 +441,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           child: Wrap(alignment: WrapAlignment.center, spacing: 8, children: [
             TextButton.icon(
               icon: const Icon(Icons.replay_outlined),
-              label: Text('Quick rebook'),
+              label: const Text('Quick rebook'),
               onPressed: () {
                 BookingScreen.prefill = {
                   'from': booking.fromCity,
@@ -514,9 +513,9 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
   Widget _detailRow(String label, String value) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(width: 95, child: Text(label, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppType.caption)),
+          Expanded(flex: 5, child: Text(label, softWrap: true, style: AppType.caption)),
           const SizedBox(width: 10),
-          Expanded(child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.35))),
+          Expanded(flex: 6, child: Text(value, textAlign: TextAlign.right, softWrap: true, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.35))),
         ]),
       );
 }
@@ -642,7 +641,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Share evidence', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+          const Text('Share evidence', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
           const Text('Proof-of-condition timeline (booking, pickup, dropoff, parcel check, confirmation). Share only with trusted parties.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
           const SizedBox(height: 12),
@@ -660,7 +659,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
           Row(children: [
             Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))),
             const SizedBox(width: 10),
-            Expanded(child: FilledButton.icon(onPressed: () async { await Share.share(summary, subject: 'DropOff evidence ${data['ref'] ?? ref}'); }, icon: const Icon(Icons.share_outlined), label: Text('Share evidence'))),
+            Expanded(child: FilledButton.icon(onPressed: () async { await Share.share(summary, subject: 'DropOff evidence ${data['ref'] ?? ref}'); }, icon: const Icon(Icons.share_outlined), label: const Text('Share evidence'))),
           ]),
         ]),
       ),
@@ -776,6 +775,7 @@ class _AutoAssignCardState extends State<_AutoAssignCard> {
         riderId: '${res['rider_id'] ?? ''}',
         riderName: res['rider'] as String?,
       );
+      if (!mounted) return;
       AppToast.success(context, 'Rider ${res['rider'] ?? ''} assigned — ETA ${res['eta_minutes'] ?? '?'} min.');
     } else {
       AppToast.warning(context, 'No rider available — the server retries automatically.');
@@ -1320,7 +1320,7 @@ class _PrepayCardState extends State<_PrepayCard> {
                 ? 'Prompt never started — no rider yet. Verify momo balance, tap Pay now.'
                 : 'Approve the momo prompt to dispatch your rider.',
                 style: AppType.caption)),
-            HelpIconButton(topic: HelpTopic.depositRejection, size: 16),
+            const HelpIconButton(topic: HelpTopic.depositRejection, size: 16),
           ]),
           const SizedBox(height: 10),
           FilledButton.icon(
@@ -1404,10 +1404,10 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.receipt_long_outlined, size: 18, color: Color(0xFF7B5710)),
-            const SizedBox(width: 8),
-            const Expanded(child: Text('Depot counter fare due',
+          const Row(children: [
+            Icon(Icons.receipt_long_outlined, size: 18, color: Color(0xFF7B5710)),
+            SizedBox(width: 8),
+            Expanded(child: Text('Depot counter fare due',
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
           ]),
           const SizedBox(height: 4),

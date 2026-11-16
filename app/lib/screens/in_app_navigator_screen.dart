@@ -311,7 +311,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                 child: Text(
                   distanceLabel == null
                       ? 'Waiting for GPS…'
-                      : '$distanceLabel · $durationLabel' + (_engineDown ? ' · straight-line' : '') + (_routeLoading ? ' · routing…' : ''),
+                      : '$distanceLabel · $durationLabel${_engineDown ? ' · straight-line' : ''}${_routeLoading ? ' · routing…' : ''}',
                   style: const TextStyle(color: AppColors.ink, fontSize: 12.5, fontWeight: FontWeight.w600),
                 ),
               ),

@@ -284,7 +284,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   Text('Devices signed in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
                 ]),
                 const SizedBox(height: 6),
-                Row(children: [
+                const Row(children: [
                   Expanded(
                     child: Text('Tap Revoke to sign a device out.', style: TextStyle(color: AppColors.muted, fontSize: 12))
                   ),
@@ -347,8 +347,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   child: OutlinedButton.icon(
                     onPressed: () async {
                       final ok = await DropOffApi.post('/me/devices/revoke-others', const {});
-                      if (!mounted) return;
-                      AppToast.show(context, ok.ok ? 'Signed out on all other devices.' : 'Could not sign out everywhere.');
+                      if (!sheetContext.mounted) return;
+                      AppToast.show(sheetContext, ok.ok ? 'Signed out on all other devices.' : 'Could not sign out everywhere.');
                       if (ok.ok) Navigator.of(sheetContext).pop();
                     },
                     icon: const Icon(Icons.logout, size: 18),
@@ -614,7 +614,7 @@ class _AccountScreenState extends State<AccountScreen> {
                 const SizedBox(height: 2),
                 Row(children: [
                   Expanded(child: Text(_biomeDescription, style: AppType.caption)),
-                  HelpIconButton(topic: HelpTopic.biometric),
+                  const HelpIconButton(topic: HelpTopic.biometric),
                 ]),
                 const SizedBox(height: 8),
                 SwitchListTile(
@@ -639,7 +639,7 @@ class _AccountScreenState extends State<AccountScreen> {
           ] else ...[
             const Text('Link this phone', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
             const SizedBox(height: 6),
-            Row(children: [
+            const Row(children: [
               Expanded(child: Text('Your number is your account — no passwords, no emails.', style: AppType.bodyStrong)),
               HelpIconButton(topic: HelpTopic.signIn),
             ]),
@@ -951,7 +951,7 @@ class _RecurringCardState extends State<_RecurringCard> {
             TextButton.icon(onPressed: _addPlan, icon: const Icon(Icons.add, size: 18), label: const Text('Add')),
           ]),
           const SizedBox(height: 2),
-          Row(children: [
+          const Row(children: [
             Expanded(child: Text('Weekly/biweekly/monthly — we remember, you tap once.', style: AppType.bodyStrong)),
             HelpIconButton(topic: HelpTopic.recurring),
           ]),
@@ -1050,7 +1050,7 @@ class _ReferralCardState extends State<_ReferralCard> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Invite sellers — earn', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
           const SizedBox(height: 4),
-          Row(children: [
+          const Row(children: [
             Expanded(child: Text('Friend-code → you get a 20% promo when they book their first pickup.', style: AppType.bodyStrong)),
             HelpIconButton(topic: HelpTopic.referralReward),
           ]),
@@ -1218,7 +1218,7 @@ class _TiersCardState extends State<_TiersCard> {
             children: [
               const Text('Send more, pay less', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
               const SizedBox(height: 4),
-              Row(children: [
+              const Row(children: [
                 Expanded(child: Text('7-Day Weekly Sprint or Silver / Gold / Platinum — one momo prompt.', style: AppType.bodyStrong)),
                 HelpIconButton(topic: HelpTopic.plansBlurb),
               ]),
@@ -1411,7 +1411,7 @@ class _PackCodeCardState extends State<_PackCodeCard> {
               Expanded(child: Text('Have a plan code?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             ]),
             const SizedBox(height: 4),
-            Row(children: [
+            const Row(children: [
               Expanded(child: Text('Bought a plan at a market? Redeem it here.', style: AppType.caption)),
               HelpIconButton(topic: HelpTopic.packCode),
             ]),
@@ -1530,7 +1530,7 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
                     style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
               ),
               const SizedBox(width: 6),
-              HelpIconButton(topic: HelpTopic.planCap, size: 16),
+              const HelpIconButton(topic: HelpTopic.planCap, size: 16),
               const SizedBox(width: 8),
               Flexible(
                 child: Text('$remaining left',

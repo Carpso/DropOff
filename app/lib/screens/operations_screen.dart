@@ -258,7 +258,7 @@ class OperationsScreen extends StatelessWidget {
 
   /// Live-position card: visible ON/OFF state + auto-ping for riders who opted
   /// in (the default). Requests GPS once, and shows precise feedback.
-  Widget _RiderLocationCard(BuildContext context) {
+  Widget _riderLocationCard(BuildContext context) {
     final store = AppScope.of(context);
     return _RiderLocationCardInner(store: store);
   }
@@ -274,14 +274,17 @@ class OperationsScreen extends StatelessWidget {
       permission = await Geolocator.requestPermission();
     }
     if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      if (!context.mounted) return;
       AppToast.show(context, 'Location permission needed to share your live position.');
       return;
     }
     try {
       final pos = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
       final res = await DropOffApi.riderPing(phone: store.linkedPhone!, lat: pos.latitude, lng: pos.longitude);
+      if (!context.mounted) return;
       AppToast.show(context, res.ok ? 'Live location shared with senders.' : 'Could not submit location right now.');
     } catch (e) {
+      if (!context.mounted) return;
       AppToast.show(context, 'Location unavailable — check GPS.');
     }
   }
@@ -354,7 +357,7 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 12),
           const _RiderTargetsCard(),
           const SizedBox(height: 12),
-          _RiderLocationCard(context),
+          _riderLocationCard(context),
           const SizedBox(height: 22),
           Card(
             child: ListTile(

@@ -157,19 +157,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(padding: const EdgeInsets.all(14), child: Text('How did the parcel move on?',
+          const Padding(padding: EdgeInsets.all(14), child: Text('How did the parcel move on?',
             style: AppType.subhead)),
           ListTile(
             leading: const Icon(Icons.local_shipping_outlined),
-            title: Text('Picked up from the seller'),
-            subtitle: Text('File it before leaving the stop'),
+            title: const Text('Picked up from the seller'),
+            subtitle: const Text('File it before leaving the stop'),
             trailing: _busyRef == ref ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
             onTap: () async {
               final photo = await _pickPodPhoto();
               setState(() => _busyRef = ref);
               final res = await DropOffApi.jobEvent(
                 jobRef: ref, status: 'picked_up', photoUrl: photo, stage: photo == null ? null : 'pickup');
-              if (!mounted) return;
+              if (!ctx.mounted) return;
               setState(() => _busyRef = null);
               Navigator.pop(ctx);
               await _snack(res.ok ? '$ref ✓ ${'Picked up from the seller'}' : 'Could not update (${res.error})');
@@ -188,19 +188,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           // cash from senders, ever.
           ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
-            title: Text('Dropped at the depot branch'),
-            subtitle: Text('Camera photo marks the handover — no fare to enter'),
+            title: const Text('Dropped at the depot branch'),
+            subtitle: const Text('Camera photo marks the handover — no fare to enter'),
             onTap: () => _depotDropWithReceipt(ctx, ref),
           ),
           ListTile(
             leading: const Icon(Icons.home_outlined),
-            title: Text('Handed to the recipient (door)'),
-            subtitle: Text('Requires their 4-digit DropOff code'),
+            title: const Text('Handed to the recipient (door)'),
+            subtitle: const Text('Requires their 4-digit DropOff code'),
             onTap: () => _deliverToDoor(ctx, ref),
           ),
           ListTile(
             leading: const Icon(Icons.close),
-            title: Text('Not yet — go back'),
+            title: const Text('Not yet — go back'),
             onTap: () => Navigator.pop(ctx),
           ),
         ]),
@@ -231,8 +231,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           title: Text('Depot drop — $ref', style: AppType.subhead),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Expanded(child: Text('Photograph every parcel, photograph every depot receipt exactly as written.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink))),
+              const Row(children: [
+                Expanded(child: Text('Photograph every parcel, photograph every depot receipt exactly as written.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink))),
                 HelpIconButton(topic: HelpTopic.depotReceipts),
               ]),
               const SizedBox(height: 12),
@@ -287,7 +287,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     style: const TextStyle(fontSize: 12.5)),
                 onPressed: () => setDialog(() => receipts.add(_ReceiptEntry())),
               ),
-              Row(children: [
+              const Row(children: [
                 Expanded(child: Text('Photos stay masked until the sender pays — then they reveal and the reimbursement triggers.', style: AppType.caption)),
                 HelpIconButton(topic: HelpTopic.depotReceipts),
               ]),
@@ -435,8 +435,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         builder: (ctx, setDialog) => AlertDialog(
           title: Text('Handover — $ref', style: AppType.subhead),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Ask the recipient for their 4-digit DropOff code. Never enter a code the parcel owner hasn\'t shown you.',
-              style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
+            const Text('Ask the recipient for their 4-digit DropOff code. Never enter a code the parcel owner hasn\'t shown you.',
+              style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
             const SizedBox(height: 12),
             TextField(
               controller: otpCtrl,
