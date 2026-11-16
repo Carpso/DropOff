@@ -7,6 +7,7 @@ import '../data/analytics_service.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/help_sheet.dart';
 import 'account_screen.dart';
 
 /// Collect a parcel from a courier's point in Lusaka and deliver it to the
@@ -392,7 +393,10 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           );
         }),
         const SizedBox(height: 6),
-        const Text('The exact fee is on the momo prompt — no hidden charges. The courier’s own fare is paid at the depot.', style: AppType.caption),
+        const Row(children: [
+          Expanded(child: Text('Approve the momo prompt on this number. No cash, no hidden charges.', style: AppType.caption)),
+          HelpIconButton(topic: HelpTopic.courierFare),
+        ]),
         const SizedBox(height: 18),
         FilledButton(
           onPressed: _saving ? null : _submit,

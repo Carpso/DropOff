@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
 
 import '../data/catalog.dart';
+import '../widgets/help_sheet.dart';
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../data/push_service.dart';
@@ -217,8 +218,11 @@ class _AccountScreenState extends State<AccountScreen> {
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Create account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
             const SizedBox(height: 4),
-            const Text('Your phone is the mobile-money identity for refunds, and the address parcels find you by — every parcel sent to this number appears automatically. Email is the sign-in key.', style: AppType.body),
-            const SizedBox(height: 14),
+            const Row(children: [
+              Expanded(child: Text('How sign-in works', style: AppType.bodyStrong)),
+              HelpIconButton(topic: HelpTopic.signIn),
+            ]),
+            const SizedBox(height: 6),
             TextField(controller: _cEmail, keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email], decoration: const InputDecoration(labelText: 'Email')),
             const SizedBox(height: 12),
             TextField(controller: _cPassword, obscureText: true, autofillHints: const [AutofillHints.password], decoration: const InputDecoration(labelText: 'Password (8+ chars)', helperText: 'At least 8 characters')),
@@ -281,8 +285,12 @@ class _AccountScreenState extends State<AccountScreen> {
                   Text('Devices signed in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
                 ]),
                 const SizedBox(height: 6),
-                const Text('Every phone/tablet this account has opened DropOff from. Tap revoke to sign that device out — it cannot be used again until re-authenticated.',
-                    style: AppType.caption),
+                Row(children: [
+                  Expanded(
+                    child: Text('Tap Revoke to sign a device out.', style: TextStyle(color: AppColors.muted, fontSize: 12))
+                  ),
+                  HelpIconButton(topic: HelpTopic.deviceList),
+                ]),
                 const SizedBox(height: 10),
                 if (rows.isEmpty)
                   const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('No devices on record yet — once you sign in on something, it shows here.', style: TextStyle(color: AppColors.muted, fontSize: 12)))
@@ -357,7 +365,7 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   String get _biomeDescription =>
-      'On: opening DropOff asks for your fingerprint or face — your parcels and bookings are nobody else\'s business. Off: the app opens straight away.';
+      'Fingerprint or face sign-in — your call.';
 
   String _localeLabel(AppLocalizations l10n, String? code) {
     switch ((code ?? 'en').toLowerCase()) {
@@ -623,12 +631,15 @@ class _AccountScreenState extends State<AccountScreen> {
                   Text('Privacy & sign-in', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
                 ]),
                 const SizedBox(height: 2),
-                Text(_biomeDescription, style: AppType.caption),
+                Row(children: [
+                  Expanded(child: Text(_biomeDescription, style: AppType.caption)),
+                  HelpIconButton(topic: HelpTopic.biometric),
+                ]),
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Fingerprint / face unlock', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  subtitle: const Text('Ask for the device biometric to open DropOff on this phone.', style: TextStyle(fontSize: 11.5)),
+                  subtitle: const Text('Unlock with fingerprint or face on this phone.', style: TextStyle(fontSize: 11.5)),
                   value: store.biometricEnabled,
                   onChanged: (v) => _setBiometric(v, store),
                 ),
@@ -655,8 +666,10 @@ class _AccountScreenState extends State<AccountScreen> {
           ] else ...[
             const Text('Link this phone', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
             const SizedBox(height: 6),
-            const Text('No passwords, no emails — your number is your account. Works for every rider and every sender.',
-                style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.45)),
+            Row(children: [
+              Expanded(child: Text('Your number is your account — no passwords, no emails.', style: AppType.bodyStrong)),
+              HelpIconButton(topic: HelpTopic.signIn),
+            ]),
             const SizedBox(height: 14),
             TextField(
               controller: _otpPhone,
@@ -765,8 +778,8 @@ class _AccountScreenState extends State<AccountScreen> {
             const SizedBox(height: 16),
             Text(
               _creating
-                  ? 'Your phone number is the mobile-money identity for refunds and payouts — the email is just the key.'
-                  : 'Signing in restores your plans and booking history from the server.',
+                  ? 'Phone number = refunds and payouts. Email = the sign-in key.'
+                  : 'Signing in restores your plans and booking history.',
               style: AppType.caption,
               textAlign: TextAlign.center,
             ),
@@ -965,7 +978,10 @@ class _RecurringCardState extends State<_RecurringCard> {
             TextButton.icon(onPressed: _addPlan, icon: const Icon(Icons.add, size: 18), label: const Text('Add')),
           ]),
           const SizedBox(height: 2),
-          const Text('Weekly/biweekly/monthly repeat drops at your depot door. We remember, you tap once to book.', style: AppType.body),
+          Row(children: [
+            Expanded(child: Text('Weekly/biweekly/monthly — we remember, you tap once.', style: AppType.bodyStrong)),
+            HelpIconButton(topic: HelpTopic.recurring),
+          ]),
           const SizedBox(height: 10),
           if (_loading)
             const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 12), child: CircularProgressIndicator(strokeWidth: 2)))
@@ -1061,8 +1077,10 @@ class _ReferralCardState extends State<_ReferralCard> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Invite sellers — earn', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
           const SizedBox(height: 4),
-          const Text('When a seller books their first pickup through your code, you get a single-use 20% promo for your own next drop-off.',
-              style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.45)),
+          Row(children: [
+            Expanded(child: Text('Friend-code → you get a 20% promo when they book their first pickup.', style: AppType.bodyStrong)),
+            HelpIconButton(topic: HelpTopic.referralReward),
+          ]),
           const SizedBox(height: 12),
           Row(children: [
             if (code != null)
@@ -1228,10 +1246,10 @@ class _TiersCardState extends State<_TiersCard> {
             children: [
               const Text('Send more, pay less', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
               const SizedBox(height: 4),
-               const Text(
-                'Plans bundle the rider into ONE mobile-money prompt — a 7-day Weekly Sprint, or a monthly Silver / Gold / Platinum plan. Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.',
-                style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.45),
-              ),
+              Row(children: [
+                Expanded(child: Text('7-Day Weekly Sprint or Silver / Gold / Platinum — one momo prompt.', style: AppType.bodyStrong)),
+                HelpIconButton(topic: HelpTopic.plansBlurb),
+              ]),
               const SizedBox(height: 12),
               _PlanUsageMeter(key: ValueKey(_usageCycle)),
               FutureBuilder<Map<String, dynamic>?>(
@@ -1422,7 +1440,10 @@ class _PackCodeCardState extends State<_PackCodeCard> {
               Expanded(child: Text('Have a plan code?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             ]),
             const SizedBox(height: 4),
-            const Text('Bought a plan from an agent or at a market day? Redeem the code — it activates instantly on your number.', style: AppType.caption),
+            Row(children: [
+              Expanded(child: Text('Bought a plan at a market? Redeem it here.', style: AppType.caption)),
+              HelpIconButton(topic: HelpTopic.packCode),
+            ]),
             const SizedBox(height: 12),
             TextField(
               controller: _code,

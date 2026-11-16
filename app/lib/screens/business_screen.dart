@@ -1,4 +1,5 @@
 import '../ui/app_toast.dart';
+import '../widgets/help_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -183,7 +184,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       return _banner(
         icon: Icons.trending_up_rounded,
         title: '3+ parcels a month pays off with a plan',
-        body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying per trip. A Weekly Sprint (K399, 20/cycle) or monthly Silver / Gold / Platinum bundles the rider fee into the parcel allowance — most regulars save K${(s.k).toStringAsFixed(0)}+.',
+        body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying ad hoc. A plan bundles the rider fee — most regulars save K${s.k.toStringAsFixed(0)}+ per cycle.',
         cta: 'Browse plans',
         onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
       );
@@ -487,11 +488,10 @@ class _BusinessScreenState extends State<BusinessScreen> {
                           style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
                         ),
                         SizedBox(height: 6),
-                        Text(
-                          'Subscription plans bundle your DropOff legs — Daily Rider K49/day, Weekly Sprint K399 or monthly Silver K250 / Gold K500 / Platinum K750. Pay once, no rider fee per parcel.',
-                          softWrap: true,
-                          style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4),
-                        ),
+                        Row(children: [
+                          Expanded(child: Text('Weekly or monthly bundles — one momo prompt, no rider fee per parcel.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4))),
+                          HelpIconButton(topic: HelpTopic.plansBlurb),
+                        ]),
                       ],
                     ),
                   ),

@@ -8,6 +8,7 @@
 import 'dart:async';
 
 import '../ui/app_toast.dart';
+import '../widgets/help_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -235,8 +236,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           title: Text('Depot drop — $ref', style: AppType.subhead),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Photograph EVERY parcel in the batch, then file EVERY depot receipt the depot wrote — each receipt photographed with the EXACT amount written on it. Never add receipts up yourself: DropOff totals the photographed documents.',
-                  style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
+              Row(children: [
+                const Expanded(child: Text('Photograph every parcel, photograph every depot receipt exactly as written.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink))),
+                HelpIconButton(topic: HelpTopic.depotReceipts),
+              ]),
               const SizedBox(height: 12),
               // ── Parcel photos (one or more) ──
               Text('PARCEL PHOTOS (${parcelPhotos.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
@@ -276,7 +279,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 ),
               ),
               const SizedBox(height: 4),
-              const Text('Optional — the exact branch you handed the parcel to. Until now the route reads "to Platinum"; this is where it lands on the books.',
+              const Text('Optional — the branch the parcel landed at. Route stays "to Platinum" until this is filled.',
                   style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.35)),
               const Divider(height: 20),
               // ── Depot receipts (one or more, each exact) ──
@@ -289,8 +292,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     style: const TextStyle(fontSize: 12.5)),
                 onPressed: () => setDialog(() => receipts.add(_ReceiptEntry())),
               ),
-              const Text('The receipt photos stay locked for the sender until they pay — then they are revealed and your money comes back.',
-                  style: TextStyle(fontSize: 11, height: 1.35, color: AppColors.muted)),
+              Row(children: [
+                Expanded(child: Text('Photos stay masked until the sender pays — then they reveal and the reimbursement triggers.', style: AppType.caption)),
+                HelpIconButton(topic: HelpTopic.depotReceipts),
+              ]),
             ]),
           ),
           actions: [

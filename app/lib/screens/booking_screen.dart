@@ -23,6 +23,7 @@ import '../ui/app_theme.dart';
 import '../ui/in_app_browser.dart';
 import '../ui/tidy.dart';
 import '../widgets/common.dart';
+import '../widgets/help_sheet.dart';
 import '../l10n/app_localizations.dart';
 import 'account_screen.dart';
 import 'bookings_screen.dart';
@@ -607,7 +608,7 @@ class _BookingScreenState extends State<BookingScreen> {
     final l10n = AppLocalizations.of(context);
     final serverCourierId = courierServerIdOf(_courierId);
     if (serverCourierId == null) {
-      return _message('That courier is not available for booking yet — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
+      return _message('That courier is unavailable right now — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
     }
     if (_senderName.text.trim().length < 2 || _recipientName.text.trim().length < 2) {
       return _message('Enter the sender and recipient names.');
@@ -670,7 +671,7 @@ class _BookingScreenState extends State<BookingScreen> {
       return;
     }
     if (store.lastBookingWindowRolled != null) {
-      _message('The ${store.lastBookingWindowRolled} window had closed — your booking moved to the next open slot automatically.');
+      _message('That window closed — your booking moved to the next open slot.');
     } else if (_tomorrowMorning) {
       _message('You booked the TOMORROW 6:00 – 7:30 AM early sweep — the rider collects in the morning.');
     }
@@ -924,9 +925,12 @@ class _BookingScreenState extends State<BookingScreen> {
               : Icon(_parcelPhotoUrl == null ? Icons.add_a_photo_outlined : Icons.check_circle, color: _parcelPhotoUrl == null ? null : AppColors.success),
           label: Text(_parcelPhotoUrl == null ? 'Add parcel photo (recommended)' : 'Parcel photo attached'),
         ),
-        const Padding(
-          padding: EdgeInsets.only(top: 4, bottom: 4),
-          child: Text('A clear photo of the parcel protects you - the rider\'s depot drop-off photo is checked against it.', style: AppType.caption),
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 4),
+          child: Row(children: [
+            Expanded(child: Text('Photo protects you in disputes.', style: AppType.caption)),
+            const HelpIconButton(topic: HelpTopic.parcelPhoto),
+          ]),
         ),
         const SizedBox(height: 10),
         TextField(
@@ -1105,13 +1109,16 @@ class _BookingScreenState extends State<BookingScreen> {
           padding: const EdgeInsets.all(13),
           decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
           child: const Text(
-            'Your rider takes the parcel to the nearest depot of the courier you choose — no branch to pick.',
+            'Nearest depot of your pick — no branch to choose.',
             style: AppType.caption,
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: Text('The courier fare is heard at the counter — the same conversation for every route, Lusaka or elsewhere.', style: AppType.caption),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(children: [
+            Expanded(child: Text('Depot fare — asked at the counter. Rider leg is separate.', style: AppType.caption)),
+            const HelpIconButton(topic: HelpTopic.courierFare),
+          ]),
         ),
       ];
 

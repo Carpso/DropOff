@@ -115,7 +115,7 @@ class HomeScreen extends StatelessWidget {
                   const SizedBox(height: 18),
                   Text('Send it anywhere.\nWithout going anywhere.', style: TextStyle(color: Colors.white, fontSize: scaleText(context, 29), height: 1.12, fontWeight: FontWeight.w900, letterSpacing: -0.8)),
                   const SizedBox(height: 12),
-                  const Text('A rider collects your parcel and drops it at the courier you choose.', style: TextStyle(color: Color(0xFFC9D9D2), height: 1.45, fontSize: 14)),
+                  const Text('A rider collects it. You pick the courier.', style: TextStyle(color: Color(0xFFC9D9D2), height: 1.45, fontSize: 15, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 22),
                   Row(children: [
                     Expanded(
@@ -430,7 +430,7 @@ class _FareCheckerState extends State<_FareChecker> {
             controller: _place,
             onChanged: (_) => setState(() => _feeChecked = false),
             decoration: const InputDecoration(
-              labelText: 'Pickup from (home / office / store — your own spot)',
+              labelText: 'Pickup from (home, office, store)',
               isDense: true,
               hintText: 'e.g. Kabulonga office, Matero home, Cairo Road shop',
             ),
@@ -473,8 +473,8 @@ class _FareCheckerState extends State<_FareChecker> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(
                   fee != null
-                      ? 'DropOff rider leg: K${fee.toStringAsFixed(0)} — pickup, band price (${km!.toStringAsFixed(1)} km) — same number you will see at booking'
-                      : 'DropOff rider leg: K55 / K75 / K95 by distance band — pin your pickup for your exact fee, it matches booking exactly (momo prepaid)',
+                      ? 'Rider leg K${fee.toStringAsFixed(0)} (${km!.toStringAsFixed(1)} km) — same number at booking'
+                      : 'Rider leg K55/K75/K95 by km band — pin your pickup for the exact fee.',
                   style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
                 ),
                 const SizedBox(height: 4),
