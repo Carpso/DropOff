@@ -201,13 +201,14 @@ class _ChatScreenState extends State<ChatScreen> {
         _poll?.cancel();
         return;
       }
-      final incoming = ((data['messages'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      final Map<String, dynamic> live = data; // null already excluded above
+      final incoming = ((live['messages'] as List?) ?? const []).cast<Map<String, dynamic>>();
       setState(() {
         _messages = incoming;
-        _myRole = data!['role'] as String?;
-        _threadId = (data['thread_id'] as num?)?.toInt();
-        _closedAt = data!['closed_at'] as String?;
-        _blockedSenders = ((data['blocked_senders'] as List?) ?? const [])
+        _myRole = live['role'] as String?;
+        _threadId = (live['thread_id'] as num?)?.toInt();
+        _closedAt = live['closed_at'] as String?;
+        _blockedSenders = ((live['blocked_senders'] as List?) ?? const [])
             .map((p) => '$p')
             .where((p) => p.isNotEmpty)
             .toList();
