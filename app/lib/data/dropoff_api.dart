@@ -823,6 +823,9 @@ class DropOffApi {
   /// {users: [{email, phone, full_name, role, ...}]} — staff can read, superadmin can write.
   static Future<Map<String, dynamic>?> adminUsers() => getAdmin('/admin/users');
 
+  /// Last client crashes (deduped per device+stack) for the admin console.
+  static Future<Map<String, dynamic>?> adminClientCrashes() => getAdmin('/admin/client-crashes');
+
   /// Promote/demote an account (customer|admin|partner) — superadmin only.
   static Future<ApiResponse> adminSetUserRole(String email, String role) =>
       post('/admin/users/role', {'email': email, 'role': role}, admin: true);

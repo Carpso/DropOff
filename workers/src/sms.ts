@@ -40,10 +40,26 @@ export async function sendSms(
     SMS_USERNAME?: string;
     SMS_API_KEY?: string;
     SMS_SENDER_ID?: string;
+    DB?: any; // D1Database — optional; enables STOP opt-out enforcement
   },
   phoneE164: string,
   message: string,
+  opts?: { transactional?: boolean },
 ): Promise<SmsResult> {
+  // Africa's Talking STOP handling: marketing/broadcast/nurture SMS is blocked
+  // for any phone that sent STOP (auth_users.sms_opt_out = 1). OTP, payment and
+  // code-bearing SMS (transactional) is never blocked — opting out of marketing
+  // can never lock you out of your own money or parcel.
+  if (!opts?.transactional && env?.DB) {
+    try {
+      const row: any = await env.DB.prepare(
+        'SELECT sms_opt_out FROM auth_users WHERE phone = ?1',
+      ).bind(String(phoneE164).replace(/\D/g, '')).first();
+      if (Number(row?.sms_opt_out ?? 0) === 1) {
+        return { sent: false, error: 'sms_opted_out' };
+      }
+    } catch { /* best-effort gate — delivery wins, matching payments */ }
+  }
   const user = String(env.AT_USERNAME ?? env.SMS_USERNAME ?? '');
   const key = String(env.AT_API_KEY ?? env.SMS_API_KEY ?? '');
   const from = String(env.AT_FROM ?? env.SMS_SENDER_ID ?? 'Carpso');

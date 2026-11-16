@@ -446,7 +446,7 @@ class OperationsScreen extends StatelessWidget {
             title: 'No riders yet.',
             message: canAddRiders
                 ? 'Tap + Add to register your first rider or driver. They appear in the shared team once saved.'
-                : 'Only the owner and admins can add riders. They appear here once added.',
+                : 'Only admins can add riders. They appear here once added.',
             action: canAddRiders
                 ? FilledButton.icon(
                     onPressed: () => _addRider(context),
@@ -471,7 +471,7 @@ class OperationsScreen extends StatelessWidget {
                   Text('${rider.vehicle} • ${rider.phone}', style: AppType.caption),
                 ])),
                 if (rider.isOwner)
-                  const InfoPill(icon: Icons.verified, label: 'OWNER')
+                  const InfoPill(icon: Icons.verified, label: 'ADMIN')
                 else if (canAddRiders) ...[
                   IconButton(
                     tooltip: 'Edit rider',
@@ -1290,7 +1290,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
     if (!mounted) return;
     setState(() => _saving = false);
     _snack(res.ok
-        ? 'Submitted - the owner/admin will verify your documents.'
+        ? 'Submitted - the admin team will verify your documents.'
         : 'Could not submit (${res.error}).');
     if (res.ok) {
       unawaited(_checkFace()); // auto-review the selfie right after submit
@@ -1412,7 +1412,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
           ]),
           if (!_collapsed) ...[
           const SizedBox(height: 4),
-          const Text('Your NRC, licence, plate and vehicle photos. The owner/admin verifies these before you can be assigned jobs.',
+          const Text('Your NRC, licence, plate and vehicle photos. An admin verifies these before you can be assigned jobs.',
               style: AppType.caption),
           if (rejected && note.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -1442,7 +1442,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
                     Text('Verification submitted', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: AppColors.forest)),
                   ]),
                   SizedBox(height: 6),
-                  Text('Your documents are in the owner/admin review queue. You will be notified once verified.', style: AppType.caption),
+                  Text('Your documents are in the admin review queue. You will be notified once verified.', style: AppType.caption),
                 ]),
               ),
               const SizedBox(height: 10),

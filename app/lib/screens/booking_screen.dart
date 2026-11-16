@@ -519,7 +519,7 @@ class _BookingScreenState extends State<BookingScreen> {
     }
   }
 
-  bool _validPhone(String value) => RegExp(r'^(?:\+?260|0)?[79][567]\d{7}$').hasMatch(value.replaceAll(RegExp(r'[\s-]'), ''));
+  bool _validPhone(String value) => RegExp(r'^(?:\+?260|0)?(5[0-9]|7[0-9]|9[1-9])\d{7}$').hasMatch(value.replaceAll(RegExp(r'[\s-]'), ''));
 
   void _next() {
     if (_step == 0) {

@@ -16,7 +16,7 @@ import {
   verifyJwtClaims, verifyPassword,
 } from './auth';
 import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
-import { PRIVACY_MD, PRIVACY_TITLE, mdToHtml } from './legal';
+import { PRIVACY_MD, PRIVACY_TITLE, TERMS_MD, TERMS_TITLE, mdToHtml } from './legal';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { sendSms } from './sms';
@@ -536,16 +536,10 @@ const isFinanceExec = (c: { env?: Env; req: { header: (k: string) => string | un
 const isOwner = (c: { env: Env; get?: (k: string) => unknown }) =>
   Boolean(typeof c.get === 'function' && c.get('phone') && c.get('phone') === ownerPhone(c.env));
 
-// Superadmin = the app owner (OWNER_PHONE) or the admin key. Only a
-// superadmin can mint or demote admins (e.g. the owner promoting a spouse
-// to admin for day-to-day assistant work). Owner keeps admin role too, so
-// every admin/ops surface works for them.
-const isSuperAdmin = (c: { env: Env; req: { header: (k: string) => string | undefined }; get?: (k: string) => unknown }) =>
-  c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY
-  || (typeof c.get === 'function' && c.get('phone') === ownerPhone(c.env))
-  // The owner's email account is the same human as OWNER_PHONE — sign in via
-  // email/password must not lock them out of minting admins.
-  || (typeof c.get === 'function' && ownerEmail(c.env) != null && c.get('email') === ownerEmail(c.env));
+// Superadmin ⊂ Admin (single role, no hierarchy): every admin can do every
+// admin thing. The one server-side hard refusal kept deliberately is that the
+// OWNER_PHONE account can never be deleted/demoted — silent guard, no UI hint.
+const isSuperAdmin = isAdmin;
 
 /** Naive per-IP throttle in D1 (e.g. 20 auth requests / hour / ip). */
 async function rateLimited(
@@ -821,9 +815,47 @@ app.get('/maps/route', async (c) => {
       return new Response(cached, { headers: { 'content-type': 'application/json', 'x-route-cache': 'hit' } });
     }
   } catch { /* cache unavailable — fall through */ }
-  const key = (c.env as any).ORS_API_KEY as string | undefined;
-  if (!key) return c.json({ error: 'router_not_configured' }, 503);
+  const upstream = ((c.env as any).ROUTER_UPSTREAM as string | undefined)?.replace(/\/+$/, '');
   try {
+    if (upstream) {
+      // Self-hosted OSRM (open-source, ours — see infra/router/README.md).
+      const res = await fetch(
+        `${upstream}/route/v1/driving/${f};${t}?overview=full&geometries=geojson&steps=true&continue_straight=true`,
+        { headers: { 'User-Agent': 'DropOff/1.0' }, signal: AbortSignal.timeout(9000) },
+      );
+      if (!res.ok) return c.json({ error: 'router_upstream_failed', status: res.status }, 502);
+      const data: any = await res.json();
+      const route = data?.routes?.[0];
+      if (!route) return c.json({ error: 'router_empty' }, 502);
+      const coords: [number, number][] = route.geometry?.coordinates ?? [];
+      if (coords.length < 2) return c.json({ error: 'router_empty' }, 502);
+      const steps = (route.legs ?? []).flatMap((leg: any) =>
+        (leg.steps ?? []).map((s: any) => {
+          const man = s?.maneuver ?? {};
+          const instruction = typeof man.instruction === 'string' && man.instruction
+            ? man.instruction
+            : osrmInstruction(String(man.type ?? ''), String(man.modifier ?? ''), String(s?.name ?? ''));
+          return {
+            instruction,
+            distance_m: Number(s?.distance ?? 0),
+            duration_s: Number(s?.duration ?? 0),
+            road: s?.name ? String(s.name) : null,
+            type: man.type ?? null,
+          };
+        }),
+      );
+      const body = JSON.stringify({
+        points: coords.map(([lng, lat]) => [lat, lng]), // app expects [lat,lng]
+        distance_m: Number(route.distance ?? 0),
+        duration_s: Number(route.duration ?? 0),
+        steps,
+      });
+      const out = new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=900' } });
+      try { c.executionCtx.waitUntil(caches.default.put(cacheKey, out.clone())); } catch { /* best-effort */ }
+      return out;
+    }
+    const key = (c.env as any).ORS_API_KEY as string | undefined;
+    if (!key) return c.json({ error: 'router_not_configured' }, 503);
     const res = await fetch(
       `https://api.openrouteservice.org/v2/directions/driving-car/geojson?start=${f}&end=${t}`,
       { headers: { Authorization: key, 'User-Agent': 'DropOff/1.0' }, signal: AbortSignal.timeout(9000) },
@@ -859,6 +891,108 @@ app.get('/maps/route', async (c) => {
   }
 });
 
+/** OSRM maneuver → human instruction, used when OSRM ships no text step. */
+function osrmInstruction(type: string, modifier: string, street: string): string {
+  const dir = (() => {
+    switch (modifier) {
+      case 'left': return 'left';
+      case 'right': return 'right';
+      case 'slight left': return 'slightly left';
+      case 'slight right': return 'slightly right';
+      case 'sharp left': return 'sharp left';
+      case 'sharp right': return 'sharp right';
+      case 'straight': return 'straight';
+      case 'uturn': return 'u-turn';
+      default: return '';
+    }
+  })();
+  const onto = street ? ` onto ${street}` : '';
+  switch (type) {
+    case 'depart': return 'Head out';
+    case 'arrive': return 'Arrive at the destination';
+    case 'turn': return dir ? `Turn ${dir}${onto}` : `Make the turn${onto}`;
+    case 'end of road': return dir ? `Turn ${dir} at the end of the road${onto}` : `Turn at the end of the road${onto}`;
+    case 'fork': return dir ? `Bear ${dir} at the fork${onto}` : `Keep at the fork${onto}`;
+    case 'merge': return `Merge${onto}`;
+    case 'ramp': return `Take the ramp${onto}`;
+    case 'on ramp': return `Take the on-ramp${onto}`;
+    case 'off ramp': return `Take the exit${onto}`;
+    case 'new name': return `Continue${onto}`;
+    case 'continue': return `Continue straight${onto}`;
+    case 'roundabout': case 'rotary': return modifier ? `Enter the roundabout (exit ${modifier})${onto}` : `Enter the roundabout${onto}`;
+    case 'exit roundabout': return `Exit the roundabout${onto}`;
+    case 'roundabout turn': return dir ? `Take the ${dir} exit at the roundabout${onto}` : `Turn at the roundabout${onto}`;
+    case 'notification': return `Continue${onto}`;
+    default: return dir ? `Turn ${dir}${onto}` : `Continue${onto}`;
+  }
+}
+
+// Client crash report — unauthenticated (crashes may occur pre-sign-in),
+// length-capped and rate-limited by device to 20/hour. The admin console reads
+// these; a growing count on the latest build = stop the rollout.
+app.post('/client/error', async (c) => {
+  let body: any = {};
+  try { body = await c.req.json(); } catch { return c.json({ error: 'json_required' }, 400); }
+  const message = String(body?.message ?? '').slice(0, 240).trim();
+  if (!message) return c.json({ ok: true }); // nothing useful to store
+  const stack = String(body?.stack ?? '').slice(0, 2000);
+  const platform = String(body?.platform ?? 'unknown').slice(0, 16);
+  const appVersion = String(body?.app_version ?? '').slice(0, 32);
+  const deviceId = String(body?.device_id ?? c.req.header('x-device-id') ?? 'unknown').slice(0, 128);
+  const userPhone = (c.get as any)?.('phone') ? String((c.get as any)('phone')).slice(0, 20) : null;
+  const dedupeKey = `${deviceId}|${message.slice(0, 64)}|${stack.slice(0, 64)}`;
+  try {
+    const recent = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM client_crashes WHERE device_id = ?1 AND last_seen_at > datetime('now', '-1 hour')`,
+    ).bind(deviceId).first<any>();
+    if (Number(recent?.n ?? 0) >= 20) return c.json({ ok: true, throttled: true });
+    await c.env.DB.prepare(
+      `INSERT INTO client_crashes (message, stack, platform, app_version, user_phone, device_id, dedupe_key)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT(dedupe_key) DO UPDATE SET count = count + 1, last_seen_at = datetime('now')`,
+    ).bind(message, stack, platform, appVersion, userPhone, deviceId, dedupeKey).run();
+  } catch { /* best-effort — never 5xx the reporter */ }
+  return c.json({ ok: true });
+});
+
+// Admin view of recent crashes for the console card.
+app.get('/admin/client-crashes', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const [rows, total] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT message, platform, app_version, count, first_seen_at, last_seen_at
+         FROM client_crashes ORDER BY last_seen_at DESC LIMIT 15`,
+    ).all<any>(),
+    c.env.DB.prepare(
+      `SELECT COALESCE(SUM(count), 0) AS n FROM client_crashes WHERE last_seen_at > datetime('now', '-1 day')`,
+    ).first<any>(),
+  ]);
+  return c.json({ crashes: rows.results ?? [], crashes_last_24h: Number(total?.n ?? 0) });
+});
+
+// Africa's Talking inbound SMS — STOP unsubscribes marketing; START resubscribes.
+// (Transactional SMS — OTP, payment codes — is never blocked either way.)
+app.post('/webhooks/at-sms', async (c) => {
+  let body: any = {};
+  const raw = await c.req.text().catch(() => '');
+  try { body = JSON.parse(raw); } catch {
+    try { body = Object.fromEntries(new URLSearchParams(raw)); } catch { /* ignore */ }
+  }
+  const text = String(body?.text ?? body?.message ?? body?.body ?? '').trim().toUpperCase();
+  const fromRaw = String(body?.from ?? body?.senderId ?? body?.phone ?? '');
+  const digits = fromRaw.replace(/\D/g, '');
+  const phone = digits.startsWith('260') ? digits : digits.replace(/^0/, '260');
+  if (!/^260\d{9}$/.test(phone)) return c.json({ ok: true }); // unparseable — ack anyway
+  const stopWords = new Set(['STOP', 'UNSUBSCRIBE', 'END', 'CANCEL', 'QUIT']);
+  const startWords = new Set(['START', 'UNSTOP', 'YES', 'SUBSCRIBE']);
+  const optOut = stopWords.has(text) ? 1 : (startWords.has(text) ? 0 : null);
+  if (optOut === null) return c.json({ ok: true });
+  try {
+    await c.env.DB.prepare('UPDATE auth_users SET sms_opt_out = ?1 WHERE phone = ?2').bind(optOut, phone).run();
+  } catch { /* best-effort */ }
+  return c.json({ ok: true });
+});
+
 /* ----------------------------- legal (Play needs a live privacy URL) ------- */
 // Public, no auth. The middleware skips '/legal' (regex below includes it).
 const PRIVACY_HTML =
@@ -871,6 +1005,17 @@ ${mdToHtml(PRIVACY_MD)}
 </body></html>`;
 
 app.get('/legal/privacy', (c) => c.html(PRIVACY_HTML));
+
+const TERMS_HTML =
+`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${TERMS_TITLE}</title>
+<style>body{font:16px/1.6 system-ui,-apple-system,sans-serif;color:#1c2530;max-width:720px;margin:2rem auto;padding:0 1.25rem}h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:1.75rem}li{margin:0.35rem 0}</style>
+</head><body>
+${mdToHtml(TERMS_MD)}
+</body></html>`;
+
+app.get('/legal/terms', (c) => c.html(TERMS_HTML));
 
 /* ------------------------------ delete my data ----------------------------- */
 // Play data-safety requires a link where any user can request that their
@@ -966,7 +1111,7 @@ app.post('/delete-data/request', async (c) => {
     ).bind(phone, hash),
   ]);
   const sms = await sendSms(c.env, phone,
-    `DropOff data deletion: your confirmation code is ${code}. It expires in 10 minutes. Never share this code.`);
+    `DropOff data deletion: your confirmation code is ${code}. It expires in 10 minutes. Never share this code.`, { transactional: true });
   return c.json({ sent: sms.sent, ...(sms.error ? { sms_error: sms.error } : {}) });
 });
 
@@ -1017,7 +1162,7 @@ app.post('/delete-data/confirm', async (c) => {
     // Clean out ALL of this account's open OTP codes.
     c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE phone = ?1 AND used = 0').bind(phone),
   ]);
-  await sendSms(c.env, phone, 'DropOff: your account and personal data have been deleted as requested. Financial audit records are retained without personal identifiers.').catch(() => null);
+  await sendSms(c.env, phone, 'DropOff: your account and personal data have been deleted as requested. Financial audit records are retained without personal identifiers.', { transactional: true }).catch(() => null);
   return c.json({ ok: true, deleted: true });
 });
 
@@ -1242,7 +1387,7 @@ app.post('/auth/request', async (c) => {
   // deliver via Africa's Talking (Carpso account) when AT_* secrets are set;
   // dev mode returns the code in the response
   const sms = await sendSms(c.env, phone,
-    `DropOff: your one-time code is ${code}. It expires in 10 minutes. For your security, never share this code with anyone — DropOff staff will never ask for it.`);
+    `DropOff: your one-time code is ${code}. It expires in 10 minutes. For your security, never share this code with anyone — DropOff staff will never ask for it.`, { transactional: true });
   const devMode = devModeOn(c.env);
   return c.json({
     sent: sms.sent, ...(sms.error ? { sms_error: sms.error } : {}),
@@ -2163,7 +2308,7 @@ app.post('/jobs', async (c) => {
           'Prepayment could not start (mobile-money provider unreachable). Booking HELD — no rider is assigned until the DropOff leg is prepaid. Retry payment to dispatch.').run();
         c.executionCtx.waitUntil(
           sendSms(c.env, senderPhone,
-          `DropOff: booking ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`).catch(() => {}),
+          `DropOff: booking ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`, { transactional: true }).catch(() => {}),
         );
       }
     }
@@ -2174,7 +2319,7 @@ app.post('/jobs', async (c) => {
         'Advance payment prompt sent at booking — the FULL DropOff leg. The rider is dispatched the moment it is approved; no pay-at-pickup, no rider cash handling.').run();
       c.executionCtx.waitUntil(
         sendSms(c.env, senderPhone,
-        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`).catch(() => {}),
+        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`, { transactional: true }).catch(() => {}),
       );
     }
 
@@ -2211,7 +2356,7 @@ app.post('/jobs', async (c) => {
       ).bind(ref, await handoverOtpHash(c.env, ref, deliveryOtp)).run();
       c.executionCtx.waitUntil(
         sendSms(c.env, recipientPhone,
-        `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {}),
+        `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`, { transactional: true }).catch(() => {}),
       );
     }
 
@@ -2427,7 +2572,7 @@ app.post('/collections', async (c) => {
   if (!depositRequired) {
     c.executionCtx.waitUntil(
       sendSms(c.env, recipientPhone,
-      `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`).catch(() => {}),
+      `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`, { transactional: true }).catch(() => {}),
     );
   }
 
@@ -2448,7 +2593,7 @@ app.post('/collections', async (c) => {
       ).bind(meta.last_row_id, 'advance_pending',
         'Advance payment prompt sent at booking — the FULL DropOff leg for this collection. The rider is dispatched the moment it is approved.').run();
       await sendSms(c.env, phone,
-        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`).catch(() => {});
+        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`, { transactional: true }).catch(() => {});
     } else {
       // PREPAY, NO EXCEPTIONS: provider down → the collection is HELD, never
       // dispatched on credit. Sender retries payment to dispatch.
@@ -2459,7 +2604,7 @@ app.post('/collections', async (c) => {
         'Prepayment could not start (mobile-money provider unreachable). Collection HELD — no rider is assigned until the DropOff leg is prepaid. Retry payment to dispatch.').run();
       c.executionCtx.waitUntil(
         sendSms(c.env, phone,
-        `DropOff: collection ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`).catch(() => {}),
+        `DropOff: collection ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`, { transactional: true }).catch(() => {}),
       );
     }
   }
@@ -3024,7 +3169,7 @@ app.post('/jobs/:ref/events', async (c) => {
       await sendSms(c.env, job.sender_phone,
         cfare.planWaived
           ? `DropOff: parcel ${job.ref} is at the depot counter. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your depot receipt photo (processing waived — plan active).`
-          : `DropOff: parcel ${job.ref} is at the depot counter. Counter fare K${counterReceiptDue.toFixed(2)} + K${fee.toFixed(2)} processing = K${cfare.total.toFixed(2)}. Open Bookings to pay — your depot receipt photo is revealed after payment.`);
+          : `DropOff: parcel ${job.ref} is at the depot counter. Counter fare K${counterReceiptDue.toFixed(2)} + K${fee.toFixed(2)} processing = K${cfare.total.toFixed(2)}. Open Bookings to pay — your depot receipt photo is revealed after payment.`, { transactional: true });
     } catch { /* notification must never break the event */ }
     c.executionCtx.waitUntil(sendToPhone(c.env, job.sender_phone, {
       title: 'Counter fare due',
@@ -3075,8 +3220,8 @@ app.post('/jobs/:ref/events', async (c) => {
             ? `DropOff: your parcel ${ref} reached the depot.`
             : `DropOff: your parcel ${ref} was picked up and is heading to the depot.`;
       await Promise.allSettled([
-        sendSms(c.env, job.sender_phone, body),
-        sendSms(c.env, job.recipient_phone, body),
+        sendSms(c.env, job.sender_phone, body, { transactional: true }),
+        sendSms(c.env, job.recipient_phone, body, { transactional: true }),
       ]);
     }
   }
@@ -4462,7 +4607,7 @@ app.post('/admin/sms', async (c) => {
   if (!message) return c.json({ error: 'message required' }, 400);
   if (message.length > 600) return c.json({ error: 'message too long (max 600 chars)' }, 400);
   const sender = c.get('phone') ?? 'admin-key';
-  const res = await sendSms(c.env, phone, message);
+  const res = await sendSms(c.env, phone, message, { transactional: true });
   await c.env.DB.prepare(
     `INSERT INTO sms_broadcasts (sender, audience, recipient_count, sent_count, body) VALUES (?1, 'single', 1, ?2, ?3)`,
   ).bind(sender, res.sent ? 1 : 0, message).run();
@@ -5017,7 +5162,7 @@ async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> 
   }
   const trackUrl = trackingUrl(env, token);
   await sendSms(env, job.recipient_phone,
-    `DropOff: parcel ${job.ref} is booked and paid. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`).catch(() => {});
+    `DropOff: parcel ${job.ref} is booked and paid. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`, { transactional: true }).catch(() => {});
 }
 
 // Idempotent settlement: the `settled` flag is flipped in the same batch as the
@@ -5050,7 +5195,7 @@ async function refundSettledPayment(
       ).bind(jobId, `${reason} — K${pay.amount_zmw.toFixed(2)} returned to the sender's momo automatically.`)] : []),
     ]);
     await sendSms(env, pay.phone,
-      `DropOff: K${pay.amount_zmw.toFixed(2)} was returned to your momo — ${reason}. ${jobRef ? `${jobRef} will not be dispatched.` : ''}`).catch(() => {});
+      `DropOff: K${pay.amount_zmw.toFixed(2)} was returned to your momo — ${reason}. ${jobRef ? `${jobRef} will not be dispatched.` : ''}`, { transactional: true }).catch(() => {});
     return;
   }
   if (jobId) {
@@ -9656,7 +9801,7 @@ async function weeklyOpsDigest(env: Env): Promise<void> {
       } catch { /* keep going — one dead token must not stop the digest */ }
     }
     if (pushed === 0 && owner) {
-      await sendSms(env, owner, `DropOff weekly: ${body}`);
+      await sendSms(env, owner, `DropOff weekly: ${body}`, { transactional: true });
     }
   } catch { /* digest is best-effort — never break the cron */ }
 }
@@ -9680,7 +9825,7 @@ async function notifyRiderTargets(env: Env): Promise<void> {
     if (short.length > 0 && env.OWNER_PHONE) {
       const lines = short.slice(0, 8).map((s) => `${s.name} ${s.t.today}/${s.t.daily_target}`).join(', ');
       await sendSms(env, env.OWNER_PHONE,
-        `DropOff targets: ${short.length} driver(s) short today. ${lines}${short.length > 8 ? ` +${short.length - 8} more` : ''}. Full view in Admin > Driver verification & targets.`);
+        `DropOff targets: ${short.length} driver(s) short today. ${lines}${short.length > 8 ? ` +${short.length - 8} more` : ''}. Full view in Admin > Driver verification & targets.`, { transactional: true });
     }
   } catch { /* target nudges are best-effort */ }
 }
@@ -9850,7 +9995,7 @@ async function refundUnspentPrepaid(
     ).bind(job.id, job.sender_phone, 'lipila', unspent, ref, dep?.first_id ?? null),
   ]);
   await sendSms(env, job.sender_phone,
-    `DropOff: ${job.ref ?? ''} was canceled before pickup. Your unspent prepayment of K${unspent.toFixed(2)} has been returned to your momo.`).catch(() => {});
+    `DropOff: ${job.ref ?? ''} was canceled before pickup. Your unspent prepayment of K${unspent.toFixed(2)} has been returned to your momo.`, { transactional: true }).catch(() => {});
 }
 
 /* ------------------- cron: no-show auto-cancel + strikes ------------------ */
@@ -9901,7 +10046,7 @@ async function cancelExpiredHolds(env: Env): Promise<number> {
         ...refundPromo,
       ]);
       await sendSms(env, job.sender_phone,
-        `DropOff: booking ${job.ref} was canceled — the prepayment was never approved within 24 hours. No rider was sent and no money was taken. Book again in the app when ready.`).catch(() => {});
+        `DropOff: booking ${job.ref} was canceled — the prepayment was never approved within 24 hours. No rider was sent and no money was taken. Book again in the app when ready.`, { transactional: true }).catch(() => {});
     } catch { /* never break the minute cron */ }
   }
   return (results ?? []).length;
@@ -9929,7 +10074,7 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
       ]);
       await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
       await sendSms(env, job.sender_phone,
-        `DropOff: ${job.ref} was auto-canceled because the parcel wasn't handed over in time (no-show). Repeated missed pickups can pause new bookings.`).catch(() => {});
+        `DropOff: ${job.ref} was auto-canceled because the parcel wasn't handed over in time (no-show). Repeated missed pickups can pause new bookings.`, { transactional: true }).catch(() => {});
       await refundUnspentPrepaid(env, job).catch(() => { /* refund bookkeeping never breaks the cron */ });
       canceled++;
     } catch { /* never break the minute cron */ }
@@ -9953,7 +10098,7 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
       ]);
       await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
       await sendSms(env, job.sender_phone,
-        `DropOff: ${job.ref} was auto-canceled after its slot window (no-show). Repeated missed pickups can pause new bookings.`).catch(() => {});
+        `DropOff: ${job.ref} was auto-canceled after its slot window (no-show). Repeated missed pickups can pause new bookings.`, { transactional: true }).catch(() => {});
       await refundUnspentPrepaid(env, job).catch(() => { /* refund bookkeeping never breaks the cron */ });
       canceled++;
     } catch { /* never break the minute cron */ }
@@ -10186,12 +10331,12 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
                 .bind(meta.last_row_id, 'advance_pending', 'Advance payment prompt sent for this standing order — dispatch at settlement.'),
             ]);
             await sendSms(env, plan.phone,
-              `DropOff: your standing order for ${plan.dest_city} (${ref}) is due now — approve the K${depAmount.toFixed(2)} prepayment to dispatch your rider.`).catch(() => {});
+              `DropOff: your standing order for ${plan.dest_city} (${ref}) is due now — approve the K${depAmount.toFixed(2)} prepayment to dispatch your rider.`, { transactional: true }).catch(() => {});
           } else {
             await env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
               .bind(meta.last_row_id, 'prepayment_pending', 'Standing order created but the prepayment prompt could not start — HELD; open Bookings and tap Pay now to dispatch.').run();
             await sendSms(env, plan.phone,
-              `DropOff: standing order ${ref} saved but the prepayment prompt could not start. Your rider is HELD — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`).catch(() => {});
+              `DropOff: standing order ${ref} saved but the prepayment prompt could not start. Your rider is HELD — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`, { transactional: true }).catch(() => {});
           }
         }
         created++;
@@ -10212,7 +10357,55 @@ function freqLabel(f: string): string {
 /* --------------------------- error reporting ------------------------------ */
 // Minimal Sentry "store" client (no SDK): one POST per uncaught error. Safe to
 // leave unset — telemetry must never break a delivery.
+/**
+ * Daily silent-failure detector (19:00 UTC cron):
+ *  - 5xx storm: more than 15 server errors in the last day → SMS the admin
+ *    (once per UTC day, tracked in app_settings.last_5xx_alert).
+ *  - Dead pipeline: active subscriptions exist but ZERO deliveries in 48h.
+ * Both are best-effort: a ping that never sends is worse than a false alarm,
+ * a missed signal is worse than either.
+ */
+async function eveningHealthProbe(env: Env): Promise<void> {
+  const db = env.DB;
+  const admin = ownerPhone(env);
+  const alertToday = async (key: string) => (await getSetting(db, key));
+  const stampAlert = async (key: string) => setSetting(db, key, new Date().toISOString(), 'cron:evening-probe');
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  // 1) server-error storm
+  const fivexx = await db.prepare(
+    `SELECT COUNT(*) AS n FROM error_events WHERE status >= 500 AND created_at > datetime('now', '-1 day')`,
+  ).first<any>();
+  if (Number(fivexx?.n ?? 0) > 15 && (await alertToday('last_5xx_alert')) !== todayIso && admin) {
+    await sendSms(env, admin, `DropOff health: ${fivexx.n} server errors in 24h — check Workers Logs. The app may be erroring for users.`, { transactional: true });
+    await stampAlert('last_5xx_alert');
+  }
+
+  // 2) dead pipeline
+  const active = await db.prepare(`SELECT COUNT(*) AS n FROM subscriptions WHERE status = 'active'`).first<any>();
+  const delivered = await db.prepare(
+    `SELECT COUNT(*) AS n FROM job_events WHERE status IN ('delivered', 'ready_for_collection') AND created_at > datetime('now', '-48 hours')`,
+  ).first<any>();
+  if (Number(active?.n ?? 0) > 0 && Number(delivered?.n ?? 0) === 0 && (await alertToday('last_dead_pipeline_alert')) !== todayIso && admin) {
+    await sendSms(env, admin, 'DropOff health: active packs exist but ZERO deliveries in 48h — dispatch or payments may be down. Check the console now.', { transactional: true });
+    await stampAlert('last_dead_pipeline_alert');
+  }
+}
+
 async function captureError(env: Env, err: unknown, req: { method: string; url: string }): Promise<void> {
+  // Always record to D1 first — the daily health probe reads error_events.
+  // Sentry remains optional when SENTRY_DSN is set.
+  try {
+    await env.DB.prepare(
+      'INSERT INTO error_events (req_id, method, path, status, message) VALUES (?1, ?2, ?3, ?4, ?5)',
+    ).bind(
+      crypto.randomUUID(),
+      String(req.method ?? 'ERR').slice(0, 8),
+      String(new URL(req.url).pathname).slice(0, 160),
+      500,
+      String((err as any)?.message ?? err).slice(0, 400),
+    ).run();
+  } catch { /* telemetry is best-effort */ }
   const dsn = env.SENTRY_DSN;
   if (!dsn) return;
   try {
@@ -10285,6 +10478,9 @@ export default {
     ctx.waitUntil((async () => {
       try {
         if (event.cron === '0 19 * * *') {
+          try { await eveningHealthProbe(env); } catch (e) {
+            await captureError(env, e, { method: 'CRON', url: 'https://cron/evening-probe' });
+          }
           await notifyRiderTargets(env);
           return;
         }

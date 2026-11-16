@@ -34,22 +34,46 @@ describe('fees', () => {
 
 describe('phone normalization', () => {
   it('normalizes Zambian formats to 260XXXXXXXXX', () => {
-    expect(normalizeZmPhone('0971234567')).toBe('260971234567');
-    expect(normalizeZmPhone('260961234567')).toBe('260961234567');
-    expect(normalizeZmPhone('961234567')).toBe('260961234567');
-    expect(normalizeZmPhone('+260 75 1234 567')).toBe('260751234567');
-  });
-
-  it('rejects non-Zambian / invalid numbers', () => {
-    expect(() => normalizeZmPhone('0112345678')).toThrow();
-    expect(() => normalizeZmPhone('')).toThrow();
-    expect(() => normalizeZmPhone('26097123456')).toThrow();
+    const cases: Array<[string, string]> = [
+      // Legacy assigned ranges
+      ['0971234567', '260971234567'], ['260961234567', '260961234567'],
+      ['961234567', '260961234567'], ['+260 75 1234 567', '260751234567'],
+      ['0951234567', '260951234567'], ['0771234567', '260771234567'],
+      ['0961234567', '260961234567'], ['0761234567', '260761234567'],
+      ['00260971234567', '260971234567'], // international escape double-0
+      // ZICTA 2024 expansion — the ranges that were being rejected in 2026
+      ['0571234567', '260571234567'],   // Airtel (assigned Dec 2024)
+      ['0561234567', '260561234567'],   // MTN (reserved, live in use)
+      ['0551234567', '260551234567'],   // Zamtel (reserved, live in use)
+      ['0581234567', '260581234567'],   // Beeline (reserved)
+      ['0781234567', '260781234567'],   // Beeline (reserved)
+      ['0981234567', '260981234567'],   // Beeline (assigned)
+    ];
+    for (const [raw, want] of cases) {
+      expect(normalizeZmPhone(raw)).toBe(want);
+    }
   });
 
   it('maps prefixes to providers', () => {
     expect(providerFromPhone('260971234567')).toBe('airtel');
+    expect(providerFromPhone('260771234567')).toBe('airtel');
+    expect(providerFromPhone('260571234567')).toBe('airtel');
     expect(providerFromPhone('260961234567')).toBe('mtn');
+    expect(providerFromPhone('260761234567')).toBe('mtn');
+    expect(providerFromPhone('260561234567')).toBe('mtn');
     expect(providerFromPhone('260951234567')).toBe('zamtel');
+    expect(providerFromPhone('260751234567')).toBe('zamtel');
+    expect(providerFromPhone('260551234567')).toBe('zamtel');
+  });
+
+  it('rejects non-Zambian / invalid / non-charging-rail numbers', () => {
+    expect(() => normalizeZmPhone('0112345678')).toThrow();   // unknown trunk range
+    expect(() => normalizeZmPhone('0211123456')).toThrow();   // 21x = geographic fixed lines, not mobile
+    expect(() => normalizeZmPhone('0631234567')).toThrow();    // 6x = VoIP
+    expect(() => normalizeZmPhone('0901234567')).toThrow();    // 90 = premium rate
+    expect(() => normalizeZmPhone('')).toThrow();
+    expect(() => normalizeZmPhone('26097123456')).toThrow();   // 8 digits after 260
+    expect(() => normalizeZmPhone('2609712345678')).toThrow(); // 10 digits after 260
   });
 });
 

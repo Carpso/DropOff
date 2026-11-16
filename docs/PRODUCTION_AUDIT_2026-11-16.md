@@ -1,9 +1,9 @@
 # DropOff — Production Audit 2026-11-16
 **Commit audited:** `72bb692` (+ `docs/PLAY_STORE.md`) · Worker deploy `c4261a43` (latest, `/maps/route` included — map proxy)
 **Release:** `0.5.28+39` · artifacts in `dist/` · `main` pushed.
-**Method:** live probes against the production Worker, repo/code inspection, worker typecheck, app analyze/test, dist hygiene, secrets hygiene. Anything marked **UNVERIFIED** needs an owner-side environment check — do not read UNVERIFIED as PASS.
+**Method:** live probes against the production Worker, repo/code inspection, worker typecheck, app analyze/test, dist hygiene, secrets hygiene. Anything marked **UNVERIFIED** needs an admin-side environment check — do not read UNVERIFIED as PASS.
 
-**Legend:** ✅ SHIP · 🟡 SHIP WITH CAVEATS (works; owner action before scale) · 🔴 BLOCKED / MISSING · ⚪ ROADMAP
+**Legend:** ✅ SHIP · 🟡 SHIP WITH CAVEATS (works; admin action before scale) · 🔴 BLOCKED / MISSING · ⚪ ROADMAP
 
 ---
 
@@ -44,7 +44,7 @@
 1. one real collect against production + webhook flips job to dispatched,
 2. one counter-fare repayment with a real receipt,
 3. one refund (kill a held booking after prepayment; verify auto-refund lands).
-Each of those is a 5-minute check with the owner's phone. Also confirm Lipila's fee schedule matches the booking UI processing fee (processor fee is what changes net on every transaction).
+Each of those is a 5-minute check with the admin's phone. Also confirm Lipila's fee schedule matches the booking UI processing fee (processor fee is what changes net on every transaction).
 
 **Fraud exposure note.** Dual-approval (two signatures release payroll) is in place on payouts; admins/ops cannot move customer money. `/admin/jobs/:ref/delete` keeps payments untouched and writes an audit event — verify the finance team accepts that ledger shape before first audit.
 
@@ -86,10 +86,10 @@ Via `/admin/tiers` you can spot-check caps with one K0 promo pack.
 
 ## 5. Rider ops — 🟡
 
-**What it does.** Rider queue with proof-of-delivery photos per leg (job requires camera photo to mark delivered; no price-only proof); KYC package + selfie reviewed by owner/admin before any job is assigned; selfie swap demotes rider to pending; AI selfie check (HF inference) is decision-support, not automatic assignment. GPS shared only with senders of their jobs while assigned; broadcast on one tap. Delivery requires recipient 4-digit OTP (door deliveries).
+**What it does.** Rider queue with proof-of-delivery photos per leg (job requires camera photo to mark delivered; no price-only proof); KYC package + selfie reviewed by admin/admin before any job is assigned; selfie swap demotes rider to pending; AI selfie check (HF inference) is decision-support, not automatic assignment. GPS shared only with senders of their jobs while assigned; broadcast on one tap. Delivery requires recipient 4-digit OTP (door deliveries).
 
 **Why 🟡.**
-1. **HF API dependency is unlisted in your P&L**: every KYC selfie + evidence grading hits `HF_API_KEY`. If the HF quota lapses or the model is deprecated, the queue stalls silently unless you watch Workers Logs. Add an explicit "AI on/off" kill-switch confirmation (it exists via feature flag? → **not confirmed** — owner should test with flag off) or budget a monthly HF line.
+1. **HF API dependency is unlisted in your P&L**: every KYC selfie + evidence grading hits `HF_API_KEY`. If the HF quota lapses or the model is deprecated, the queue stalls silently unless you watch Workers Logs. Add an explicit "AI on/off" kill-switch confirmation (it exists via feature flag? → **not confirmed** — admin should test with flag off) or budget a monthly HF line.
 2. **Selfie swap detection requires re-shoot** — a rider can only be auto-demoted when a mismatch is flagged. Verify the admin console shows the AI verdict with confidence + reason so staff know when to override.
 3. Geolocation on rider devices: high-accuracy GPS for navigation holds battery cost; riders must be told (they are; app says GPS sharing is opt-in).
 
@@ -117,12 +117,12 @@ Via `/admin/tiers` you can spot-check caps with one K0 promo pack.
 
 ## 8. Admin console — ✅ (one hygiene note)
 
-**Shipped in this release:** owner-only account deletion (`/admin/users/:phone`, superadmin required, owner refused, kills sessions + push tokens, job history kept for audit); admin booking deletion (`/admin/jobs/:ref/delete`, soft delete, payments untouched, `admin_deleted` audit event, hidden from all user listings); console cards for both wired. Role minting stays owner-only; admin cannot mint admin. Branch manager, strike ledger (with wipe), pack codes, plan caps, couriers, fraud queue, SMS broadcast, security alerts, XC (tax) reports — all gated `isAdmin`/`isSuperAdmin`.
+**Shipped in this release:** admin-only account deletion (`/admin/users/:phone`, superadmin required, admin refused, kills sessions + push tokens, job history kept for audit); admin booking deletion (`/admin/jobs/:ref/delete`, soft delete, payments untouched, `admin_deleted` audit event, hidden from all user listings); console cards for both wired. Role minting stays admin-only; admin cannot mint admin. Branch manager, strike ledger (with wipe), pack codes, plan caps, couriers, fraud queue, SMS broadcast, security alerts, XC (tax) reports — all gated `isAdmin`/`isSuperAdmin`.
 
 **Evidence.** `admin_screen.dart` — `_BookingDeleteCard`, delete-account rows, `_setRole`; worker `/admin/*` routes audited 2026-11-15 (all ungated admin routes fixed that day); this release deployed as `c4261a43` re-verified.
 
 **Hygiene.**
-- Delete booking is **ref-driven**, not a jobs list — a typo deletes nothing (`not found`) but slower UX for batch deletions. If a bulk "wipe this test account's bookings" tool appears later, keep it owner-only + dry-run mode.
+- Delete booking is **ref-driven**, not a jobs list — a typo deletes nothing (`not found`) but slower UX for batch deletions. If a bulk "wipe this test account's bookings" tool appears later, keep it admin-only + dry-run mode.
 - The 60-account cap on the Users card is intentional scroll protection; it is not a compliance control.
 
 ---
@@ -135,13 +135,13 @@ Via `/admin/tiers` you can spot-check caps with one K0 promo pack.
 
 OSRM's own docs state the demo server **is not for production use** (fair-use, no SLA, could be rate-limited or cut off at any time). That risk is tolerable pre-launch but is **not production-grade** for money-handling routing.
 
-**Owner actions to make this ✅ SHIP (each ≤ 10 minutes):**
+**Admin actions to make this ✅ SHIP (each ≤ 10 minutes):**
 1. Sign up at `openrouteservice.org` (free, no card) → Settings → API key.
 2. `cd workers && npx wrangler secret put ORS_API_KEY` → paste key.
 3. curl check: `curl -sH "Authorization: Bearer <any test JWT>" "https://dropoff-api.godfreymoseskalambo.workers.dev/maps/route?from=28.3228,-15.3875&to=28.2833,-15.4167"` → expect `points`, `steps`, `duration_s`.
 4. No rebuild needed — app already calls the proxy first.
 
-**Budget safety:** Cache API dedups identical 5dp-coordinate routes for 15 min; routes only fetch when the rider has moved >150 m; 2,000/day covers ~2× current fleet with headroom. Growth path: self-host OSRM on a $5/mo VPS (geofabrik.de Zambia extract → `osrm-backend` in Docker; point `/maps/route` upstream at it; zero ongoing cost, full ownership). Voice turn-by-turn remains unshipped (OS TTS integration is a separate task).
+**Budget safety:** Cache API dedups identical 5dp-coordinate routes for 15 min; routes only fetch when the rider has moved >150 m; 2,000/day covers ~2× current fleet with headroom. Growth path: self-host OSRM on a $5/mo VPS (geofabrik.de Zambia extract → `osrm-backend` in Docker; point `/maps/route` upstream at it; zero ongoing cost, full adminship). Voice turn-by-turn remains unshipped (OS TTS integration is a separate task).
 
 **Tile availability.** The basemap URL is R2 public bucket — if the bucket rotates, the map degrades to "map could not load" with a last-seen fallback; riders still have job/queue UIs. Consider signed URLs or a custom domain on the bucket once traffic grows (R2 egress is free within the plan).
 
@@ -163,7 +163,7 @@ OSRM's own docs state the demo server **is not for production use** (fair-use, n
 
 **What it does.** Fully-wired HTTP-v1 FCM sender (service-account JWT signed with WebCrypto, 55-minute TTL), zero dependencies, used for rider_assigned, payment received, delivery completion, push broadcast admin card, chat pings. Code logs + no-ops when `FIREBASE_SERVICE_ACCOUNT` is not set — **the code cannot tell you whether the secret is set in production**.
 
-**Owner must do:**
+**Admin must do:**
 1. `wrangler secret list` on the production worker → confirm `FIREBASE_SERVICE_ACCOUNT` is present (name only).
 2. Trigger a real push to a real device (admin → broadcast → “test” to one number, or assign a job and watch for the push).
 3. Check the broadcast card in the admin console shows `queued`, not `failed`.
@@ -254,7 +254,7 @@ Modelled in `UNIT_ECONOMICS_2026-11-15.md`: K45 PAYG trip → K41.80 net (K3.2 L
 
 ---
 
-## 20. Pre-launch checklist — owner actions, in order
+## 20. Pre-launch checklist — admin actions, in order
 
 | # | Action | Est. time | Unblocks |
 |---|--------|-----------|----------|

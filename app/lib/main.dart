@@ -26,6 +26,7 @@ import 'screens/lock_screen.dart';
 import 'state/app_store.dart';
 import 'data/dropoff_api.dart';
 import 'data/analytics_service.dart';
+import 'services/crash_reporting.dart';
 import 'ui/app_theme.dart';
 import 'data/push_service.dart';
 import 'services/device_lock.dart';
@@ -119,6 +120,7 @@ void _handleDeepLink(AppStore store, Uri uri) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  CrashReporting.init();
   final store = AppStore();
   // Initialize analytics outbox (offline-first) on a background future so the
   // splash screen shows immediately; events are flushed with the booking

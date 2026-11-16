@@ -26,4 +26,4 @@ Every upload to Google Play **must** use a **strictly higher `versionCode`** tha
 - Courier/rider partner money is never collected by DropOff; the depot fare is paid at the counter.
 - Cover is **quoted protection, not insurance**, until legal/commercial sign-off; never market as insured.
 - SMS stays English-only until user locale is applied; TOI = Tonga (Zambia) / Chitonga.
-- Ops/admin endpoints are gated (`isAdmin` = admin key | role=admin | owner phone). Never ship `DROPOFF_API_KEY`/`ADMIN_AUTH_KEY` in store builds.
+- Ops/admin endpoints are gated (`isAdmin` = admin key | role=admin | admin phone). Never ship `DROPOFF_API_KEY`/`ADMIN_AUTH_KEY` in store builds.

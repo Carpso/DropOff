@@ -2,7 +2,7 @@
 // live at https://dropoff-api.godfreymoseskalambo.workers.dev/legal/privacy).
 // Rendered with a tiny markdown subset converter in index.ts.
 
-export const PRIVACY_MD: string = `# DropOff — Privacy Policy
+export const PRIVACY_MD: string = `# DropOff - Privacy Policy
 
 Last updated: November 2026
 
@@ -72,4 +72,76 @@ export function mdToHtml(md: string): string {
     .replace(/((?:<li>.*<\/li>\n?)+)/g, (_m, lis) => `<ul>${lis.replace(/\n(?=<)/g, '').replace(/\n$/, '')}</ul>\n`);
 }
 
-export const PRIVACY_TITLE = 'DropOff — Privacy Policy';
+export const PRIVACY_TITLE = 'DropOff - Privacy Policy';
+
+export const TERMS_MD: string = `# DropOff - Terms of Service
+
+Last updated: November 2026
+
+## Who we are
+
+DropOff is a first-mile parcel marketplace operated in Zambia by Carpso Solutions. We match a sender whose parcel needs a door-to-depot ride with an independent local rider, and we arrange delivery to the courier depot branch you nominate. **DropOff is not a courier, not a carrier, not a logistics company and not an insurer, and we never take custody of parcels between cities.** The city-to-city leg is a contract between you and the courier you choose.
+
+## How a booking works
+
+- You book in the app with pickup address, recipient, parcel weight class and description.
+- DropOff dispatches algorithmically to the nearest available verified rider. Staff cannot hand-pick a rider for you.
+- The rider collects, drops at the branch you nominated. You pay the rider's leg via Lipila mobile money **up front**; your rider is dispatched once the prepayment lands.
+- The courier's counter fare is **your arrangement with the courier**, paid by you at the depot counter. DropOff never collects courier counter fares; if your rider fronted it on your behalf, you repay exactly the receipt amount plus processing in the app.
+- Delivery to your recipient's door (last mile) is an optional add-on with its own code (OTP) handover.
+
+## What we charge
+
+- **PAYG trip:** rider leg price + processing (the live quote shown at booking).
+- **Packs & subscriptions:** the pack price you pay buys the pack benefits shown at purchase time (parcel caps, free legs, lower per-parcel processing). Silver / Gold / Platinum monthly packs and Daily Pass / Sprint passes; terms print at checkout and are changeable at renewal.
+- **No hidden fees:** counter fare is always the courier's price with the courier. Pack upcharges or overage rates apply only if you exceed the pack's entitlements; your app shows them before you confirm.
+- **Refunds:** if the leg can't run (rider no-show, cancelled hold that never dispatched), the DropOff prepayment returns to your original momo. If we fail you after pickup, we investigate with evidence (photos, OTP, GPS).
+- **Cancel before pickup:** cancel in the app before pickup and the unspent prepayment is refunded. After pickup, cancellation closes as delivered-to-depot at the counter.
+
+## Booking and no-show policy
+
+- Repeatedly ghosting riders (3 unattended pickups / 14 days) can restrict booking for two weeks.
+- Unpaid held bookings auto-cancel after 24 hours; no money is taken.
+- If your parcel never reaches the depot, contact support with your booking ref; we review photos, OTP and GPS.
+
+## Your account
+
+- One account per phone number. Don't share riders, passwords or OTP codes; a compromised account can be reset from the app or via support@carpsosolutions.store.
+- You remain responsible for what you put in parcels: **no dangerous goods, no cash, no documents of forged value.** We can refuse parcels and will report illegal contents.
+- **Quoted protection** (the optional parcel value cover at booking) is not insurance: it is a **quote** — fee and cap — not coverage, not an insurance product, and not a guarantee. Cover applies only when confirmed and only as stated at the point of booking.
+- By using DropOff you agree to receive transactional SMS/push for your bookings. You can reply STOP to our SMS sender at any time; transactional messages (OTP, codes, payment and parcel status) still arrive, marketing does not.
+
+## Disputes and evidence
+
+- Delivery disputes are settled on evidence: booking/drop-off photos, GPS pings, chat history, OTP confirmation, and the depot counter receipt for courier-paid legs.
+- We may record and store that evidence to resolve parcel disputes and prevent fraud.
+- Claims fade fast — 14 days from delivery/dispute first reported. Unverified claims on missing evidence may be declined.
+
+## Liability
+
+- DropOff's maximum total liability for any parcel is limited to the lower of (a) the DropOff fees you paid for that parcel, or (b) the declared value at booking (if your parcel exceeded courier mass/dimensions limits, also capped at the courier's own admission).
+- We are not liable for: indirect or consequential loss (lost profit, events), parcels booked under false description, courier delay or loss on the onward leg, or courier counter-fare disputes between you and the courier.
+- Nothing here limits liability that cannot be limited by Zambian law.
+
+## Pack codes and refunds
+
+- Offline pack codes are single-use, non-transferable, and their remaining value is forfeited on refund. All sales of pack codes are final.
+
+## Privacy
+
+See our [Privacy Policy](/legal/privacy). We collect the minimum needed to run the service and do not sell personal data.
+
+## Law and disputes
+
+- These terms are governed by the laws of the Republic of Zambia.
+- Parties must attempt to resolve disputes by written notice to support@carpsosolutions.store before any legal action. If unresolved within 30 days, disputes proceed to the courts of Lusaka, Zambia.
+- We may update these terms; current terms always at /legal/terms. Continued use after a material change is acceptance.
+
+## Contact
+
+support@carpsosolutions.store
+
+Carpso Solutions, Lusaka, Zambia
+`;
+
+export const TERMS_TITLE = 'DropOff - Terms of Service';

@@ -33,6 +33,9 @@ BUSINESS_PHONE = "260976847775"
 MAIL_FROM = "no-reply@carpsosolutions.store"
 APP_URL = "https://dropoff-api.godfreymoseskalambo.workers.dev"
 AUTH_DEV_MODE = "0"                            # "1" = return OTP codes / reset links in responses
+# When the self-hosted OSRM router exists (see infra/router/README.md), uncomment:
+# ROUTER_UPSTREAM = "https://router.dropoff.example.com"
+# The Worker proxy uses it ahead of any keyed service; riders get road-following routes; no keys involved.
 
 # SMS — Africa's Talking, the Carpso account (same pattern as Kingdom Sponsor /
 # chisomo). Secret: AT_API_KEY (npx wrangler secret put AT_API_KEY).

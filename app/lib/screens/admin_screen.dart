@@ -8,7 +8,7 @@ import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../ui/app_theme.dart';
 
-/// Owner / admin console inside the app: live business stats, security
+/// Admin console inside the app: live business stats, security
 /// alerts, the fraud queue, depot branches, and SMS broadcasts. The screen
 /// re-checks GET /me on open — a seller who deep-links here gets a lock door.
 class AdminScreen extends StatefulWidget {
@@ -87,7 +87,7 @@ class _AdminScreenState extends State<AdminScreen> {
     if (!mounted) return;
     setState(() {
       _authorized = true;
-      _superadmin = me?['superadmin'] == true;
+      _superadmin = role == 'admin';
       _role = role;
       _runrate = runrate;
       _stats = stats;
@@ -197,22 +197,6 @@ class _AdminScreenState extends State<AdminScreen> {
                 Text('CFO', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.9, color: Color(0xFF1E4F6E))),
               ]),
             ),
-          if (_superadmin)
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: AppColors.amber.withValues(alpha: 0.22),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.amber.withValues(alpha: 0.65)),
-              ),
-              // compact SUPERADMIN chip — flags the owner-only console to itself
-              child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.shield, size: 12, color: Color(0xFF7A5200)),
-                SizedBox(width: 4),
-                Text('SUPERADMIN', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.9, color: Color(0xFF7A5200))),
-              ]),
-            ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: () => setState(() { _loading = true; _load(); }),
@@ -267,10 +251,10 @@ class _AdminScreenState extends State<AdminScreen> {
             _taxCard(),
             if (!_financeOnly) ...[
               const _SupportInboxCard(),
-              if (_superadmin) ...[
-                const SizedBox(height: 18),
-                const _UsersCard(),
-              ],
+              const SizedBox(height: 18),
+              const _ClientCrashesCard(),
+              const SizedBox(height: 18),
+              const _UsersCard(),
               const SizedBox(height: 18),
               const _PackCodesCard(),
               const SizedBox(height: 18),
@@ -544,7 +528,7 @@ class _AdminScreenState extends State<AdminScreen> {
         ]),
       );
 
-  /// Every payout row's money moves only after admin intent → superadmin release.
+  /// Every payout row's money moves only after admin intent → second-admin release.
   Widget _payrollCard({bool financeOnly = false}) => Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -650,7 +634,7 @@ class _AdminScreenState extends State<AdminScreen> {
   String _payrollStatusText(String status) {
     switch (status) {
       case 'pending': return 'awaiting admin';
-      case 'admin_confirmed': return 'awaiting superadmin';
+      case 'admin_confirmed': return 'awaiting second admin';
       case 'paid': return 'paid ✓';
       case 'failed': return 'Lipila failed';
       default: return status;
@@ -1343,8 +1327,8 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
   }
 }
 
-/// Accounts & roles (superadmin only): review every account and mentor who is
-/// admin. The owner's own row can never be demoted (server refuses).
+/// Accounts & roles (admins): review every account and decide who is
+/// admin. The admin key's own row can never be demoted (server refuses).
 class _UsersCard extends StatefulWidget {
   const _UsersCard();
 
@@ -1395,7 +1379,7 @@ class _UsersCardState extends State<_UsersCard> {
     if (!mounted) return;
     AppToast.show(context, res.ok
         ? '$name was deleted. Their sessions are dead.'
-        : 'Failed: ${res.error == 'superadmin_required' ? 'only the owner can delete accounts' : res.error == 'cannot_delete_owner' ? 'the owner account cannot be deleted' : res.error}');
+        : 'Failed: ${res.error == 'superadmin_required' || res.error == 'admin_required' ? 'admins only' : res.error == 'cannot_delete_owner' ? 'that account cannot be deleted' : res.error}');
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(
@@ -1412,7 +1396,7 @@ class _UsersCardState extends State<_UsersCard> {
     if (!mounted) return;
     AppToast.show(context, res.ok
         ? '$email is now $role.'
-        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'the owner account cannot be demoted' : res.error == 'superadmin_required' ? 'only the owner can change roles' : res.error}');
+        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'that account cannot be demoted' : res.error == 'superadmin_required' || res.error == 'admin_required' ? 'admins only' : res.error}');
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(
@@ -1435,7 +1419,7 @@ class _UsersCardState extends State<_UsersCard> {
             IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
           const SizedBox(height: 4),
-          const Text('As the owner you decide who is who. Roles you can grant: customer (regular sender/seller), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves), cfo (finances only — payroll, turnover tax and filings; never moves money on their own).',
+          const Text('Admins decide who is who. Roles you can grant: customer (regular sender/seller), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves), cfo (finances only — payroll, turnover tax and filings; never moves money on their own).',
               style: AppType.caption),
           const SizedBox(height: 8),
           if (_loading)
@@ -1445,7 +1429,6 @@ class _UsersCardState extends State<_UsersCard> {
           else
             ..._users.take(60).map((u) {
               final role = '${u['role'] ?? 'customer'}';
-              final superadmin = u['superadmin'] == true;
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(children: [
@@ -1455,24 +1438,12 @@ class _UsersCardState extends State<_UsersCard> {
                     Row(children: [
                       Text('${u['full_name'] ?? u['email'] ?? u['phone'] ?? 'Account'}',
                           style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                      if (superadmin) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.amber.withValues(alpha: 0.22),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppColors.amber.withValues(alpha: 0.65)),
-                          ),
-                          child: const Text('SUPERADMIN', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.7, color: Color(0xFF7A5200))),
-                        ),
-                      ],
+                      
                     ]),
                     Text('${u['email'] ?? ''} · ${u['phone'] ?? ''}',
                         style: const TextStyle(color: AppColors.muted, fontSize: 11)),
                   ])),
-                  if (superadmin) const Chip(visualDensity: VisualDensity.compact, label: Text('SUPERADMIN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900)))
-                  else ...[
+                  ...[
                     PopupMenuButton<String>(
                       tooltip: 'Change role',
                       initialValue: role,
@@ -1506,7 +1477,7 @@ class _UsersCardState extends State<_UsersCard> {
 }
 
 /// Admin booking delete: the soft-delete the ops console has no button for.
-/// Customers can never delete bookings — only the owner/admins can, and the
+/// Customers can never delete bookings — only admins can, and the
 /// job stays in the DB for payments & audit (every listing filters on
 /// status != 'deleted').
 class _BookingDeleteCard extends StatefulWidget {
@@ -1578,7 +1549,7 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
             const Expanded(child: Text('Delete a booking', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
           ]),
           const SizedBox(height: 4),
-          const Text('Only the owner and admins can delete a booking. Customers see a request-delete button that messages support — their data stays unless staff act on it. Deleting keeps payments and audit events for the books.',
+          const Text('Only admins can delete a booking. Customers see a request-delete button that messages support — their data stays unless staff act on it. Deleting keeps payments and audit events for the books.',
               style: AppType.caption),
           const SizedBox(height: 10),
           Row(children: [
@@ -2229,7 +2200,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
   String? _error;
   List<Map<String, dynamic>> _plans = const [];
   List<Map<String, dynamic>> _couriers = const [];
-  // Platform switches — owner flips live, superadmin-only server-side.
+  // Platform switches — an admin flips live, admin-key-gated server-side.
   bool _doorToDoor = false;
   bool _overageDiscount = false;
   bool _flagBusy = false;
@@ -2274,7 +2245,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
         ? (key == 'door_to_door_enabled'
             ? (on ? 'Door-to-door drop-off ON — sellers see the option.' : 'Door-to-door OFF — collection points only.')
             : (on ? 'Overage discount ON — tiers apply on PAYG overage.' : 'Overage discount OFF — overage bills at full PAYG.'))
-        : 'Could not flip the switch (${res.error ?? 'superadmin required'})');
+        : 'Could not flip the switch (${res.error ?? 'admins only'})');
     unawaited(Future.delayed(const Duration(milliseconds: 400), _load));
   }
 
@@ -2400,7 +2371,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
           Row(children: [
             const Icon(Icons.tune, size: 19, color: AppColors.forest),
             const SizedBox(width: 8),
-            const Expanded(child: Text('Plans & couriers (owner)',
+            const Expanded(child: Text('Plans & couriers (admin)',
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             IconButton(
               tooltip: 'Refresh',
@@ -2417,7 +2388,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
           const Row(children: [
             Icon(Icons.toggle_on_outlined, size: 16, color: AppColors.forest),
             SizedBox(width: 6),
-            Expanded(child: Text('Platform switches — live, no deploy (superadmin)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
+            Expanded(child: Text('Platform switches — live, no deploy (admin)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
           ]),
           const SizedBox(height: 6),
           _flagRow(
@@ -2606,7 +2577,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
   }
 }
 
-/// Admin/superadmin console: run rider incentive programmes as named promos
+/// Admin console: run rider incentive programmes as named promos
 /// ("Christmas Bonus", "Hydro-gen Sprint"…). Toggle on/off to promote or
 /// retire — amounts never cash out in-app, they flow through the same payroll
 /// confirmation chain as salary. Only ONE programme can be active at a time.
@@ -3498,6 +3469,77 @@ class _SheetAvatar extends StatelessWidget {
           errorBuilder: (_, __, ___) => Text(_initials,
               style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: AppColors.forest)),
         ),
+      ),
+    );
+  }
+}
+
+
+/// Client crash digest — the free crash reporting answer. Compact, actionable,
+/// first sign of trouble on a fresh build. Data: `/admin/client-crashes`,
+/// deduped per device+stack server-side.
+class _ClientCrashesCard extends StatefulWidget {
+  const _ClientCrashesCard();
+
+  @override
+  State<_ClientCrashesCard> createState() => _ClientCrashesCardState();
+}
+
+class _ClientCrashesCardState extends State<_ClientCrashesCard> {
+  Map<String, dynamic>? _data;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final data = await DropOffApi.adminClientCrashes();
+    if (!mounted) return;
+    setState(() {
+      _data = data;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = ((_data?['crashes'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final total = (_data?['crashes_last_24h'] as num?)?.toInt() ?? 0;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.bug_report_outlined, color: total > 0 ? const Color(0xFFB3261E) : AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Client crashes', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 2),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+          else ...[
+            Text('$total crash${total == 1 ? '' : 'es'} in 24h — deduplicated. On a fresh build, any row below is urgent.', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+            const SizedBox(height: 6),
+            if (rows.isEmpty)
+              const Text('Quiet. No client crashes on record.', style: TextStyle(color: AppColors.ink, fontSize: 12.5))
+            else
+              ...rows.take(8).map((c) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('×${(c['count'] as num?)?.toInt() ?? 1}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: Color(0xFFB3261E))),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${c['message']}', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, height: 1.35), maxLines: 3, overflow: TextOverflow.ellipsis),
+                    Text('v${c['app_version'] ?? '?'} · ${c['platform'] ?? '?'} · ${c['last_seen_at'] ?? ''}', style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                  ])),
+                ]),
+              )),
+          ],
+        ]),
       ),
     );
   }

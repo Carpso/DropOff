@@ -103,7 +103,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return _message('Enter the courier point where the parcel is waiting.');
     }
     if (_recipientName.text.trim().length < 2) return _message('Enter the recipient name.');
-    if (!RegExp(r'^(?:\+?260|0)?[79][567]\d{7}$').hasMatch(_recipientPhone.text.replaceAll(RegExp(r'[\s-]'), ''))) {
+    if (!RegExp(r'^(?:\+?260|0)?(5[0-9]|7[0-9]|9[1-9])\d{7}$').hasMatch(_recipientPhone.text.replaceAll(RegExp(r'[\s-]'), ''))) {
       return _message('Use a valid Zambian recipient number, e.g. 0961234567.');
     }
     if (_address.text.trim().length < 4) return _message('Enter the door address for delivery.');

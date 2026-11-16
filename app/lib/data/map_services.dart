@@ -8,11 +8,11 @@ import 'dropoff_api.dart';
 
 /// One routing/search service for everything drawn on the DropOff map.
 ///
-/// Routing: public OSRM demo server (router.project-osrm.org) — free, no
-/// key, fair-use limits. Self-hosting OSRM is the production answer and
-/// stays on the roadmap; until then callers fall back to a straight line
-/// (clearly labelled "as the crow flies") so the app NEVER shows a false
-/// road-following line.
+/// Routing: DropOff Worker `/maps/route` — open-source OSRM served from
+/// infra/router (or any ORS key set server-side). Road-following routes
+/// arrive cached and signed-in-only; when unreachable, the caller draws a
+/// clearly-labelled straight line — NEVER a fake road. See
+/// infra/router/README.md for the one-time self-host setup.
 ///
 /// Search: Photon (photon.komoot.io) — free OSM geocoder with a location
 /// bias, built for type-ahead. Zambia coverage via OSM; no key.
@@ -67,55 +67,14 @@ class MapSearchResult {
 }
 
 class MapServices {
-  static const _osrmBase = 'https://router.project-osrm.org/route/v1/driving/';
   static const _photonBase = 'https://photon.komoot.io/api/';
   static const Duration _timeout = Duration(seconds: 8);
 
-  /// Routing order: DropOff Worker proxy (ORS key server-side, cached) →
-  /// public OSRM demo (evaluation-grade, works at launch volume) → null
-  /// (caller draws a labelled straight line). Riders always get *some*
-  /// directions; quality upgrades with one server-side secret.
+  /// Routing order: DropOff Worker proxy (OSRM self-host / ORS key server-side,
+  /// cached) → null (caller draws a labelled straight line). Riders always get
+  /// *some* direction; quality upgrades when the owner hosts the router.
   static Future<RouteResult?> route(LatLng from, LatLng to) async {
-    final viaWorker = await _routeViaWorker(from, to);
-    if (viaWorker != null) return viaWorker;
-    try {
-      final url = Uri.parse(
-          '$_osrmBase${from.longitude},${from.latitude};${to.longitude},${to.latitude}'
-          '?overview=full&geometries=geojson&steps=true&continue_straight=true');
-      final res = await http.get(url).timeout(_timeout);
-      if (res.statusCode != 200) return null;
-      final data = jsonDecode(res.body);
-      final list = (data as Map<String, dynamic>)['routes'] as List?;
-      if (list == null || list.isEmpty) return null;
-      final r = list.first as Map<String, dynamic>;
-      final coords = ((r['geometry'] as Map)['coordinates'] as List)
-          .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
-          .toList();
-      if (coords.length < 2) return null;
-      final steps = <RouteStep>[];
-      for (final leg in ((r['legs'] as List?) ?? const [])) {
-        for (final s in ((leg['steps'] as List?) ?? const [])) {
-          final step = s as Map<String, dynamic>;
-          final man = (step['maneuver'] as Map?) ?? const {};
-          steps.add(RouteStep(
-            _instruction(
-              '${man['type'] ?? ''}',
-              '${man['modifier'] ?? ''}',
-              '${step['name'] ?? ''}',
-            ),
-            (step['distance'] as num?)?.toDouble() ?? 0,
-          ));
-        }
-      }
-      return RouteResult(
-        points: coords,
-        distanceMetres: (r['distance'] as num?)?.toDouble() ?? 0,
-        durationSeconds: (r['duration'] as num?)?.toDouble() ?? 0,
-        steps: steps,
-      );
-    } catch (_) {
-      return null;
-    }
+    return _routeViaWorker(from, to);
   }
 
   /// Road route via OUR worker — the ORS API key never ships in the binary,
@@ -186,54 +145,4 @@ class MapServices {
     }
   }
 
-  static String _instruction(String type, String modifier, String street) {
-    final dir = switch (modifier) {
-      'left' => 'left',
-      'right' => 'right',
-      'slight left' => 'slightly left',
-      'slight right' => 'slightly right',
-      'sharp left' => 'sharp left',
-      'sharp right' => 'sharp right',
-      'straight' => 'straight',
-      'uturn' => 'U-turn',
-      _ => '',
-    };
-    final onto = street.isEmpty ? '' : ' onto $street';
-    switch (type) {
-      case 'depart':
-        return 'Head out';
-      case 'arrive':
-        return 'Arrive at the destination';
-      case 'turn':
-        return dir.isEmpty ? 'Make the turn$onto' : 'Turn $dir$onto';
-      case 'end of road':
-        return dir.isEmpty ? 'Turn at the end of the road$onto' : 'Turn $dir at the end of the road$onto';
-      case 'fork':
-        return dir.isEmpty ? 'Keep at the fork$onto' : 'Bear $dir at the fork$onto';
-      case 'merge':
-        return 'Merge$onto';
-      case 'ramp':
-        return 'Take the ramp$onto';
-      case 'on ramp':
-        return 'Take the on-ramp$onto';
-      case 'off ramp':
-        return 'Take the exit$onto';
-      case 'new name':
-        return 'Continue${onto.isEmpty ? '' : onto}';
-      case 'continue':
-        return 'Continue straight$onto';
-      case 'roundabout':
-      case 'rotary':
-        final exit = modifier.isEmpty ? '' : ' (exit $modifier)';
-        return 'Enter the roundabout$exit$onto';
-      case 'exit roundabout':
-        return 'Exit the roundabout$onto';
-      case 'roundabout turn':
-        return dir.isEmpty ? 'Turn at the roundabout$onto' : 'Take the $dir exit at the roundabout$onto';
-      case 'notification':
-        return 'Continue$onto';
-      default:
-        return dir.isEmpty ? 'Continue$onto' : 'Turn $dir$onto';
-    }
-  }
 }

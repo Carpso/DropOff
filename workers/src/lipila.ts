@@ -54,23 +54,29 @@ export interface Env {
 //   Payout:         POST /api/v1/disbursements/mobile-money  (payout destinations only RECEIVE — no registration required)
 //   Status checks:  GET  /api/v1/collections/check-status?referenceId=…
 //                   GET  /api/v1/disbursements/check-status?referenceId=…
-// All phone numbers normalized to 260XXXXXXXXX (Airtel 097/077, MTN 096/076, Zamtel 095/075).
+// All phone numbers normalized to 260XXXXXXXXX. ZICTA national numbering plan
+// (ITU Dec-2024 notification): mobile = 5x/7x/9x (9-digit NS). Airtel 77/97/57,
+// MTN 76/96/56, Zamtel 75/95/55, Beeline 78/98. VoIP (6x) and premium-rate (90)
+// are NOT mobile-charging rails and are rejected.
 
 export type Provider = 'airtel' | 'mtn' | 'zamtel';
 
-/** Normalize a Zambian phone number to 260XXXXXXXXX */
+/** Normalize a Zambian mobile number to 260XXXXXXXXX */
 export function normalizeZmPhone(raw: string): string {
   let d = raw.replace(/\D/g, '');
-  if (d.startsWith('09') || d.startsWith('07')) d = '260' + d.slice(1);
-  else if (d.startsWith('260')) { /* already fine */ }
-  else if (d.length === 9) d = '260' + d;
-  if (!/^260(97|77|96|76|95|75)\d{7}$/.test(d)) throw new Error(`Invalid Zambian phone: ${raw}`);
+  if (d.startsWith('00260')) d = d.slice(2);           // international escape
+  else if (d.startsWith('0') && d.length === 10) d = '260' + d.slice(1); // trunk 0
+  else if (d.length === 9) d = '260' + d;              // bare national significant
+  if (!/^260(5[0-9]|7[0-9]|9[1-9])\d{7}$/.test(d)) {
+    throw new Error(`Invalid Zambian mobile number: ${raw}`);
+  }
   return d;
 }
 
 export function providerFromPhone(zm: string): Provider {
-  if (/^260(97|77)/.test(zm)) return 'airtel';
-  if (/^260(96|76)/.test(zm)) return 'mtn';
+  if (/^260(57|77|97)/.test(zm)) return 'airtel';
+  if (/^260(56|76|96)/.test(zm)) return 'mtn';
+  // Zamtel: 55/75/95. Beeline (58/78/98) rides the Zamtel rail on Lipila today.
   return 'zamtel';
 }
 

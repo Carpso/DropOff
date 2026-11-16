@@ -1,6 +1,6 @@
 # Play Store release checklist
 
-App id: `zm.dropoff.dropoff` - current version `0.5.28+39` (`pubspec.yaml`).
+App id: `zm.dropoff.dropoff` - current version `0.5.29+40` (`pubspec.yaml`).
 
 ## 1. Upload keystore (one-time)
 
@@ -81,8 +81,8 @@ mirrors its in-app copy.)
 5. **Countries**: Zambia (plus any market the pricebook covers).
 6. **Release production**:
    - *Promote track -> Production, countries -> Zambia, release name
-     "0.5.28 (39) — Held bookings unmissable + fully in-app map"*.
-   - Upload `dist/DropOff-0.5.28-release.aab` into a NEW production release.
+     "0.5.29 (40) — Held bookings unmissable + fully in-app map"*.
+   - Upload `dist/DropOff-0.5.29-release.aab` into a NEW production release.
    - Choose **staged rollout 10%** first (small user base: 10% of <100 is
      statistically silent — either pick 10% for caution or 100% given testers
      already validated 0.5.0; for a first production release, 100% in Zambia
@@ -163,14 +163,17 @@ Questions? support@carpsosolutions.store
 5. Recipient tracking page (SMS link) showing handover code hint.
 6. Task queue (rider) with proof-of-delivery dialog.
 
-### Release notes (0.5.28+39)
+### Release notes (0.5.29+40)
 ```
+* Zambian phone numbers fixed — ZICTA's new mobile ranges (057 Airtel,
+  056 MTN, 055 Zamtel, and Beeline 058/078/098) are now accepted at
+  signup, booking, booking creation, collections and SMS. ZICTA's
+  December 2024 numbering plan is honoured.
 * Bookings held for prepayment now show as "Booking held — payment pending"
   on My Bookings, with the pay path one tap away. No rider until it clears.
-* The DropOff map is now fully ours: road-following routes (OSRM) with a
-  turn-by-turn A→Z cue sheet, place search (Photon) biased to Zambia, live
-  rider tracking with a green route line, recipient live map and in-app
-  navigation — no Waze or Google Maps links anywhere.
+* The DropOff map is ours end-to-end: live rider tracking, recipient map
+  and rider navigation all on our basemap — no Waze or Google Maps links.
+  Road-following routes unlock when the DropOff router is switched on.
 * Held bookings, unpaid delivery-time hints and the waybill stay locked
   until payment; delivery-time hints show measured averages only.
 ```
@@ -204,27 +207,41 @@ Questions? support@carpsosolutions.store
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 9. What is new in 0.5.28+39
+## 9. What is new in 0.5.29+40
 
+- **ZICTA 2024 numbering plan honoured — book with any live mobile number**:
+  new mobile ranges 055 (Zamtel), 056 (MTN), 057 (Airtel), Beeline 058/078/098
+  and existing 75/76/77/95/96/97 all normalise to 260XXXXXXXXX everywhere
+  (signup, booking, collections, SMS, payments, blocking). VoIP (6x) and
+  premium-rate (90) are rejected; fixed lines were never mobile-charging
+  rails. Source: ITU Operational Bulletin, Communication of 24.XII.2024.
+- **One admin role**: superadmin == admin everywhere — the console no longer
+  distinguishes them; the master account can never be deleted/demoted
+  (server-side, silent).
 - **Payment-held bookings are unmissable** — My Bookings shows a red
   "Booking held — payment pending" banner with the one-tap pay path; the
   prepayment card stays inside the booking as before. Riders booking for
   themselves see the same path.
 - **Fully in-app map** — DropOff's own Protomaps PMTiles basemap (Zambia /
   Zimbabwe / Malawi / Mozambique, R2-hosted) replaces every Waze/Google Maps
-  deep-link. New this release: road-following routes via OSRM with a green
-  cased line (dashed straight line + label when the engine is unreachable —
-  never a fake road), turn-by-turn A→Z cue sheet bottom sheet, Photon
-  type-ahead place search biased to Zambia, live rider tracking with a
+  deep-link. This release: live rider tracking with a green route line, live
   route line that re-routs as the rider moves, numbered batched stop pins,
-  zoom controls and one-tap re-fit. OSM-aligned attribution on every map.
-  Self-hosted OSRM + crowd-sourced traffic (à la ChurchOnApp) remain on the
-  roadmap.
+  zoom controls, re-fit, Photon type-ahead place search biased to Zambia, and
+  turn-by-turn cue sheet scaffolding. Road-following routes via the
+  self-hosted router (infra/router/) — the app never makes unsupported
+  calls; the Worker proxy returns 503 until the router is switched on.
+- **Client crash reporting, in-house**: the app posts unhandled errors to
+  `/client/error` (rate-limited, deduped per device+stack) — visible in the
+  admin console under "Client crashes" per 24h. No third-party account needed.
+- **Monitoring bridge**: the Worker records 5xx/crashes to D1 (`error_events`)
+  and pings the admin on 5xx storms and dead pipelines (daily check inside
+  the 19:00 cron). Africa's Talking STOP is honoured for marketing SMS;
+  transactional SMS is never blocked. Terms live at `/legal/terms`.
 - **Deletes are staff-only** — customers cannot delete a booking; a
   "Request deletion" one-tap opens support chat with the ref prefilled.
   Admins delete bookings in the console (soft delete; payments and audit
-  kept); deleting an account is owner-only and removes sessions, push
-  tokens and the auth row (history kept). The owner account is refused.
+  kept); deleting an account is admin-only and removes sessions, push
+  tokens and the auth row (history kept). The admin account is refused.
 - **Truth in UI** — waybill/depot receipt appears only after payment;
   Delivery IQ shows measured p50/p90 with n≥5 only (advertised fallback
   hidden); counter-fare wording matches the depot.

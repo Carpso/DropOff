@@ -572,8 +572,8 @@ class AppStore extends ChangeNotifier {
     }
     if (_riders.isEmpty) {
       _riders.add(const Rider(
-        id: 'owner',
-        name: 'Owner',
+        id: 'admin',
+        name: 'Admin',
         phone: 'Add your phone in team settings',
         vehicle: 'Motorcycle / vehicle',
         isOwner: true,
@@ -848,8 +848,8 @@ class AppStore extends ChangeNotifier {
     _riders
       ..clear()
       ..add(const Rider(
-        id: 'owner',
-        name: 'Owner',
+        id: 'admin',
+        name: 'Admin',
         phone: 'Add your phone in team settings',
         vehicle: 'Motorcycle / vehicle',
         isOwner: true,
@@ -872,7 +872,7 @@ class AppStore extends ChangeNotifier {
   /// on full success, or an error message when the server rejected the write.
   Future<String?> addRider({required String name, required String phone, required String vehicle, String vehicleClass = 'motorcycle'}) async {
     if (!(isSuperAdmin || isAdminRole)) {
-      return 'Only the owner and admins can add riders.';
+      return 'Only admins can add riders.';
     }
     if (DropOffApi.enabled) {
       final res = await DropOffApi.post('/admin/riders', {
@@ -883,7 +883,7 @@ class AppStore extends ChangeNotifier {
       });
       if (!res.ok) {
         if (res.status == 403 || res.error == 'admin_key_required' || res.error == 'forbidden') {
-          return 'Only the owner and admins can add riders.';
+          return 'Only admins can add riders.';
         }
         return 'Could not add the rider (${res.error ?? 'network'}).';
       }
