@@ -1651,14 +1651,23 @@ app.post('/auth/login', async (c) => {
     `SELECT password_hash, phone, full_name, token_version FROM auth_users WHERE email = ?1`,
   ).bind(email).first<any>();
   const ok = user ? await verifyPassword(password, user.password_hash) : false;
-  if (!user || !ok) {
+  if (!user) {
     const res = await recordAttempt(c.env.DB, email, false, ip, ua, devId);
     if (res.lockUntilMinutes) {
       await alertOwner(c.env, email, 'brute_force', 'high',
         `${res.lockUntilMinutes}-minute lockout after repeated failed logins for ${email} from ${ip}.`,
         { ip, device: devId, userAgent: ua, email });
     }
-    return c.json({ error: 'invalid_credentials' }, 401);
+    return c.json({ error: 'unknown_email', hint: 'No DropOff account with that email — create one, or sign in with your phone code instead.' }, 401);
+  }
+  if (!ok) {
+    const res = await recordAttempt(c.env.DB, email, false, ip, ua, devId);
+    if (res.lockUntilMinutes) {
+      await alertOwner(c.env, email, 'brute_force', 'high',
+        `${res.lockUntilMinutes}-minute lockout after repeated failed logins for ${email} from ${ip}.`,
+        { ip, device: devId, userAgent: ua, email });
+    }
+    return c.json({ error: 'wrong_password', hint: 'Wrong password for that email — try again.' }, 401);
   }
 
   // transparent hash upgrade: legacy (lower-iteration) hashes re-mint to the
@@ -3118,15 +3127,25 @@ app.post('/jobs/:ref/events', async (c) => {
   // no typing required). Executes only after the canonical events commit has
   // landed — these are derived from `status` set by the authorized caller,
   // and the message is always labelled SYSTEM (no fake user).
+  // Route-aware SYSTEM messages — never claim a hard-coded city when the job
+  // is happening anywhere else. Branch beats city beats generic.
+  const routeCity = (job.branch?.trim() ? job.branch : null) ?? job.dest_city?.trim() ?? job.to_city?.trim() ?? job.from_city?.trim() ?? null;
+  const originCity = job.from_city?.trim() || null;
+  const destCity = job.dest_city?.trim() || job.to_city?.trim() || null;
   const chatEvent = (() => {
     switch (status) {
-      case 'rider_assigned': return `SYSTEM: Rider is on the way to the pickup — parcel handoff in progress.`;
-      case 'picked_up':      return `SYSTEM: Picked up by the rider — en route to ${job.from_city ?? 'the depot'}.`;
-      case 'at_depot':       return `SYSTEM: Parcel dropped at the courier depot — awaiting lodgement.`;
-      case 'departed':       return `SYSTEM: Parcel dispatched from the depot to the destination.`;
-      case 'arrived':        return `SYSTEM: Parcel arrived at the destination — awaiting collection.`;
+      case 'rider_assigned': return `SYSTEM: Rider is on the way to the pickup${originCity ? ` in ${originCity}` : ''} — parcel handoff in progress.`;
+      case 'picked_up':
+        return `SYSTEM: Picked up by the rider — en route to ${(job.branch?.trim()) || 'the depot'}.`;
+      case 'at_depot':
+        return `SYSTEM: Parcel dropped at ${(job.branch?.trim()) || 'the courier depot'} — awaiting lodgement.`;
+      case 'departed':
+        return `SYSTEM: Parcel dispatched from ${originCity ?? 'the depot'} to ${destCity ?? 'the destination'}.`;
+      case 'arrived':
+        return `SYSTEM: Parcel arrived at ${destCity ?? routeCity ?? 'the destination'} — awaiting collection.`;
       case 'delivered':      return `SYSTEM: Parcel delivered — journey complete.`;
-      case 'ready_for_collection': return `SYSTEM: Parcel ready for collection at the depot.`;
+      case 'ready_for_collection':
+        return `SYSTEM: Parcel ready for collection at ${(job.branch?.trim()) || 'the depot'}.`;
       default: return '';
     }
   })();
@@ -6257,7 +6276,8 @@ function buildRoute(stops: { ref: string; address: string; lat: number; lng: num
 async function dispatchToNearestRider(
   env: Env,
   ref: string,
-): Promise<{ rider: any; eta_minutes: number; km: number; fallback: boolean } | null> {
+  collectExcluded?: Array<{ name: string; depot: string }>,
+): Promise<{ rider: any; eta_minutes: number; km: number; fallback: boolean; excludedAtDepot: Array<{ name: string; depot: string }> } | null> {
   try {
     const job = await env.DB.prepare(
       'SELECT id, ref, sender_phone, pickup_address, pickup_lat, pickup_lng FROM jobs WHERE ref = ?1').bind(ref).first<any>();
@@ -6265,7 +6285,7 @@ async function dispatchToNearestRider(
     const fallback = !(Number.isFinite(Number(job.pickup_lat)) && Number.isFinite(Number(job.pickup_lng)));
     const lat = fallback ? -15.4255 : Number(job.pickup_lat);
     const lng = fallback ? 28.2805 : Number(job.pickup_lng);
-    const pick = await nearestAvailableRider(env, lat, lng);
+    const pick = await nearestAvailableRider(env, lat, lng, collectExcluded);
     if (!pick) return null;
     const etaMin = Math.round((pick.km / 22) * 60 + 4);
     // Idempotency guard (webhook double-fire or stale dispatch): only claim
@@ -6295,13 +6315,44 @@ async function dispatchToNearestRider(
       body: `Job ${job.ref} — pickup at ${job?.pickup_address ?? 'sender address'}. Open the Team tab for details.`,
       data: { job_ref: job.ref, kind: 'rider_assigned' },
     });
-    return { rider: pick.rider, eta_minutes: etaMin, km: pick.km, fallback };
+    return { rider: pick.rider, eta_minutes: etaMin, km: pick.km, fallback, excludedAtDepot: collectExcluded ?? [] };
   } catch {
     return null;
   }
 }
 
-async function nearestAvailableRider(env: Env, lat: number, lng: number): Promise<{ rider: any; km: number } | null> {
+/**
+ * Riders currently at a depot (first-mile leg done, parcel lodged, waiting to
+ * advance to 'collected'/'delivered') are NOT assignable — they're physically
+ * at the courier counter/depot unloading lodgement paperwork. Returned as a
+ * map of rider_id -> depot name so callers can explain a refusal honestly
+ * instead of a bare "no riders".
+ */
+async function ridersAtDepot(env: Env): Promise<Map<number, string>> {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT j.rider_id AS id, c.depot_name AS depot
+         FROM jobs j JOIN couriers c ON c.id = j.courier_id
+        WHERE j.status = 'at_depot' AND j.rider_id IS NOT NULL`,
+    ).all<any>();
+    const m = new Map<number, string>();
+    for (const r of (results ?? []) as any[]) {
+      const id = Number(r.id);
+      if (Number.isFinite(id) && !m.has(id)) m.set(id, String(r.depot ?? 'the depot'));
+    }
+    return m;
+  } catch {
+    return new Map();
+  }
+}
+
+async function nearestAvailableRider(
+  env: Env,
+  lat: number,
+  lng: number,
+  collectExcluded?: Array<{ name: string; depot: string }>,
+): Promise<{ rider: any; km: number } | null> {
+  const atDepot = await ridersAtDepot(env);
   const riders = await env.DB.prepare(
     `SELECT id, phone, full_name, vehicle, last_lat, last_lng, last_seen_at, status, active, capacity, current_load, photo_url
        FROM riders WHERE active = 1 AND status IN ('available', 'on_route')
@@ -6325,6 +6376,11 @@ async function nearestAvailableRider(env: Env, lat: number, lng: number): Promis
   let best: { rider: any; km: number } | null = null;
   let bestScore = Infinity;
   for (const r of (riders.results ?? [])) {
+    const riderId = Number(r.id);
+    if (atDepot.has(riderId)) {
+      if (collectExcluded) collectExcluded.push({ name: String(r.full_name ?? 'A rider'), depot: atDepot.get(riderId)! });
+      continue;
+    }
     const load = Number(r.current_load ?? 0), cap = Number(r.capacity ?? 8);
     if (load >= cap) continue;
     const penalty = freshnessPenalty(r.last_seen_at);
@@ -6348,8 +6404,19 @@ app.post('/jobs/:ref/auto-assign', async (c) => {
   if (await jobPaymentHeld(c.env.DB, job.id)) {
     return c.json({ error: 'payment_required', hint: 'Prepayment pending — assignment unlocks once payment is approved.' }, 402);
   }
-  const result = await dispatchToNearestRider(c.env, ref);
-  if (!result) return c.json({ error: 'no verified rider available right now' }, 404);
+  const excludedDepot: Array<{ name: string; depot: string }> = [];
+  const result = await dispatchToNearestRider(c.env, ref, excludedDepot);
+  if (!result) {
+    if (excludedDepot.length > 0) {
+      const names = [...new Set(excludedDepot.map((d) => d.depot))].join(' / ');
+      return c.json({
+        error: 'rider_at_depot',
+        hint: `Rider(s) busy at ${names} — the system auto-assigns the moment a depot job closes.`,
+        excluded_at_depot: excludedDepot,
+      }, 404);
+    }
+    return c.json({ error: 'no verified rider available right now' }, 404);
+  }
   const pick = result.rider;
   const etaMin = result.eta_minutes;
   const km = result.km;

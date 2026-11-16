@@ -1194,8 +1194,11 @@ class DropOffApi {
   // is algorithmic. autoAssignJob is the only rider-assignment call the app
   // makes; it hits the server-side nearestAvailableRider() under the hood.
 
+  /// Returns the server body whether ok or not — callers render `hint` /
+  /// `excluded_at_depot` on failures (rider at depot, no riders) instead of a
+  /// bare generic failure.
   static Future<Map<String, dynamic>?> autoAssignJob(String jobRef) =>
-      post('/jobs/$jobRef/auto-assign', const {}).then((r) => r.ok ? r.body : null);
+      post('/jobs/$jobRef/auto-assign', const {}).then((r) => r.body);
 
   static Future<ApiResponse> payout({
     required String phone,

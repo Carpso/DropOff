@@ -240,10 +240,16 @@ class _SplashScreenState extends State<_SplashScreen> {
   bool _unlocked = false;
   bool _authing = false;
   String? _lockError;
+  bool _reauth = false;
+  bool _reauthBusy = false;
+  String? _reauthError;
+  final _emailCtor = TextEditingController();
+  final _passwordCtor = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    _emailCtor.text = widget.store.email ?? '';
     widget.initFuture.whenComplete(() {
       if (!mounted) return;
       if (widget.store.linked && DropOffApi.token != null) {
@@ -251,6 +257,13 @@ class _SplashScreenState extends State<_SplashScreen> {
       }
       setState(() {});
     });
+  }
+
+  @override
+  void dispose() {
+    _emailCtor.dispose();
+    _passwordCtor.dispose();
+    super.dispose();
   }
 
   Future<void> _tryUnlock() async {
@@ -261,13 +274,31 @@ class _SplashScreenState extends State<_SplashScreen> {
     setState(() { _authing = false; if (ok) { _unlocked = true; } else { _lockError = 'Not recognized — try again.'; } });
   }
 
-  /// Password door: drop the session and fall through to the sign-in screen.
+  /// Password door: verify password inline and unlock — the session is KEPT.
   Future<void> _usePassword() async {
+    if (_reauth && _emailCtor.text.trim().isNotEmpty && _passwordCtor.text.length >= 8) {
+      setState(() { _reauthBusy = true; _reauthError = null; });
+      final ok = await widget.store.loginEmail(_emailCtor.text.trim(), _passwordCtor.text, remember: true);
+      if (!mounted) return;
+      if (ok) {
+        _unlocked = true;
+      } else {
+        _reauthError = widget.store.lastAuthError ?? 'Wrong email or password — try again.';
+      }
+      setState(() { _reauthBusy = false; });
+      return;
+    }
+    setState(() {
+      _reauth = true;
+      _reauthError = null;
+      _emailCtor.text = widget.store.email ?? '';
+    });
+  }
+
+  /// Explicitly sign out — the only path that wipes the session.
+  Future<void> _signOutInstead() async {
     await widget.store.unlink();
     if (!mounted) return;
-    // Unlink wipes credentials; _unlocked stays false so we still show the
-    // gate momentarily — but linked==false now, so we drop straight into the
-    // app with the sign-in door visible.
     setState(() => _unlocked = true);
   }
 
@@ -276,6 +307,17 @@ class _SplashScreenState extends State<_SplashScreen> {
     final store = widget.store;
     if (store.ready) {
       if (store.biometricEnabled && store.linked && !_unlocked) {
+        if (_reauth) {
+          return _PasswordReauthGate(
+            emailCtor: _emailCtor,
+            passwordCtor: _passwordCtor,
+            busy: _reauthBusy,
+            error: _reauthError,
+            onSubmit: _usePassword,
+            onBack: () => setState(() => _reauth = false),
+            onSignOut: _signOutInstead,
+          );
+        }
         return BiometricLockScreen(onUnlock: _tryUnlock, onUsePassword: _usePassword, busy: _authing, error: _lockError);
       }
       return const AppShell();
@@ -290,6 +332,79 @@ class _SplashScreenState extends State<_SplashScreen> {
           SizedBox(height: 12),
           Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
         ]),
+      ),
+    );
+  }
+}
+
+
+/// Inline password re-auth — unlock the session with email + password.
+/// NEVER unlinks on a wrong password; the session only dies via explicit sign-out.
+class _PasswordReauthGate extends StatelessWidget {
+  final TextEditingController emailCtor;
+  final TextEditingController passwordCtor;
+  final bool busy;
+  final String? error;
+  final VoidCallback onSubmit;
+  final VoidCallback onBack;
+  final VoidCallback onSignOut;
+  const _PasswordReauthGate({
+    required this.emailCtor,
+    required this.passwordCtor,
+    required this.busy,
+    required this.error,
+    required this.onSubmit,
+    required this.onBack,
+    required this.onSignOut,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.forest,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const SizedBox(height: 8),
+              const Icon(Icons.lock_outline_rounded, size: 44, color: AppColors.amber),
+              const SizedBox(height: 12),
+              const Text('Unlock with password', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 4),
+              const Text('Your session stays on this phone — proving it is you takes one email and password.', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFFC9D9D2), height: 1.4, fontSize: 13)),
+              const SizedBox(height: 22),
+              TextField(
+                controller: emailCtor,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'Email', filled: true, fillColor: Colors.white, border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passwordCtor,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Password', filled: true, fillColor: Colors.white, border: OutlineInputBorder()),
+                onSubmitted: (_) => onSubmit(),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 10),
+                Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.amber, fontSize: 12.5, fontWeight: FontWeight.w700, height: 1.35)),
+              ],
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: AppColors.amber, foregroundColor: AppColors.forest, minimumSize: const Size.fromHeight(52)),
+                onPressed: busy ? null : onSubmit,
+                icon: busy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.forest))
+                    : const Icon(Icons.login_rounded),
+                label: Text(busy ? 'Checking…' : 'Unlock', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+              ),
+              const SizedBox(height: 8),
+              TextButton(onPressed: onBack, child: const Text('Try biometrics instead', style: TextStyle(color: Color(0xFFC9D9D2)))),
+              TextButton(onPressed: onSignOut, child: const Text('Not you? Sign out instead', style: TextStyle(color: Colors.white70, fontSize: 12))),
+            ]),
+          ),
+        ),
       ),
     );
   }

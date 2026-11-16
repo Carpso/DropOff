@@ -762,13 +762,19 @@ class _AutoAssignCardState extends State<_AutoAssignCard> {
     setState(() { _busy = true; _note = null; });
     final res = await DropOffApi.autoAssignJob(widget.booking.serverRef!);
     if (!mounted) return;
+    final ok = res?['ok'] == true;
+    final depotHint = (res == null || ok) ? null : (res['hint'] as String?)?.trim();
+    final atDepot = (res?['excluded_at_depot'] as List?) ?? const [];
     setState(() {
       _busy = false;
-      _note = res == null
-          ? 'No verified rider available right now — the server keeps retrying automatically.'
-          : null;
+      _note = ok
+          ? null
+          : depotHint ??
+              (atDepot.isNotEmpty
+                  ? 'Rider(s) busy at depot — the system auto-assigns the moment a depot job closes.'
+                  : 'No verified rider available right now — the server keeps retrying automatically.');
     });
-    if (res != null) {
+    if (ok && res != null) {
       final store = AppScope.of(context);
       await store.setBookingRider(
         widget.booking.id,
@@ -777,6 +783,9 @@ class _AutoAssignCardState extends State<_AutoAssignCard> {
       );
       if (!mounted) return;
       AppToast.success(context, 'Rider ${res['rider'] ?? ''} assigned — ETA ${res['eta_minutes'] ?? '?'} min.');
+    } else if (depotHint != null && depotHint.isNotEmpty) {
+      // Fancy depot-aware toast — server embeds the physical depot name.
+      AppToast.warning(context, '🚚 $depotHint', duration: const Duration(seconds: 6));
     } else {
       AppToast.warning(context, 'No rider available — the server retries automatically.');
     }

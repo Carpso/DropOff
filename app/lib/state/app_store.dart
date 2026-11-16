@@ -465,6 +465,10 @@ class AppStore extends ChangeNotifier {
     switch (error) {
       case 'invalid_credentials':
         return 'Wrong email or password.';
+      case 'unknown_email':
+        return 'No DropOff account with that email — create one, or sign in with your phone code instead.';
+      case 'wrong_password':
+        return 'Wrong password for that email — try again.';
       case 'email_already_registered':
         return 'That email already has an account - sign in instead.';
       case 'phone_already_used':
