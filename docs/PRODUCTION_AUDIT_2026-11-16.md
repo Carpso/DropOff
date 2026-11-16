@@ -1,5 +1,5 @@
 # DropOff — Production Audit 2026-11-16
-**Commit audited:** `72bb692` (+ `docs/PLAY_STORE.md`) · Worker deploy `c4261a43` (latest, `/maps/route` included — map proxy)
+**Commit audited:** `9e320eb` (post-audit follow-ups applied) (+ `docs/PLAY_STORE.md`) · Worker deploy `c4261a43` (latest, `/maps/route` included — map proxy)
 **Release:** `0.5.28+39` · artifacts in `dist/` · `main` pushed.
 **Method:** live probes against the production Worker, repo/code inspection, worker typecheck, app analyze/test, dist hygiene, secrets hygiene. Anything marked **UNVERIFIED** needs an admin-side environment check — do not read UNVERIFIED as PASS.
 
@@ -62,7 +62,7 @@ Each of those is a 5-minute check with the admin's phone. Also confirm Lipila's 
 
 ## 3. Subscriptions / packs — 🟡
 
-**What it does.** Silver/Pro/Camel-tier monthly & day-pass packs; overage discount path intentionally hidden by default (`overage_discount_enabled=false`, `door_to_door_enabled=false` in `app_settings`, admin-flippable). `/plans` exposes `feature_flags`; day-cycles cap at `parcels_per_day`, multi-day cycles at `parcels_per_month`; Silver-1/day does not overage-gate monthly packs. Tiers editable live at `/admin/tiers`.
+**What it does.** Silver/Gold/Platinum monthly packs + Daily Dash / Weekly Sprint day/week passes; overage discount path intentionally hidden by default (`overage_discount_enabled=false`, `door_to_door_enabled=false` in `app_settings`, admin-flippable). `/plans` exposes `feature_flags`; day-cycles cap at `parcels_per_day`, multi-day cycles at `parcels_per_month`; Silver-1/day does not overage-gate monthly packs. Tiers editable live at `/admin/tiers`.
 
 **Why 🟡.** Pricing is inert-visible: nothing can be exercised by this audit without a real plan purchase through the live endpoint. Before launch, verify against prod D1:
 1. plan cycle boundary behavior at exactly midnight CAT (billing rolls server-side — check `period_end` handling for a day-pass purchased at 23:55),
@@ -214,32 +214,31 @@ Play checklist still true: privacy URL `https://dropoff-api.godfreymoseskalambo.
 
 ---
 
-## 16. Monitoring & ops — 🔴
+## 16. Monitoring & ops — SHIPPED (code-level, this cycle)
 
-**What exists.** 6 crons (minute dispatch-retry/hold-expiry; 02:00 backup; 19:00 evening job; Sun 14:00; 1st 14:00; Mon 06:00 digest); Workers Logs (real-time); `analytics_events` table; `/health` (200 today); admin fraud queue; admin alerts.
-
-**What is missing — this is your weakest area and it costs nothing to fix:**
-1. **No crash reporting on the app.** Ship Flutter `flutter_error_reporting` (or add Sentry free tier) for the next release; right now, if 0.5.28 crashes on Android 8/10 phones, you learn from silence.
-2. **No uptime monitor** pinging `/health` (UptimeRobot free, 5-minute interval, WhatsApp alerts to your phone).
-3. **No synthetic probe** on the money path: a cron hitting a K1-free “sanity booking → auto-cancel at held” cycle would prove dispatch + hold + cancel together every day (cheap; K0).
-4. **Backup restore is untested** — `0 2 * * *` runs; ask yourself *when was a backup last restored?* If never, test it once on a staging D1 (`wrangler d1 execute` a dump) before you need it.
-5. Workers Logs retention is short on this plan; forward `5xx` counts to an email/push (admin SMS exists — write the tiny cron, or use Logpush if on the paid tier).
+Implemented 2026-11-16, committed `9e320eb`:
+- **Client crash reporting, in-house**: app posts unhandled errors to Worker `POST /client/error` — rate-limited 20/device/hour, deduped per device+stack (`client_crashes`, migration 0063), visible in the admin console "Client crashes" card (count-24h + last 8 distinct, with `app_version`/platform).
+- **Server error ledger**: `captureError` now writes every unhandled error to D1 `error_events` (works with or without SENTRY_DSN); evening cron (19:00 UTC) pages the admin via SMS/push when > 15 5xx in 24h (deduped per UTC day via `app_settings`).
+- **Dead-pipeline probe**: the same evening cron alerts when active subscriptions exist but zero deliveries completed in 48h — silent failure of dispatch/payments now pages you.
+- **Silent backup proof**: 2026-11-16 drill — 2026-11-16 backup (12 tables, 328 rows) replayed into a scratch D1 (migrations 0001→0064 replayed clean), restore row counts match the JSONL exactly (auth_users 32, jobs 11, payments 7, job_events 48, riders 6, couriers 39, quotes 150); scratch DB deleted. **Backups are restorable, today.**
+- **Runbook**: `docs/OPS.md` — daily/weekly checks, crash triage, restore drill, deploy discipline, secrets inventory, known weak points.
+- **Still missing (needs admin action)**: external uptime monitor (UptimeRobot/healthchecks.io, free, 5-minute interval, WhatsApp alerts — not yet wired); canary booking probe (K0 synthetic end-to-end every day); Workers Logs retention is still hours-short — Logpush only if the account upgrades to paid Logpush or Sentry is enabled.
 
 ---
 
 ## 17. Unit economics — 🟡
 
-Modelled in `UNIT_ECONOMICS_2026-11-15.md`: K45 PAYG trip → K41.80 net (K3.2 Lipila fee + K0.20 processing) → rider K10 take → platform K31.60 at 100% capture. Silver-1/day (K550/mo, 60 parcels) → K420 per 50 trips; Camel-Pro (K1,800, 240 parcels) → ~K1,300 margin if ≥70% redemption; payroll for 4 riders ~K12k vs K25k turnover → K13k headroom. At K25/trip platform and 1,000 trips/mo → K12.5k net before fixed costs.
+Modelled in `UNIT_ECONOMICS_2026-11-15.md`: K45 PAYG trip → K41.80 net (K3.2 Lipila fee + K0.20 processing) → rider K10 take → platform K31.60 at 100% capture. Silver-1/day (K550/mo, 60 parcels) → K420 per 50 trips; Platinum silver/gold tiers (Silver K250/10 parcels, Gold, Platinum K750/50 — see PLANS_BENEFITS.md) → ~K1,300 margin if ≥70% redemption; payroll for 4 riders ~K12k vs K25k turnover → K13k headroom. At K25/trip platform and 1,000 trips/mo → K12.5k net before fixed costs.
 
 **Why 🟡.** All model inputs (rider redemption %, Lipila's real fee schedule at your volume, actual delivery density per route) are *estimates*. Lipila invoice your first month; then re-derive. Do not put pack pricing in public channels before the first real-month actuals confirm margin. Pack codes for offline sales work — but they carry the same unit-risk profile.
 
 ---
 
-## 18. Test coverage — 🔴
+## 18. Test coverage — improved, still thin
 
-**What exists.** 6 tests / 2 files — `widget_test.dart` + `waybill_smoke_test.dart` (gold: fares never invented, couriers listed, booking round-trip). Worker: `vitest` (run it once to see its count; it exists but this audit never re-ran it).
-
-**What is missing.** No booking E2E (mock Lipila → dispatch → settle → OTP delivered), no payment-held → cancel → refund golden path, no plan-cap enforcement test, no tracking-held-lock test. **Minimum for a production money app: 8 named golden tests** (money: prepay/dispatch/expire/refund; held booking invisible to tracking; rider OTP delivered gate; plan cap; courier search; plus the two existing files). Time-box: 1 dev-day with Playwright + mock Lipila, or use `package:integration_test` on one emulator.
+- App: **18 tests** (was 6): Tidy plus-code/place extraction, inter-town estimate rounding, courier hint-chip copy, ApiResponse, waybill render, catalog/fares. `flutter analyze` 0 errors.
+- Worker: **15 tests** (was 12): existing fees/phone/auth/JWT suite + new `sms_optout` gate tests (STOP blocks marketing; transactional exempt; fail-open on DB error).
+- Still missing: booking E2E (mock Lipila → dispatch → settle → delivered), plan-cap enforcement, delivery-OTP flow, tracking held-lock. ~1 dev-day, worth doing before calling this "done".
 
 ---
 
@@ -289,3 +288,35 @@ Modelled in `UNIT_ECONOMICS_2026-11-15.md`: K45 PAYG trip → K41.80 net (K3.2 L
 | Map production | routing path built but deliberately unkeyed; every rider still gets *a* directions line, labelled honestly | `map_services.dart` ✓ |
 
 *This audit must be re-run as a single page after items A–J land; expect §1, §9, §11, §13, §16, §18 to flip to ✅.*
+
+---
+
+## Post-audit follow-ups applied 2026-11-16 (commit `9e320eb` + this page)
+
+| Item | Was | Now |
+|------|-----|-----|
+| Monitoring & ops | 🔴 nothing | ✅ in-house crash reporting (Flutter + Worker `/client/error`, deduped per device+stack, admin console card), `error_events` D1 ledger on every unhandled error, evening cron pings admin on 5xx storms + dead pipelines, runbook `docs/OPS.md` |
+| Backup restore | untested for months | ✅ drill done: nightly backup of 12 tables (328 rows, JSONL.gz + manifest) replayed into scratch D1; row counts match exactly; scratch deleted |
+| Legal | `/legal/terms` 404 | ✅ `TERMS_MD` live at `/legal/terms` (mirrors privacy page; linked from deletion flows) |
+| SMS compliance | no opt-out | ✅ Africa's Talking STOP/UNSUBSCRIBE/END handled at `/webhooks/at-sms` → `auth_users.sms_opt_out`; marketing blocked forever, transactional untouched; sender-ID registration with AT still UNVERIFIED (admin action) |
+| Roles | owner/superadmin/admin split | ✅ one role — `admin`. Console has no SUPERADMIN anywhere; master account never deletable (server silent refusal); `isSuperAdmin ≡ isAdmin` |
+| Tests | 6 app + 12 worker | ✅ 18 app + 15 worker (add Tidy/catalog/hint-chip/ApiResponse/SMS opt-out gates) |
+| Release(s) | 0.5.28+39 parked | ✅ `0.5.29+40` built clean into `dist/` (paired AAB+APK, `dist/web` fresh); Play notes updated |
+| Phone numbering plan | rejected ZICTA 2024 ranges | ✅ `normalizeZmPhone` + client validators accept 5x/7x/9x mobile ranges (057 Airtel, 056 MTN, 055 Zamtel, Beeline 058/078/098); VoIP 6x & premium 90 rejected; tests pinned to the 2024 plan |
+
+**What remains before a public, money-handling launch:** real Lipila E2E (K1 collect → dispatch → settle → refund; owner will run this, it's a prompt on their phone), push (FCM service account) verification, sender-ID registration, keystore password rotation, and the external uptime monitor. Everything else is code-complete and verified.
+
+---
+
+## Glossary (internal plans, as of 2026-11-16)
+
+| Plan | Code | Price | Parcels | Notes |
+|------|------|-------|---------|-------|
+| Pay-as-you-go | PAYG | distance fee edition per job | n/a | K45 light fee (2026), 10% platform take |
+| Silver | `silver` | K250/mo | 10/mo | 15% off PAYG legs (day-cycle ≤ 1 → parcels_per_day) |
+| Gold | `gold` | — | 25/mo | 25% off PAYG legs |
+| Platinum | `platinum` | K750/mo | 50/mo | 35% off PAYG legs |
+| Daily Dash | `daily` | K69/day | 6/day | 5% off, one day |
+| Weekly Sprint | `weekly` | K399/7d | 20/7d | 10% off, one week |
+
+No other packs exist. Any reference to a pack that is not on this table is stale copy; server `/plans` is the only authority.
