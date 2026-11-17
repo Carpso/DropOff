@@ -7966,8 +7966,11 @@ app.get('/rider/profile', async (c) => {
   const phone = c.get('phone');
   if (!phone) return c.json({ error: 'sign_in_required' }, 401);
   if (c.get('role') !== 'rider' && !isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  // Rejected riders are inactive (blocked from jobs) but MUST still see their
+  // REJECTED card + reviewer note — otherwise the app lies with a blank state
+  // and the rider can never fix what was wrong.
   const rider = await c.env.DB.prepare(
-    `SELECT ${riderDocSelect()} FROM riders WHERE phone = ?1 AND active = 1`,
+    `SELECT ${riderDocSelect()} FROM riders WHERE phone = ?1 AND (active = 1 OR verification_status = 'rejected')`,
   ).bind(phone).first<any>();
   if (!rider) return c.json({ error: 'rider_not_found' }, 404);
   const prog = await incentiveProgramme(c.env);
@@ -7980,7 +7983,7 @@ app.post('/rider/profile', async (c) => {
   if (!phone) return c.json({ error: 'sign_in_required' }, 401);
   if (c.get('role') !== 'rider') return c.json({ error: 'rider_only' }, 403);
   const rider = await c.env.DB.prepare(
-    'SELECT id, verification_status FROM riders WHERE phone = ?1 AND active = 1',
+    'SELECT id, phone, full_name, verification_status FROM riders WHERE phone = ?1',
   ).bind(phone).first<any>();
   if (!rider) return c.json({ error: 'rider_not_found' }, 404);
   const b: any = await c.req.json().catch(() => null);
@@ -8002,13 +8005,43 @@ app.post('/rider/profile', async (c) => {
         license_photo_url = ?9, plate_photo_url = ?10,
         verification_status = 'pending', verification_note = NULL,
         submitted_at = datetime('now'), verified_by = NULL, verified_at = NULL,
-        ai_check_json = NULL
+        ai_check_json = NULL,
+        active = 1
       WHERE id = ?1`,
   ).bind(
     rider.id, nrc, clean(b.license_number, 40).toUpperCase() || null, plate,
     vehicleMake, clean(b.vehicle_color, 40) || null, photo, nrcPhoto,
     clean(b.license_photo_url, 300) || null, platePhoto,
   ).run();
+  // Re-applying re-opens the pipeline: a rejected (inactive) rider who fixes
+  // their documents goes back to PENDING and shows up in the admin queue again
+  // instead of hitting a permanent rider_not_found dead end.
+  // Sync the submission to everyone who verifies it — never rely on someone
+  // happening to open the admin queue (owner directive 2026-11-17).
+  try {
+    const owner = ownerPhone(c.env);
+    const staff = await c.env.DB.prepare(
+      `SELECT phone FROM auth_users WHERE role IN ('admin', 'ops') AND phone IS NOT NULL AND phone <> ''`,
+    ).all<any>();
+    const phones = new Set<string>([
+      ...(owner ? [owner] : []),
+      ...((staff.results ?? []) as any[]).map((r) => String(r.phone).trim()).filter((p) => p !== ''),
+    ]);
+    const name = String(rider.full_name ?? 'A driver');
+    for (const p of phones) {
+      try {
+        await sendToPhone(c.env, p, {
+          title: 'Driver verification waiting',
+          body: `${name} submitted NRC/licence/plate documents — review in Admin → Driver verification & targets.`,
+          data: { kind: 'rider_kyc', rider_id: rider.id },
+        });
+      } catch { /* one dead token must not stop the rest */ }
+    }
+    if (owner) {
+      await sendSms(c.env, owner,
+        `DropOff: driver verification submitted by ${name} (${String(rider.phone ?? '')}). Review it in the admin queue.`, { transactional: true });
+    }
+  } catch { /* best-effort — submission already saved */ }
   return c.json({ ok: true, verification_status: 'pending' });
 });
 
@@ -8191,7 +8224,7 @@ app.post('/admin/riders/:id/verify', async (c) => {
   const note = String(b?.note ?? '').trim().slice(0, 500) || null;
   if (status === 'rejected' && !note) return c.json({ error: 'rejection_note_required' }, 400);
   const rider = await c.env.DB.prepare(
-    `SELECT id, full_name, verification_status, nrc_number, plate_number FROM riders WHERE id = ?1`,
+    `SELECT id, phone, full_name, verification_status, nrc_number, plate_number FROM riders WHERE id = ?1`,
   ).bind(id).first<any>();
   if (!rider) return c.json({ error: 'not found' }, 404);
   await c.env.DB.prepare(
@@ -8199,6 +8232,19 @@ app.post('/admin/riders/:id/verify', async (c) => {
         verified_by = ?4, verified_at = datetime('now'), active = ?5
       WHERE id = ?1`,
   ).bind(id, status, note, c.get('phone') ?? 'admin-key', status === 'verified' ? 1 : 0).run();
+  // Close the loop (owner directive 2026-11-17): the rider learns the decision
+  // the moment it is made — SMS always, push where a token exists. Verified
+  // riders go straight back to earning; rejected riders know exactly what to
+  // fix (the note is the same text their app card shows).
+  const decision = status === 'verified'
+    ? `DropOff: you are VERIFIED. Jobs can now assign you automatically. Welcome to the road${rider.full_name ? `, ${rider.full_name}` : ''}.`
+    : `DropOff: verification not approved. Reason: ${note}. Update your documents in the app (Team tab > Driver verification) and re-submit.`;
+  try { await sendSms(c.env, String(rider.phone ?? ''), decision, { transactional: true }); } catch { /* best-effort */ }
+  try { await sendToPhone(c.env, String(rider.phone ?? ''), {
+    title: status === 'verified' ? 'You are verified' : 'Verification declined',
+    body: status === 'verified' ? 'Jobs can now assign you automatically.' : (note ?? ''),
+    data: { kind: 'rider_verification', status },
+  }); } catch { /* best-effort */ }
   return c.json({ ok: true, id, verification_status: status });
 });
 
@@ -9840,19 +9886,21 @@ async function notifyExpiryNudges(env: Env): Promise<void> {
 async function weeklyOpsDigest(env: Env): Promise<void> {
   try {
     const one = async (sql: string) => Number((await env.DB.prepare(sql).first<any>())?.n ?? 0);
-    const [created, delivered, learned, stale] = await Promise.all([
+    const [created, delivered, learned, stale, pendingKyc] = await Promise.all([
       one(`SELECT COUNT(*) AS n FROM jobs WHERE created_at >= datetime('now', '-7 days')`),
       one(`SELECT COUNT(*) AS n FROM job_events je WHERE je.status = 'delivered'
              AND je.created_at >= datetime('now', '-7 days')`),
       one(`SELECT COUNT(*) AS n FROM quotes WHERE source = 'recorded'
              AND updated_at >= datetime('now', '-7 days')`),
       one(`SELECT COUNT(*) AS n FROM quotes WHERE updated_at < datetime('now', '-90 days')`),
+      one(`SELECT COUNT(*) AS n FROM riders WHERE verification_status = 'pending'`),
     ]);
     const title = 'DropOff weekly digest';
     const body = 'Week: ' +
       `${created} parcel${created === 1 ? '' : 's'} booked, ${delivered} delivered. ` +
       `Chargebook: ${learned} counter fare${learned === 1 ? '' : 's'} newly recorded. ` +
-      (stale > 0 ? `${stale} rate${stale === 1 ? '' : 's'} stale (>90 days) — reconfirm at the counter.` : 'All rates fresh.');
+      (stale > 0 ? `${stale} rate${stale === 1 ? '' : 's'} stale (>90 days) — reconfirm at the counter.` : 'All rates fresh.') +
+      (pendingKyc > 0 ? ` ${pendingKyc} driver verification${pendingKyc === 1 ? '' : 's'} waiting your review.` : '');
     // Recipients: owner + every admin/ops/cfo account with a phone on file.
     const owner = ownerPhone(env);
     const staff = await env.DB.prepare(
