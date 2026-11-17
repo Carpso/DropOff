@@ -1,5 +1,12 @@
 # Self-host the router (bring your own — no demo servers, no keys)
 
+> **Status 2026-11-17:** stopgap live — `ROUTER_UPSTREAM` points at the free
+> public OSRM demo (`router.project-osrm.org`), chosen by the owner who wants
+> **no VPS and no Fly.io**. Worker proxies + 15-min caches; volume is tiny.
+> Verified end-to-end through the live Worker (200, 186 points, 15 steps,
+> 8.5 km / 14 min, Lusaka). Swap to one of the options below only if the demo
+> server ever degrades — it is a one-variable change, nothing in the app moves.
+
 DropOff routing must be open-source and ours. The app talks to
 `https://dropoff-api.godfreymoseskalambo.workers.dev/maps/route` (already
 deployed), which proxies to an upstream you host. No app changes, no keys in

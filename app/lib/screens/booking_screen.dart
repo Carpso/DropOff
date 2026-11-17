@@ -114,6 +114,10 @@ class _BookingScreenState extends State<BookingScreen> {
   /// cars/vans cover most everyday parcels.
   String _vehicleClass = 'motorcycle';
   int _parcels = 1;
+  /// Mirrors [_parcels] so the free-typed parcels field always shows the real
+  /// value — size/vehicle picks clamp the count and the field must follow
+  /// (previously it kept the stale typed number, so taps looked ignored).
+  final _parcelsCtl = TextEditingController(text: '1');
   final _courierSearchCtl = TextEditingController();
   /// Owner directive (2026-11-13): motorcycle carries at most 10 SMALL,
   /// 5 MEDIUM or 1 LARGE parcel — past that, the rider bumps vehicle, not
@@ -191,7 +195,10 @@ class _BookingScreenState extends State<BookingScreen> {
       final vehicle = '${pre['vehicle_class'] ?? ''}';
       if (_vehicleLabels.containsKey(vehicle)) _vehicleClass = vehicle;
       final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
-      if (parcels > 0 && parcels <= _parcelCapFor(_vehicleClass)) _parcels = parcels;
+      if (parcels > 0 && parcels <= _parcelCapFor(_vehicleClass)) {
+        _parcels = parcels;
+        _parcelsCtl.text = '$parcels';
+      }
       final pw = '${pre['pickup_window'] ?? pre['pickupWindow'] ?? ''}'.trim();
       if (pw == 'tomorrow:06:00') {
         _tomorrowMorning = true;
@@ -225,7 +232,7 @@ class _BookingScreenState extends State<BookingScreen> {
   @override
   void dispose() {
     _hintTimer?.cancel();
-    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress, _courierSearchCtl, _declaredValue]) {
+    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress, _courierSearchCtl, _declaredValue, _parcelsCtl]) {
       controller.dispose();
     }
     super.dispose();
@@ -525,8 +532,16 @@ class _BookingScreenState extends State<BookingScreen> {
 
   bool _validPhone(String value) => RegExp(r'^(?:\+?260|0)?(5[0-9]|7[0-9]|9[1-9])\d{7}$').hasMatch(value.replaceAll(RegExp(r'[\s-]'), ''));
 
-  void _next() {
-    if (_step == 0) {
+  /// Tap-to-jump on the step bars (and Continue): going back is always free;
+  /// jumping forward only lands when the skipped steps pass the same gates as
+  /// Continue — otherwise the same hint toast explains why.
+  void _jumpToStep(int target) {
+    if (_saving || target == _step) return;
+    if (target < _step) {
+      setState(() => _step = target);
+      return;
+    }
+    if (_step < 1 && target >= 1) {
       if (_from == _to) return _message('Choose different pickup and destination cities.');
       if (_pickup.text.trim().length < 4) return _message('Enter the home or shop pickup address.');
       // Nudge, never block: a pin gives exact dispatch + turn-by-turn stops;
@@ -534,11 +549,14 @@ class _BookingScreenState extends State<BookingScreen> {
       if (_pickupLat == null) {
         _message('Tip: tap the location icon to pin the pickup — the nearest rider and the turn-by-turn route both use it.');
       }
-    } else if (_step == 1) {
+    }
+    if (_step < 2 && target >= 2) {
       if (_description.text.trim().length < 3) return _message('Briefly describe what is inside the parcel.');
     }
-    setState(() => _step++);
+    setState(() => _step = target);
   }
+
+  void _next() => _jumpToStep(_step + 1);
 
   Future<void> _openRecipientsPicker() async {
       final list = await DropOffApi.recipients();
@@ -822,7 +840,17 @@ class _BookingScreenState extends State<BookingScreen> {
           child: Column(children: [
             Row(children: [
               for (var i = 0; i < 3; i++) ...[
-                Expanded(child: AnimatedContainer(duration: const Duration(milliseconds: 250), height: 4, decoration: BoxDecoration(color: i <= _step ? AppColors.forest : AppColors.line, borderRadius: BorderRadius.circular(4)))),
+                Expanded(child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _saving ? null : () => _jumpToStep(i),
+                  child: SizedBox(
+                    height: 26,
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: AnimatedContainer(duration: const Duration(milliseconds: 250), height: 4, decoration: BoxDecoration(color: i <= _step ? AppColors.forest : AppColors.line, borderRadius: BorderRadius.circular(4))),
+                    ),
+                  ),
+                )),
                 if (i < 2) const SizedBox(width: 7),
               ],
             ]),
@@ -928,7 +956,10 @@ class _BookingScreenState extends State<BookingScreen> {
           selected: {_size},
           onSelectionChanged: (selection) => setState(() {
             _size = selection.first;
-            if (_parcels > _parcelCap) _parcels = _parcelCap;
+            if (_parcels > _parcelCap) {
+              _parcels = _parcelCap;
+              _parcelsCtl.text = '$_parcels';
+            }
           }),
         ),
         const SizedBox(height: 16),
@@ -988,7 +1019,7 @@ class _BookingScreenState extends State<BookingScreen> {
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'Vehicle', hintText: 'Motorcycle', prefixIcon: Icon(Icons.directions)),
             items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _parcelCapFor(v)) _parcels = _parcelCapFor(v); setState(() {}); } },
+            onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _parcelCapFor(v)) { _parcels = _parcelCapFor(v); _parcelsCtl.text = '$_parcels'; } setState(() {}); } },
           )),
           const SizedBox(width: 12),
           Expanded(child: _vehicleClass == 'motorcycle'
@@ -999,11 +1030,12 @@ class _BookingScreenState extends State<BookingScreen> {
                   items: List.generate(_parcelCap, (i) => i + 1)
                       .map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}', maxLines: 1, overflow: TextOverflow.ellipsis)))
                       .toList(),
-                  onChanged: (v) { if (v != null) setState(() => _parcels = v); },
+                  onChanged: (v) { if (v != null) { _parcels = v; _parcelsCtl.text = '$v'; setState(() {}); } },
                 )
               // Cars, vans and trucks: UNLIMITED parcels — type any number.
+              // Controller-driven so the value stays in sync with every clamp.
               : TextFormField(
-                  initialValue: '$_parcels',
+                  controller: _parcelsCtl,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(labelText: 'Parcels (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
                   onChanged: (v) {

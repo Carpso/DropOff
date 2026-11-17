@@ -520,12 +520,51 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       );
 }
 
+/// Journey steps sheet. Opens INSTANTLY (the tap gives immediate feedback even
+/// when the network crawls), then fills in the server's movement log — or an
+/// honest retry note when it can't be fetched. The old version awaited the
+/// network BEFORE showing anything, so a slow connection made every step tap
+/// look completely dead.
 Future<void> _showMovementLog(BuildContext context, Booking booking) async {
   final ref = booking.serverRef?.isNotEmpty == true ? booking.serverRef! : booking.reference;
-  final data = await DropOffApi.jobEvidence(ref);
-  if (!context.mounted) return;
-  final timeline = (data?['timeline'] as List?)?.cast<Map<String, dynamic>>() ?? const <Map<String, dynamic>>[];
-  String labelFor(String status) => switch (status) {
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => _MovementLogSheet(ref: ref),
+  );
+}
+
+class _MovementLogSheet extends StatefulWidget {
+  final String ref;
+  const _MovementLogSheet({required this.ref});
+
+  @override
+  State<_MovementLogSheet> createState() => _MovementLogSheetState();
+}
+
+class _MovementLogSheetState extends State<_MovementLogSheet> {
+  List<Map<String, dynamic>> _timeline = const <Map<String, dynamic>>[];
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final data = await DropOffApi.jobEvidence(widget.ref);
+    if (!mounted) return;
+    setState(() {
+      _failed = data == null;
+      _timeline = (data?['timeline'] as List?)?.cast<Map<String, dynamic>>() ?? const <Map<String, dynamic>>[];
+      _loading = false;
+    });
+  }
+
+  String _labelFor(String status) => switch (status) {
         'created' => 'Booking placed',
         'rider_assigned' => 'Rider assigned',
         'partner_confirmed' => 'Courier depot accepted the parcel',
@@ -544,18 +583,18 @@ Future<void> _showMovementLog(BuildContext context, Booking booking) async {
         'reprompt_resumed' => 'Reminders resumed',
         _ => status.replaceAll('_', ' '),
       };
-  String humanAt(String raw) {
+
+  String _humanAt(String raw) {
     final parsed = DateTime.tryParse(raw.contains('T') ? raw : '${raw.replaceFirst(' ', 'T')}Z');
     if (parsed == null) return raw;
     return DateFormat('d MMM · HH:mm').format(parsed);
   }
-  await showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    builder: (ctx) => SafeArea(
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
           child: ListView(shrinkWrap: true, children: [
@@ -567,14 +606,24 @@ Future<void> _showMovementLog(BuildContext context, Booking booking) async {
             const SizedBox(height: 4),
             const Text('Every update on this job — who recorded it and when.', style: AppType.body),
             const SizedBox(height: 14),
-            if (timeline.isEmpty)
+            if (_loading) ...[
+              const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 18), child: SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.4)))),
+            ] else if (_failed && _timeline.isEmpty) ...[
+              const Text('Couldn\'t load the journey log just now — check your connection and try again.', style: AppType.body),
+              const SizedBox(height: 10),
+              Center(child: TextButton.icon(
+                onPressed: () { setState(() { _loading = true; _failed = false; }); _load(); },
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Try again'),
+              )),
+            ] else if (_timeline.isEmpty)
               const Text('No updates yet — they appear here the moment the parcel moves.', style: AppType.body),
-            for (final e in timeline)
+            for (final e in _timeline)
               () {
                 final who = '${e['who'] ?? 'system'}';
                 final actor = '${e['actor'] ?? ''}';
                 final status = '${e['status'] ?? ''}';
-                final at = humanAt('${e['at'] ?? ''}');
+                final at = _humanAt('${e['at'] ?? ''}');
                 final note = '${e['note'] ?? ''}'.trim();
                 final (icon, byline) = switch (who) {
                   'rider' => (Icons.two_wheeler, 'Marked updated by rider${actor.isEmpty || actor == 'rider' ? '' : ' — $actor'}'),
@@ -587,7 +636,7 @@ Future<void> _showMovementLog(BuildContext context, Booking booking) async {
                     Icon(icon, size: 18, color: AppColors.forest),
                     const SizedBox(width: 10),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(labelFor(status), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+                      Text(_labelFor(status), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
                       Text('$byline · $at', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                       if (note.isNotEmpty) ...[
                         const SizedBox(height: 3),
@@ -600,8 +649,8 @@ Future<void> _showMovementLog(BuildContext context, Booking booking) async {
           ]),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {

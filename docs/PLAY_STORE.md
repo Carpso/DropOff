@@ -163,8 +163,12 @@ Questions? support@carpsosolutions.store
 5. Recipient tracking page (SMS link) showing handover code hint.
 6. Task queue (rider) with proof-of-delivery dialog.
 
-### Release notes (0.5.33+43)
+### Release notes (0.5.34+44)
 ```
+* Booking fixes you asked for: the Journey steps now open instantly when
+  tapped (even on a slow connection), the step bars on the booking form
+  can be tapped to jump between steps, and the parcels field always shows
+  the real count after changing size or vehicle.
 * Signed-in errors simply report in. Unhandled app errors now report
   themselves to DropOff (anonymous, deduped) so crashes get fixed fast —
   no action needed from you.
@@ -209,20 +213,25 @@ Questions? support@carpsosolutions.store
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 9. What is new in 0.5.33+43
+## 9. What is new in 0.5.34+44
 
-- **DropOff is now English-only** — the ny/bem/toi/loz catalogue (ARB files,
-  generated l10n classes, `l10n.yaml`, `flutter_localizations`/`intl`, the
-  in-app language picker, `locale_pref` sync) is fully removed. Fewer
-  ambiguous machine-translation surfaces; single canonical copy.
-- **Admin edit user details** — Accounts & roles → pencil on a
-  non-admin row → full name + email. Emails set by an admin are marked
-  verified (admin attestation), so the number can sign in with password
-  immediately; server refuses edits to the master admin account and to other
-  admin rows, and checks uniqueness before saving.
-- **Client crash reporting, in-house** — unhandled app errors post to
-  `/client/error` (rate-limited, deduped per device+stack) — visible in
-  admin console "Client crashes".
+- **Booking taps fixed (owner-reported)** — three surfaces dead or misleading:
+  - *Journey steps*: "Tap any step — see who updated it and when." used to wait
+    on a network round-trip BEFORE opening anything, so on a slow connection
+    every tap looked dead. The sheet now opens instantly with a spinner, fills
+    in the movement log, and shows an honest retry note if it can't load.
+  - *Booking wizard step bars*: the three progress bars at the top ("STEP 1 OF
+    3") were display-only; they are now tap targets — jump back freely,
+    forward jumps run the same validation as Continue.
+  - *Parcels field*: the free-typed count kept a stale number after a size or
+    vehicle pick clamped it (looked like taps being ignored); it is now
+    controller-synced with the actual selection.
+- **Carried from 0.5.33+43**: parcel-chat SYSTEM messages name the actual
+  branch/destination (no more hardcoded "en route to Lusaka"); biometric-gate
+  "Use my password instead" no longer wipes the session (inline re-auth, the
+  session only dies via explicit sign-out); login distinguishes unknown email
+  from wrong password; receipts/waybills never clip words (screen, PNG share,
+  thermal); at-depot riders are excluded from dispatch with a depot-named toast.
 
 Engineering notes carried over from the previous waves: ZICTA 2024 numbering,
 one admin role, audit-restore drill completed, 5xx D1 ledger + admin SMS on
