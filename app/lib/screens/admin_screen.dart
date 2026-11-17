@@ -1231,7 +1231,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
                   Text('Ticket #${widget.threadId}',
                       style: AppType.subhead),
                   Text(widget.customerName ?? widget.phone,
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      maxLines: 2, overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                 ]),
               ),
@@ -2517,7 +2517,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
                   Text('${c['name']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                   const SizedBox(height: 2),
                   Text('${c['city'] ?? ''}${c['depot_name'] != null ? ' • ${c['depot_name']}' : ''} • id ${c['id']}',
-                      style: const TextStyle(color: AppColors.muted, fontSize: 10.5), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      style: const TextStyle(color: AppColors.muted, fontSize: 10.5), maxLines: 2, overflow: TextOverflow.ellipsis),
                 ])),
                 Switch(
                   value: c['active'] == true || c['active'] == 1,
@@ -2632,7 +2632,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
                   const SizedBox(height: 2),
                   Text('jobs: ${row['job_refs'] ?? '—'}',
                       style: const TextStyle(color: AppColors.muted, fontSize: 10, fontFamily: 'monospace'),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
                 ])),
                 const SizedBox(width: 8),
                 if (row['on_hold'] == true)
@@ -3040,7 +3040,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
                 ),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
-                    Expanded(child: Text('${rider['full_name'] ?? 'Driver'}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    Expanded(child: Text('${rider['full_name'] ?? 'Driver'}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5), maxLines: 2, overflow: TextOverflow.ellipsis)),
                     _statusChip('${rider['verification_status'] ?? 'pending'}'),
                   ]),
                   const SizedBox(height: 2),
@@ -3291,7 +3291,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
               ...features.take(6).map((f) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(children: [
-                  Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis)),
                   Text('${f['n']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: AppColors.forest)),
                   const SizedBox(width: 6),
                   Text('${f['users']} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
@@ -3306,7 +3306,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
                 ...screens.take(6).map((s) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Row(children: [
-                    Expanded(child: Text('${s['screen'] ?? 'unknown'}', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    Expanded(child: Text('${s['screen'] ?? 'unknown'}', style: const TextStyle(fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis)),
                     Text('${s['n'] ?? 0}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: AppColors.forest)),
                     const SizedBox(width: 6),
                     Text('${s['users'] ?? 0} users', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
@@ -3328,7 +3328,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
               ...funnel.take(5).map((f) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(children: [
-                  Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  Expanded(child: Text('${f['feature']}', style: const TextStyle(fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis)),
                   Text('${f['users']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: AppColors.forest)),
                 ]),
               )),
@@ -3453,7 +3453,7 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Row(children: [
                     Expanded(
-                      child: Text('${b['branch']}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                      child: Text('${b['branch']}', maxLines: 2, overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                     ),
                     const SizedBox(width: 8),

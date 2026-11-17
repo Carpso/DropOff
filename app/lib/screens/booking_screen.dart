@@ -385,9 +385,13 @@ class _BookingScreenState extends State<BookingScreen> {
   void _message(String text) => AppToast.show(context, text);
 
   /// Shared copy for the post-prompt verdict (both pay paths use it).
-  String _payResultMessage(String outcome) => switch (outcome) {
+  /// [failReason] is the telco's own message ("User wallet does not have
+  /// enough money...") — shown verbatim so the payer learns WHY.
+  String _payResultMessage(String outcome, [String? failReason]) => switch (outcome) {
         'success' => 'Lipila payment received. Your rider is being dispatched.',
-        'failed' => 'The mobile-money request was rejected — verify your momo balance has the funds, then tap Pay now to resend the prompt.',
+        'failed' => (failReason == null || failReason.isEmpty)
+            ? 'The mobile-money request was rejected — verify your momo balance has the funds, then tap Pay now to resend the prompt.'
+            : 'Payment failed: $failReason — top up your momo wallet, then tap Pay now to resend the prompt.',
         _ => 'Payment still pending — the rider sweep confirms when your money lands.',
       };
 
@@ -779,13 +783,13 @@ class _BookingScreenState extends State<BookingScreen> {
                 ? 'Your plan cap is reached — this trip is billed pay-as-you-go. Pay K${due.toStringAsFixed(2)} to dispatch.'
                 : 'Approve the prepayment prompt for K${due.toStringAsFixed(2)} sent to ${_senderPhone.text} — your rider dispatches the moment it lands. You pay DropOff only; the courier counter fare stays with the depot.');
       }
-      final outcome = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
+      final out = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
       if (!mounted) return;
-      paymentOutcome = outcome == 'success' ? 'paid' : 'held';
-      if (outcome.startsWith('error:')) {
-        _message('Payment could not start now (${outcome.substring(6)}); the booking is saved and HELD — verify your momo balance, then tap Pay now on the booking screen to retry.');
+      paymentOutcome = out.status == 'success' ? 'paid' : 'held';
+      if (out.status.startsWith('error:')) {
+        _message('Payment could not start now (${out.status.substring(6)}); the booking is saved and HELD — verify your momo balance, then tap Pay now on the booking screen to retry.');
       } else {
-        _message(_payResultMessage(outcome));
+        _message(_payResultMessage(out.status, out.failReason));
       }
     } else if (booking.dispatched && due != null && due > 0 && mounted) {
       // Deposit required but no live prompt on this device: the sender
@@ -1550,7 +1554,10 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
           final pid = pay['payment_id'];
           if (pid != _lastFailedPayId) {
             _lastFailedPayId = pid;
-            AppToast.show(context, 'That momo prompt was rejected — tap Pay now to send a fresh one.');
+            final why = pay['fail_reason'] as String?;
+            AppToast.show(context, (why == null || why.isEmpty)
+                ? 'That momo prompt was rejected — tap Pay now to send a fresh one.'
+                : 'Payment failed: $why — top up your momo wallet, then tap Pay now to send a fresh one.');
           }
         }
       }
@@ -1586,10 +1593,10 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
     }
     if (_busy) return;
     setState(() => _busy = true);
-    final outcome = await PayJob.startAndPoll(jobRef: jobRef, phone: booking.senderPhone);
+    final out = await PayJob.startAndPoll(jobRef: jobRef, phone: booking.senderPhone);
     if (!mounted) return;
     setState(() => _busy = false);
-    switch (outcome) {
+    switch (out.status) {
       case 'success':
         _watchTimer?.cancel();
         AppToast.show(context, 'Prepayment received — your rider is being dispatched.');
@@ -1597,11 +1604,13 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
         unawaited(AppScope.of(context).syncJobsFromServer());
         break;
       case 'failed':
-        AppToast.show(context, 'The momo prompt was rejected — verify your mobile-money balance has the funds, then tap Pay now again.');
+        AppToast.show(context, (out.failReason == null || out.failReason!.isEmpty)
+            ? 'The momo prompt was rejected — verify your mobile-money balance has the funds, then tap Pay now again.'
+            : 'Payment failed: ${out.failReason} — top up your momo wallet, then tap Pay now again.');
         break;
       default:
-        if (outcome.startsWith('error:')) {
-          AppToast.show(context, 'Payment could not start (${outcome.substring(6)}) — check your connection and tap Pay now again.');
+        if (out.status.startsWith('error:')) {
+          AppToast.show(context, 'Payment could not start (${out.status.substring(6)}) — check your connection and tap Pay now again.');
         } else {
           AppToast.show(context, 'Prompt sent — approve it on your phone to dispatch your rider.');
         }

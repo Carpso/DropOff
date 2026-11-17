@@ -428,7 +428,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
               decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                 Text('Best fit: ${(rec['tag'] as String?) ?? '${rec['tier']}'.toUpperCase()} · K${(rec['fee_zmw'] as num?)?.toStringAsFixed(0)}',
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    maxLines: 2, overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
                 const SizedBox(height: 3),
                 Text(savingsLine(rec), style: AppType.caption),

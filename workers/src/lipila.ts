@@ -203,8 +203,12 @@ export async function lipilaDisburse(
   return { ok: res.ok, status: res.status, lipilaReference: ref ? String(ref) : undefined, raw: text };
 }
 
-/** Poll a collection. The app polls every ~2s for up to 40s. */
-export async function lipilaStatus(env: Env, reference: string): Promise<'pending' | 'success' | 'failed'> {
+/** Poll a collection WITH the telco's failure reason. On a failed prompt
+ *  Lipila returns e.g. "User wallet does not have enough money to cover the
+ *  payable amount." — the owner directive (2026-11-17) is that the app must
+ *  show the payer WHY it failed, not a generic rejection. The reason is only
+ *  populated on 'failed'; success/pending messages are transport noise. */
+export async function lipilaStatusDetail(env: Env, reference: string): Promise<{ status: 'pending' | 'success' | 'failed'; reason?: string }> {
   let res: Response;
   try {
     res = await withCircuit('lipila-status', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/collections/check-status?referenceId=${encodeURIComponent(reference)}`, {
@@ -212,12 +216,41 @@ export async function lipilaStatus(env: Env, reference: string): Promise<'pendin
       signal: AbortSignal.timeout(8000),
     }));
   } catch {
-    return 'pending'; // circuit open: treat as pending, never block a payment on a status poll
+    return { status: 'pending' }; // circuit open: treat as pending, never block a payment on a status poll
   }
-  if (!res.ok) return 'pending';
+  if (!res.ok) return { status: 'pending' };
   const data: any = await res.json().catch(() => null);
   const raw = data?.status ?? data?.paymentStatus ?? data?.state ?? data?.transactionStatus ?? data?.result;
-  return mapLipilaStatus(raw);
+  const status = mapLipilaStatus(raw);
+  const message = typeof data?.message === 'string' ? data.message.trim() : '';
+  return { status, reason: status === 'failed' && message ? message.slice(0, 200) : undefined };
+}
+
+/** Poll a collection. The app polls every ~2s for up to 40s. */
+export async function lipilaStatus(env: Env, reference: string): Promise<'pending' | 'success' | 'failed'> {
+  return (await lipilaStatusDetail(env, reference)).status;
+}
+
+/** Poll a DISBURSEMENT (payout). Separate status endpoint from collections —
+ *  the worker must reconcile pending payouts (reimbursements, payroll, refunds,
+ *  sweeps) against Lipila's own verdict instead of trusting only the init
+ *  response, which can leave forever-pending rows. */
+export async function lipilaDisburseStatusDetail(env: Env, reference: string): Promise<{ status: 'pending' | 'success' | 'failed'; reason?: string }> {
+  let res: Response;
+  try {
+    res = await withCircuit('lipila-disburse-status', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/disbursements/check-status?referenceId=${encodeURIComponent(reference)}`, {
+      headers: { accept: 'application/json', 'x-api-key': env.LIPILA_API_KEY },
+      signal: AbortSignal.timeout(8000),
+    }));
+  } catch {
+    return { status: 'pending' };
+  }
+  if (!res.ok) return { status: 'pending' };
+  const data: any = await res.json().catch(() => null);
+  const raw = data?.status ?? data?.paymentStatus ?? data?.state ?? data?.transactionStatus ?? data?.result;
+  const status = mapLipilaStatus(raw);
+  const message = typeof data?.message === 'string' ? data.message.trim() : '';
+  return { status, reason: status === 'failed' && message ? message.slice(0, 200) : undefined };
 }
 
 function mapLipilaStatus(raw: unknown): 'pending' | 'success' | 'failed' {

@@ -990,9 +990,15 @@ class DropOffApi {
         'phone': phone,
         if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
       }, timeout: _paymentTimeout);
-  /// Poll Lipila collect status (call every ~2s up to ~40s).
-  static Future<String?> paymentStatus(String paymentId) async =>
-      (await get('/payments/$paymentId/status'))?['status'] as String?;
+  /// Poll Lipila collect status (call every ~2s up to ~40s). Returns
+  /// (status, failReason): failReason carries the telco's own message when a
+  /// prompt fails — "User wallet does not have enough money to cover the
+  /// payable amount." — so screens can tell the user WHY, not just "failed"
+  /// (owner directive 2026-11-17).
+  static Future<(String?, String?)> paymentStatus(String paymentId) async {
+    final b = await get('/payments/$paymentId/status');
+    return (b?['status'] as String?, b?['fail_reason'] as String?);
+  }
 
   /// HELD-PAYMENT WATCH (owner bug 2026-11-17: "I paid but the payment screen
   /// didn't check or poll"): the held-booking screen polls the job's LATEST

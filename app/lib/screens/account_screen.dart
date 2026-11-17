@@ -1185,9 +1185,12 @@ class _TiersCardState extends State<_TiersCard> {
     }
     final paymentId = '${pay.body['payment_id']}';
     var status = 'pending';
+    String? failReason;
     for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 2));
-      status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
+      final st = await DropOffApi.paymentStatus(paymentId);
+      status = st.$1 ?? 'pending';
+      failReason = st.$2;
     }
     if (!mounted) return;
     setState(() { _busyTier = null; _usageCycle++; });
@@ -1200,7 +1203,9 @@ class _TiersCardState extends State<_TiersCard> {
       AppToast.show(context, switch (status) {
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
       'success' => '$tier plan is LIVE — your monthly parcels are ready.',
-      'failed' => 'The mobile-money prompt was rejected — verify your momo balance has the funds, then tap Pay now again.',
+      'failed' => (failReason == null || failReason.isEmpty)
+          ? 'The mobile-money prompt was rejected — verify your momo balance has the funds, then tap Pay now again.'
+          : 'Payment failed: $failReason — top up your momo wallet, then tap Pay now again.',
       _ => 'Payment still pending — the plan activates the moment it lands.',
     });
   }
@@ -1268,31 +1273,32 @@ class _TiersCardState extends State<_TiersCard> {
                           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Expanded(
                               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Row(children: [
-                                  Flexible(
-                                    child: Text(entry.value.label,
-                                        maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false,
-                                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.4)),
-                                  ),
-                                  if (currentActive && currentTier == entry.key) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(20)),
-                                      child: const Text('CURRENT', style: TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
-                                    ),
-                                  ],
-                                  if (models[entry.key]?['tag'] != null) ...[
-                                    const SizedBox(width: 6),
-                                    Flexible(
-                                      child: Container(
+                                // FULL-WIDTH NAME + WRAPPED BADGES (owner fix
+                                // 2026-11-17: "MOST POPULAR / Weekly ... are
+                                // ellipsed — fill them up"): the plan name and
+                                // the badges used to share one row and squeeze
+                                // each other into "WEEKLY SPR…" / "MOST POP…".
+                                // The name now owns its own line and the
+                                // badges flow on a Wrap below — never truncated.
+                                Text(entry.value.label,
+                                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.4)),
+                                if ((currentActive && currentTier == entry.key) || models[entry.key]?['tag'] != null) ...[
+                                  const SizedBox(height: 5),
+                                  Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                                    if (currentActive && currentTier == entry.key)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(20)),
+                                        child: const Text('CURRENT', style: TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
+                                      ),
+                                    if (models[entry.key]?['tag'] != null)
+                                      Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(20)),
-                                        child: Text('${models[entry.key]['tag']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF7B5710), fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
+                                        child: Text('${models[entry.key]['tag']}', style: const TextStyle(color: Color(0xFF7B5710), fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4)),
                                       ),
-                                    ),
-                                  ],
-                                ]),
+                                  ]),
+                                ],
                                 const SizedBox(height: 4),
                                 Text(entry.value.blurb,
                                     style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
@@ -1327,7 +1333,15 @@ class _TiersCardState extends State<_TiersCard> {
                                                   ? 'Upgrade'
                                                   : 'Choose',
                                           textAlign: TextAlign.center,
-                                          style: AppType.callout,
+                                          // THEME-BASED LABEL (owner fix 2026-11-17):
+                                          // AppType.callout pins AppColors.ink, which
+                                          // overrode the FilledButton's white foreground
+                                          // — "Choose"/"Renew"/"Upgrade" read black on
+                                          // the forest button. Resolve the color from
+                                          // the button theme so it always follows it.
+                                          style: AppType.callout.copyWith(
+                                            color: Theme.of(context).filledButtonTheme.style?.foregroundColor?.resolve({}) ?? Colors.white,
+                                          ),
                                         ),
                                 ),
                               ]),

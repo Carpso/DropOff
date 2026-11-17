@@ -14,12 +14,16 @@ import '../data/dropoff_api.dart';
 /// losing payments the user had actually approved.
 ///
 /// Returns:
-///   'success' | 'failed' | 'pending'  — Lipila's verdict on the prompt
-///   'error:<reason>'                   — the prompt could not be started at all
+///   status — 'success' | 'failed' | 'pending' (Lipila's verdict on the prompt)
+///            or 'error:<reason>' when the prompt could not be started at all
+///   failReason — the telco's own failure message when status == 'failed'
+///            (e.g. "User wallet does not have enough money to cover the
+///            payable amount."). Owner directive 2026-11-17: the payer must
+///            see WHY a prompt failed, not a generic rejection.
 class PayJob {
   PayJob._();
 
-  static Future<String> startAndPoll({required String jobRef, required String phone}) async {
+  static Future<({String status, String? failReason})> startAndPoll({required String jobRef, required String phone}) async {
     final res = await DropOffApi.pay(
       jobRef: jobRef,
       phone: phone,
@@ -27,19 +31,24 @@ class PayJob {
       // path (the booking is held until one prompt lands).
       idempotencyKey: 'pay-$jobRef-${DateTime.now().millisecondsSinceEpoch}',
     );
-    if (!res.ok) return 'error:${res.error ?? 'network'}';
+    if (!res.ok) return (status: 'error:${res.error ?? 'network'}', failReason: null);
     final paymentId = '${res.body['payment_id']}';
     var status = 'pending';
+    String? failReason;
     // Fast phase: catches the common approve-right-away case.
     for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 2));
-      status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
+      final st = await DropOffApi.paymentStatus(paymentId);
+      status = st.$1 ?? 'pending';
+      failReason = st.$2;
     }
     // Slow tail: the phone may still be showing the prompt — keep watching.
     for (var attempt = 0; attempt < 6 && status == 'pending'; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 5));
-      status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
+      final st = await DropOffApi.paymentStatus(paymentId);
+      status = st.$1 ?? 'pending';
+      failReason = st.$2;
     }
-    return status;
+    return (status: status, failReason: failReason);
   }
 }

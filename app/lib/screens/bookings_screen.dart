@@ -1346,11 +1346,11 @@ class _ParcelsForYou extends StatelessWidget {
                     Expanded(
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text('${p['ref'] ?? 'Parcel'} · ${p['courier'] ?? ''}',
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
                         Text('To ${p['dest_city'] ?? 'destination'}',
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: AppColors.muted, fontSize: 11)),
                       ]),
@@ -1428,17 +1428,19 @@ class _PrepayCardState extends State<_PrepayCard> {
   Future<void> _payNow() async {
     final store = AppScope.of(context);
     setState(() => _busy = true);
-    final outcome = await PayJob.startAndPoll(jobRef: widget.booking.serverRef!, phone: widget.booking.senderPhone);
+    final out = await PayJob.startAndPoll(jobRef: widget.booking.serverRef!, phone: widget.booking.senderPhone);
     if (!mounted) return;
     setState(() => _busy = false);
-    AppToast.show(context, outcome == 'success'
+    AppToast.show(context, out.status == 'success'
         ? 'Prepayment received — your rider is being dispatched.'
-        : outcome == 'failed'
-            ? 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.'
-            : outcome.startsWith('error:')
-                ? (outcome.contains('already paid')
+        : out.status == 'failed'
+            ? (out.failReason == null || out.failReason!.isEmpty)
+                ? 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.'
+                : 'Payment failed: ${out.failReason} — top up your momo wallet, then tap Pay now again.'
+            : out.status.startsWith('error:')
+                ? (out.status.contains('already paid')
                     ? 'This delivery is already paid.'
-                    : 'Payment could not start (${outcome.substring(6)}) — verify your momo balance and connection, then retry.')
+                    : 'Payment could not start (${out.status.substring(6)}) — verify your momo balance and connection, then retry.')
                 : 'Prompt sent — approve it on your phone to dispatch your rider.');
     unawaited(store.syncJobsFromServer());
   }
@@ -1570,15 +1572,20 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
     final paymentId = '${res.body['payment_id']}';
     final total = (res.body['amount_zmw'] as num?)?.toDouble();
     var status = 'pending';
+    String? failReason;
     for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 2));
-      status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
+      final st = await DropOffApi.paymentStatus(paymentId);
+      status = st.$1 ?? 'pending';
+      failReason = st.$2;
     }
     if (!mounted) return;
     setState(() => _busy = false);
     AppToast.show(context, switch (status) {
       'success' => 'Counter fare paid — your depot receipt is revealed below.',
-      'failed' => 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.',
+      'failed' => (failReason == null || failReason.isEmpty)
+          ? 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.'
+          : 'Payment failed: $failReason — top up your momo wallet, then tap Pay now again.',
       _ => total != null
           ? 'Prompt sent for K${total.toStringAsFixed(2)} — approve it on your phone to reveal the receipt.'
           : 'Prompt sent — approve it on your phone to reveal the receipt.',

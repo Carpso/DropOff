@@ -8,7 +8,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import {
-  Env, Provider, lipilaCollect, lipilaDisburse, lipilaStatus, normalizeZmPhone, providerFromPhone,
+  Env, Provider, lipilaCollect, lipilaDisburse, lipilaDisburseStatusDetail, lipilaStatus,
+  lipilaStatusDetail, normalizeZmPhone, providerFromPhone,
 } from './lipila';
 
 import {
@@ -5266,6 +5267,32 @@ app.post('/payments', async (c) => {
   return c.json(payload);
 });
 
+/* --------------------- K1 payment rails test (owner) ----------------------- */
+// Fires a REAL Lipila collect for a tiny amount to prove the whole money
+// path — prompt → approval → webhook → settlement — without touching any
+// booking, plan or wallet (owner directive 2026-11-17: "test payment k1").
+// kind='test' matches NO settle branch in settlePaymentSuccess: the row just
+// flips to 'success' and stays as an audit trail. Gated to the superadmin key.
+app.post('/admin/test-collect', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  const b: any = await c.req.json().catch(() => ({}));
+  const phone = normalizeZmPhone(String(b?.phone ?? ''));
+  if (!phone) return c.json({ error: 'valid Zambian phone required' }, 400);
+  const amount = round2(Math.max(1, Math.min(Number(b?.amount_zmw ?? 1) || 1, 20)));
+  const flavor = b?.kind === 'subscription' ? 'subscription' : 'payg';
+  const ref = `test-${flavor}-${randomCode(6)}`;
+  const init = await lipilaCollect(c.env, phone, amount, ref,
+    flavor === 'subscription' ? 'DropOff TEST plan subscription' : 'DropOff TEST prepayment (pay-as-you-go)')
+    .catch(() => ({ ok: false } as any));
+  if (!init.ok) return c.json({ error: 'lipila_init_failed', detail: (init as any).raw }, 502);
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO payments (job_id, subscription_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
+       lipila_fee_zmw, lipila_reference, status, channel, kind)
+     VALUES (NULL, NULL, ?1, ?2, ?3, 0, 0, 0, ?4, 'pending', 'merchant', 'test')`,
+  ).bind(phone, providerFromPhone(phone), amount, init.lipilaReference ?? ref).run();
+  return c.json({ ok: true, payment_id: meta.last_row_id, lipila_reference: init.lipilaReference, amount_zmw: amount, flavor });
+});
+
 // Depot counter fare owed by a sender (owner directive 2026-11-12).
 // PLAN-ACTIVE SENDERS (owner directive) pay ONLY for the receipt reveal:
 // the processing fee is waived because their plan already funds the DropOff
@@ -5298,7 +5325,7 @@ async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> 
   const job = await env.DB.prepare(
     `SELECT j.ref, j.recipient_phone, j.sender_phone, j.delivery_otp_hash, t.token AS tracking_token
        FROM jobs j LEFT JOIN tracking_tokens t ON t.job_id = j.id
-      WHERE j.id = ?1 ORDER BY t.id DESC LIMIT 1`,
+      WHERE j.id = ?1 ORDER BY t.created_at DESC LIMIT 1`,
   ).bind(jobId).first<any>();
   if (!job?.ref || !job.recipient_phone || job.delivery_otp_hash) return;
   const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
@@ -5319,6 +5346,33 @@ async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> 
   if (job.sender_phone) {
     await sendSms(env, job.sender_phone,
       `DropOff: parcel ${job.ref} paid. Pickup code ${deliveryOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {});
+  }
+}
+
+// Self-heal (2026-11-17): the SMS/OTP mint could die AFTER the money landed
+// (bug: ORDER BY t.id on a table with no id column) — a paid, live parcel
+// with no handover code, no tracking link, no sender pickup code. Idempotent:
+// mints only when delivery_otp_hash IS NULL, so it's a safe permanent guard
+// in the minute cron, not a one-off patch. Recipient SMS is a one-time send
+// per job (the hash becomes set on success).
+async function healMissingTrackingSms(env: Env): Promise<void> {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT id FROM jobs
+        WHERE paid = 1 AND delivery_otp_hash IS NULL
+          AND COALESCE(status, '') != 'canceled'
+          AND created_at > datetime('now', '-2 days')
+        ORDER BY id LIMIT 25`,
+    ).all<any>();
+    for (const row of results ?? []) {
+      try {
+        await sendRecipientTrackingSms(env, row.id);
+      } catch (e) {
+        await captureError(env, e, { method: 'CRON', url: `https://cron/heal-tracking/${row.id}` }).catch(() => {});
+      }
+    }
+  } catch (e) {
+    await captureError(env, e, { method: 'CRON', url: 'https://cron/heal-tracking' }).catch(() => {});
   }
 }
 
@@ -5390,6 +5444,31 @@ async function rewardReferralOnBooking(env: Env, jobId: number, senderPhone: str
     env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'referral_rewarded', ?2)`)
       .bind(jobId, `Referrer ${refRow.referrer_phone} gets ${rewardCode} (${pct}% off, single-use)`),
   ]);
+}
+
+/* Failure reasons (owner directive 2026-11-17): when a momo prompt fails the
+ * payer must see WHY — "no money", "wrong PIN attempts exhausted", etc. Lipila
+ * returns that message on the status check; we store it on the payments row's
+ * meta JSON and echo it from the status endpoints the app polls. */
+function failReasonOf(metaText: unknown): string | null {
+  if (!metaText) return null;
+  try {
+    const r = (JSON.parse(String(metaText)) as Record<string, unknown>)?.fail_reason;
+    return typeof r === 'string' && r.trim() ? r.trim() : null;
+  } catch { return null; }
+}
+
+// Persist the telco's failure message onto the row (meta JSON, merged — meta
+// also carries upgrade bookkeeping like prevTier, so never clobber it).
+async function recordFailReason(env: Env, paymentId: number, reason?: string): Promise<void> {
+  if (!reason) return;
+  try {
+    const row = await env.DB.prepare('SELECT meta FROM payments WHERE id = ?1').bind(paymentId).first<any>();
+    let meta: Record<string, unknown> = {};
+    try { meta = JSON.parse(row?.meta ?? '{}') as Record<string, unknown>; } catch { /* replace bad meta */ }
+    meta.fail_reason = reason;
+    await env.DB.prepare('UPDATE payments SET meta = ?2 WHERE id = ?1').bind(paymentId, JSON.stringify(meta)).run();
+  } catch { /* best-effort — never block settlement on reason bookkeeping */ }
 }
 
 async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: string): Promise<void> {  if (finalStatus !== 'success') return;
@@ -5629,6 +5708,10 @@ async function reimburseRider(
            lipila_fee_zmw, lipila_reference, status, channel, kind)
          VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, 'pending', 'merchant', 'rider_reimbursement')`,
       ).bind(job.id, rider.phone, providerFromPhone(rider.phone), amount, ref),
+      // FK-safe (same bug class as the settle-time wallet_ledger crash): a
+      // rider without a wallets row made this batch throw and the payout was
+      // marked failed before Lipila was ever called.
+      env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(rider.phone),
       env.DB.prepare(
         `INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'rider_reimburse', ?3)`,
       ).bind(rider.phone, amount, job.id),
@@ -5642,6 +5725,12 @@ async function reimburseRider(
           `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_failed', ?2)`,
         ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} to the rider failed at payout init (Lipila) — retry via /admin/payments/:id/refund. The rider is OWED this money.`),
       ]);
+      // Surface Lipila's own error (auth/float/whitelist) on the row's meta so
+      // ops screens can show WHY the payout failed, not just "failed".
+      try {
+        const row = await env.DB.prepare('SELECT id FROM payments WHERE lipila_reference = ?1 ORDER BY id DESC LIMIT 1').bind(ref).first<any>();
+        if (row?.id) await recordFailReason(env, row.id, String(disb.raw ?? '').slice(0, 200) || 'payout_init_failed');
+      } catch { /* best-effort */ }
     }
   } catch {
     try {
@@ -5698,16 +5787,27 @@ async function sweepPlatformIncome(env: Env): Promise<void> {
 // actually succeeded. Rows stuck >7 days are closed as failed.
 async function reconcilePayments(env: Env): Promise<void> {  try {
     const { results } = await env.DB.prepare(
-      `SELECT id, lipila_reference FROM payments
+      `SELECT id, lipila_reference, kind FROM payments
         WHERE status = 'pending' AND lipila_reference IS NOT NULL
           AND created_at < datetime('now', '-2 minutes')
           AND created_at > datetime('now', '-2 days')
         ORDER BY id LIMIT 50`,
     ).all<any>();
     for (const pay of results ?? []) {
-      const status = await lipilaStatus(env, pay.lipila_reference);
+      // Payout kinds settle on the DISBURSEMENT status endpoint (a collect
+      // check-status would never see their reference). Payout rows are only
+      // status-flipped - their ledger/payroll bookkeeping happened at init.
+      if (pay.kind === 'rider_reimbursement' || pay.kind === 'cod_remit') {
+        const d = await lipilaDisburseStatusDetail(env, pay.lipila_reference);
+        if (d.status === 'pending') continue;
+        await env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, d.status).run();
+        await recordFailReason(env, pay.id, d.reason);
+        continue;
+      }
+      const { status, reason } = await lipilaStatusDetail(env, pay.lipila_reference);
       if (status === 'pending') continue;
       await env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
+      await recordFailReason(env, pay.id, reason);
       await settlePaymentSuccess(env, pay.id, status);
     }
     const expired = await env.DB.prepare(
@@ -5736,21 +5836,23 @@ async function reconcilePayments(env: Env): Promise<void> {  try {
 app.get('/payments/:id/status', async (c) => {
   const id = Number(c.req.param('id'));
   const pay = await c.env.DB.prepare(
-    'SELECT id, job_id, phone, provider, amount_zmw, lipila_reference, status, kind FROM payments WHERE id = ?1',
+    'SELECT id, job_id, phone, provider, amount_zmw, lipila_reference, status, kind, meta FROM payments WHERE id = ?1',
   ).bind(id).first<any>();
   if (!pay) return c.json({ error: 'not found' }, 404);
   const isOwner = c.get('phone') === pay.phone || c.get('role') === 'ops';
   if (!isOwner) return c.json({ error: 'forbidden' }, 403);
 
   if (pay.status === 'pending' && pay.lipila_reference) {
-    const status = await lipilaStatus(c.env, pay.lipila_reference);
+    const { status, reason } = await lipilaStatusDetail(c.env, pay.lipila_reference);
     if (status !== 'pending') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
+      await recordFailReason(c.env, pay.id, reason);
       await settlePaymentSuccess(c.env, pay.id, status);
+      return c.json({ status, fail_reason: reason ?? null });
     }
-    return c.json({ status });
+    return c.json({ status, fail_reason: failReasonOf(pay.meta) });
   }
-  return c.json({ status: pay.status });
+  return c.json({ status: pay.status, fail_reason: failReasonOf(pay.meta) });
 });
 
 // HELD-PAYMENT RECONCILE (owner bug 2026-11-17: "I paid but the payment
@@ -5769,7 +5871,7 @@ app.get('/jobs/:ref/payments', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
   const pay = await c.env.DB.prepare(
-    'SELECT id, phone, amount_zmw, status, kind, lipila_reference, created_at FROM payments WHERE job_id = ?1 ORDER BY id DESC LIMIT 1',
+    'SELECT id, phone, amount_zmw, status, kind, lipila_reference, meta, created_at FROM payments WHERE job_id = ?1 ORDER BY id DESC LIMIT 1',
   ).bind(job.id).first<any>();
   // JOB-PAID OVERRIDE (owner bug 2026-11-17: "booking succeeds, money
   // deducted, screen never flips"): the JOB being paid is the truth this
@@ -5786,11 +5888,13 @@ app.get('/jobs/:ref/payments', async (c) => {
   }
   if (!pay) return c.json({ payment: null });
   if (pay.status === 'pending' && pay.kind !== 'cod_remit' && pay.kind !== 'rider_reimbursement' && pay.lipila_reference) {
-    const status = await lipilaStatus(c.env, pay.lipila_reference);
+    const { status, reason } = await lipilaStatusDetail(c.env, pay.lipila_reference);
     if (status !== 'pending') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
+      await recordFailReason(c.env, pay.id, reason);
       await settlePaymentSuccess(c.env, pay.id, status);
       pay.status = status;
+      if (reason) pay.meta = JSON.stringify({ ...(pay.meta ? safeParse(pay.meta) : {}), fail_reason: reason });
     }
   }
   return c.json({
@@ -5801,9 +5905,15 @@ app.get('/jobs/:ref/payments', async (c) => {
       phone: pay.phone,
       kind: pay.kind,
       created_at: pay.created_at,
+      fail_reason: failReasonOf(pay.meta),
     },
   });
 });
+
+// Tiny parse helper for the fail-reason merge above (never throw from a poll).
+function safeParse(s: string): Record<string, unknown> {
+  try { return JSON.parse(s) as Record<string, unknown>; } catch { return {}; }
+}
 
 app.get('/payments/:id/receipt', async (c) => {
   const id = Number(c.req.param('id'));
@@ -5879,9 +5989,10 @@ app.post('/webhooks/lipila', async (c) => {
 
   if (pay.status === 'pending' && pay.lipila_reference) {
     // authoritative check straight from Lipila — body status is advisory only
-    const status = await lipilaStatus(c.env, pay.lipila_reference);
+    const { status, reason } = await lipilaStatusDetail(c.env, pay.lipila_reference);
     if (status !== 'pending') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
+      await recordFailReason(c.env, pay.id, reason);
       await settlePaymentSuccess(c.env, pay.id, status);
       return c.json({ ok: true, status });
     }
@@ -10905,6 +11016,7 @@ export default {
           await checkTimedPickups(env);
           await detectDrift(env);
           await redispatchUnassignedPaidJobs(env);
+          await healMissingTrackingSms(env);
           await notifyCapNudges(env);
           await notifyExpiryNudges(env);
           return;

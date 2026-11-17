@@ -149,14 +149,19 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       if (pay.ok) {
         final paymentId = '${pay.body['payment_id']}';
         var status = 'pending';
+        String? failReason;
         for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
           await Future<void>.delayed(const Duration(seconds: 2));
-          status = await DropOffApi.paymentStatus(paymentId) ?? 'pending';
+          final st = await DropOffApi.paymentStatus(paymentId);
+          status = st.$1 ?? 'pending';
+          failReason = st.$2;
         }
         if (!mounted) return;
         _message(switch (status) {
           'success' => 'Paid — a rider will collect from $_courierId point.',
-          'failed' => 'The mobile-money prompt was rejected — verify your momo balance has the funds, then try again. Tap Pay now to resend the prompt, or contact DropOff support.',
+          'failed' => (failReason == null || failReason.isEmpty)
+              ? 'The mobile-money prompt was rejected — verify your momo balance has the funds, then try again. Tap Pay now to resend the prompt, or contact DropOff support.'
+              : 'Payment failed: $failReason — top up your momo wallet, then try again. Tap Pay now to resend the prompt, or contact DropOff support.',
           _ => 'Payment still pending — the rider sweep confirms when your money lands.',
         });
       }
@@ -240,7 +245,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                 child: Row(children: [
                   CourierAvatar(courier: c, size: 38),
                   const SizedBox(width: 10),
-                  Expanded(child: Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+                  Expanded(child: Text(c.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
                   Icon(_courierId == c.id ? Icons.check_circle : Icons.circle_outlined, color: _courierId == c.id ? AppColors.forest : AppColors.line),
                 ]),
               ),
