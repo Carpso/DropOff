@@ -1,8 +1,22 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../ui/in_app_browser.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
+
+/// Opens the phone dialer for [raw] (keeps digits and '+'). Returns false when
+/// the device can't dial (web console, tablet) so the caller can surface the
+/// number as text instead of a dead button.
+Future<bool> callPhoneNumber(String raw) async {
+  final tel = raw.replaceAll(RegExp(r'[^0-9+]'), '');
+  if (tel.isEmpty) return false;
+  try {
+    return await launchUrl(Uri(scheme: 'tel', path: tel), mode: LaunchMode.platformDefault);
+  } catch (_) {
+    return false;
+  }
+}
 
 class DropOffLogo extends StatelessWidget {
   final double size;

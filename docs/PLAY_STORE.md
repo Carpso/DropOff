@@ -163,8 +163,12 @@ Questions? support@carpsosolutions.store
 5. Recipient tracking page (SMS link) showing handover code hint.
 6. Task queue (rider) with proof-of-delivery dialog.
 
-### Release notes (0.5.34+44)
+### Release notes (0.5.35+45)
 ```
+* Call buttons are here: a booking with a rider shows "Call <rider>"
+  one tap under the Journey steps, and the rider's pickup list has a
+  call button for each seller. Numbers are only ever sent to the people
+  actually on that parcel's trip.
 * Booking fixes you asked for: the Journey steps now open instantly when
   tapped (even on a slow connection), the step bars on the booking form
   can be tapped to jump between steps, and the parcels field always shows
@@ -213,25 +217,25 @@ Questions? support@carpsosolutions.store
 - `flutter build appbundle` uses the machine's Java 17; install Temurin 17 if the
   Gradle step fails.
 
-## 9. What is new in 0.5.34+44
+## 9. What is new in 0.5.35+45
 
-- **Booking taps fixed (owner-reported)** — three surfaces dead or misleading:
-  - *Journey steps*: "Tap any step — see who updated it and when." used to wait
-    on a network round-trip BEFORE opening anything, so on a slow connection
-    every tap looked dead. The sheet now opens instantly with a spinner, fills
-    in the movement log, and shows an honest retry note if it can't load.
-  - *Booking wizard step bars*: the three progress bars at the top ("STEP 1 OF
-    3") were display-only; they are now tap targets — jump back freely,
-    forward jumps run the same validation as Continue.
-  - *Parcels field*: the free-typed count kept a stale number after a size or
-    vehicle pick clamped it (looked like taps being ignored); it is now
-    controller-synced with the actual selection.
-- **Carried from 0.5.33+43**: parcel-chat SYSTEM messages name the actual
-  branch/destination (no more hardcoded "en route to Lusaka"); biometric-gate
-  "Use my password instead" no longer wipes the session (inline re-auth, the
-  session only dies via explicit sign-out); login distinguishes unknown email
-  from wrong password; receipts/waybills never clip words (screen, PNG share,
-  thermal); at-depot riders are excluded from dispatch with a depot-named toast.
+- **Tap-to-call (owner request)** — the booking detail shows a
+  "Call <rider>" button once a rider is assigned, and the rider's pickup
+  queue has a per-stop "Call the seller" button.
+  - Server side: `/jobs` and `/jobs/:ref` now ship `rider_phone` (LEFT JOIN
+    riders) — participants/staff only; `/rider/queue` stops ship
+    `seller_phone`. No third party or public surface ever sees the numbers.
+  - App side: shared `callPhoneNumber` helper (url_launcher `tel:`), manifest
+    `<queries>` DIAL intent for Android 11+ package visibility, honest toast
+    with the number when a device can't dial (web console).
+- **Carried from 0.5.34+44** — Journey-steps sheet opens instantly with a
+  spinner (was: silent network wait that made taps look dead); wizard step
+  bars are tap-to-jump with Continue-identical validation; parcels field
+  controller-synced with size/vehicle clamps.
+- **Carried from 0.5.33+43** — parcel-chat SYSTEM messages name the actual
+  branch/destination; biometric-gate "Use my password instead" no longer
+  wipes the session; login distinguishes unknown email from wrong password;
+  receipts/waybills never clip words; at-depot riders excluded from dispatch.
 
 Engineering notes carried over from the previous waves: ZICTA 2024 numbering,
 one admin role, audit-restore drill completed, 5xx D1 ledger + admin SMS on

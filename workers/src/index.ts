@@ -2669,7 +2669,7 @@ app.get('/jobs', async (c) => {
   const after = c.req.query('after') ? Number(c.req.query('after')) : null;
   const afterBind = after != null && Number.isFinite(after) ? after : 9007199254740991;
   const { results } = await c.env.DB.prepare(
-    `SELECT j.*, co.name AS courier_name, co.depot_name, r.full_name AS rider_name,
+    `SELECT j.*, co.name AS courier_name, co.depot_name, r.full_name AS rider_name, r.phone AS rider_phone,
             (SELECT status FROM job_events ev WHERE ev.job_id = j.id ORDER BY ev.id DESC LIMIT 1) AS last_event,
             (SELECT paused_at IS NOT NULL FROM payments p WHERE p.job_id = j.id AND p.kind = 'booking_deposit' AND p.status = 'pending' ORDER BY p.id DESC LIMIT 1) AS reprompt_paused
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
@@ -2714,8 +2714,9 @@ app.get('/jobs', async (c) => {
 
 app.get('/jobs/:ref', async (c) => {
   const job = await c.env.DB.prepare(
-    `SELECT j.*, co.name AS courier_name, co.depot_name FROM jobs j
-       JOIN couriers co ON co.id = j.courier_id WHERE j.ref = ?1`,
+    `SELECT j.*, co.name AS courier_name, co.depot_name, r.phone AS rider_phone FROM jobs j
+       JOIN couriers co ON co.id = j.courier_id
+       LEFT JOIN riders r ON r.id = j.rider_id WHERE j.ref = ?1`,
   ).bind(c.req.param('ref')).first() as any;
   if (!job) return c.json({ error: 'not found' }, 404);
   const phone = c.get('phone');
@@ -6527,7 +6528,7 @@ app.get('/rider/queue', async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.parcels, j.status,
-            j.sender_name, j.eta_minutes, j.pickup_window, j.created_at, j.from_city,
+            j.sender_name, j.sender_phone, j.eta_minutes, j.pickup_window, j.created_at, j.from_city,
             co.name AS courier_name, co.depot_name, co.city AS courier_city
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
       WHERE j.rider_id = ?1 AND j.status NOT IN ('delivered', 'ready_for_collection')
@@ -6578,6 +6579,7 @@ app.get('/rider/queue', async (c) => {
           lng: job.pickup_lng ?? null,
           from_city: job.from_city ?? '',
           seller: job.sender_name,
+          seller_phone: job.sender_phone ?? '',
           parcels: Number(job.parcels ?? 1),
           status: job.status,
           courier: job.courier_name,

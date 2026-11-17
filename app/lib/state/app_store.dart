@@ -960,6 +960,11 @@ class AppStore extends ChangeNotifier {
               _bookings[i] = _bookings[i].copyWith(riderName: riderName);
               changed = true;
             }
+            final riderPhone = (j['rider_phone'] as String?)?.trim() ?? '';
+            if (riderPhone.isNotEmpty && riderPhone != (existing.riderPhone ?? '')) {
+              _bookings[i] = _bookings[i].copyWith(riderPhone: riderPhone);
+              changed = true;
+            }
             if (changed) dirty = true;
           }
           continue;
@@ -1006,6 +1011,7 @@ class AppStore extends ChangeNotifier {
     final timelineMax = door ? 6 : 4;
     final lastEvent = j['last_event'] as String?;
     final riderNameRaw = '${j['rider_name'] ?? ''}'.trim();
+    final riderPhoneRaw = '${j['rider_phone'] ?? ''}'.trim();
     return Booking(
       id: 'srv-${j['id']}',
       reference: '${j['ref']}',
@@ -1030,6 +1036,7 @@ class AppStore extends ChangeNotifier {
       // Algorithm-assigned rider from the server (never a default owner).
       riderId: '',
       riderName: riderNameRaw.isEmpty ? null : riderNameRaw,
+      riderPhone: riderPhoneRaw.isEmpty ? null : riderPhoneRaw,
       paymentHeld: lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending',
       parcels: (j['parcels'] as num?)?.toInt() ?? 1,
       vehicleClass: '${j['vehicle_class'] ?? 'motorcycle'}',

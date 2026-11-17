@@ -248,6 +248,7 @@ class Booking {
     this.branch,
     this.lastEvent,
     this.riderName,
+    this.riderPhone,
     this.paymentHeld = false,
     this.counterReceiptZmw,
     this.counterReceiptUrl,
@@ -264,6 +265,11 @@ class Booking {
   /// The rider the server's dispatch ALGORITHM picked (never a default
   /// "Owner" — owner directive 2026-11-15). Null while nobody is assigned.
   final String? riderName;
+
+  /// The assigned rider's mobile number (260XXXXXXXXX) — the server only ships
+  /// it to this booking's own participants and staff. Powers the tap-to-call
+  /// button; null while nobody is assigned (or on pre-field cached rows).
+  final String? riderPhone;
 
   /// True while this booking's DropOff-leg prepayment is NOT confirmed
   /// (prompt waiting or the provider never started). A held booking shows the
@@ -299,7 +305,7 @@ class Booking {
 
   double? get total => courierFare == null ? null : courierFare! + riderFee + lastMileFee;
 
-  Booking copyWith({int? stage, String? riderId, double? courierFare, String? serverRef, String? promoCode, double? promoDiscount, int? parcels, String? vehicleClass, String? riderName, String? lastEvent, bool? paymentHeld}) => Booking(
+  Booking copyWith({int? stage, String? riderId, double? courierFare, String? serverRef, String? promoCode, double? promoDiscount, int? parcels, String? vehicleClass, String? riderName, String? riderPhone, String? lastEvent, bool? paymentHeld}) => Booking(
         id: id,
         reference: reference,
         createdAt: createdAt,
@@ -331,6 +337,7 @@ class Booking {
         parcels: parcels ?? this.parcels,
         vehicleClass: vehicleClass ?? this.vehicleClass,
         riderName: riderName ?? this.riderName,
+        riderPhone: riderPhone ?? this.riderPhone,
         lastEvent: lastEvent ?? this.lastEvent,
         paymentHeld: paymentHeld ?? this.paymentHeld,
         counterReceiptZmw: counterReceiptZmw,
@@ -374,6 +381,7 @@ class Booking {
         'branch': branch,
         'lastEvent': lastEvent,
         'riderName': riderName,
+        'riderPhone': riderPhone,
         'paymentHeld': paymentHeld,
         'counterReceiptZmw': counterReceiptZmw,
         'counterReceiptUrl': counterReceiptUrl,
@@ -416,6 +424,7 @@ class Booking {
         branch: json['branch'] as String?,
         lastEvent: json['lastEvent'] as String?,
         riderName: json['riderName'] as String?,
+        riderPhone: json['riderPhone'] as String?,
         paymentHeld: json['paymentHeld'] as bool? ?? false,
         counterReceiptZmw: (json['counterReceiptZmw'] as num?)?.toDouble(),
         counterReceiptUrl: json['counterReceiptUrl'] as String?,

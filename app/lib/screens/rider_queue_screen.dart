@@ -16,6 +16,7 @@ import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../widgets/common.dart';
 import '../ui/in_app_browser.dart';
 import 'in_app_navigator_screen.dart';
 
@@ -589,6 +590,17 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       Text('Seller: ${s['seller']} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${s['status']}'.replaceAll('_', ' '),
                           style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                     ])),
+                    if ('${s['seller_phone'] ?? ''}'.trim().isNotEmpty)
+                      IconButton(
+                        tooltip: 'Call the seller',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.phone_outlined, color: AppColors.forest),
+                        onPressed: () async {
+                          final number = '${s['seller_phone']}';
+                          final ok = await callPhoneNumber(number);
+                          if (!ok && mounted) _snack('Dialer not available here — call $number');
+                        },
+                      ),
                     _navBtn('Navigate', 'Navigate to pickup in the DropOff map', const Color(0xFF17855F), Icons.navigation_rounded, () => _navigateToStop(s)),
                     IconButton(
                       tooltip: 'Update stop',

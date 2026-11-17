@@ -287,6 +287,11 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     final booking = matches.first;
     final courier = courierById(booking.courierId);
     final rider = store.riders.where((item) => item.id == booking.riderId).firstOrNull;
+    // Tap-to-call: the server ships the rider's number to this booking's
+    // participants; staff also fall back to the roster row.
+    final riderPhoneOf = booking.riderPhone?.isNotEmpty == true
+        ? booking.riderPhone
+        : (store.isTeam && rider != null && rider.phone.contains(RegExp(r'\d')) ? rider.phone : null);
     final complete = booking.stage == booking.timeline.length - 1;
     return Scaffold(
       appBar: AppBar(title: Text(booking.reference, style: const TextStyle(fontWeight: FontWeight.w800))),
@@ -323,6 +328,21 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           for (var i = 0; i < booking.timeline.length; i++)
             _TimelineRow(title: booking.timeline[i], complete: i <= booking.stage, current: i == booking.stage, last: i == booking.timeline.length - 1, onTap: () => _showMovementLog(context, booking)),
         ]))),
+        if (riderPhoneOf != null) ...[
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            onPressed: () async {
+              final number = riderPhoneOf;
+              final ok = await callPhoneNumber(number);
+              if (!ok && context.mounted) {
+                AppToast.show(context, 'Dialer not available here — call $number');
+              }
+            },
+            icon: const Icon(Icons.phone_outlined),
+            label: Text('Call ${rider?.name ?? booking.riderName ?? 'the rider'}'),
+          ),
+        ],
         const SizedBox(height: 24),
         const SectionTitle('Booking details'),
         const SizedBox(height: 8),

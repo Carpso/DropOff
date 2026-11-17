@@ -82,5 +82,9 @@
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE"/>
         </intent>
+        <!-- Tap-to-call (tel:) — lets url_launcher resolve the dialer app on Android 11+ -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+        </intent>
     </queries>
 </manifest>
