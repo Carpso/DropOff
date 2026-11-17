@@ -19,8 +19,8 @@
 //     rider mode. It must NOT be used to credit salaried sweep riders.
 
 export const PLATFORM_FEE_PCT = 1.0;     // 1% of the customer base
-export const PLATFORM_FIXED_FEE = 0.48;  // + K0.48 per collection
-export const PLATFORM_MIN_FEE = 3.0;     // minimum platform portion (K3.00)
+export const PLATFORM_FIXED_FEE = 0.98;  // + K0.98 per collection (was 0.48 — raised 2026-11-17: SMS/notification + ops costs)
+export const PLATFORM_MIN_FEE = 4.0;     // minimum platform portion (K4.00, was K3.00 — same raise)
 export const MOMO_COLLECTION_FEE = 2.5;  // Lipila collect leg (passed to customer)
 export const MOMO_DISBURSEMENT_FEE = 1.5; // Lipila payout leg (rider-side)
 /** Platform revenue sweep: minimum undistributed balance before the cron

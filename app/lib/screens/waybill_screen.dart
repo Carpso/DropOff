@@ -20,6 +20,7 @@ import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../models/booking.dart';
+import '../state/app_store.dart';
 import '../ui/app_theme.dart';
 import '../ui/thermal_print.dart';
 import '../widgets/common.dart';
@@ -51,7 +52,9 @@ class WaybillScreen extends StatefulWidget {
 }
 
 class _WaybillScreenState extends State<WaybillScreen> {
-  final GlobalKey _captureKey = GlobalKey();
+  /// Key of the OFFSTAGE capture rendition (see _capturePng) — never attached
+  /// to the on-screen card, so the two never collide.
+  final GlobalKey _offstageKey = GlobalKey();
 
   bool _busy = false;
   bool _linkBusy = false;
@@ -112,12 +115,75 @@ class _WaybillScreenState extends State<WaybillScreen> {
     }
   }
 
+  /// Assembles the receipt card from current state — used by the on-screen
+  /// render AND the share capture so both always show identical data.
+  _ReceiptCard _assembleCard(Booking booking, AppStore store) {
+    final courier = courierById(booking.courierId);
+    final rider = store.riders.where((item) => item.id == booking.riderId).firstOrNull;
+    final branchInfo = _branchInfo(booking, courier);
+    final ref = booking.serverRef?.isNotEmpty == true ? booking.serverRef! : booking.reference;
+    return _ReceiptCard(
+      booking: booking,
+      courierName: courier.name,
+      courierId: courier.id,
+      riderName: rider?.name ?? booking.riderName,
+      branchInfo: branchInfo,
+      declaredValue: _declaredValue(),
+      partnerWaybill: _partnerWaybill(),
+      counterReceipt: _counterReceipt(),
+      ref: ref,
+      // CAT clock: server timestamps are UTC — 12-hour ("7:09 AM").
+      dateFmt: DateFormat('d MMM yyyy · h:mm a'),
+      trackingToken: _trackingToken,
+      trackingUrl: _trackingUrl,
+      evidenceLoading: !_evidenceTried,
+    );
+  }
+
   Future<Uint8List?> _capturePng() async {
-    final boundary = _captureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-    if (boundary == null) return null;
-    final image = await boundary.toImage(pixelRatio: 3.0);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    return byteData?.buffer.asUint8List();
+    final booking = _lookup();
+    if (booking == null) return null;
+    // THE SHARE IMAGE IS DETACHED FROM THE SCREEN (right-edge clipping fix,
+    // owner report 2026-11-17): the PNG is rendered from a FRESH offstage
+    // rendition of the receipt at a fixed width — never from the live
+    // on-screen copy, whose layout depends on the phone's screen, scroll
+    // state and pending repaints, which is how content ended up clipped at
+    // the boundary's right edge on some devices. The rendition paints at 1%
+    // opacity (rasterised but never visible) inside the root overlay.
+    final store = AppScope.of(context);
+    final width = (MediaQuery.of(context).size.width - 32).clamp(320.0, 560.0);
+    final overlay = OverlayEntry(
+      builder: (_) => Positioned(
+        left: 0,
+        top: 0,
+        child: Opacity(
+          opacity: 0.01,
+          child: RepaintBoundary(
+            key: _offstageKey,
+            child: Material(
+              color: Colors.white,
+              child: SizedBox(
+                width: width,
+                child: _assembleCard(booking, store),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context, rootOverlay: true).insert(overlay);
+    try {
+      // Two frames: the first paints the rendition, the second settles it.
+      await WidgetsBinding.instance.endOfFrame;
+      await WidgetsBinding.instance.endOfFrame;
+      final boundary = _offstageKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return null;
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      return byteData?.buffer.asUint8List();
+    } finally {
+      overlay.remove();
+    }
   }
 
   /// Portable Bluetooth thermal printer (ESC/POS 58mm). Android only —
@@ -144,13 +210,12 @@ class _WaybillScreenState extends State<WaybillScreen> {
       courier: '${courier.name} ($courier.id)',
       pickupAddress: booking.pickupAddress,
       pickupWindow: _ReceiptCard._pickupWindowLabel(booking),
-      scheduledSlot: booking.pickupAt == null ? '' : DateFormat('d MMM yyyy · HH:mm').format(DateTime.tryParse(booking.pickupAt!) ?? DateTime.now()),
+      scheduledSlot: booking.pickupAt == null ? '' : _ReceiptCard._formatSlot(booking.pickupAt!),
       size: booking.parcelSize.label,
       parcels: '${booking.parcels}',
       vehicle: _ReceiptCard._vehicleLabel(booking.vehicleClass),
       description: booking.description,
       declaredValue: _declaredValue() == null ? '' : kwacha(_declaredValue()!),
-      cover: _coverSummary(),
       partnerWaybill: _partnerWaybill() ?? 'Not recorded yet — counter fills in at lodgement',
       riderFee: kwacha(booking.riderFee),
       lastMileFee: booking.lastMileFee > 0 ? kwacha(booking.lastMileFee) : '',
@@ -168,7 +233,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       recipientPhone: booking.recipientPhone,
       reference: booking.reference,
       dispatchRef: booking.serverRef?.isNotEmpty == true ? booking.serverRef! : '',
-      bookedAt: DateFormat('d MMM yyyy · HH:mm').format(booking.createdAt),
+      bookedAt: DateFormat('d MMM yyyy · h:mm a').format(booking.createdAt),
       rider: rider?.name ?? booking.riderName ?? '',
       trackingUrl: _trackingUrl != null ? 'https://dropoff-api.godfreymoseskalambo.workers.dev/t/${_trackingUrl!}' : null,
     );
@@ -259,49 +324,19 @@ class _WaybillScreenState extends State<WaybillScreen> {
       return const Scaffold(body: Center(child: Text('Booking not found')));
     }
     final courier = courierById(booking.courierId);
-    final rider = store.riders.where((item) => item.id == booking.riderId).firstOrNull;
-    final branchInfo = _branchInfo(booking, courier);
-    final declaredValue = _declaredValue();
-    final cover = _coverSummary();
-    final partnerWaybill = _partnerWaybill();
-    final counterReceipt = _counterReceipt();
-    final dateFmt = DateFormat('d MMM yyyy · HH:mm');
-    final ref = booking.serverRef?.isNotEmpty == true ? booking.serverRef! : booking.reference;
 
     return Scaffold(
       appBar: AppBar(title: Text('${courier.name} counter waybill', style: const TextStyle(fontWeight: FontWeight.w800))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
         children: [
-          const Text(
-            'Hand this screen to the counter — it is everything lodging needs.',
-            style: TextStyle(color: AppColors.ink, fontSize: 13, height: 1.4),
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 2),
 
           // ─────────────────────────── Printable receipt ───────────────────────────
           Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 560),
-              child: RepaintBoundary(
-                key: _captureKey,
-                child: _ReceiptCard(
-                  booking: booking,
-                  courierName: courier.name,
-                  courierId: courier.id,
-                  riderName: rider?.name ?? booking.riderName,
-                  branchInfo: branchInfo,
-                  declaredValue: declaredValue,
-                  cover: cover,
-                  partnerWaybill: partnerWaybill,
-                  counterReceipt: counterReceipt,
-                  ref: ref,
-                  dateFmt: dateFmt,
-                  trackingToken: _trackingToken,
-                  trackingUrl: _trackingUrl,
-                  evidenceLoading: !_evidenceTried,
-                ),
-              ),
+              child: _assembleCard(booking, store),
             ),
           ),
           const SizedBox(height: 16),
@@ -370,30 +405,6 @@ class _WaybillScreenState extends State<WaybillScreen> {
     return (nested as num?)?.toDouble();
   }
 
-  /// Human-readable cover line. Cover is quoted protection, NEVER insurance
-  /// (legal/commercial sign-off pending) — copy must not imply otherwise.
-  String _coverSummary() {
-    if (_evidence == null) {
-      return _evidenceTried ? 'Not recorded on this booking' : 'Loading…';
-    }
-    final cover = (_evidence?['cover'] as Map?)?.cast<String, dynamic>();
-    final nested = (_evidence?['evidence'] as Map?)?.cast<String, dynamic>();
-    final status = (cover?['status'] ?? nested?['cover_status'] ?? 'none').toString();
-    final fee = (cover?['fee_zmw'] as num?)?.toDouble();
-    final feePart = fee != null && fee > 0 ? ' · fee ${kwacha(fee)}' : '';
-    switch (status) {
-      case 'quoted':
-        return 'Quoted protection — not insurance$feePart';
-      case 'active':
-        return 'Cover active — quoted protection, not insurance$feePart';
-      case 'declined':
-        return 'Cover declined';
-      case 'none':
-      default:
-        return 'No cover elected';
-    }
-  }
-
   /// Partner courier waybill number, recorded at the depot when lodged.
   String? _partnerWaybill() {
     final nested = (_evidence?['evidence'] as Map?)?.cast<String, dynamic>();
@@ -436,7 +447,6 @@ class _ReceiptCard extends StatelessWidget {
   final String? riderName;
   final CourierBranch? branchInfo;
   final double? declaredValue;
-  final String cover;
   final String? partnerWaybill;
   final (double, bool)? counterReceipt;
   final String ref;
@@ -452,7 +462,6 @@ class _ReceiptCard extends StatelessWidget {
     required this.riderName,
     required this.branchInfo,
     required this.declaredValue,
-    required this.cover,
     required this.partnerWaybill,
     required this.counterReceipt,
     required this.ref,
@@ -517,11 +526,6 @@ class _ReceiptCard extends StatelessWidget {
                   SizedBox(
                     height: 44,
                     child: CustomPaint(painter: _RefBarcodePainter(ref), child: const SizedBox.expand()),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'DropOff waybill no. — read out or type at the counter',
-                    style: TextStyle(color: AppColors.muted, fontSize: 10),
                   ),
                   const SizedBox(height: 14),
 
@@ -590,9 +594,8 @@ class _ReceiptCard extends StatelessWidget {
                     ],
                   ]),
 
-                  _receiptSection('VALUE & COVER', [
+                  _receiptSection('VALUE', [
                     _row('Declared value', declaredValue == null ? (evidenceLoading ? 'Loading…' : 'Not provided') : kwacha(declaredValue)),
-                    _row('Cover', cover),
                     _row('Partner waybill', partnerWaybill ?? (evidenceLoading ? 'Loading…' : 'Not recorded yet — counter fills in at lodgement')),
                   ]),
 
@@ -654,7 +657,7 @@ class _ReceiptCard extends StatelessWidget {
                   const _DashedLine(),
                   const SizedBox(height: 10),
                   const Text(
-                    'The courier / depot fare is paid directly at the counter — DropOff never collects partner money. Cover shown above is quoted protection, not insurance, until legal and commercial sign-off. Keep this waybill until the parcel is lodged at the depot.',
+                    'The courier / depot fare is paid directly at the counter — DropOff never collects partner money. Keep this waybill until the parcel is lodged at the depot.',
                     textAlign: TextAlign.center,
                     style: AppType.caption,
                   ),
@@ -745,7 +748,9 @@ class _ReceiptCard extends StatelessWidget {
   static String _formatSlot(String iso) {
     final parsed = DateTime.tryParse(iso);
     if (parsed == null) return iso;
-    return DateFormat('d MMM yyyy · HH:mm').format(parsed);
+    // Server slots are UTC ISO strings — render the CAT clock (h:mm a).
+    final local = parsed.isUtc ? parsed.toLocal() : parsed;
+    return DateFormat('d MMM yyyy · h:mm a').format(local);
   }
 }
 

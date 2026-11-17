@@ -190,13 +190,13 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                   const SizedBox(width: 12),
                   Expanded(child: Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Text(s.instruction, style: const TextStyle(fontSize: 13.5, height: 1.4, fontWeight: FontWeight.w600)),
+                    child: Text(s.instruction, style: const TextStyle(fontSize: 15.5, height: 1.4, fontWeight: FontWeight.w700)),
                   )),
                   if (s.distanceMetres >= 50)
                     Padding(
-                      padding: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.only(top: 5),
                       child: Text(s.distanceMetres >= 1000 ? '${(s.distanceMetres / 1000).toStringAsFixed(1)} km' : '${s.distanceMetres.round()} m',
-                          style: const TextStyle(color: AppColors.muted, fontSize: 11, fontWeight: FontWeight.w700)),
+                          style: const TextStyle(color: AppColors.muted, fontSize: 12.5, fontWeight: FontWeight.w800)),
                     ),
                 ]);
               },
@@ -319,7 +319,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                 TextButton.icon(
                   onPressed: _openCueSheet,
                   icon: const Icon(Icons.format_list_bulleted, size: 18),
-                  label: Text('A→Z (${_route!.steps.length})'),
+                  label: Text('Steps (${_route!.steps.length})'),
                 ),
             ]),
             if (_error.isNotEmpty) Padding(

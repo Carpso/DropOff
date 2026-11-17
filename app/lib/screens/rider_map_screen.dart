@@ -123,7 +123,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'This is the DropOff live map — no Waze or Google Maps link needed. The rider pin refreshes every 12 seconds while this screen is open.',
+                'This is the DropOff live map. The rider pin refreshes every 12 seconds while this screen is open.',
                 style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
               ),
             ]),

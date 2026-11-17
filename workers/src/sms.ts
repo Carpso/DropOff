@@ -18,12 +18,37 @@ export function safePhone(phone: string): string {
   return `+${digits}`;
 }
 
-/** Africa's Talking sends concatenated multi-part SMS, so long messages are
- *  fine — this is a sanity ceiling (4 segments ≈ 616 GSM-7 chars), never a
- *  silent trim of meaningful copy. */
-export function clampSms(message: string, max = 600): string {
-  if (message.length <= max) return message;
-  return `${message.slice(0, max - 3).trimEnd()}...`;
+/** Africa's Talking bills per 160-GSM-char segment (K0.24). Non-GSM characters
+ *  (em dashes, curly quotes, checkmarks) silently flip the whole message to
+ *  UCS-2, where a segment is only 70 characters — tripling the cost of an
+ *  unchanged-looking text. Rewrite those to their GSM-7 equivalents so every
+ *  DropOff SMS stays on the cheap alphabet. */
+const GSM_MAP: Record<string, string> = {
+  '—': '-', '–': '-', '‑': '-', '‒': '-',
+  '\u2018': "'", '\u2019': "'", '\u201A': "'", '\u2032': "'",
+  '\u201C': '"', '\u201D': '"', '\u201E': '"',
+  '\u2026': '...',
+  '✓': 'OK', '✔': 'OK', '✗': 'X', '✘': 'X', '•': '*', '·': '.', '→': '->',
+  '\u00A0': ' ', '\u202F': ' ', '\u2009': ' ',
+};
+
+export function gsmSafe(message: string): string {
+  let out = '';
+  for (const ch of message) out += GSM_MAP[ch] ?? ch;
+  // Anything still outside GSM-7 gets replaced, not dropped — a stray emoji
+  // must never re-price a payment instruction into a different alphabet.
+  // eslint-disable-next-line no-control-regex
+  return out.replace(/[^\x00-\x7F]/g, '?');
+}
+
+/** ONE SEGMENT = K0.24 (owner directive 2026-11-17). Every DropOff SMS is
+ *  authored to fit 160 GSM-7 characters; this is the hard billing ceiling so
+ *  an unexpected template can never silently double or triple the bill. */
+export function clampSms(message: string, max = 160): string {
+  const safe = gsmSafe(message);
+  if (safe.length <= max) return safe;
+  console.warn(JSON.stringify({ where: 'sms_clamp', length: safe.length, head: safe.slice(0, 60) }));
+  return `${safe.slice(0, max - 3).trimEnd()}...`;
 }
 
 export interface SmsResult {

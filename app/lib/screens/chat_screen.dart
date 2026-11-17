@@ -575,9 +575,24 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _bubble(Map<String, dynamic> m) {
-    final alignRight = _myRole != null && m['sender_role'] == _myRole;
+    // OWN-MESSAGE detection by PHONE first: the same person can be the
+    // parcel's sender AND a rider — role labels alone misalign their bubbles
+    // and mislabel them ("Seller" on your own rider-side message). Falls
+    // back to the role match for token/ops sessions where the viewer phone
+    // is unknown.
+    final myPhone = AppScope.of(context).linkedPhone;
+    final senderPhone = '${m['sender_phone'] ?? ''}';
+    final alignRight = (myPhone != null && myPhone.isNotEmpty && senderPhone == myPhone)
+        || ((myPhone == null || myPhone.isEmpty) && _myRole != null && m['sender_role'] == _myRole);
+    final role = _roleLabel(m['sender_role']);
+    final name = '${m['sender_name'] ?? ''}'.trim();
+    // BYLINE (owner bug 2026-11-17: the chat showed only "Seller"/"Rider" so
+    // participants pasted contact details into the chat just to identify
+    // themselves): your own bubbles say YOU; everyone else reads
+    // "Name · Role" — real identity, no emails needed.
+    final byline = alignRight ? 'You' : (name.isNotEmpty ? '$name · $role' : role);
     final time = '${m['created_at'] ?? ''}'.split(' ').last;
-    final avatar = _ChatAvatar(photoUrl: m['sender_photo_url'] as String?, label: _roleLabel(m['sender_role']));
+    final avatar = _ChatAvatar(photoUrl: m['sender_photo_url'] as String?, label: name.isNotEmpty ? name : role);
     final bubble = Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
@@ -589,7 +604,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(
-            _roleLabel(m['sender_role']),
+            byline,
             style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5, color: alignRight ? AppColors.amber : AppColors.forest),
           ),
           const SizedBox(height: 3),

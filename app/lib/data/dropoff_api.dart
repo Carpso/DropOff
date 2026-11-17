@@ -366,12 +366,14 @@ class DropOffApi {
     }
   }
 
-  /// Share the rider's current GPS fix for dispatch + live tracking.
-  static Future<ApiResponse> riderPing({required String phone, required double lat, required double lng}) async {
+  /// Share the rider's current GPS fix for dispatch + live tracking. `status`
+  /// optionally flips the rider's availability flag (available|on_route).
+  static Future<ApiResponse> riderPing({required String phone, required double lat, required double lng, String? status}) async {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
       final res = await http
-          .post(Uri.parse('$baseUrl/rider/ping'), headers: _headers, body: jsonEncode({'phone': phone, 'lat': lat, 'lng': lng}))
+          .post(Uri.parse('$baseUrl/rider/ping'), headers: _headers,
+              body: jsonEncode({'phone': phone, 'lat': lat, 'lng': lng, if (status != null) 'status': status}))
           .timeout(_timeout);
       return ApiResponse(status: res.statusCode, ok: res.statusCode < 300, body: const {});
     } catch (e) {
@@ -991,6 +993,14 @@ class DropOffApi {
   /// Poll Lipila collect status (call every ~2s up to ~40s).
   static Future<String?> paymentStatus(String paymentId) async =>
       (await get('/payments/$paymentId/status'))?['status'] as String?;
+
+  /// HELD-PAYMENT WATCH (owner bug 2026-11-17: "I paid but the payment screen
+  /// didn't check or poll"): the held-booking screen polls the job's LATEST
+  /// payment row — the server re-checks any pending row against Lipila inline,
+  /// so a prompt approved late still settles. `phone` on the row is the
+  /// transacting number the momo prompt was fired at.
+  static Future<Map<String, dynamic>?> latestJobPayment(String jobRef) async =>
+      (await get('/jobs/$jobRef/payments'))?['payment'] as Map<String, dynamic>?;
 
   /// Seller subscription plans (live prices come from /plans; seeded at Silver
   /// Silver K250 / Gold K500 / Platinum K750, Weekly Sprint K399.

@@ -9,8 +9,8 @@ import '../data/catalog.dart';
 ///     canonical list and never invents a street or town.
 ///  2. Local (this file): everything that needs NO network — zone matching to
 ///     real coordinates (feeds the fee-band lookup and the rider's ETA) and
-///     plus-code detection, because Plus Codes resolve natively in Google Maps
-///     (the courier industry's chosen "no address" standard).
+///     plus-code detection, because Plus Codes are the courier industry's
+///     chosen "no address" standard and any maps tool can open them.
 ///
 /// Design constraint: Tidy NEVER guesses beyond what it can verify — the reply
 /// is always captioned so the sender eyeballs it before booking.
@@ -45,8 +45,9 @@ class Tidy {
   ];
 
   /// Pull an Open Location Code ("8FQ4+22 Lusaka") out of raw text.
-  /// No decoder needed: Google Maps interprets the code natively, and we carry
-  /// it through the address string so riders and the depot can navigate by it.
+  /// No decoder needed: any maps tool interprets the code natively, and we
+  /// carry it through the address string so riders and the depot can navigate
+  /// by it.
   static String? extractPlusCode(String text) {
     final m = RegExp(r'\b[23456789CFGHJMPQRVWX]{4}\+[23456789CFGHJMPQRVWX]{2,3}(?:\s?[A-Za-z][A-Za-z ]{0,20})?',
             caseSensitive: false)

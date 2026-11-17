@@ -1,4 +1,9 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
@@ -55,6 +60,84 @@ class _RiderMapState extends State<RiderMap> {
   late final Future<PmTilesVectorTileProvider> _provider =
       PmTilesVectorTileProvider.fromSource(RiderMap.tileUrl);
   final MapController _mapCtl = MapController();
+
+  // COMPASS (owner directive 2026-11-17: "I kept turning the phone in order
+  // to track my north of the route direction"): a live needle badge that
+  // always points at true north, tracking both the device heading and any
+  // in-app map rotation.
+  StreamSubscription<CompassEvent>? _compassSub;
+  double _headingDeg = 0; // 0 = north-up until the magnetometer speaks
+
+  @override
+  void initState() {
+    super.initState();
+    _compassSub = FlutterCompass.events?.listen((event) {
+      final h = event.heading;
+      if (h == null || !mounted) return;
+      setState(() => _headingDeg = h);
+    });
+  }
+
+  @override
+  void dispose() {
+    _compassSub?.cancel();
+    super.dispose();
+  }
+
+  /// Needle angle in radians: the device's heading negated (heading 90° =
+  /// facing east ⇒ north lies 90° to the left of "up"), minus the map's own
+  /// rotation so the needle stays truthful on a rotated map. Camera not
+  /// ready ⇒ rotation contributes nothing.
+  double _needleAngle() {
+    var deg = -_headingDeg;
+    try {
+      deg -= _mapCtl.camera.rotationRad * 180 / math.pi;
+    } catch (_) {
+      /* camera not ready — device heading only */
+    }
+    return deg * math.pi / 180;
+  }
+
+  /// The compass badge: white circle, red needle + N that rotates with the
+  /// device so the rider can hold the phone any way and still find north.
+  /// TAPPING it snaps the map back to north-up (owner 2026-11-17: the familiar
+  /// tap-to-north behaviour) — a two-finger rotate no longer strands the map
+  /// sideways.
+  Widget _compassBadge() => Tooltip(
+        message: 'Tap to rotate the map north-up',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _snapNorth,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.94),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFF123C32), width: 1.3),
+              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1))],
+            ),
+            child: Transform.rotate(
+              angle: _needleAngle(),
+              child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.arrow_upward, size: 15, color: Color(0xFFB3261E)),
+                Text('N', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: Color(0xFF123C32), height: 1)),
+              ]),
+            ),
+          ),
+        ),
+      );
+
+  /// Compass tap → north-up. flutter_map's rotate(0) is due-north; guarded —
+  /// the camera may not be ready yet, in which case the map is already north.
+  void _snapNorth() {
+    HapticFeedback.selectionClick();
+    try {
+      _mapCtl.rotate(0);
+    } catch (_) {
+      /* camera not ready — the map is already north-up */
+    }
+  }
 
   LatLngBounds? get _bounds {
     final pts = widget._points;
@@ -159,6 +242,11 @@ class _RiderMapState extends State<RiderMap> {
             ],
           ),
           // Zoom + re-fit controls — our map, our chrome.
+          Positioned(
+            top: 12,
+            right: 12,
+            child: _compassBadge(),
+          ),
           Align(
             alignment: Alignment.centerRight,
             child: Padding(

@@ -82,9 +82,14 @@ export class ChatRoom extends DurableObject {
         ON CONFLICT(thread_id, phone) DO UPDATE SET last_read_id = MAX(chat_reads.last_read_id, excluded.last_read_id)`,
     ).bind(threadId, client.phone, meta.last_row_id as number).run();
 
+    const nameRow = await this.db.prepare(
+      `SELECT COALESCE(NULLIF((SELECT full_name FROM auth_users WHERE phone = ?1), ''),
+                       NULLIF((SELECT full_name FROM riders WHERE phone = ?1), '')) AS sender_name`,
+    ).bind(client.phone).first<{ sender_name: string | null }>();
     const outgoing = JSON.stringify({
       type: 'message', id: meta.last_row_id, sender_phone: client.phone,
-      sender_role: client.role, body, created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      sender_role: client.role, sender_name: nameRow?.sender_name ?? null,
+      body, created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
     });
     for (const socket of this.ctx.getWebSockets()) {
       try {

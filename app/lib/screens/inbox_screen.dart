@@ -62,7 +62,13 @@ class _InboxScreenState extends State<InboxScreen> {
 
   Widget _row(Map<String, dynamic> t) {
     final unread = (t['unread'] as num?)?.toInt() ?? 0;
-    final title = t['kind'] == 'support' ? 'DropOff support' : '${t['job_ref'] ?? 'Parcel'} · ${t['dest_city'] ?? ''}';
+    // Status rides in the title (the server now returns job_status): the same
+    // trip booked twice used to show as several indistinguishable chats — now
+    // each row reads "DRO-… · City · picked up".
+    final status = '${t['job_status'] ?? ''}'.trim().replaceAll('_', ' ');
+    final title = t['kind'] == 'support'
+        ? 'DropOff support'
+        : '${t['job_ref'] ?? 'Parcel'} · ${t['dest_city'] ?? ''}${status.isNotEmpty ? ' · $status' : ''}';
     final lastAt = '${t['last_at'] ?? ''}'.split(' ').last;
     return Card(
       margin: const EdgeInsets.only(bottom: 9),

@@ -6,6 +6,7 @@ import 'business_screen.dart';
 import 'couriers_screen.dart';
 import 'home_screen.dart';
 import 'operations_screen.dart';
+import 'rider_queue_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -27,19 +28,22 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final store = AppScope.of(context);
-    // Tabs: everyone gets Home/Couriers/Bookings. Signed-in sellers also get
-    // the Business dashboard. Staff (admin/ops) add Team; riders get Team as
-    // their personal rider view instead of Business.
+    // RIDER LANDING (owner directive 2026-11-17): a rider's FIRST screen is
+    // the Task queue — their slot-batched pickups are the whole job. The
+    // queue replaces Home as the first tab; Business never shows for riders.
     final showBusiness = store.linked && !store.isRider;
     final screens = <Widget>[
-      HomeScreen(onOpenCouriers: () => goTo(1), onOpenBookings: () => goTo(2)),
+      if (store.isRider) const RiderQueueScreen() else HomeScreen(onOpenCouriers: () => goTo(1), onOpenBookings: () => goTo(2)),
       const CouriersScreen(),
       const BookingsScreen(),
       if (showBusiness) const BusinessScreen(),
       if (store.isTeam) const OperationsScreen(),
     ];
     final destinations = <NavigationDestination>[
-      const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
+      if (store.isRider)
+        const NavigationDestination(icon: Icon(Icons.fact_check_outlined), selectedIcon: Icon(Icons.fact_check), label: 'Tasks')
+      else
+        const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
       const NavigationDestination(icon: Icon(Icons.local_shipping_outlined), selectedIcon: Icon(Icons.local_shipping), label: 'Couriers'),
       const NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Bookings'),
       if (showBusiness)

@@ -114,14 +114,25 @@ class MapServices {
     }
   }
 
-  /// Type-ahead place search, biased to our operating region (Lusaka).
+  /// LUSAKA LOCK (owner directive 2026-11-17: the app once suggested a pickup
+  /// outside Lusaka): every geocode result is filtered to this Lusaka metro
+  /// box AND the Zambia country code. Photon's lat/lon is only a soft bias;
+  /// the bbox parameter plus this client-side check make the lock hard.
+  static const double _lusakaMinLon = 28.05, _lusakaMinLat = -15.62;
+  static const double _lusakaMaxLon = 28.55, _lusakaMaxLat = -15.18;
+
+  static bool _inLusaka(double lat, double lon) =>
+      lat >= _lusakaMinLat && lat <= _lusakaMaxLat && lon >= _lusakaMinLon && lon <= _lusakaMaxLon;
+
+  /// Type-ahead place search, HARD-LOCKED to Lusaka.
   static Future<List<MapSearchResult>> search(String query, {LatLng? bias}) async {
     final q = query.trim();
     if (q.length < 3) return const [];
     try {
       final b = bias ?? const LatLng(-15.4167, 28.2833); // Lusaka
       final url = Uri.parse(
-          '$_photonBase?q=${Uri.encodeQueryComponent(q)}&lat=${b.latitude}&lon=${b.longitude}&limit=6&lang=en');
+          '$_photonBase?q=${Uri.encodeQueryComponent(q)}&lat=${b.latitude}&lon=${b.longitude}'
+          '&bbox=$_lusakaMinLon,$_lusakaMinLat,$_lusakaMaxLon,$_lusakaMaxLat&limit=6&lang=en');
       final res = await http.get(url).timeout(_timeout);
       if (res.statusCode != 200) return const [];
       final data = jsonDecode(res.body);
@@ -132,12 +143,18 @@ class MapServices {
         final p = (f as Map<String, dynamic>)['properties'] as Map<String, dynamic>? ?? const {};
         final coords = ((f['geometry'] as Map?)?['coordinates'] as List?) ?? const [];
         if (coords.length < 2) continue;
+        final lat = (coords[1] as num).toDouble();
+        final lon = (coords[0] as num).toDouble();
+        // HARD LUSAKA LOCK — outside the box or outside Zambia: never shown.
+        if (!_inLusaka(lat, lon)) continue;
+        final country = '${p['countrycode'] ?? p['country'] ?? ''}'.trim().toLowerCase();
+        if (country.isNotEmpty && country != 'zm' && country != 'zambia') continue;
         final name = '${p['name'] ?? ''}'.trim();
         final city = '${p['city'] ?? p['town'] ?? p['village'] ?? ''}'.trim();
         final label = [if (name.isNotEmpty) name, if (city.isNotEmpty && city != name) city].join(', ');
         if (label.isEmpty) continue;
         if (!seen.add(label.toLowerCase())) continue;
-        out.add(MapSearchResult(label, LatLng((coords[1] as num).toDouble(), (coords[0] as num).toDouble())));
+        out.add(MapSearchResult(label, LatLng(lat, lon)));
       }
       return out;
     } catch (_) {

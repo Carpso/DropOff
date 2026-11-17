@@ -75,6 +75,20 @@ export interface PushPayload {
   data?: Record<string, string>;
 }
 
+/** Android notification channel — the app pre-creates these channels with
+ *  sound enabled (push_service.dart). Routing the FCM message into the
+ *  matching channel is what makes an incoming ORDER ping even when the app is
+ *  closed: without a channel_id, FCM dumps background notifications into a
+ *  silent "Miscellaneous" channel. */
+function androidChannelId(data: Record<string, string> | undefined): string {
+  const kind = `${data?.['kind'] ?? ''}`.toLowerCase();
+  if (kind.startsWith('chat') || kind.includes('support')) return 'dropoff_chat';
+  if (kind.includes('payment') || kind.includes('deposit') || kind.includes('plan') || kind.includes('subscription')) return 'dropoff_payments';
+  if (kind.includes('marketing') || kind.includes('promo')) return 'dropoff_marketing';
+  if (kind.includes('security') || kind.includes('alert') || kind.includes('fraud')) return 'dropoff_alerts';
+  return 'dropoff_jobs';
+}
+
 /** Sends a notification to every registered device for a phone. Best-effort. */
 export async function sendToPhone(env: Env, phone: string | null | undefined, payload: PushPayload): Promise<void> {
   try {
@@ -105,7 +119,7 @@ export async function sendToPhone(env: Env, phone: string | null | undefined, pa
             token,
             notification: { title: payload.title, body: payload.body },
             data: payload.data ?? {},
-            android: { priority: 'high' },
+            android: { priority: 'high', notification: { channel_id: androidChannelId(payload.data) } },
             apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
           },
         }),

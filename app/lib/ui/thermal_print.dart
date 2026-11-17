@@ -143,7 +143,6 @@ class ThermalWaybill {
       out.addAll(gen.barcode(Barcode.code128(d.ref.split('')),
           width: 2, height: 60, textPos: BarcodeText.none));
     } catch (_) {/* non-ASCII refs simply skip the barcode */}
-    out.addAll(gen.text('DropOff waybill no. — read out or type at the counter', styles: const PosStyles(align: PosAlign.center, fontType: PosFontType.fontB)));
     out.addAll(gen.feed(1));
 
     // Route hero
@@ -184,9 +183,8 @@ class ThermalWaybill {
       ('Vehicle', d.vehicle),
       ('Description', d.description),
     ]);
-    section('VALUE & COVER', [
+    section('VALUE', [
       ('Declared value', d.declaredValue),
-      ('Cover', d.cover),
       ('Partner waybill', d.partnerWaybill),
     ]);
     section('FEES & PAYMENT', [
@@ -227,7 +225,7 @@ class ThermalWaybill {
 
     out.addAll(gen.hr());
     for (final line in _wrapWords(
-      'The courier / depot fare is paid directly at the counter. DropOff never collects partner money. Cover shown is quoted protection, not insurance. Keep this waybill until the parcel is lodged.',
+      'The courier / depot fare is paid directly at the counter. DropOff never collects partner money. Keep this waybill until the parcel is lodged.',
       40,
     )) {
       out.addAll(gen.text(line,
@@ -263,7 +261,6 @@ class WaybillPrintData {
   final String vehicle;
   final String description;
   final String declaredValue;
-  final String cover;
   final String partnerWaybill;
   final String riderFee;
   final String lastMileFee;
@@ -299,7 +296,6 @@ class WaybillPrintData {
     required this.vehicle,
     required this.description,
     required this.declaredValue,
-    required this.cover,
     required this.partnerWaybill,
     required this.riderFee,
     required this.lastMileFee,

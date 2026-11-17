@@ -250,14 +250,16 @@ class _TrackScreenState extends State<TrackScreen> {
     final now = DateTime.now();
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     final sameDay = local.year == now.year && local.month == now.month && local.day == now.day;
-    final hh = local.hour.toString().padLeft(2, '0');
+    // 12-hour with AM/PM — how the owner reads every DropOff time.
+    final h12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
     final mm = local.minute.toString().padLeft(2, '0');
-    if (sameDay) return 'today $hh:$mm';
+    final am = local.hour < 12 ? 'AM' : 'PM';
+    if (sameDay) return 'today $h12:$mm $am';
     final tomorrow = now.add(const Duration(days: 1));
     if (local.year == tomorrow.year && local.month == tomorrow.month && local.day == tomorrow.day) {
-      return 'tomorrow $hh:$mm';
+      return 'tomorrow $h12:$mm $am';
     }
-    return '${local.day} ${months[local.month - 1]} $hh:$mm';
+    return '${local.day} ${months[local.month - 1]} $h12:$mm $am';
   }
 
   Widget _statusHeader(Map<String, dynamic> d) {

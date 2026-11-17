@@ -4,10 +4,10 @@ import { generateOtp, hashPassword, signJwt, verifyJwtClaims, verifyPassword } f
 import { normalizeZmPhone, providerFromPhone } from '../src/lipila';
 
 describe('fees', () => {
-  it('platform fee has a K3.48 floor', () => {
-    expect(platformFee(10)).toBe(3.48);
-    expect(platformFee(45)).toBe(3.48);
-    expect(platformFee(500)).toBe(5.48); // 1% + 0.48 above the floor
+  it('platform fee has a K4.98 floor (raised 2026-11-17: SMS + ops costs)', () => {
+    expect(platformFee(10)).toBe(4.98);
+    expect(platformFee(45)).toBe(4.98);
+    expect(platformFee(500)).toBe(5.98); // 1% + 0.98 above the floor
   });
 
   it('rider keeps 90% minus payout transaction fees', () => {

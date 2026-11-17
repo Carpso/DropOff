@@ -605,9 +605,8 @@ class _MovementLogSheetState extends State<_MovementLogSheet> {
       };
 
   String _humanAt(String raw) {
-    final parsed = DateTime.tryParse(raw.contains('T') ? raw : '${raw.replaceFirst(' ', 'T')}Z');
-    if (parsed == null) return raw;
-    return DateFormat('d MMM · HH:mm').format(parsed);
+    final parsed = serverTime(raw);
+    return DateFormat('d MMM · h:mm a').format(parsed);
   }
 
   @override
@@ -683,13 +682,18 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   }
   final ev = (data['evidence'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
   final check = (ev['parcel_check'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
-  String line(String label, Object? value) => '$label: ${value == null || '$value'.isEmpty ? 'n/a' : value}';
   final track = '${data['tracking_token'] ?? ''}';
+  final bookedAt = data['created_at'] == null || '${data['created_at']}'.isEmpty
+      ? 'n/a'
+      : DateFormat('d MMM yyyy · h:mm a').format(serverTime('${data['created_at']}'));
+  // Compact text summary for the Share button (the visual comparison lives in
+  // the sheet itself — photos can't ride in a plain-text share).
+  String line(String label, Object? value) => '$label: ${value == null || '$value'.isEmpty ? 'n/a' : value}';
   final summary = [
     'DropOff evidence — ${data['ref'] ?? ref}',
     line('Status', data['status']),
     if (track.isNotEmpty) 'Track: https://dropoff-api.godfreymoseskalambo.workers.dev/t/$track',
-    line('Booked', data['created_at']),
+    line('Booked', bookedAt),
     line('Booking photo', ev['booking_photo']),
     line('Pickup photo', ev['pickup_photo']),
     line('Dropoff photo', ev['depot_or_dropoff_photo']),
@@ -699,8 +703,67 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
     line('Confidence', check['confidence']),
     line('Review', check['review_status'] ?? (check['needs_review'] == true ? 'needs_review' : '')),
     line('Declared value', ev['declared_value_zmw']),
-    line('Cover', ev['cover_status']),
   ].join('\n');
+
+  // Parcel-check verdict chip (sender photo vs rider photo, AI + rules).
+  final same = '${check['same_parcel'] ?? ''}';
+  final (chipIcon, chipColor, chipLabel) = switch (same) {
+    'yes' => (Icons.verified_outlined, AppColors.forest, 'Same parcel'),
+    'no' => (Icons.warning_amber_rounded, const Color(0xFFB3261E), 'Mismatch — review'),
+    'uncertain' => (Icons.help_outline_rounded, const Color(0xFF8A5A00), 'Uncertain — review'),
+    _ => (Icons.hourglass_empty_rounded, AppColors.muted, 'Comparison pending'),
+  };
+
+  Future<void> zoom(String? path, String label) async {
+    if (path == null || path.isEmpty) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dctx) => Dialog(
+        backgroundColor: Colors.black,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+            child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+          ),
+          Flexible(
+            child: InteractiveViewer(
+              maxScale: 4,
+              child: AuthedImage(path, fit: BoxFit.contain, width: double.infinity),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dctx),
+            child: const Text('Close', style: TextStyle(color: Colors.white)),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget photoTile(String? path, String label) => Expanded(
+        child: InkWell(
+          onTap: path == null || path.isEmpty ? null : () => zoom(path, label),
+          borderRadius: BorderRadius.circular(10),
+          child: Column(children: [
+            SizedBox(
+              width: double.infinity,
+              height: 104,
+              child: path == null || path.isEmpty
+                  ? Container(
+                      decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(10)),
+                      alignment: Alignment.center,
+                      child: const Text('None yet', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+                    )
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: AuthedImage(path, fit: BoxFit.cover, width: double.infinity, height: 104),
+                    ),
+            ),
+            const SizedBox(height: 4),
+            Text(label, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11.5)),
+          ]),
+        ),
+      );
 
   await showModalBottomSheet<void>(
     context: context,
@@ -710,18 +773,69 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Share evidence', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+          Text('Share evidence — ${data['ref'] ?? ref}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
-          const Text('Proof-of-condition timeline (booking, pickup, dropoff, parcel check, confirmation). Share only with trusted parties.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
+          const Text('Proof-of-condition photos and the parcel comparison. Share only with trusted parties.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
           const SizedBox(height: 12),
           Flexible(
             child: SingleChildScrollView(
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(12)),
-                child: SelectableText(summary, style: const TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.45)),
-              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // ── Comparison card: sender's booking photo vs the rider's drop photo ──
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(12)),
+                  child: Column(children: [
+                    const Row(children: [
+                      Icon(Icons.compare_rounded, size: 16, color: AppColors.forest),
+                      SizedBox(width: 6),
+                      Text('PARCEL COMPARISON', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
+                    ]),
+                    const SizedBox(height: 10),
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      photoTile('${ev['booking_photo'] ?? ''}'.isEmpty ? null : '${ev['booking_photo']}', 'Sender (booking)'),
+                      const SizedBox(width: 10),
+                      photoTile('${ev['depot_or_dropoff_photo'] ?? ''}'.isEmpty ? null : '${ev['depot_or_dropoff_photo']}', 'Rider (drop)'),
+                    ]),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      Icon(chipIcon, size: 16, color: chipColor),
+                      const SizedBox(width: 6),
+                      Text(chipLabel, style: TextStyle(color: chipColor, fontWeight: FontWeight.w900, fontSize: 12.5)),
+                      if ('${check['confidence'] ?? ''}'.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        Text('· ${check['confidence']}', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                      ],
+                    ]),
+                    if ('${check['note'] ?? ''}'.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text('${check['note']}', style: const TextStyle(fontSize: 11.5, height: 1.35, color: AppColors.ink)),
+                    ],
+                  ]),
+                ),
+                const SizedBox(height: 10),
+                // ── Other evidence photos ──
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  photoTile('${ev['pickup_photo'] ?? ''}'.isEmpty ? null : '${ev['pickup_photo']}', 'Pickup'),
+                  const SizedBox(width: 10),
+                  photoTile('${ev['handover_photo'] ?? ''}'.isEmpty ? null : '${ev['handover_photo']}', 'Handover'),
+                  const SizedBox(width: 10),
+                  Builder(builder: (_) {
+                    final cr = (ev['counter_receipt'] as Map?)?.cast<String, dynamic>();
+                    final url = '${cr?['url'] ?? ''}';
+                    return photoTile(url.isEmpty ? null : url, 'Depot receipt');
+                  }),
+                ]),
+                const SizedBox(height: 10),
+                // ── Facts ──
+                Text('Status: ${data['status'] ?? 'n/a'} · Booked $bookedAt', style: const TextStyle(fontSize: 12.5, height: 1.4)),
+                Text(
+                  'Partner confirmed: ${ev['partner_confirmed'] == true ? 'yes' : 'not yet'} · OTP required: ${ev['otp_required'] == true ? 'yes' : 'no'} · Declared value: ${ev['declared_value_zmw'] ?? 'n/a'}',
+                  style: const TextStyle(fontSize: 12.5, height: 1.4),
+                ),
+                if (track.isNotEmpty)
+                  Text('Tracking: dropoff-api.godfreymoseskalambo.workers.dev/t/$track', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+              ]),
             ),
           ),
           const SizedBox(height: 12),

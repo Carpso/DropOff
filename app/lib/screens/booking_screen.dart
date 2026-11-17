@@ -16,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
+import '../data/map_services.dart';
 import '../data/analytics_service.dart';
 import '../main.dart';
 import '../models/booking.dart';
@@ -103,9 +104,6 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _parcelPhotoUploading = false;
   String? _tidyPinLabel; // '✨ Tidy pinned ≈ Kabwata — bands apply (±1 km)'
   String? _plusCode;
-  final _declaredValue = TextEditingController();
-  bool _coverOptIn = false;
-  bool _coverTosAccepted = false;
   List<String> _cities = cities;
   double? _promoPct;
   String _promoNote = '';
@@ -119,6 +117,10 @@ class _BookingScreenState extends State<BookingScreen> {
   /// (previously it kept the stale typed number, so taps looked ignored).
   final _parcelsCtl = TextEditingController(text: '1');
   final _courierSearchCtl = TextEditingController();
+  /// DECLARED VALUE (owner directive 2026-11-17): the parcel's worth in ZMW,
+  /// printed on the depot counter receipt so the depot can verify what it is
+  /// carrying. NOT the cover value — protection is not sold in the app.
+  final _declaredValue = TextEditingController();
   /// Owner directive (2026-11-13): motorcycle carries at most 10 SMALL,
   /// 5 MEDIUM or 1 LARGE parcel — past that, the rider bumps vehicle, not
   /// stuffing. Cars, vans and trucks carry whole batches: no practical limit.
@@ -205,8 +207,6 @@ class _BookingScreenState extends State<BookingScreen> {
       } else if (pickupWindows.containsKey(pw)) {
         _pickupWindow = pw;
       }
-      final dv = '${pre['declared_value_zmw'] ?? ''}'.trim();
-      if (dv.isNotEmpty) _declaredValue.text = dv;
       final promo = '${pre['promo_code'] ?? ''}'.trim();
       if (promo.isNotEmpty) _promo.text = promo;
     }
@@ -232,7 +232,7 @@ class _BookingScreenState extends State<BookingScreen> {
   @override
   void dispose() {
     _hintTimer?.cancel();
-    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress, _courierSearchCtl, _declaredValue, _parcelsCtl]) {
+    for (final controller in [_pickup, _description, _senderName, _senderPhone, _recipientName, _recipientPhone, _promo, _pack, _returnAddress, _courierSearchCtl, _parcelsCtl, _declaredValue]) {
       controller.dispose();
     }
     super.dispose();
@@ -320,7 +320,12 @@ class _BookingScreenState extends State<BookingScreen> {
     final plan = _planSnap?['plan'] as Map<String, dynamic>?;
     if (sub == null || plan == null || '${sub['status'] ?? ''}' != 'active') return null;
     // Expired period → pay-as-you-go, exactly like the server's SQL gate.
-    final end = DateTime.tryParse('${sub['period_end'] ?? ''}'.trim());
+    // D1 writes naive UTC stamps ("2026-12-01 00:00:00") — without the Z the
+    // parse reads them as LOCAL time and the pack appears to expire 2h early.
+    final rawEnd = '${sub['period_end'] ?? ''}'.trim().replaceFirst(' ', 'T');
+    final end = DateTime.tryParse(
+      rawEnd.endsWith('Z') || rawEnd.contains('+') ? rawEnd : '${rawEnd}Z',
+    );
     if (end != null && end.isBefore(DateTime.now())) return null;
     final remaining = (_planSnap?['remaining_this_period'] as num?)?.toInt() ?? 0;
     return remaining >= _parcels ? 'pack' : 'overage';
@@ -416,8 +421,9 @@ class _BookingScreenState extends State<BookingScreen> {
     final text = _pickup.text.trim();
     if (text.length < 5) return _message('Type the address first, then tap Tidy.');
     setState(() => _aiBusy = true);
-    // Plus codes resolve natively in Google Maps — carry the code through the
-    // address string so rider, depot and waybill all read it (no decoder needed).
+    // Plus codes are a universal location format any maps tool can open —
+    // carry the code through the address string so rider, depot and waybill
+    // all read it (no decoder needed).
     _updateTidyPins(text);
     final res = await DropOffApi.aiAddress(text);
     if (!mounted) return;
@@ -426,7 +432,7 @@ class _BookingScreenState extends State<BookingScreen> {
     if (!res.ok || parsed is! Map) {
       return _message(_plusCode == null
           ? '✨ Tidy is unavailable right now — your address is unchanged.'
-          : '✨ Tidy is unavailable — but the plus code is pinned for Google Maps.');
+          : '✨ Tidy is unavailable — but the plus code is pinned to your pickup.');
     }
     final parts = [parsed['street'], parsed['area'], parsed['city']]
         .map((e) => '${e ?? ''}'.trim())
@@ -484,9 +490,11 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   /// See the pinned pickup on the DropOff map. With GPS/Tidy coordinates this
-  /// opens in-app; a raw plus code needs a map lookup, so it falls back to the
-  /// device default maps app (kept, relabeled honestly).
-  void _openInMaps() {
+  /// opens in-app; a raw plus code or typed address is GEOCODED in-app
+  /// (hard-locked to Lusaka) so the sender still gets DropOff turn-by-turn —
+  /// the device's maps handler is a silent last resort, never a labelled
+  /// choice in this UI.
+  Future<void> _openInMaps() async {
     final lat = _pickupLat, lng = _pickupLng;
     if (lat != null && lng != null) {
       Navigator.of(context).push(MaterialPageRoute<void>(
@@ -500,7 +508,20 @@ class _BookingScreenState extends State<BookingScreen> {
     }
     final q = (_plusCode != null && _plusCode!.isNotEmpty) ? _plusCode! : _pickup.text.trim();
     if (q.isEmpty) return;
-    openInApp('https://maps.google.com/?q=${Uri.encodeComponent(q)}');
+    final hits = await MapServices.search(q);
+    if (!mounted) return;
+    if (hits.isNotEmpty) {
+      final hit = hits.first;
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => InAppNavigatorScreen(
+          destLat: hit.point.latitude,
+          destLng: hit.point.longitude,
+          label: 'Pickup pin — this is where the rider comes to',
+        ),
+      ));
+      return;
+    }
+    await openInApp('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(q)}');
   }
 
   Future<void> _captureLocation() async {
@@ -650,9 +671,6 @@ class _BookingScreenState extends State<BookingScreen> {
     if (!_validPhone(_senderPhone.text) || !_validPhone(_recipientPhone.text)) {
       return _message('Use valid Zambian phone numbers, e.g. 0971234567.');
     }
-    if (_coverOptIn && !_coverTosAccepted) {
-      return _message('I accept the cover terms (quoted, not insurance)');
-    }
     if (_roundTrip && _returnAddress.text.trim().isEmpty) {
       return _message('Enter the return address for the round trip.');
     }
@@ -685,9 +703,7 @@ class _BookingScreenState extends State<BookingScreen> {
       pickupLat: _pickupLat,
       pickupLng: _pickupLng,
       parcelPhotoUrl: _parcelPhotoUrl,
-      declaredValueZmw: double.tryParse(_declaredValue.text.trim()),
-      coverOptIn: _coverOptIn,
-      coverTosAccepted: _coverTosAccepted,
+      declaredValueZmw: double.tryParse(_declaredValue.text.replaceAll(RegExp(r'[^0-9.]'), '')),
     );
     if (store.lastBookingError != null && store.lastBookingError != 'network_error') {
       if (!mounted) return;
@@ -695,8 +711,6 @@ class _BookingScreenState extends State<BookingScreen> {
       final msg = switch (store.lastBookingError) {
         'booking_on_hold' => 'Recent missed pickups put new bookings on hold. Contact DropOff support or ask ops to review your account.',
         'slot_required' || 'pickup_window_required' => 'Every parcel must be booked onto a Sweep slot (no untimed pickups).',
-        'cover_tos_required' => 'Optional cover is a quoted protection product, NOT automatic insurance. Limits, exclusions, eligibility, and evidence requirements apply. Cover is only active if DropOff confirms it under the applicable terms (legal/commercial sign-off required). By opting in you accept these terms.',
-        'declared_value_required_for_cover' => 'Declared value (ZMW)',
         _ => store.lastBookingErrorDetail?.isNotEmpty == true
             ? store.lastBookingErrorDetail!
             : 'Booking could not be created (${store.lastBookingError}).',
@@ -704,7 +718,9 @@ class _BookingScreenState extends State<BookingScreen> {
       _message(msg);
       return;
     }
-    if (store.lastBookingWindowRolled != null) {
+    if (store.lastBookingDeduped) {
+      _message('This trip is already booked and waiting for payment — finish paying it below. No duplicate booking was created.');
+    } else if (store.lastBookingWindowRolled != null) {
       _message('That window closed — your booking moved to the next open slot.');
     } else if (_tomorrowMorning) {
       _message('You booked the TOMORROW 6:00 – 7:30 AM early sweep — the rider collects in the morning.');
@@ -979,40 +995,22 @@ class _BookingScreenState extends State<BookingScreen> {
             HelpIconButton(topic: HelpTopic.parcelPhoto),
           ]),
         ),
-        const SizedBox(height: 10),
+        // DECLARED VALUE (owner directive 2026-11-17): restored — needed for
+        // the counter receipt at the depot. Optional, NOT the cover value.
         TextField(
           controller: _declaredValue,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Declared value (ZMW)', hintText: 'e.g. 500', prefixIcon: Icon(Icons.payments_outlined)),
-        ),
-        CheckboxListTile(
-          value: _coverOptIn,
-          contentPadding: EdgeInsets.zero,
-          controlAffinity: ListTileControlAffinity.leading,
-          title: const Text('Parcel cover (optional)'),
-          subtitle: const Text('Cover is an optional quoted protection product. Terms, limits and eligibility apply; it is not automatic insurance until confirmed.', style: TextStyle(fontSize: 11, height: 1.3)),
-          onChanged: (v) => setState(() { _coverOptIn = v ?? false; if (!_coverOptIn) _coverTosAccepted = false; }),
-        ),
-        if (_coverOptIn)
-          Container(
-            margin: const EdgeInsets.only(top: 2, bottom: 4),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.amber.withValues(alpha: 0.6))),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Parcel cover terms', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-              const SizedBox(height: 4),
-              const Text('Optional cover is a quoted protection product, NOT automatic insurance. Limits, exclusions, eligibility, and evidence requirements apply. Cover is only active if DropOff confirms it under the applicable terms (legal/commercial sign-off required). By opting in you accept these terms.', style: TextStyle(fontSize: 11, height: 1.35, color: Color(0xFF5D4200))),
-              CheckboxListTile(
-                value: _coverTosAccepted,
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('I accept the cover terms (quoted, not insurance)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                onChanged: (v) => setState(() => _coverTosAccepted = v ?? false),
-              ),
-            ]),
+          decoration: const InputDecoration(
+            labelText: 'Declared value (ZMW)',
+            hintText: 'What the parcel is worth, e.g. 450',
+            prefixIcon: Icon(Icons.payments_outlined),
           ),
-        const SizedBox(height: 8),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 4),
+          child: Text('Optional — printed on the depot counter receipt so the depot knows what it is carrying.', style: AppType.caption),
+        ),
+        const SizedBox(height: 10),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: DropdownButtonFormField<String>(
             initialValue: _vehicleClass,
@@ -1468,11 +1466,98 @@ class BookingSuccessScreen extends StatefulWidget {
   State<BookingSuccessScreen> createState() => _BookingSuccessScreenState();
 }
 
-class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
+class _BookingSuccessScreenState extends State<BookingSuccessScreen>
+    with WidgetsBindingObserver {
   bool _busy = false;
   bool _pausing = false;
   bool? _pausedOverride;
   late bool _paid = !widget.paymentHeld;
+
+  // HELD-PAYMENT WATCH (owner bug 2026-11-17: "I paid but the payment screen
+  // didn't check or poll the transacting number"): the held screen polls
+  // GET /jobs/:ref/payments — the booking-time prompt's row, INCLUDING the
+  // transacting phone — and the server re-checks pending rows against Lipila
+  // on every call. A prompt approved late (or whose webhook never arrived)
+  // still settles here, flips the screen to PAID and dispatches the rider.
+  Timer? _watchTimer;
+  int _watchCalls = 0;
+  bool _watchInFlight = false;
+  Object? _lastFailedPayId; // one rejection toast per payment row
+  String? _promptPhone; // the number the momo prompt was fired at
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (widget.paymentHeld) {
+      // AppScope.of walks an InheritedNotifier — never read it inside
+      // initState; the first tick runs right after the first frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _watchTick());
+      _watchTimer = Timer.periodic(const Duration(seconds: 3), (_) => _watchTick());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _watchTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Returning from the momo app is exactly when an approval may have landed.
+    if (state == AppLifecycleState.resumed && widget.paymentHeld) _watchTick();
+  }
+
+  /// One reconcile step: ≈3 s cadence for the first 90 s, then a slower tail
+  /// (every 4th tick) up to ~7 min total. Every app RESUME forces a check
+  /// regardless of cadence.
+  Future<void> _watchTick() async {
+    if (!mounted || _paid || _watchInFlight) return;
+    _watchCalls++;
+    if (_watchCalls > 30 && _watchCalls % 4 != 0) return;
+    if (_watchCalls > 108) {
+      _watchTimer?.cancel();
+      return;
+    }
+    final store = AppScope.of(context);
+    Booking? booking;
+    for (final item in store.bookings) {
+      if (item.id == widget.bookingId) {
+        booking = item;
+        break;
+      }
+    }
+    final jobRef = booking?.serverRef;
+    if (jobRef == null || jobRef.isEmpty) return; // not synced yet — retry next tick
+    _watchInFlight = true;
+    try {
+      final pay = await DropOffApi.latestJobPayment(jobRef);
+      if (!mounted || _paid) return;
+      if (pay != null) {
+        final phone = '${pay['phone'] ?? ''}'.trim();
+        if (phone.isNotEmpty && phone != _promptPhone) setState(() => _promptPhone = phone);
+        final status = '${pay['status'] ?? ''}';
+        if (status == 'success') {
+          _watchTimer?.cancel();
+          setState(() => _paid = true);
+          AppToast.show(context, 'Prepayment received — your rider is being dispatched.');
+          unawaited(AppScope.of(context).syncJobsFromServer());
+          return;
+        }
+        if (status == 'failed') {
+          final pid = pay['payment_id'];
+          if (pid != _lastFailedPayId) {
+            _lastFailedPayId = pid;
+            AppToast.show(context, 'That momo prompt was rejected — tap Pay now to send a fresh one.');
+          }
+        }
+      }
+    } finally {
+      _watchInFlight = false;
+    }
+  }
 
   Future<void> _togglePause(Booking booking, bool pause) async {
     final jobRef = booking.serverRef;
@@ -1506,6 +1591,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
     setState(() => _busy = false);
     switch (outcome) {
       case 'success':
+        _watchTimer?.cancel();
         AppToast.show(context, 'Prepayment received — your rider is being dispatched.');
         setState(() => _paid = true);
         unawaited(AppScope.of(context).syncJobsFromServer());
@@ -1524,7 +1610,35 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final booking = AppScope.of(context).bookings.firstWhere((item) => item.id == widget.bookingId);
+    // Safe lookup — firstWhere would THROW if the booking dropped out of the
+    // store mid-view (sync prune / sign-out), crashing the payment screen.
+    Booking? found;
+    for (final item in AppScope.of(context).bookings) {
+      if (item.id == widget.bookingId) {
+        found = item;
+        break;
+      }
+    }
+    if (found == null) {
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.cloud_off_outlined, size: 44, color: AppColors.muted),
+              const SizedBox(height: 14),
+              const Text('Booking is syncing…',
+                  textAlign: TextAlign.center, style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 8),
+              const Text('It appears here the moment the server sync completes.',
+                  textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.5)),
+              const SizedBox(height: 18),
+              FilledButton.tonal(onPressed: () => Navigator.of(context).pop(), child: const Text('Back to home')),
+            ]),
+          ),
+        ),
+      );
+    }
+    final Booking booking = found; // promote once — closures below capture a non-null local
     if (!_paid) return _held(booking);
     return Scaffold(
       body: SafeArea(
@@ -1576,9 +1690,25 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen> {
               const SizedBox(height: 18),
               Text('Reference ${booking.reference}\n${booking.fromCity} → ${booking.toCity}', textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.6)),
               const SizedBox(height: 10),
-              if (paused) const InfoPill(icon: Icons.notifications_off_outlined, label: 'Reminders paused by you — resume below')
-              else const InfoPill(icon: Icons.payments_outlined, label: 'Momo prompt pending — approve it to dispatch'),
+              if (paused)
+                const InfoPill(icon: Icons.notifications_off_outlined, label: 'Reminders paused by you — resume below')
+              // The transacting number comes from the payment row via the
+              // held-watch — the user knows exactly which phone to approve on.
+              else InfoPill(
+                  icon: Icons.payments_outlined,
+                  label: _promptPhone == null
+                      ? 'Momo prompt pending — approve it to dispatch'
+                      : 'Momo prompt sent to $_promptPhone — approve it to dispatch'),
               const Spacer(),
+              if (!paused && (_watchTimer?.isActive ?? false)) ...[
+                const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 8),
+                  Text('Checking your payment…',
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.muted)),
+                ]),
+                const SizedBox(height: 12),
+              ],
               if (!paused) SizedBox(
                 height: 54,
                 child: FilledButton.icon(

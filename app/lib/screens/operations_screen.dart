@@ -9,6 +9,7 @@ import 'dart:io';
 
 import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
+import '../data/push_service.dart';
 import '../state/app_store.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
@@ -73,7 +74,7 @@ class OperationsScreen extends StatelessWidget {
             FilledButton.tonal(onPressed: () async {
               await AppScope.of(context).unlink();
               if (sheetContext.mounted) Navigator.of(sheetContext).pop(true);
-            }, child: const Text('Unlink device')),
+            }, child: const Text('Sign out (unlink device)')),
           ],
         ]),
       )),
@@ -1164,7 +1165,7 @@ class _RiderVerificationCard extends StatefulWidget {
   State<_RiderVerificationCard> createState() => _RiderVerificationCardState();
 }
 
-class _RiderVerificationCardState extends State<_RiderVerificationCard> {
+class _RiderVerificationCardState extends State<_RiderVerificationCard> with WidgetsBindingObserver {
   final _nrc = TextEditingController();
   final _license = TextEditingController();
   final _plate = TextEditingController();
@@ -1181,19 +1182,52 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
   bool _submitted = false;
   /// Collapsed by default — the verified rider is busy, not editing. Tap to open.
   bool _collapsed = true;
+  /// Auto-sync of the admin's verdict (owner bug report 2026-11-17: "approved
+  /// on the rider side doesn't sync"). Rejections/approvals land while the
+  /// app sits in the background; three sources refresh this card without a
+  /// manual pull: app resume, a periodic poll while the verdict is still
+  /// pending, and the rider_verification push tap.
+  StreamSubscription<Map<String, dynamic>?>? _pushSub;
+  Timer? _poll;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+    _pushSub = PushService.onPayloadTap.stream.listen((payload) {
+      final kind = '${payload?['kind'] ?? ''}'.toLowerCase();
+      if (kind.contains('rider_verification')) _load();
+    });
+    _schedulePoll();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pushSub?.cancel();
+    _poll?.cancel();
     for (final c in [_nrc, _license, _plate, _make, _color]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back to the foreground is the moment the admin verdict may have
+    // landed — refresh immediately instead of waiting for the poll.
+    if (state == AppLifecycleState.resumed) _load();
+  }
+
+  /// Poll every 45s while a verdict is outstanding so an approval surfaces on
+  /// its own once the worker flips the row (D1 writes don't notify clients).
+  void _schedulePoll() {
+    _poll?.cancel();
+    final status = '${_rider?['verification_status'] ?? ''}';
+    if (_loading || status == 'pending' || status == 'rejected' || status.isEmpty) {
+      _poll = Timer.periodic(const Duration(seconds: 45), (_) => _load());
+    }
   }
 
   Map<String, dynamic>? _parseFace(String? raw) {
@@ -1230,6 +1264,8 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
         if ('${rider['verification_status'] ?? ''}' == 'pending') _submitted = true;
       }
     });
+    // Re-arm the poll with the fresh status: once verified it stops ticking.
+    _schedulePoll();
   }
 
   /// Riders run the AI face review on their own selfie before submitting —
@@ -1252,6 +1288,14 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
   }
 
   Future<void> _pick(String field) async {
+    // PHOTO LOCK (owner directive 2026-11-17): once documents are submitted
+    // (pending) or verified, the rider can no longer swap them from this
+    // screen — any change goes through an admin request. Rejected stays
+    // editable so a fixable rejection can be corrected and resubmitted.
+    if (_locked) {
+      _snack('Photos are locked — request a change from the admin team.');
+      return;
+    }
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -1295,7 +1339,15 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
       _nrcUrl != null &&
       _plateUrl != null;
 
+  /// SUBMITTED-OR-VERIFIED = LOCKED (owner directive 2026-11-17): the rider
+  /// screen locks the moment documents go in; only a rejection re-opens it.
+  bool get _locked {
+    final status = '${_rider?['verification_status'] ?? ''}';
+    return status == 'pending' || status == 'verified';
+  }
+
   Future<void> _submit() async {
+    if (_locked) return _snack('Verification is locked — request changes from the admin team.');
     if (_nrc.text.trim().length < 6) return _snack('Enter your NRC number.');
     if (_plate.text.trim().length < 3) return _snack('Enter your number plate.');
     if (_make.text.trim().isEmpty) return _snack('Enter the vehicle make/model.');
@@ -1328,7 +1380,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
 
   void _snack(String text) => AppToast.show(context, text);
 
-  Widget _photoTile(String field, String label, String? url) {
+  Widget _photoTile(String field, String label, String? url, {bool locked = false}) {
     final local = _local[field];
     final busy = _busyField == field;
     Widget preview;
@@ -1348,19 +1400,27 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
     }
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: busy ? null : () => _pick(field),
+      onTap: busy || locked ? null : () => _pick(field),
       child: Column(children: [
-        Container(
-          width: 96,
-          height: 78,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: AppColors.line.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.line),
+        Stack(children: [
+          Container(
+            width: 96,
+            height: 78,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: AppColors.line.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.line),
+            ),
+            child: preview,
           ),
-          child: preview,
-        ),
+          if (locked)
+            const Positioned(
+              top: 4,
+              right: 4,
+              child: Icon(Icons.lock, size: 13, color: AppColors.muted),
+            ),
+        ]),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.muted)),
       ]),
@@ -1455,7 +1515,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
               padding: EdgeInsets.symmetric(vertical: 14),
               child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
             )
-          else if (_submitted)
+          else if (_submitted || _locked)
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const SizedBox(height: 12),
               Container(
@@ -1473,7 +1533,28 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
                 ]),
               ),
               const SizedBox(height: 10),
-              TextButton(onPressed: () => setState(() => _submitted = false), child: const Text('Edit details and resubmit')),
+              // LOCK BANNER (owner directive 2026-11-17): submitted photos are
+              // submitted ONCE — the rider screen locks; changes go through an
+              // admin request. A REJECTION re-opens editing.
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8A5A00).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF8A5A00).withValues(alpha: 0.35)),
+                ),
+                child: const Row(children: [
+                  Icon(Icons.lock_outline, size: 16, color: Color(0xFF8A5A00)),
+                  SizedBox(width: 8),
+                  Expanded(child: Text(
+                    'Photos and details are locked. To change them, request it from the admin team — they re-open your file.',
+                    style: TextStyle(fontSize: 11.5, height: 1.35, color: Color(0xFF8A5A00), fontWeight: FontWeight.w600),
+                  )),
+                ]),
+              ),
+              if (rejected)
+                TextButton(onPressed: () => setState(() => _submitted = false), child: const Text('Edit details and resubmit')),
             ])
           else ...[
             const SizedBox(height: 12),
@@ -1492,10 +1573,10 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> {
             const Text('Photos', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
             const SizedBox(height: 8),
             Wrap(spacing: 12, runSpacing: 10, children: [
-              _photoTile('selfie', 'Selfie', _selfieUrl),
-              _photoTile('nrc', 'NRC', _nrcUrl),
-              _photoTile('plate', 'Plate', _plateUrl),
-              _photoTile('license', 'Licence', _licenseUrl),
+              _photoTile('selfie', 'Selfie', _selfieUrl, locked: _locked),
+              _photoTile('nrc', 'NRC', _nrcUrl, locked: _locked),
+              _photoTile('plate', 'Plate', _plateUrl, locked: _locked),
+              _photoTile('license', 'Licence', _licenseUrl, locked: _locked),
             ]),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [

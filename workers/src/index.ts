@@ -629,9 +629,11 @@ function secureToken(bytes = 18): string {
 }
 
 async function issueTrackingToken(env: Env, jobId: number, jobRef: string, phone: string | null): Promise<string> {
-  const token = secureToken(18);
+  const token = secureToken(12);
   // 180-day ceiling on every newly minted link: parcels deliver in days to a
   // few weeks, so a long-lived shareable URL is pure risk with no upside.
+  // 12 chars keeps SMS tracking links short enough that the recipient
+  // tracking SMS still fits ONE Africa's Talking segment (K0.24).
   await env.DB.prepare(
     `INSERT INTO tracking_tokens (token, job_id, job_ref, phone, expires_at)
      VALUES (?1, ?2, ?3, ?4, datetime('now', '+180 days'))`,
@@ -2171,16 +2173,17 @@ app.post('/jobs', async (c) => {
 
     const total = round2(totals.total_zmw + returnLegFee);
     const dropOffLeg = totals.dropoff_leg_zmw;
-    // Declared value + optional cover (quoted only; NOT active insurance).
+    // COVER REMOVED (owner directive 2026-11-17): DropOff ships NO parcel
+    // cover — "we don't want to be held responsible for now". Incoming
+    // opt-ins are ignored; the legacy columns are zeroed so old bookings'
+    // audit trail keeps its shape.
     const declaredValueZmw = Math.max(0, Number(b.declared_value_zmw ?? 0) || 0);
-    const coverOptIn = b.cover_opt_in === true || b.cover_opt_in === 1 || b.cover_opt_in === '1';
-    const coverTosAccepted = coverOptIn && (b.cover_tos_accepted === true || b.cover_tos_accepted === 1 || b.cover_tos_accepted === '1');
-    const coverTosVersion = coverTosAccepted ? String(b.cover_tos_version ?? 'v1-cover-quoted').slice(0, 40) : null;
-    const coverTosAcceptedAt = coverTosAccepted ? new Date().toISOString() : null;
-    const cover = coverOptIn ? coverQuote(declaredValueZmw, weightClass) : { fee_zmw: 0, cap_zmw: 0 };
-    const coverStatus = !coverOptIn ? 'none' : (declaredValueZmw > 0 ? 'quoted' : 'declined');
-    if (coverOptIn && declaredValueZmw <= 0) return c.json({ error: 'declared_value_required_for_cover', detail: 'Enter a declared parcel value to receive a cover quote.' }, 400);
-    if (coverOptIn && !coverTosAccepted) return c.json({ error: 'cover_tos_required', detail: 'Accept the parcel cover terms (quoted protection, not insurance) before opting in.' }, 400);
+    const coverOptIn = false;
+    const coverTosAccepted = false;
+    const coverTosVersion = null;
+    const coverTosAcceptedAt = null;
+    const cover = { fee_zmw: 0, cap_zmw: 0 };
+    const coverStatus = 'none';
 
     // Wider entropy: date + 5 random chars (the old 2-digit suffix was guessable)
     const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
@@ -2195,6 +2198,68 @@ app.post('/jobs', async (c) => {
     const senderName = String(b.sender_name ?? '').trim()
       || await senderProfileName(c.env.DB, senderPhone)
       || 'DropOff customer';
+
+    // ONE PARCEL, ONE CHAT (owner directive 2026-11-17: "the chat of the same
+    // parcel having many chats instead of one chat for each parcel"): booking
+    // the same trip again while the earlier booking is still UNPAID returns
+    // the EXISTING job instead of minting a duplicate. This is the rebooking
+    // pattern that flooded the inbox with near-identical chats for one
+    // physical parcel (the payment looked stuck, so the sender rebooked — the
+    // held-payment auto-watch now fixes that at the source). A dedupe hit
+    // requires ALL of: same sender + destination city + courier, pickup at
+    // the same spot (≤150 m or identical address text), created within 24 h,
+    // never paid, NO rider ever assigned, and not canceled/delivered. Paid or
+    // dispatched bookings NEVER dedupe — a second real parcel books freely.
+    let dedupedJob: any = null;
+    {
+      const { results: recent } = await c.env.DB.prepare(
+        `SELECT id, ref, pickup_address, pickup_lat, pickup_lng, dest_city,
+                total_zmw, rider_fee_zmw, parcels, vehicle_class, pickup_window, pickup_at, branch,
+                promo_code, promo_discount_zmw
+           FROM jobs
+          WHERE sender_phone = ?1 AND dest_city = ?2 AND courier_id = ?3
+            AND paid = 0 AND rider_id IS NULL
+            AND status NOT IN ('canceled', 'delivered', 'ready_for_collection')
+            AND created_at > datetime('now', '-24 hours')
+          ORDER BY id DESC LIMIT 8`,
+      ).bind(senderPhone, b.dest_city, b.courier_id).all<any>();
+      const addrNorm = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const newAddr = addrNorm(b.pickup_address);
+      for (const cand of recent ?? []) {
+        if (cand.pickup_lat != null && b.pickup_lat != null) {
+          const km = haversine(Number(b.pickup_lat), Number(b.pickup_lng), Number(cand.pickup_lat), Number(cand.pickup_lng));
+          if (km <= 0.15) { dedupedJob = cand; break; }
+        } else if (newAddr && addrNorm(cand.pickup_address) === newAddr) {
+          dedupedJob = cand;
+          break;
+        }
+      }
+    }
+    if (dedupedJob) {
+      const dupTotal = Number(dedupedJob.total_zmw ?? 0);
+      const dupPrompt = round2(dupTotal + MOMO_COLLECTION_FEE);
+      const payload = {
+        ok: true, ref: dedupedJob.ref, job_id: dedupedJob.id,
+        total_zmw: dupTotal, dropoff_leg_zmw: Number(dedupedJob.rider_fee_zmw ?? 0),
+        promo_code: dedupedJob.promo_code, promo_discount_zmw: dedupedJob.promo_discount_zmw,
+        fees: {} as Record<string, never>, // display-only; the held screen prices from prompt_total
+        prompt_total_zmw: dupPrompt,
+        deposit_required: true, deposit_amount_zmw: dupPrompt,
+        deposit_reference: `adv-${dedupedJob.ref}`,
+        deposit_init_failed: false,
+        pack_inclusion: 'payg', pay_method: 'mobile_money',
+        auto_assigned: null, tracking_token: null, tracking_url: null,
+        parcels: Number(dedupedJob.parcels ?? 1), vehicle_class: dedupedJob.vehicle_class,
+        plan_used: null, plan_cap: null, plan_inclusion: 'payg',
+        pickup_window: dedupedJob.pickup_window, window_rolled_from: null,
+        pickup_tomorrow: false, pickup_at: dedupedJob.pickup_at,
+        branch: dedupedJob.branch,
+        deduped: true,
+      };
+      if (idemKey) await saveIdempotent(c.env, idemKey, 'job', senderPhone, 200, payload);
+      return c.json(payload, 200);
+    }
+
     const { meta } = await c.env.DB.prepare(
       `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, pickup_lat, pickup_lng,
          courier_id, recipient_name, recipient_phone, dest_city, dest_city_to_depot,
@@ -2317,7 +2382,7 @@ app.post('/jobs', async (c) => {
           'Prepayment could not start (mobile-money provider unreachable). Booking HELD — no rider is assigned until the DropOff leg is prepaid. Retry payment to dispatch.').run();
         c.executionCtx.waitUntil(
           sendSms(c.env, senderPhone,
-          `DropOff: booking ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`, { transactional: true }).catch(() => {}),
+          `DropOff: booking ${ref} is HELD. The momo prompt failed. Open Bookings and tap Pay now to dispatch your rider.`, { transactional: true }).catch(() => {}),
         );
       }
     }
@@ -2328,7 +2393,7 @@ app.post('/jobs', async (c) => {
         'Advance payment prompt sent at booking — the FULL DropOff leg. The rider is dispatched the moment it is approved; no pay-at-pickup, no rider cash handling.').run();
       c.executionCtx.waitUntil(
         sendSms(c.env, senderPhone,
-        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`, { transactional: true }).catch(() => {}),
+        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for ${ref} (trip price + processing fee). Your rider dispatches the moment you approve and never handles cash.`, { transactional: true }).catch(() => {}),
       );
     }
 
@@ -2365,7 +2430,14 @@ app.post('/jobs', async (c) => {
       ).bind(ref, await handoverOtpHash(c.env, ref, deliveryOtp)).run();
       c.executionCtx.waitUntil(
         sendSms(c.env, recipientPhone,
-        `DropOff: parcel ${ref} is booked. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`, { transactional: true }).catch(() => {}),
+        `DropOff: parcel ${ref}. Track: ${trackUrl}. Code ${deliveryOtp} - never share before handover.`, { transactional: true }).catch(() => {}),
+      );
+      // PICKUP CODE FOR THE SENDER (owner directive 2026-11-17): the rider
+      // confirms the collection with the SENDER's code, so the sender gets
+      // their own copy at booking.
+      c.executionCtx.waitUntil(
+        sendSms(c.env, senderPhone,
+        `DropOff: parcel ${ref}. Pickup code ${deliveryOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {}),
       );
     }
 
@@ -2523,14 +2595,14 @@ app.post('/collections', async (c) => {
     return c.json({ error: 'bad_parcel_photo_url', detail: 'Upload the parcel photo via /uploads first, then pass its url.' }, 400);
   }
   const declaredValueZmw = Math.max(0, Number(b.declared_value_zmw ?? 0) || 0);
-  const coverOptIn = b.cover_opt_in === true || b.cover_opt_in === 1 || b.cover_opt_in === '1';
-  const coverTosAccepted = coverOptIn && (b.cover_tos_accepted === true || b.cover_tos_accepted === 1 || b.cover_tos_accepted === '1');
-  const coverTosVersion = coverTosAccepted ? String(b.cover_tos_version ?? 'v1-cover-quoted').slice(0, 40) : null;
-  const coverTosAcceptedAt = coverTosAccepted ? new Date().toISOString() : null;
-  const cover = coverOptIn ? coverQuote(declaredValueZmw, String(b.weight_class ?? '0-5kg')) : { fee_zmw: 0, cap_zmw: 0 };
-  const coverStatus = !coverOptIn ? 'none' : (declaredValueZmw > 0 ? 'quoted' : 'declined');
-  if (coverOptIn && declaredValueZmw <= 0) return c.json({ error: 'declared_value_required_for_cover' }, 400);
-  if (coverOptIn && !coverTosAccepted) return c.json({ error: 'cover_tos_required', detail: 'Accept the parcel cover terms (quoted protection, not insurance) before opting in.' }, 400);
+  // COVER REMOVED (owner directive 2026-11-17) — see POST /jobs. No cover is
+  // quoted or charged anywhere; legacy columns stay zeroed.
+  const coverOptIn = false;
+  const coverTosAccepted = false;
+  const coverTosVersion = null;
+  const coverTosAcceptedAt = null;
+  const cover = { fee_zmw: 0, cap_zmw: 0 };
+  const coverStatus = 'none';
   // ADVANCE-PAYMENT GATE (owner directive): every momo collection is paid IN
   // ADVANCE at booking — full rider leg + processing + momo leg. Plan members
   // (in-cap, rider fee K0) ride their prepaid subscription. Deposit settles
@@ -2581,7 +2653,7 @@ app.post('/collections', async (c) => {
   if (!depositRequired) {
     c.executionCtx.waitUntil(
       sendSms(c.env, recipientPhone,
-      `DropOff: collection booked from ${courier.name} (${point}). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.`, { transactional: true }).catch(() => {}),
+      `DropOff: collection booked at ${courier.name}. Show code ${deliveryOtp} to your rider at handover - never share it before the parcel is in your hands.`, { transactional: true }).catch(() => {}),
     );
   }
 
@@ -2602,7 +2674,7 @@ app.post('/collections', async (c) => {
       ).bind(meta.last_row_id, 'advance_pending',
         'Advance payment prompt sent at booking — the FULL DropOff leg for this collection. The rider is dispatched the moment it is approved.').run();
       await sendSms(c.env, phone,
-        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for parcel delivery ${ref} (trip price + processing fee). Your rider is dispatched the moment it is approved and never handles cash. If the delivery is canceled before pickup, the unspent prepayment is returned to your momo.`, { transactional: true }).catch(() => {});
+        `DropOff: approve the K${depositAmount.toFixed(2)} prepayment for ${ref} (trip price + processing fee). Your rider dispatches the moment you approve and never handles cash.`, { transactional: true }).catch(() => {});
     } else {
       // PREPAY, NO EXCEPTIONS: provider down → the collection is HELD, never
       // dispatched on credit. Sender retries payment to dispatch.
@@ -2613,7 +2685,7 @@ app.post('/collections', async (c) => {
         'Prepayment could not start (mobile-money provider unreachable). Collection HELD — no rider is assigned until the DropOff leg is prepaid. Retry payment to dispatch.').run();
       c.executionCtx.waitUntil(
         sendSms(c.env, phone,
-        `DropOff: collection ${ref} saved but the prepayment prompt could not start. Your rider is NOT dispatched yet — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`, { transactional: true }).catch(() => {}),
+        `DropOff: collection ${ref} is HELD. The momo prompt failed. Open Bookings and tap Pay now to dispatch your rider.`, { transactional: true }).catch(() => {}),
       );
     }
   }
@@ -2787,6 +2859,13 @@ app.get('/jobs/:ref/live', async (c) => {
     return c.json({ error: 'not found' }, 404);
   }
   if (!job.rider_phone) return c.json({ has_rider: false });
+  // TRACKING WINDOW (owner directive 2026-11-17): live rider tracking runs
+  // from dispatch — on the way to the pickup — through the collected leg,
+  // and ENDS at the depot drop ('delivered') or when the parcel waits at the
+  // destination depot for collection ('ready_for_collection').
+  if (['delivered', 'ready_for_collection'].includes(String(job.status ?? ''))) {
+    return c.json({ has_rider: true, location: null, ended: true, note: 'Tracking ended — the parcel is at the depot.' });
+  }
   if (job.last_lat == null) {
     return c.json({ has_rider: true, location: null, note: 'rider has not shared location yet' });
   }
@@ -2874,6 +2953,36 @@ app.post('/jobs/:ref/events', async (c) => {
         }, 403);
       }
       doorVerified = true;
+      dbStatements.push(c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id));
+    }
+  }
+
+  // PICKUP PROOF (owner directive 2026-11-17): the SENDER holds the 4-digit
+  // code for the first leg (seller → depot). The rider confirms it at
+  // collection — same hash, same attempt gate as the door handover. Ops/admin
+  // keys bypass; jobs minted before the code existed pass through.
+  if (status === 'picked_up' && !isAdminKey && !isOpsKey) {
+    const pickupOtp = await c.env.DB.prepare(
+      'SELECT delivery_otp_hash, delivery_otp_attempts FROM jobs WHERE id = ?1',
+    ).bind(job.id).first<any>();
+    if (pickupOtp?.delivery_otp_hash) {
+      if ((pickupOtp.delivery_otp_attempts ?? 0) >= 8) {
+        await addStrike(c.env, phone ?? '', job.id, 'otp_abuse');
+        return c.json({ error: 'otp_locked', detail: 'Too many wrong codes — contact DropOff support to unlock this pickup.' }, 429);
+      }
+      const otp = String(b.otp ?? '').replace(/\D/g, '');
+      const want = String(pickupOtp.delivery_otp_hash);
+      const got = otp.length === 4 ? await handoverOtpHash(c.env, c.req.param('ref'), otp) : '';
+      const match = got.length === want.length && got.split('').every((ch, i) => ch === want[i]);
+      if (!match) {
+        await c.env.DB.prepare(
+          'UPDATE jobs SET delivery_otp_attempts = COALESCE(delivery_otp_attempts, 0) + 1 WHERE id = ?1',
+        ).bind(job.id).run();
+        return c.json({
+          error: 'otp_required',
+          detail: 'Ask the SENDER for their 4-digit pickup code — it is in the booking SMS. It protects both of you against false parcels.',
+        }, 403);
+      }
       dbStatements.push(c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id));
     }
   }
@@ -3122,6 +3231,19 @@ app.post('/jobs/:ref/events', async (c) => {
     dbStatements.push(c.env.DB.prepare(
       `UPDATE jobs SET ${sets.join(', ')} WHERE id = ?1`).bind(...vals));
   }
+  // PICKUP PHOTO BATCH (owner directive 2026-11-17): a stop with N parcels
+  // files N photos — one per parcel, no repeats. The first photo is the
+  // locked pod_pickup_url evidence; the whole batch is recorded on the job's
+  // event log so ops can compare every collected parcel against the seller's
+  // booking photo at the depot drop.
+  if (status === 'picked_up' && Array.isArray(b.parcel_photos)) {
+    const pickupPhotos = (b.parcel_photos as any[]).map((u) => String(u ?? '').trim()).filter((u) => u.length > 0);
+    if (pickupPhotos.length > 0) {
+      dbStatements.push(c.env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'pickup_photos_filed', ?2)`,
+      ).bind(job.id, `Pickup evidence: ${pickupPhotos.length} parcel photo${pickupPhotos.length > 1 ? 's' : ''} filed at collection (${pickupPhotos.join(' ')}).`));
+    }
+  }
   if (dbStatements.length) await c.env.DB.batch(dbStatements);
 
   // Auto-mark in the parcel chat on every major milestone (everyone watches,
@@ -3188,8 +3310,8 @@ app.post('/jobs/:ref/events', async (c) => {
     try {
       await sendSms(c.env, job.sender_phone,
         cfare.planWaived
-          ? `DropOff: parcel ${job.ref} is at the depot counter. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your depot receipt photo (processing waived — plan active).`
-          : `DropOff: parcel ${job.ref} is at the depot counter. Counter fare K${counterReceiptDue.toFixed(2)} + K${fee.toFixed(2)} processing = K${cfare.total.toFixed(2)}. Open Bookings to pay — your depot receipt photo is revealed after payment.`, { transactional: true });
+          ? `DropOff: parcel ${job.ref} is at the depot counter. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your depot receipt photo (no processing - plan active).`
+          : `DropOff: parcel ${job.ref} is at the depot. Counter fare K${counterReceiptDue.toFixed(2)} + K${fee.toFixed(2)} processing = K${cfare.total.toFixed(2)}. Pay in Bookings to reveal the depot receipt photo.`, { transactional: true });
     } catch { /* notification must never break the event */ }
     c.executionCtx.waitUntil(sendToPhone(c.env, job.sender_phone, {
       title: 'Counter fare due',
@@ -4036,7 +4158,8 @@ async function getOrCreateJobThread(env: Env, jobId: number): Promise<number> {
 async function chatMessages(env: Env, threadId: number, viewerPhone: string | null = null) {
   const { results } = await env.DB.prepare(
     `SELECT m.id, m.sender_phone, m.sender_role, m.body, m.created_at,
-            COALESCE(au.photo_url, r.photo_url) AS sender_photo_url
+            COALESCE(au.photo_url, r.photo_url) AS sender_photo_url,
+            COALESCE(NULLIF(au.full_name, ''), NULLIF(r.full_name, '')) AS sender_name
        FROM chat_messages m
        LEFT JOIN auth_users au ON au.phone = m.sender_phone
        LEFT JOIN riders r ON r.phone = m.sender_phone
@@ -4426,6 +4549,7 @@ app.get('/chat/threads', async (c) => {
   const rider = await c.env.DB.prepare('SELECT id FROM riders WHERE phone = ?1').bind(phone).first<{ id: number }>();
   const { results } = await c.env.DB.prepare(
     `SELECT t.id, t.kind, t.job_id, t.closed_by, t.closed_at, j.ref AS job_ref, j.dest_city,
+            j.status AS job_status, j.pickup_address,
             (SELECT body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_message,
             (SELECT created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_at,
             (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id AND m.id > COALESCE((SELECT last_read_id FROM chat_reads r WHERE r.thread_id = t.id AND r.phone = ?1), 0) AND m.sender_phone <> ?1) AS unread
@@ -4434,6 +4558,7 @@ app.get('/chat/threads', async (c) => {
       WHERE (t.kind = 'support' AND t.phone = ?1)
          OR (t.job_id IS NOT NULL AND EXISTS (
               SELECT 1 FROM jobs jj WHERE jj.id = t.job_id
+                AND jj.status <> 'canceled'
                 AND (jj.sender_phone = ?1 OR jj.recipient_phone = ?1
                      OR (?2 IS NOT NULL AND jj.rider_id = ?2)
                      OR EXISTS (SELECT 1 FROM chat_partner_joins p JOIN chat_threads t2 ON t2.id = p.thread_id WHERE t2.job_id = jj.id AND p.phone = ?1))))`,
@@ -5165,7 +5290,7 @@ async function counterFareFees(env: Env, phone: string, receipt: number) {
 // hashed a code at booking time (and SMSed it), so they are skipped here.
 async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> {
   const job = await env.DB.prepare(
-    `SELECT j.ref, j.recipient_phone, j.delivery_otp_hash, t.token AS tracking_token
+    `SELECT j.ref, j.recipient_phone, j.sender_phone, j.delivery_otp_hash, t.token AS tracking_token
        FROM jobs j LEFT JOIN tracking_tokens t ON t.job_id = j.id
       WHERE j.id = ?1 ORDER BY t.id DESC LIMIT 1`,
   ).bind(jobId).first<any>();
@@ -5182,7 +5307,13 @@ async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> 
   }
   const trackUrl = trackingUrl(env, token);
   await sendSms(env, job.recipient_phone,
-    `DropOff: parcel ${job.ref} is booked and paid. Track live: ${trackUrl} — sign in with the phone number this parcel was addressed to (create a DropOff account first if you don't have one). Show DropOff code ${deliveryOtp} to your rider at handover. Never share it before the parcel is in your hands.${localHandoverSuffix()}`, { transactional: true }).catch(() => {});
+    `DropOff: parcel ${job.ref} paid. Track: ${trackUrl}. Code ${deliveryOtp} - never share before handover.`, { transactional: true }).catch(() => {});
+  // Sender's pickup-code copy lands here too (held bookings mint the code at
+  // settlement — see /jobs booking comment).
+  if (job.sender_phone) {
+    await sendSms(env, job.sender_phone,
+      `DropOff: parcel ${job.ref} paid. Pickup code ${deliveryOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {});
+  }
 }
 
 // Idempotent settlement: the `settled` flag is flipped in the same batch as the
@@ -5586,6 +5717,45 @@ app.get('/payments/:id/status', async (c) => {
     return c.json({ status });
   }
   return c.json({ status: pay.status });
+});
+
+// HELD-PAYMENT RECONCILE (owner bug 2026-11-17: "I paid but the payment
+// screen didn't check or poll"): the held-booking screen polls THIS endpoint
+// — the job's latest payment — and every pending row is re-checked against
+// Lipila right here. A prompt approved late (or a webhook that never
+// arrived) still settles and flips the booking out of HELD. The phone on the
+// row is returned so the screen can tell the user WHICH number transacts.
+// Gated to the job's sender phone + ops/admin.
+app.get('/jobs/:ref/payments', async (c) => {
+  const job = await c.env.DB.prepare(
+    'SELECT id, sender_phone FROM jobs WHERE ref = ?1',
+  ).bind(c.req.param('ref')).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (c.get('phone') !== job.sender_phone && c.get('role') !== 'ops' && !isAdmin(c)) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+  const pay = await c.env.DB.prepare(
+    'SELECT id, phone, amount_zmw, status, kind, lipila_reference, created_at FROM payments WHERE job_id = ?1 ORDER BY id DESC LIMIT 1',
+  ).bind(job.id).first<any>();
+  if (!pay) return c.json({ payment: null });
+  if (pay.status === 'pending' && pay.kind !== 'cod_remit' && pay.kind !== 'rider_reimbursement' && pay.lipila_reference) {
+    const status = await lipilaStatus(c.env, pay.lipila_reference);
+    if (status !== 'pending') {
+      await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
+      await settlePaymentSuccess(c.env, pay.id, status);
+      pay.status = status;
+    }
+  }
+  return c.json({
+    payment: {
+      payment_id: pay.id,
+      status: pay.status,
+      amount_zmw: pay.amount_zmw,
+      phone: pay.phone,
+      kind: pay.kind,
+      created_at: pay.created_at,
+    },
+  });
 });
 
 app.get('/payments/:id/receipt', async (c) => {
@@ -6527,18 +6697,30 @@ app.get('/rider/queue', async (c) => {
   if (!rider) return c.json({ error: 'rider not found' }, 404);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.parcels, j.status,
+    `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.parcels, j.status, j.last_mile,
             j.sender_name, j.sender_phone, j.eta_minutes, j.pickup_window, j.created_at, j.from_city,
-            co.name AS courier_name, co.depot_name, co.city AS courier_city
+            co.name AS courier_name, co.depot_name, co.city AS courier_city,
+            cb.lat AS branch_lat, cb.lng AS branch_lng
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
+        LEFT JOIN courier_branches cb ON cb.courier_id = co.id AND cb.name = j.branch AND cb.active = 1
       WHERE j.rider_id = ?1 AND j.status NOT IN ('delivered', 'ready_for_collection')
       ORDER BY j.created_at`,
   ).bind(rider.id).all<any>();
 
-  // Bucket into sweep slots (instant = ASAP).
-  const buckets: Record<string, any[]> = { instant: [], '06:00': [], '10:00': [], '14:00': [] };
+  // NO INSTANT PICK-UPS (owner directive 2026-11-17): every job rides a TIMED
+  // sweep (06:00 / 10:00 / 14:00 CAT). A job whose window is missing or
+  // unknown rolls into the next slot whose cutoff has not passed; after the
+  // last cutoff it rolls to TOMORROW's 06:00 slot. The old "instant" bucket
+  // (ASAP stops with made-up ETAs) is gone.
+  const TOMORROW_SLOT = 'tomorrow-06:00';
+  const buckets: Record<string, any[]> = { '06:00': [], '10:00': [], '14:00': [], [TOMORROW_SLOT]: [] };
+  const nowCatMin = minutesOf(catHM());
   for (const job of results) {
-    const w = SWEEP_SLOTS[job.pickup_window] ? job.pickup_window : 'instant';
+    const w = SWEEP_SLOTS[job.pickup_window] ? job.pickup_window
+      : nowCatMin < minutesOf(SWEEP_SLOTS['06:00'].cutoff) ? '06:00'
+      : nowCatMin < minutesOf(SWEEP_SLOTS['10:00'].cutoff) ? '10:00'
+      : nowCatMin < minutesOf(SWEEP_SLOTS['14:00'].cutoff) ? '14:00'
+      : TOMORROW_SLOT;
     buckets[w].push(job);
   }
 
@@ -6546,16 +6728,22 @@ app.get('/rider/queue', async (c) => {
   const batches = Object.entries(buckets)
     .filter(([, jobs]) => jobs.length > 0)
     .map(([slot, jobs]) => {
+      // Slot metadata (the TOMORROW roll-up reuses the 06:00 timings).
+      const meta = slot === TOMORROW_SLOT ? SWEEP_SLOTS['06:00'] : SWEEP_SLOTS[slot];
+      const slotLabel = slot === TOMORROW_SLOT ? 'TOMORROW 06:00—07:30 SLOT' : meta.label;
       // Nearest-neighbour stop chain from the rider's last known position.
       let curLat = Number(rider.last_lat ?? depot.lat);
       let curLng = Number(rider.last_lng ?? depot.lng);
       const remaining = [...jobs];
       const stops: any[] = [];
-      // Window slots start sweeping at the slot time; instant starts now.
-      let clockMin = slot === 'instant'
-        ? minutesOf(catHM())
-        : minutesOf(SWEEP_SLOTS[slot].start);
-      const slotStartMin = clockMin;
+      // LIVE CHAIN (owner directive 2026-11-17): the chain ticks with the
+      // clock — it starts at max(slot start, now CAT), so times recompute
+      // from reality on every refresh instead of showing a stale plan.
+      const clockMin = slot === TOMORROW_SLOT
+        ? minutesOf(meta.start) // tomorrow's slot has not started yet
+        : Math.max(minutesOf(meta.start), nowCatMin);
+      let chainMin = clockMin; // mutable running clock for the ETA chain
+      const slotStartMin = minutesOf(meta.start);
       while (remaining.length) {
         let bestIdx = 0;
         let bestKm = Infinity;
@@ -6566,22 +6754,27 @@ app.get('/rider/queue', async (c) => {
           if (km < bestKm) { bestKm = km; bestIdx = i; }
         }
         const job = remaining.splice(bestIdx, 1)[0];
-        clockMin += Math.max(5, Math.round((bestKm / 22) * 60 + 4)); // 22 km/h + 4 min stop
+        chainMin += Math.max(5, Math.round((bestKm / 22) * 60 + 4)); // 22 km/h + 4 min stop
         stops.push({
           n: stops.length + 1,
-          time: hmOf(clockMin),
+          time: hmOf(chainMin),
           ref: job.ref,
           address: job.pickup_address,
-          // Coordinates let the app offer one-tap Waze/Google-Maps navigation
-          // per stop; null for typed addresses without a pin (the app then
-          // navigates by address text).
+          // Coordinates let the app offer one-tap in-app navigation per stop;
+          // null for typed addresses without a pin (the app then navigates
+          // by address text).
           lat: job.pickup_lat ?? null,
           lng: job.pickup_lng ?? null,
+          // Depot drop coordinates for the "navigate to depot" leg after the
+          // pickup is done.
+          depot_lat: job.branch_lat ?? null,
+          depot_lng: job.branch_lng ?? null,
           from_city: job.from_city ?? '',
           seller: job.sender_name,
           seller_phone: job.sender_phone ?? '',
           parcels: Number(job.parcels ?? 1),
           status: job.status,
+          last_mile: Number(job.last_mile ?? 0),
           courier: job.courier_name,
         });
         curLat = Number(job.pickup_lat ?? curLat);
@@ -6597,18 +6790,18 @@ app.get('/rider/queue', async (c) => {
       }
       const dest = [...counts.values()].sort((a, b) => b.n - a.n)[0];
       const totalParcels = jobs.reduce((s, j) => s + Number(j.parcels ?? 1), 0);
-      const target = slot === 'instant'
-        ? hmOf(minutesOf(catHM()) + 120)
-        : SWEEP_SLOTS[slot].target;
       return {
         slot,
-        label: slot === 'instant' ? 'INSTANT PICK-UPS' : SWEEP_SLOTS[slot].label,
-        cutoff: slot === 'instant' ? null : SWEEP_SLOTS[slot].cutoff,
+        label: slotLabel,
+        cutoff: SWEEP_SLOTS[slot]?.cutoff ?? null,
+        // The full CAT window shown on the slot card footer (owner audit
+        // 2026-11-17: the footer range was ambiguous).
+        range: slot === TOMORROW_SLOT ? 'Tomorrow 6:00—7:30 AM' : meta.range,
         total_parcels: totalParcels,
         total_stops: jobs.length,
         destination: dest ? { courier: dest.name, branch: dest.branch, city: dest.city } : null,
-        target_dropoff: target,
-        minutes_on_road: clockMin - slotStartMin,
+        target_dropoff: meta.target,
+        minutes_on_road: chainMin - slotStartMin,
         stops,
       };
     });
@@ -7942,7 +8135,22 @@ app.get('/media/*', async (c) => {
   } else if (key.startsWith('uploads/kyc/')) {
     const owner = key.split('/')[2] ?? '';
     if (c.get('phone') !== owner && !isAdmin(c) && c.get('role') !== 'ops') {
-      return c.json({ error: 'kyc_media_staff_only' }, 403);
+      // Parcel-evidence sharing (owner directive 2026-11-17): the SELLER's
+      // booking photo and the RIDER's drop photo are stored under
+      // uploads/kyc/<uploader>/<uuid> — the other side of that job must see
+      // them so the photo comparison works end-to-end. Authorization =
+      // participant of a job that references this exact key.
+      const linked = await c.env.DB.prepare(
+        `SELECT j.sender_phone, r.phone AS rider_phone
+           FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
+          WHERE j.parcel_photo_url = ?1 OR j.dropoff_photo_url = ?1
+             OR j.pod_pickup_url = ?1 OR j.pod_delivery_url = ?1 LIMIT 1`,
+      ).bind(`/media/${key}`).first<any>();
+      const participant = !!linked
+        && (linked.sender_phone === c.get('phone') || linked.rider_phone === c.get('phone'));
+      if (!participant) {
+        return c.json({ error: 'kyc_media_staff_only' }, 403);
+      }
     }
   } else {
     if (!isAdmin(c) && c.get('role') !== 'ops') {
@@ -8534,7 +8742,8 @@ app.post('/rider/profile/ai-face-check', async (c) => {
 // NOT automatic/regulated insurance. Cover becomes "active" only under confirmed
 // terms/eligibility (future). Until then status is quoted/declined/none.
 const COVER_TERMS_VERSION = '2026-11-08';
-const COVER_TERMS_SUMMARY = 'Optional parcel cover quote (not insurance). Limits, exclusions, and eligibility apply. Photo/OTP/parcel-check evidence may be required for any review. No cover is active until DropOff confirms terms in writing/in-app.';
+// COVER REMOVED (owner directive 2026-11-17) — the terms summary and quote
+// engine below stay dormant in case cover returns after legal sign-off.
 function coverQuote(declaredValueZmw: number, weightClass: string): { fee_zmw: number; cap_zmw: number } {
   const v = Math.max(0, declaredValueZmw);
   if (v <= 0) return { fee_zmw: 0, cap_zmw: 0 };
@@ -9867,7 +10076,7 @@ async function notifyExpiryNudges(env: Env): Promise<void> {
       } else {
         if (Number(row.pending ?? 0) > 0) continue; // renewal prompt already on the phone
         await sendSms(env, row.phone,
-          `DropOff: your ${row.tier} pack ends ${end.slice(0, 10)}. Renew or upgrade in the app to keep your free rider rate (we auto-bill 3 days before, approve the momo prompt).`);
+          `DropOff: your ${row.tier} pack ends ${end.slice(0, 10)}. Renew in the app to keep your free rider rate (we auto-bill 3 days before - approve the prompt).`);
       }
       await env.DB.prepare('UPDATE subscriptions SET expiry_nudge_period = ?2 WHERE id = ?1')
         .bind(row.id, want).run().catch(() => {});
@@ -9937,12 +10146,12 @@ async function notifyRiderTargets(env: Env): Promise<void> {
       if (t.daily_met) continue;
       short.push({ name: String(r.full_name ?? 'Driver'), t });
       await sendSms(env, r.phone,
-        `DropOff target: ${t.today}/${t.daily_target} parcels today, ${t.daily_remaining} to go. Month ${t.month}/${t.month_target} (pace ${t.pace_target}) - ${t.on_track ? 'on track' : `${t.behind_by} behind pace`}. Check your queue in the app.`);
+        `DropOff target: ${t.today}/${t.daily_target} today, ${t.daily_remaining} to go. Month ${t.month}/${t.month_target}${t.on_track ? ' - on track' : ` - ${t.behind_by} behind pace`}. Check your queue.`);
     }
     if (short.length > 0 && env.OWNER_PHONE) {
-      const lines = short.slice(0, 8).map((s) => `${s.name} ${s.t.today}/${s.t.daily_target}`).join(', ');
+      const lines = short.slice(0, 5).map((s) => `${s.name} ${s.t.today}/${s.t.daily_target}`).join(', ');
       await sendSms(env, env.OWNER_PHONE,
-        `DropOff targets: ${short.length} driver(s) short today. ${lines}${short.length > 8 ? ` +${short.length - 8} more` : ''}. Full view in Admin > Driver verification & targets.`, { transactional: true });
+        `DropOff targets: ${short.length} driver(s) short today. ${lines}${short.length > 5 ? ` +${short.length - 5} more` : ''}. Full view in Admin > Targets.`, { transactional: true });
     }
   } catch { /* target nudges are best-effort */ }
 }
@@ -10163,7 +10372,7 @@ async function cancelExpiredHolds(env: Env): Promise<number> {
         ...refundPromo,
       ]);
       await sendSms(env, job.sender_phone,
-        `DropOff: booking ${job.ref} was canceled — the prepayment was never approved within 24 hours. No rider was sent and no money was taken. Book again in the app when ready.`, { transactional: true }).catch(() => {});
+        `DropOff: booking ${job.ref} was canceled - the prepayment was never approved in 24 hours. No rider was sent, no money taken.`, { transactional: true }).catch(() => {});
     } catch { /* never break the minute cron */ }
   }
   return (results ?? []).length;
@@ -10453,7 +10662,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
             await env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
               .bind(meta.last_row_id, 'prepayment_pending', 'Standing order created but the prepayment prompt could not start — HELD; open Bookings and tap Pay now to dispatch.').run();
             await sendSms(env, plan.phone,
-              `DropOff: standing order ${ref} saved but the prepayment prompt could not start. Your rider is HELD — verify your momo balance has the funds, then open Bookings and tap Pay now to dispatch.`, { transactional: true }).catch(() => {});
+              `DropOff: standing order ${ref} is HELD - the momo prompt failed. Open Bookings and tap Pay now to dispatch your rider.`, { transactional: true }).catch(() => {});
           }
         }
         created++;

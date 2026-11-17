@@ -72,7 +72,7 @@ void main() {
     expect(find.text('LUSAKA → KITWE BRANCH'), findsOneWidget);
     expect(find.text('SENDER'), findsOneWidget);
     expect(find.text('RECIPIENT'), findsOneWidget);
-    expect(find.text('VALUE & COVER'), findsOneWidget);
+    expect(find.text('VALUE'), findsOneWidget); // cover removed — declared value only
     expect(find.text('FEES & PAYMENT'), findsOneWidget);
     expect(find.text('Share waybill image'), findsOneWidget);
     expect(find.text('Download / save image'), findsOneWidget);

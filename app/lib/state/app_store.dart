@@ -449,6 +449,11 @@ class AppStore extends ChangeNotifier {
   /// could not start — never inferred client-side from plan inclusion.
   bool lastBookingDepositRequired = false;
   bool lastBookingDepositInitFailed = false;
+  /// ONE PARCEL, ONE CHAT (owner directive 2026-11-17): the server matched
+  /// this booking to the sender's own UNPAID booking of the same trip and
+  /// returned THAT job instead of minting a duplicate — the app should tell
+  /// the sender to finish the payment they already have, not book twice.
+  bool lastBookingDeduped = false;
   /// The rider the dispatch algorithm picked for the last booking (server
   /// response). Replaces the old hard-coded "Owner" default.
   String? lastBookingAutoRiderName;
@@ -634,11 +639,12 @@ class AppStore extends ChangeNotifier {
     String vehicleClass = 'motorcycle',
     String? branch,
     String? parcelPhotoUrl,
-    double? declaredValueZmw,
-    bool coverOptIn = false,
-    bool coverTosAccepted = false,
     double? pickupLat,
     double? pickupLng,
+    // DECLARED VALUE (owner directive 2026-11-17): the parcel's worth in ZMW
+    // for the depot counter receipt — NOT a cover value, never marketed as
+    // protection.
+    double? declaredValueZmw,
   }) async {
     final now = DateTime.now();
     final id = now.microsecondsSinceEpoch.toString();
@@ -683,13 +689,11 @@ class AppStore extends ChangeNotifier {
       'pickup_time': pickupWindow,
       if (parcelPhotoUrl != null && parcelPhotoUrl.isNotEmpty) 'parcel_photo_url': parcelPhotoUrl,
       if (declaredValueZmw != null && declaredValueZmw > 0) 'declared_value_zmw': declaredValueZmw,
-      if (coverOptIn) 'cover_opt_in': true,
-      if (coverOptIn && coverTosAccepted) 'cover_tos_accepted': true,
-      if (coverOptIn && coverTosAccepted) 'cover_tos_version': 'v1-cover-quoted',
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode.trim().toUpperCase(),
     };
     lastBookingError = null;
     lastBookingErrorDetail = null;
+    lastBookingDeduped = false;
     if (DropOffApi.enabled) {
       response = await DropOffApi.createJob(jobPayload);
       if (!response.ok && response.error == 'network_error') {
@@ -712,6 +716,7 @@ class AppStore extends ChangeNotifier {
     lastBookingParcels = (response.body['parcels'] as num?)?.toInt() ?? parcels;
     lastBookingDepositRequired = (response.body['deposit_required'] as bool?) ?? ((response.body['deposit_required'] as num?)?.toInt() == 1);
     lastBookingDepositInitFailed = (response.body['deposit_init_failed'] as bool?) ?? ((response.body['deposit_init_failed'] as num?)?.toInt() == 1);
+    lastBookingDeduped = response.body['deduped'] == true;
     // The algorithm picks the rider (nearest available, load-balanced) — the
     // app NEVER defaults a booking to the owner pseudo-rider (owner directive
     // 2026-11-15). No assignment yet = empty riderId + null riderName.
@@ -997,7 +1002,11 @@ class AppStore extends ChangeNotifier {
     if (s.isEmpty) return DateTime.now();
     final normalized = s.contains('T') ? s : s.replaceFirst(' ', 'T');
     final withZone = normalized.endsWith('Z') || normalized.contains('+') ? normalized : '${normalized}Z';
-    return DateTime.tryParse(withZone) ?? DateTime.now();
+    // Server timestamps are UTC ("Z"); the phone runs CAT (+2). Without
+    // toLocal() every booking shows the UTC wall clock — 5:09 instead of
+    // 7:09 (owner bug report 2026-11-17).
+    final parsed = DateTime.tryParse(withZone) ?? DateTime.now();
+    return parsed.isUtc ? parsed.toLocal() : parsed;
   }
 
   Booking _bookingFromJob(Map<String, dynamic> j, int stage) {

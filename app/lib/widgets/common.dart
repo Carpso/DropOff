@@ -1,9 +1,62 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../data/dropoff_api.dart';
 import '../ui/in_app_browser.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
+
+/// Parses a server timestamp ("2026-11-17 05:09:12", always UTC) into the
+/// phone's local time. Every screen formats times through this so the CAT
+/// clock the customer sees is never the UTC wall clock.
+DateTime serverTime(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty) return DateTime.now();
+  final normalized = s.contains('T') ? s : s.replaceFirst(' ', 'T');
+  final withZone = normalized.endsWith('Z') || normalized.contains('+') ? normalized : '${normalized}Z';
+  final parsed = DateTime.tryParse(withZone);
+  if (parsed == null) return DateTime.now();
+  return parsed.isUtc ? parsed.toLocal() : parsed;
+}
+
+/// Loads a DropOff media file (/media/uploads/...) with the signed-in user's
+/// token — media routes require an authenticated participant, so a plain
+/// Image.network would 401. Empty paths render a neutral placeholder.
+class AuthedImage extends StatelessWidget {
+  final String? path;
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  const AuthedImage(this.path, {super.key, this.width, this.height, this.fit = BoxFit.cover});
+
+  Widget _box({Widget? child}) => Container(
+        width: width,
+        height: height,
+        color: const Color(0xFFE9EFEA),
+        alignment: Alignment.center,
+        child: child ?? const Icon(Icons.image_outlined, color: AppColors.muted),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final p = (path ?? '').trim();
+    if (p.isEmpty) return _box();
+    final uri = p.startsWith('http') ? p : '${DropOffApi.baseUrl}$p';
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        uri,
+        width: width,
+        height: height,
+        fit: fit,
+        headers: DropOffApi.token == null ? null : {'Authorization': 'Bearer ${DropOffApi.token}'},
+        loadingBuilder: (_, child, progress) =>
+            progress == null ? child : _box(child: const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+        errorBuilder: (_, __, ___) => _box(),
+      ),
+    );
+  }
+}
 
 /// Opens the phone dialer for [raw] (keeps digits and '+'). Returns false when
 /// the device can't dial (web console, tablet) so the caller can surface the

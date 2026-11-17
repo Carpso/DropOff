@@ -4,7 +4,7 @@
 name: dropoff
 description: DropOff - home or shop pickup to your chosen Zambian courier depot.
 publish_to: "none"
-version: 0.5.35+45
+version: 0.5.37+47
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -34,6 +34,7 @@ dependencies:
   esc_pos_utils_plus: ^2.0.4
   flutter_bluetooth_serial: ^0.4.0
   permission_handler: ^11.3.1
+  flutter_compass: ^0.8.0
   
   intl: any
 dev_dependencies:
