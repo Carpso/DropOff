@@ -948,7 +948,13 @@ class AppStore extends ChangeNotifier {
           if (i >= 0) {
             final lastEvent = '${j['last_event'] ?? ''}';
             final riderName = j['rider_name'] as String?;
-            final held = lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending';
+            // PAID BEATS PROMPT EVENTS (owner bug 2026-11-17: "money deducted,
+            // screen never flips to success"): a settled prompt leaves the
+            // advance_pending event in history (nothing newer may exist), so
+            // keying HELD off lastEvent alone held PAID bookings forever.
+            // jobs.paid is the settlement truth — never hold a paid parcel.
+            final jobPaid = ((j['paid'] as num?)?.toInt() ?? 0) == 1;
+            final held = !jobPaid && (lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending');
             var changed = false;
             if (existing.stage < stage) {
               _bookings[i] = _bookings[i].copyWith(stage: stage);
@@ -1046,7 +1052,10 @@ class AppStore extends ChangeNotifier {
       riderId: '',
       riderName: riderNameRaw.isEmpty ? null : riderNameRaw,
       riderPhone: riderPhoneRaw.isEmpty ? null : riderPhoneRaw,
-      paymentHeld: lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending',
+      // PAID BEATS PROMPT EVENTS (see syncJobsFromServer): never hold a
+      // parcel the server has marked paid.
+      paymentHeld: ((j['paid'] as num?)?.toInt() ?? 0) != 1 &&
+          (lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending'),
       parcels: (j['parcels'] as num?)?.toInt() ?? 1,
       vehicleClass: '${j['vehicle_class'] ?? 'motorcycle'}',
       branch: j['branch'] as String?,

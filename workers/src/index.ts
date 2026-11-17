@@ -2004,8 +2004,14 @@ app.post('/jobs', async (c) => {
     // Sweep windows have booking cutoffs (06:00?05:30, 10:00?09:30, 14:00?13:30
     // CAT). A late booking never dies — it rolls forward to the next open
     // window (or instant) and the sender is told exactly what happened.
+    // TOMORROW BOOKINGS NEVER ROLL (owner bug 2026-11-17: "the 6am is not
+    // showing"): 'tomorrow:06:00' was normalized to '06:00' and then rolled
+    // against TODAY's 05:30 cutoff — a tomorrow-6am booking made any time
+    // after 05:30 (or after 13:30: "instant") got pickup_window='now' while
+    // pickup_at stayed tomorrow 06:00, so the rider queue never bucketed it
+    // into the 06:00 card (jobs 16 + 19). Tomorrow's cutoff is tomorrow.
     let windowRolledFrom: string | null = null;
-    if (pickupWindow !== 'now') {
+    if (pickupWindow !== 'now' && !pickupTomorrow) {
       const cutoffs: Record<string, string> = { '06:00': '05:30', '10:00': '09:30', '14:00': '13:30' };
       const cat = new Date(Date.now() + 2 * 3600_000); // CAT = UTC+2
       const nowHM = `${String(cat.getUTCHours()).padStart(2, '0')}:${String(cat.getUTCMinutes()).padStart(2, '0')}`;
@@ -5520,18 +5526,46 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       await refundSettledPayment(env, pay, job?.ref ?? null, 'Duplicate prepayment for the same parcel — refund');
       return;
     }
-    await env.DB.batch([
-      env.DB.prepare(`INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'deposit', ?3)`)
-        .bind(pay.phone, pay.amount_zmw, pay.job_id),
-      env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'deposit_paid', ?2)`)
-        .bind(pay.job_id, 'Prepayment approved — rider dispatch in flight.'),
-    ]);
+    // DISPATCH FIRST (owner bug 2026-11-17: "booking succeeds, money deducted,
+    // screen never flips to success"): the money is claimed and the job is
+    // paid — rider assignment, tracking and the sender's success flip must
+    // never wait on (or die with) bookkeeping. The old order wrote the
+    // wallet-ledger audit row BEFORE dispatch; that row has a FOREIGN KEY to
+    // wallets(phone), which customers don't have ("NOT A WALLET"), so the
+    // batch threw on EVERY momo settlement — dispatch, the deposit_paid
+    // event, the tracking SMS and the OTP never ran, and the polling screen
+    // got a 500 right when the money landed (jobs 18 + 19, both stuck
+    // paid-but-undispatched). The minute cron's redispatch net also skipped
+    // them forever (their advance_pending event never cleared).
     if (job) {
-      await dispatchToNearestRider(env, job.ref);
+      try {
+        await dispatchToNearestRider(env, job.ref);
+      } catch (e) {
+        // paid + riderless is recoverable: the minute cron retries dispatch.
+        await captureError(env, e, { method: 'SETTLE', url: `https://settle/dispatch/${pay.job_id}` }).catch(() => {});
+      }
     }
     // Payment-held bookings only NOW earn their tracking link + handover code.
-    await sendRecipientTrackingSms(env, pay.job_id);
+    try {
+      await sendRecipientTrackingSms(env, pay.job_id);
+    } catch (e) {
+      await captureError(env, e, { method: 'SETTLE', url: `https://settle/tracking/${pay.job_id}` }).catch(() => {});
+    }
     if (job?.ref) await rewardReferralOnBooking(env, pay.job_id, pay.phone).catch(() => {});
+    // Bookkeeping LAST and non-fatal: a failed audit row must never again be
+    // able to kill a dispatch or a settlement response. The zero-balance
+    // wallets row satisfies the wallet_ledger FK without crediting anything.
+    try {
+      await env.DB.batch([
+        env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(pay.phone),
+        env.DB.prepare(`INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'deposit', ?3)`)
+          .bind(pay.phone, pay.amount_zmw, pay.job_id),
+        env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'deposit_paid', ?2)`)
+          .bind(pay.job_id, 'Prepayment approved — rider dispatched.'),
+      ]);
+    } catch (e) {
+      await captureError(env, e, { method: 'SETTLE', url: `https://settle/ledger/${pay.job_id}` }).catch(() => {});
+    }
   } else if (pay.kind === 'counter_fare' && pay.job_id) {
     // Sender paid the depot counter fare (+ processing) through DropOff.
     // Unlock the receipt photo for them, then reimburse the rider the EXACT
@@ -5728,7 +5762,7 @@ app.get('/payments/:id/status', async (c) => {
 // Gated to the job's sender phone + ops/admin.
 app.get('/jobs/:ref/payments', async (c) => {
   const job = await c.env.DB.prepare(
-    'SELECT id, sender_phone FROM jobs WHERE ref = ?1',
+    'SELECT id, sender_phone, paid FROM jobs WHERE ref = ?1',
   ).bind(c.req.param('ref')).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
   if (c.get('phone') !== job.sender_phone && c.get('role') !== 'ops' && !isAdmin(c)) {
@@ -5737,6 +5771,19 @@ app.get('/jobs/:ref/payments', async (c) => {
   const pay = await c.env.DB.prepare(
     'SELECT id, phone, amount_zmw, status, kind, lipila_reference, created_at FROM payments WHERE job_id = ?1 ORDER BY id DESC LIMIT 1',
   ).bind(job.id).first<any>();
+  // JOB-PAID OVERRIDE (owner bug 2026-11-17: "booking succeeds, money
+  // deducted, screen never flips"): the JOB being paid is the truth this
+  // endpoint sells. A newer PENDING row (a retried "Pay now" prompt) used to
+  // shadow an earlier settled payment and keep the held-watch spinning — and
+  // a settlement whose side-effects threw (the wallet_ledger FK bug) left
+  // the job paid while the screen stayed HELD. If the job is paid, the
+  // screen flips — no Lipila round-trip, no shadowing row, no stuck watch.
+  if (Number(job.paid) === 1) {
+    return c.json({
+      payment: pay ? { ...pay, status: 'success' } : null,
+      job_paid: true,
+    });
+  }
   if (!pay) return c.json({ payment: null });
   if (pay.status === 'pending' && pay.kind !== 'cod_remit' && pay.kind !== 'rider_reimbursement' && pay.lipila_reference) {
     const status = await lipilaStatus(c.env, pay.lipila_reference);
@@ -6715,12 +6762,21 @@ app.get('/rider/queue', async (c) => {
   const TOMORROW_SLOT = 'tomorrow-06:00';
   const buckets: Record<string, any[]> = { '06:00': [], '10:00': [], '14:00': [], [TOMORROW_SLOT]: [] };
   const nowCatMin = minutesOf(catHM());
+  // CAT date of "now" (UTC+2) — compared against each job's pickup_at date so
+  // a TOMORROW-6am booking shows in the TOMORROW 06:00 card instead of
+  // today's 06:00 sweep (owner bug 2026-11-17: "the 6am is not showing").
+  const todayCatDate = new Date(Date.now() + 2 * 3600_000).toISOString().slice(0, 10);
   for (const job of results) {
-    const w = SWEEP_SLOTS[job.pickup_window] ? job.pickup_window
-      : nowCatMin < minutesOf(SWEEP_SLOTS['06:00'].cutoff) ? '06:00'
-      : nowCatMin < minutesOf(SWEEP_SLOTS['10:00'].cutoff) ? '10:00'
-      : nowCatMin < minutesOf(SWEEP_SLOTS['14:00'].cutoff) ? '14:00'
-      : TOMORROW_SLOT;
+    let w: string;
+    if (SWEEP_SLOTS[job.pickup_window]) {
+      const pickupDay = job.pickup_at ? String(job.pickup_at).slice(0, 10) : null;
+      w = pickupDay && pickupDay > todayCatDate ? TOMORROW_SLOT : job.pickup_window;
+    } else {
+      w = nowCatMin < minutesOf(SWEEP_SLOTS['06:00'].cutoff) ? '06:00'
+        : nowCatMin < minutesOf(SWEEP_SLOTS['10:00'].cutoff) ? '10:00'
+        : nowCatMin < minutesOf(SWEEP_SLOTS['14:00'].cutoff) ? '14:00'
+        : TOMORROW_SLOT;
+    }
     buckets[w].push(job);
   }
 
@@ -10439,13 +10495,22 @@ async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
 // up on the next minute sweep — nobody re-assigns it by hand. HELD bookings
 // (prompt waiting / provider down) are excluded: no dispatch on credit.
 async function redispatchUnassignedPaidJobs(env: Env): Promise<number> {
+  // PAID JOBS ALWAYS DISPATCH (owner bug 2026-11-17): a paid job can never be
+  // "on credit", so its stale advance_pending event (the at-booking prompt
+  // that SETTLED) must not exclude it. Only UNPAID jobs still awaiting a
+  // prompt or with a live payment row hold back — that is the no-credit rule.
   const { results } = await env.DB.prepare(
     `SELECT j.ref FROM jobs j
       WHERE j.rider_id IS NULL AND j.status = 'created'
         AND j.created_at > datetime('now', '-2 days')
-        AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
-        AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.status IN ('pending', 'failed'))
-        AND (j.paid = 1 OR NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.job_id = j.id AND p2.kind IN ('booking_deposit', 'job')))
+        AND (
+          j.paid = 1
+          OR (
+            NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
+            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.status IN ('pending', 'failed'))
+            AND NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.job_id = j.id AND p2.kind IN ('booking_deposit', 'job'))
+          )
+        )
       LIMIT 20`,
   ).all<any>();
   let dispatched = 0;
