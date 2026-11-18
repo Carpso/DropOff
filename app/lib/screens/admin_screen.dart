@@ -2370,7 +2370,10 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
     final cycle = (t['cycle_days'] as num?)?.toInt() ?? 0;
     final disc = (t['overage_discount_pct'] as num?)?.toDouble() ?? 0;
     final fee = (t['fee_zmw'] as num?)?.toDouble() ?? 0;
-    return 'K${fee.toStringAsFixed(0)} • $cap • ${cycle}d cycle${disc > 0 ? ' • ${disc.toStringAsFixed(0)}% overage discount' : ''}';
+    // The live tag rides on the subtitle (owner 2026-11-18): admins see at a
+    // glance what the seller page currently badges without opening the editor.
+    final tag = '${t['tag'] ?? ''}'.trim();
+    return 'K${fee.toStringAsFixed(0)} • $cap • ${cycle}d cycle${disc > 0 ? ' • ${disc.toStringAsFixed(0)}% overage discount' : ''}${tag.isNotEmpty ? ' • tag: $tag' : ' • no tag'}';
   }
 
   Future<void> _editPlan(Map<String, dynamic> t) async {
