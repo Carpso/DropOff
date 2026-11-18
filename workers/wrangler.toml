@@ -31,7 +31,7 @@ BUSINESS_PHONE = "260976847775"
 # carpsosolutions.store; churchonapp.com is not in this account and was
 # rejected with "domain was not found").
 MAIL_FROM = "no-reply@carpsosolutions.store"
-APP_URL = "https://dropoff-api.godfreymoseskalambo.workers.dev"
+APP_URL = "https://api.carpsosolutions.store"
 AUTH_DEV_MODE = "0"                            # "1" = return OTP codes / reset links in responses
 # Router upstream: free public OSRM demo (stopgap chosen by owner 2026-11-17 —
 # same "borrow a free router" pattern ChurchOnApp used; Worker caches 15 min and
@@ -113,3 +113,11 @@ migrations_dir = "migrations"
 #      - npx wrangler email sending enable <domain verified in this account>
 #      - AUTH_DEV_MODE stays "0" once SMS secrets are in
 # HUGGINGFACE_TOKEN - optional free HF inference fallback (mistralai/Mistral-7B-Instruct-v0.3); set with: npx wrangler secret put HUGGINGFACE_TOKEN
+
+# Custom domain (owner 2026-11-18): the *.workers.dev TLD is blocked by many
+# phone filters (Private DNS / VPN / ad-blockers) — logins died at the edge.
+# api.carpsosolutions.store serves the same Worker; the workers.dev host keeps
+# working too, so existing builds and webhook URLs stay valid.
+[[routes]]
+pattern = "api.carpsosolutions.store"
+custom_domain = true

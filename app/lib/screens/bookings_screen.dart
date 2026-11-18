@@ -692,7 +692,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   final summary = [
     'DropOff evidence — ${data['ref'] ?? ref}',
     line('Status', data['status']),
-    if (track.isNotEmpty) 'Track: https://dropoff-api.godfreymoseskalambo.workers.dev/t/$track',
+    if (track.isNotEmpty) 'Track: https://api.carpsosolutions.store/t/$track',
     line('Booked', bookedAt),
     line('Booking photo', ev['booking_photo']),
     line('Pickup photo', ev['pickup_photo']),
@@ -834,7 +834,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
                   style: const TextStyle(fontSize: 12.5, height: 1.4),
                 ),
                 if (track.isNotEmpty)
-                  Text('Tracking: dropoff-api.godfreymoseskalambo.workers.dev/t/$track', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                  Text('Tracking: api.carpsosolutions.store/t/$track', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
               ]),
             ),
           ),

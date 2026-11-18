@@ -235,7 +235,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       dispatchRef: booking.serverRef?.isNotEmpty == true ? booking.serverRef! : '',
       bookedAt: DateFormat('d MMM yyyy · h:mm a').format(booking.createdAt),
       rider: rider?.name ?? booking.riderName ?? '',
-      trackingUrl: _trackingUrl != null ? 'https://dropoff-api.godfreymoseskalambo.workers.dev/t/${_trackingUrl!}' : null,
+      trackingUrl: _trackingUrl != null ? 'https://api.carpsosolutions.store/t/${_trackingUrl!}' : null,
     );
     await ThermalWaybill.print(context, data);
   }
@@ -258,7 +258,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       await Share.shareXFiles(
         [XFile.fromData(bytes, mimeType: 'image/png', name: name)],
         subject: 'DropOff waybill ${booking.serverRef ?? booking.reference}',
-        text: 'DropOff waybill ${booking.serverRef ?? booking.reference} — ${booking.fromCity} → ${booking.toCity}. Show at the depot counter.${track.isNotEmpty ? '\nTrack: https://dropoff-api.godfreymoseskalambo.workers.dev/t/$track' : ''}',
+        text: 'DropOff waybill ${booking.serverRef ?? booking.reference} — ${booking.fromCity} → ${booking.toCity}. Show at the depot counter.${track.isNotEmpty ? '\nTrack: https://api.carpsosolutions.store/t/$track' : ''}',
       );
     } catch (_) {
       if (mounted) {

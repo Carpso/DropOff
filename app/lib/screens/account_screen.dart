@@ -1031,7 +1031,7 @@ class _ReferralCardState extends State<_ReferralCard> {
   Future<void> _share() async {
     final code = _data?['code'] as String? ?? '';
     if (code.isEmpty) return;
-    final link = 'https://dropoff-api.godfreymoseskalambo.workers.dev/r/$code';
+    final link = 'https://api.carpsosolutions.store/r/$code';
     final text = 'Join me on DropOff — sellers get home pickup to their courier: $link';
     await openInApp('https://wa.me/?text=${Uri.encodeComponent(text)}');
   }

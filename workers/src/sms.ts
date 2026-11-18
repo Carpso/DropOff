@@ -117,15 +117,26 @@ export async function sendSms(
       message: text,
       ...(sender ? { from: sender } : {}),
     });
-    const res = await fetch(AT_MESSAGES_URL, {
-      method: 'POST',
-      headers: {
-        Apikey: k,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      body: form.toString(),
-    });
+    // Bound the AT call: the app gives /auth/request 15s — an AT hang (slow
+    // day on their edge) must never silently eat the whole budget and render
+    // the flow dead on the handset. 8s keeps the OTP response inside it.
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 8000);
+    let res: Response;
+    try {
+      res = await fetch(AT_MESSAGES_URL, {
+        method: 'POST',
+        signal: ac.signal,
+        headers: {
+          Apikey: k,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        body: form.toString(),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     const body = await res.text().catch(() => '');
     if (!res.ok) {
       return { sent: false, error: `at_status_${res.status}${body ? `:${body.slice(0, 120)}` : ''}` };

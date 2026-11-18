@@ -23,7 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// every call still degrades gracefully if the network is down.
 class DropOffApi {
   static const String baseUrl = String.fromEnvironment('DROPOFF_API_URL',
-      defaultValue: 'https://dropoff-api.godfreymoseskalambo.workers.dev');
+      defaultValue: 'https://api.carpsosolutions.store');
   // SECURITY: the ops/rider service key must NEVER ship inside a store build.
   // It arrives only via --dart-define at build time on trusted rider/operator
   // devices. Without it, customers sign in with the email/OTP JWT and every
@@ -294,6 +294,26 @@ class DropOffApi {
     bool admin = false,
     Duration? timeout,
     Map<String, String>? extraHeaders,
+    int retries = 0,
+  }) async {
+    ApiResponse res = const ApiResponse(error: 'network_error');
+    final attempts = 1 + retries;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) await Future.delayed(const Duration(seconds: 2));
+      res = await _postOnce(path, body, admin: admin, timeout: timeout, extraHeaders: extraHeaders);
+      // Only transport-level failures retry — an HTTP error answer from the
+      // server is a definite outcome, never a silent re-fire.
+      if (res.error != 'network_error') return res;
+    }
+    return res;
+  }
+
+  static Future<ApiResponse> _postOnce(
+    String path,
+    Map<String, dynamic> body, {
+    bool admin = false,
+    Duration? timeout,
+    Map<String, String>? extraHeaders,
   }) async {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
@@ -457,7 +477,11 @@ class DropOffApi {
   }
 
   /// Phone-OTP login. `verify` returns/stores the JWT.
-  static Future<ApiResponse> requestOtp(String phone) => post('/auth/request', {'phone': phone});
+  static Future<ApiResponse> requestOtp(String phone) =>
+      // One silent retry rides out a dropped connection mid-tap — the
+      // handset either reaches workers.dev this time or the honest
+      // network_error is shown instead.
+      post('/auth/request', {'phone': phone}, retries: 1);
 
   static Future<ApiResponse> verifyOtp(String phone, String code) async {
     final res = await post('/auth/verify', {'phone': phone, 'code': code});
