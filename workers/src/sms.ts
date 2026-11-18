@@ -66,11 +66,6 @@ export async function sendSms(
     AT_USERNAME?: string;
     AT_API_KEY?: string;
     AT_FROM?: string;
-    // Cross-wallet fallback (owner 2026-11-18 "one wallet"): when the primary
-    // app cannot send — bad key, empty wallet — the send retries on the
-    // fallback app's wallet so OTP/payment SMS never die with the balance.
-    AT_FALLBACK_USERNAME?: string;
-    AT_FALLBACK_API_KEY?: string;
     SMS_USERNAME?: string;
     SMS_API_KEY?: string;
     SMS_SENDER_ID?: string;
@@ -98,10 +93,9 @@ export async function sendSms(
   const key = String(env.AT_API_KEY ?? env.SMS_API_KEY ?? '');
   // Sender ID is OPTIONAL: it is only used when explicitly configured (a
   // hardcoded fallback once forced "Carpso" onto every call and got
-  // InvalidSenderId).
+  // InvalidSenderId). One funded ChurchOnApp wallet serves every Carpso app
+  // (owner 2026-11-18) — branded sender IDs per app, no cross-wallet fallback.
   const from = String(env.AT_FROM ?? env.SMS_SENDER_ID ?? '').trim();
-  const fbUser = String(env.AT_FALLBACK_USERNAME ?? '').trim();
-  const fbKey = String(env.AT_FALLBACK_API_KEY ?? '').trim();
   const production = String(env.ENV ?? '').toLowerCase() === 'production';
 
   // Dev / sandbox: never call AT (no billing), just surface the text so the
@@ -151,34 +145,21 @@ export async function sendSms(
     return { sent: false, error: `at_reject:${String(recipients[0]?.status ?? 'unknown').slice(0, 80)}` };
   };
   try {
-    // Ladder (delivery beats branding beats nothing):
-    //   1. primary app + configured sender ID (branded),
-    //   2. primary app + default route (sender rejected),
-    //   3. fallback app's wallet + default route (primary key dead or wallet
-    //      empty — owner 2026-11-18: one Carpso wallet, the other app's
-    //      balance keeps the OTPs flowing).
-    let primaryError: string | undefined;
+    // Ladder (delivery beats branding): the configured sender ID first, and
+    // only if AT rejects THAT SENDER do we retry on the same app's default
+    // route. A dead key or empty wallet surfaces as an error — the owner
+    // tops up one funded ChurchOnApp wallet for every Carpso app.
     if (from) {
       const withSender = await post(user, key, from);
       if (withSender.sent) return withSender;
-      primaryError = withSender.error;
-      if (/InvalidSenderId/i.test(primaryError ?? '')) {
+      if (/InvalidSenderId/i.test(withSender.error ?? '')) {
         const onDefault = await post(user, key, '');
         if (onDefault.sent) return onDefault;
-        primaryError = onDefault.error;
+        return onDefault;
       }
-    } else {
-      const onDefault = await post(user, key, '');
-      if (onDefault.sent) return onDefault;
-      primaryError = onDefault.error;
+      return withSender;
     }
-    if (fbUser && fbKey) {
-      const viaFallback = await post(fbUser, fbKey, '');
-      if (viaFallback.sent) return viaFallback;
-      // Surface whichever failure explains the delivery best (both shown).
-      return { sent: false, error: `${primaryError ?? 'sms_failed'} | fallback:${viaFallback.error ?? 'sms_failed'}` };
-    }
-    return { sent: false, error: primaryError ?? 'sms_failed' };
+    return await post(user, key, '');
   } catch (e: any) {
     return { sent: false, error: e?.message ?? 'sms_failed' };
   }

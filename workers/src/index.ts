@@ -23,7 +23,7 @@ import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { sendSms } from './sms';
 import { sendToPhone } from './push';
 import {
-  clientIp, deviceId, userAgent, ownerPhone, ownerEmail,
+  clientIp, deviceId, deviceName, userAgent, ownerPhone, ownerEmail,
   lockoutStatus, recordAttempt, noteDevice, alertOwner, raiseAlert, acknowledgeAlert,
 } from './security';
 import { ChatRoom } from './chat_do';
@@ -1659,7 +1659,7 @@ app.post('/auth/login', async (c) => {
     if (res.lockUntilMinutes) {
       await alertOwner(c.env, email, 'brute_force', 'high',
         `${res.lockUntilMinutes}-minute lockout after repeated failed logins for ${email} from ${ip}.`,
-        { ip, device: devId, userAgent: ua, email });
+        { ip, device: devId, deviceName: deviceName(c), userAgent: ua, email });
     }
     return c.json({ error: 'unknown_email', hint: 'No DropOff account with that email — create one, or sign in with your phone code instead.' }, 401);
   }
@@ -1668,7 +1668,7 @@ app.post('/auth/login', async (c) => {
     if (res.lockUntilMinutes) {
       await alertOwner(c.env, email, 'brute_force', 'high',
         `${res.lockUntilMinutes}-minute lockout after repeated failed logins for ${email} from ${ip}.`,
-        { ip, device: devId, userAgent: ua, email });
+        { ip, device: devId, deviceName: deviceName(c), userAgent: ua, email });
     }
     return c.json({ error: 'wrong_password', hint: 'Wrong password for that email — try again.' }, 401);
   }
@@ -1688,7 +1688,7 @@ app.post('/auth/login', async (c) => {
   if (dev.isNew) {
     await alertOwner(c.env, phone, 'new_device', 'medium',
       `New device signed in to ${email}.`,
-      { ip, device: deviceId(c), userAgent: ua, email });
+      { ip, device: deviceId(c), deviceName: deviceName(c), userAgent: ua, email });
   }
 
   const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(user.token_version ?? 0), deviceId(c));
@@ -2855,8 +2855,12 @@ app.get('/jobs/:ref', async (c) => {
 // Live location for a participant (sender/recipient) or ops/admin (fleet view)
 app.get('/jobs/:ref/live', async (c) => {
   const job = await c.env.DB.prepare(
-    `SELECT j.*, r.phone AS rider_phone, r.last_lat, r.last_lng, r.last_seen_at
-       FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id WHERE j.ref = ?1`,
+    `SELECT j.*, r.phone AS rider_phone, r.last_lat, r.last_lng, r.last_seen_at,
+            co.lat AS depot_lat, co.lng AS depot_lng, co.depot_name
+       FROM jobs j
+       LEFT JOIN riders r ON r.id = j.rider_id
+       LEFT JOIN couriers co ON co.id = j.courier_id
+      WHERE j.ref = ?1`,
   ).bind(c.req.param('ref')).first() as any;
   if (!job) return c.json({ error: 'not found' }, 404);
   const liveRole = c.get('role');
@@ -2883,6 +2887,12 @@ app.get('/jobs/:ref/live', async (c) => {
     seen_at: job.last_seen_at,
     pickup_lat: job.pickup_lat ?? null,
     pickup_lng: job.pickup_lng ?? null,
+    // END of the visible leg: the courier's depot branch — real stored
+    // coordinates (jobs carry no destination GPS, only an address string),
+    // so the tracking map can draw where the journey ends (owner 2026-11-18).
+    depot_lat: job.depot_lat ?? null,
+    depot_lng: job.depot_lng ?? null,
+    depot_name: job.depot_name ?? null,
     maps_link: `https://maps.google.com/?q=${job.last_lat},${job.last_lng}`,
   });
 });

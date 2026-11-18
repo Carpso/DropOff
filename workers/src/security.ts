@@ -29,6 +29,40 @@ export function userAgent(c: any): string {
   return c.req.header('User-Agent') ?? 'unknown';
 }
 
+/** Friendly device label the app can supply (device_info_plus: model + OS
+ *  version). Empty when the client doesn't send it — callers fall back to
+ *  parsing the User-Agent. */
+export function deviceName(c: any): string {
+  return String(c.req.header('X-Device-Name') ?? '').trim();
+}
+
+/** The REAL device (owner 2026-11-18): the fingerprint hash told the owner
+ *  nothing ("Device: dev…"). Parse a human-readable name from the User-Agent
+ *  — model + OS where AT/browsers expose it — and let an explicit
+ *  X-Device-Name (the app will send one via device_info_plus) win over it. */
+export function friendlyDevice(ua?: string | null): string {
+  const s = String(ua ?? '').trim();
+  if (!s || s === 'unknown') return 'unknown device';
+  const dart = /Dart\/([\d.]+)/i.exec(s);
+  if (dart) return `DropOff app (Dart ${dart[1]})`;
+  const android = /Android[ /]?([\d.]+)?/i.exec(s);
+  if (android) {
+    const os = android[1] ? `Android ${android[1]}` : 'Android';
+    // Chrome/WebView Android UAs carry the model between ';' and "Build/…".
+    const model = /;\s*([^;()]+?)\s+Build\//.exec(s)?.[1]?.trim()
+      ?? /;\s*([^;()]+?)\s*;\s*wv\)/.exec(s)?.[1]?.trim()
+      ?? null;
+    return model ? `${model} · ${os}` : os;
+  }
+  const ios = /iPhone OS ([\d_]+)/i.exec(s);
+  if (ios) return `iPhone · iOS ${ios[1].replace(/_/g, '.')}`;
+  if (/iPad/i.test(s)) return 'iPad';
+  if (/Windows NT/i.test(s)) return 'Windows PC';
+  if (/Mac OS X/i.test(s)) return 'Mac';
+  if (/Linux/i.test(s)) return 'Linux';
+  return s.slice(0, 60);
+}
+
 export function ownerPhone(env: Env): string | null {
   return env.OWNER_PHONE ?? null;
 }
@@ -118,11 +152,14 @@ export async function acknowledgeAlert(db: D1Database, id: number): Promise<bool
   return (res.meta.changes ?? 0) > 0;
 }
 
-/** Notify the owner of an intrusion / new-device event via every channel we
- *  have. The SMS carries full forensics (who, where, when, how) plus a plain
- *  suggested response so the owner can act without opening anything. */
+/** Notify the owner of an intrusion / new-device event. Channel policy
+ *  (owner directive 2026-11-18): security alerts are EMAIL-first — full
+ *  forensics, no per-SMS cost — plus an app push. SMS is reserved for
+ *  HIGH-severity intrusions only (brute-force lockouts and worse). The
+ *  device line carries the REAL device (friendly name), the fingerprint id
+ *  is demoted to a short correlation tag. */
 export async function alertOwner(env: Env, phone: string, type: string, severity: string, detail: string,
-  extra?: { ip?: string; device?: string; userAgent?: string; email?: string }): Promise<void> {
+  extra?: { ip?: string; device?: string; deviceName?: string; userAgent?: string; email?: string }): Promise<void> {
   const op = ownerPhone(env);
   const oe = ownerEmail(env);
   const subject = `DropOff security alert — ${type}`;
@@ -133,22 +170,28 @@ export async function alertOwner(env: Env, phone: string, type: string, severity
       ? 'Suggested response: if this was you, nothing to do. If you do not recognise it, change the password in-app immediately — every other session is revoked automatically.'
       : 'Suggested response: if this was not you, change the password in-app immediately and review active devices.';
 
-  const smsText = [
+  const ua = String(extra?.userAgent ?? '').trim();
+  const deviceName = String(extra?.deviceName ?? '').trim() || friendlyDevice(ua);
+  const deviceTag = extra?.device && extra.device !== 'unknown' ? ` (id …${extra.device.slice(-6)})` : '';
+  const deviceLine = `${deviceName}${deviceTag}`;
+
+  const alertLines = [
     `DropOff SECURITY ALERT (${severity.toUpperCase()})`,
     `Event: ${type}`,
     `Account: ${extra?.email ?? phone}`,
     `From IP: ${extra?.ip ?? 'unknown'}`,
-    `Device: ${extra?.device ?? 'unknown'}`,
-    `App: ${extra?.userAgent?.slice(0, 80) ?? 'unknown'}`,
+    `Device: ${deviceLine}`,
+    `App: ${ua.slice(0, 80) || 'unknown'}`,
     `When: ${new Date().toISOString()} (UTC)`,
     detail,
     suggestion,
-  ].join('\n');
-
+  ];
+  const smsText = alertLines.join('\n');
   const body = `${smsText}\nIf this wasn't you, change your password and revoke sessions immediately.`;
 
+  const smsWorthy = severity === 'high' || severity === 'critical';
   await Promise.allSettled([
-    op ? sendSms(env, op, smsText) : Promise.resolve({ sent: false }),
+    smsWorthy && op ? sendSms(env, op, smsText) : Promise.resolve({ sent: false }),
     oe ? sendMail(env, { to: oe, subject, html: `<pre>${body.replace(/\n/g, '<br>')}</pre>`, text: body }) : Promise.resolve({ sent: false }),
     sendToPhone(env, op, { title: `DropOff security: ${type}`, body: detail, data: { kind: 'security_alert', phone, severity } }),
   ]);
