@@ -518,6 +518,11 @@ class DropOffApi {
       // network_error is shown instead.
       post('/auth/request', {'phone': phone}, retries: 1);
 
+  /// Server-backed address book (owner 2026-11-18).
+  static Future<Map<String, dynamic>?> savedPlaces() => get('/places');
+  static Future<ApiResponse> rememberPlace(String label, {double? lat, double? lng}) =>
+      post('/places', {'label': label, 'lat': lat, 'lng': lng, 'source': 'app'});
+
   static Future<ApiResponse> verifyOtp(String phone, String code) async {
     final res = await post('/auth/verify', {'phone': phone, 'code': code});
     if (res.ok) token = res.body['token'] as String?;

@@ -319,6 +319,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                       child: switch (widget.stops![i]['kind']) {
                         'pickup' => const Icon(Icons.storefront, size: 24, color: Color(0xFF17855F)),
                         'depot' => const Icon(Icons.warehouse_outlined, size: 24, color: Color(0xFF10312A)),
+                        'saved' => const Icon(Icons.bookmark, size: 22, color: Color(0xFF7B5710)),
                         _ => CircleAvatar(
                             backgroundColor: const Color(0xFFF6B73C),
                             radius: 17,

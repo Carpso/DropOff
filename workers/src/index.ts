@@ -6357,6 +6357,41 @@ app.post('/webhooks/lipila', async (c) => {
 });
 
 /* ------------------------- seller subscription packs ----------------------- */
+/* ---------- server-backed address book (owner 2026-11-18) ------------- */
+// Places used in search / booking / GPS pinning are stored against the signed-in
+// phone. The app keeps an offline mirror; this is the shared, growing collection
+// that seeds the in-app map across sessions and devices.
+app.get('/places', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, label, lat, lng, source, used_at, created_at
+       FROM saved_places WHERE phone = ?1
+      ORDER BY used_at DESC, id DESC LIMIT 100`,
+  ).bind(phone).all();
+  return c.json({ places: results });
+});
+app.post('/places', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const label = String(b?.label ?? '').trim().slice(0, 180);
+  if (!label) return c.json({ error: 'label_required' }, 400);
+  const lat = Number(b?.lat);
+  const lng = Number(b?.lng);
+  const hasPin = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+  const source = String(b?.source ?? 'app').slice(0, 32);
+  await c.env.DB.prepare(
+    `INSERT INTO saved_places (phone, label, lat, lng, source, used_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+     ON CONFLICT(phone, label) DO UPDATE SET
+       lat = COALESCE(excluded.lat, saved_places.lat),
+       lng = COALESCE(excluded.lng, saved_places.lng),
+       source = excluded.source, used_at = datetime('now')`,
+  ).bind(phone, label, hasPin ? lat : null, hasPin ? lng : null, source).run();
+  return c.json({ ok: true, label });
+});
+
 app.get('/plans', async (c) => {
   // Driver economics are for drivers and admins only — sellers/customers get
   // the tier catalogue alone. Flags let the app hide dark features (the

@@ -260,16 +260,20 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           depot: (widget.otherLat != null && widget.otherIsDepot)
               ? LatLng(widget.otherLat!, widget.otherLng!)
               : null,
-          stops: (widget.otherLat != null && !widget.otherIsDepot)
-              ? [
-                  {
-                    'lat': widget.otherLat,
-                    'lng': widget.otherLng,
-                    'kind': 'pickup',
-                    if (widget.otherLabel != null) 'label': widget.otherLabel,
-                  },
-                ]
-              : null,
+          // Other half of the job + the growing saved-places collection, all
+          // as pins on our own map.
+          stops: [
+            if (widget.otherLat != null && !widget.otherIsDepot)
+              {
+                'lat': widget.otherLat,
+                'lng': widget.otherLng,
+                'kind': 'pickup',
+                if (widget.otherLabel != null) 'label': widget.otherLabel,
+              },
+            for (final p in _saved)
+              if (p.lat != null && p.lng != null)
+                {'lat': p.lat, 'lng': p.lng, 'kind': 'saved', 'label': p.label},
+          ],
         ),
         // Floating search — our own geocoder, biased to Lusaka.
         Positioned(

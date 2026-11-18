@@ -80,3 +80,11 @@ Dated engineering log of the fixes shipped 2026-11-18. Release train: 0.5.45+55 
 ### Release 0.5.47+57 contents
 - api.carpsosolutions.store default base URL; auth retry + truthful errors; self-contained create-account sheet; full-width vehicle fields; Promo tag visible in admin list; Auth/OTP bounded; deeplink hosts on the new domain.
 
+
+### Server-backed address book (owner 2026-11-18)
+- Migration 0066 adds `saved_places` (phone, label, lat/lng, source, used_at). Signed-in endpoints: GET/POST `/places`.
+- App keeps an offline mirror (SharedPreferences) and merges the server copy when signed in; every navigator pick, booking address and GPS pin is remembered on both.
+- In-app navigator shows saved places as a growing list and pins them on the DropOff map (`kind: 'saved'` bookmark markers); Photon results raised 6 to 20.
+- Seeded 10 real pickup addresses from existing jobs into the owner's account (never invented).
+- Three `prepaid_refund_failed` events from test jobs were VOIDED (note updated) — no real refund owed; financial rows retained.
+

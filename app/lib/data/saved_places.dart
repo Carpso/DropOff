@@ -1,11 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'dropoff_api.dart';
+
 /// Auto-growing place book (owner 2026-11-18): every place used in the map
 /// navigator, every pickup address used for a booking and every pinned GPS
-/// location is remembered here automatically — the list grows with the user
-/// instead of starting empty each time. Local-only, no account needed.
+/// location is remembered here automatically — locally for offline use AND on
+/// the server against the signed-in phone, so the collection grows across
+/// devices and can populate the in-app map.
 class SavedPlace {
   final String label;
   final double? lat;
@@ -25,7 +29,10 @@ class SavedPlace {
         '${j['label'] ?? ''}',
         lat: (j['lat'] as num?)?.toDouble(),
         lng: (j['lng'] as num?)?.toDouble(),
-        usedAt: (j['usedAt'] as num?)?.toInt() ?? 0,
+        usedAt: (j['usedAt'] as num?)?.toInt() ??
+            (j['used_at'] != null
+                ? DateTime.tryParse('${j['used_at']}Z')?.millisecondsSinceEpoch ?? 0
+                : 0),
       );
 }
 
@@ -34,20 +41,48 @@ class SavedPlaces {
   static const _cap = 60;
   static List<SavedPlace> _cache = const [];
 
-  static Future<List<SavedPlace>> load() async {
-    if (_cache.isNotEmpty) return _cache;
+  static Future<void> _persist() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_key);
-      if (raw != null && raw.isNotEmpty) {
-        final rows = jsonDecode(raw) as List;
-        _cache = rows
-            .map((r) => SavedPlace.fromJson(r as Map<String, dynamic>))
-            .where((p) => p.label.isNotEmpty)
-            .toList();
+      await prefs.setString(_key, jsonEncode(_cache.map((p) => p.toJson()).toList()));
+    } catch (_) {}
+  }
+
+  static Future<List<SavedPlace>> load() async {
+    if (_cache.isEmpty) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final raw = prefs.getString(_key);
+        if (raw != null && raw.isNotEmpty) {
+          final rows = jsonDecode(raw) as List;
+          _cache = rows
+              .map((r) => SavedPlace.fromJson(r as Map<String, dynamic>))
+              .where((p) => p.label.isNotEmpty)
+              .toList();
+        }
+      } catch (_) {
+        _cache = const [];
       }
-    } catch (_) {
-      _cache = const [];
+    }
+    // Merge the server copy when signed in — the address book follows the
+    // account, not just this phone.
+    if (DropOffApi.token != null) {
+      try {
+        final data = await DropOffApi.savedPlaces();
+        final rows = (data?['places'] as List?) ?? const [];
+        final merged = <String, SavedPlace>{
+          for (final p in _cache) p.label.toLowerCase(): p,
+        };
+        for (final r in rows) {
+          final sp = SavedPlace.fromJson(r as Map<String, dynamic>);
+          if (sp.label.isNotEmpty) merged[sp.label.toLowerCase()] = sp;
+        }
+        _cache = merged.values.toList()
+          ..sort((a, b) => b.usedAt.compareTo(a.usedAt));
+        await _persist();
+      } catch (_) {
+        // offline: the local mirror is still authoritative enough
+      }
     }
     return _cache;
   }
@@ -62,8 +97,11 @@ class SavedPlaces {
       final kept = places.where((p) => p.label.toLowerCase() != text.toLowerCase()).toList();
       kept.insert(0, SavedPlace(text, lat: lat, lng: lng, usedAt: DateTime.now().millisecondsSinceEpoch));
       _cache = kept.take(_cap).toList();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_key, jsonEncode(_cache.map((p) => p.toJson()).toList()));
+      await _persist();
+      // Server write is best-effort; the local book is already updated.
+      if (DropOffApi.token != null) {
+        unawaited(DropOffApi.rememberPlace(text, lat: lat, lng: lng));
+      }
     } catch (_) {
       // best-effort: the app keeps working without the address book
     }
