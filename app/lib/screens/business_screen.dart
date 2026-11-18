@@ -70,7 +70,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
   }
 
   bool _inFlight(Map<String, dynamic> job) {
-    final status = '${job['status'] ?? job['last_event'] ?? ''}';
+    final status = '${job['status'] ?? job['last_event'] ?? ''}'.toLowerCase();
+    // Canceled jobs belong to sender HISTORY, never the active order list.
+    if (status.contains('cancel') || status == 'deleted' || status == 'expired') return false;
     return status != 'delivered' && status != 'ready_for_collection' && status != 'collected';
   }
 

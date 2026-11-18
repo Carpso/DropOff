@@ -70,7 +70,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
     if (!mounted) return;
     final parcels = (((data?['parcels'] as List?) ?? const []))
         .cast<Map<String, dynamic>>()
-        .where((p) => '${p['status'] ?? ''}' != 'cancelled')
+        .where((p) => !'${p['status'] ?? ''}'.toLowerCase().contains('cancel'))
         .take(10)
         .toList();
     setState(() => _incoming = parcels);

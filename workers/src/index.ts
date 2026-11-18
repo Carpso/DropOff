@@ -4025,7 +4025,7 @@ app.get('/track/incoming', async (c) => {
        LEFT JOIN couriers co ON co.id = j.courier_id
        LEFT JOIN tracking_tokens t ON t.job_id = j.id
       WHERE j.recipient_phone = ?1
-         AND COALESCE(j.status, '') != 'deleted'
+         AND COALESCE(j.status, '') NOT IN ('deleted', 'canceled', 'cancelled')
       ORDER BY j.id DESC LIMIT ?2`,
   ).bind(phone, limit).all();
   const APP_URL = (c.env.APP_URL ?? '').replace(/\/$/, '');
@@ -7249,7 +7249,7 @@ app.get('/rider/queue', async (c) => {
             cb.lat AS branch_lat, cb.lng AS branch_lng
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
         LEFT JOIN courier_branches cb ON cb.courier_id = co.id AND cb.name = j.branch AND cb.active = 1
-      WHERE j.rider_id = ?1 AND j.status NOT IN ('delivered', 'ready_for_collection')
+      WHERE j.rider_id = ?1 AND j.status NOT IN ('delivered', 'ready_for_collection', 'canceled', 'cancelled', 'deleted')
       ORDER BY j.created_at`,
   ).bind(rider.id).all<any>();
 
