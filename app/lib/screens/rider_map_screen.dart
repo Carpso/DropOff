@@ -55,6 +55,15 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
           ? LatLng((_live!['lat'] as num).toDouble(), (_live!['lng'] as num).toDouble())
           : null;
 
+  /// END of the visible leg: the courier's depot branch (real coordinates the
+  /// live API now serves — jobs carry no destination GPS). Shown as the
+  /// warehouse pin so the tracking map reads start → rider → end (owner
+  /// 2026-11-18: "show start and end of route to pick up and drop off").
+  LatLng? get _depot =>
+      (_live?['depot_lat'] != null && _live?['depot_lng'] != null)
+          ? LatLng((_live!['depot_lat'] as num).toDouble(), (_live!['depot_lng'] as num).toDouble())
+          : null;
+
   RouteResult? _route;
   LatLng? _routeOrigin;
 
@@ -89,6 +98,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
           RiderMap(
             pickup: _pickup,
             rider: _rider,
+            depot: _depot,
             route: _route?.points ??
                 ((_rider != null && _pickup != null) ? [_rider!, _pickup!] : null),
             routeIsStraightLine: _route == null,
