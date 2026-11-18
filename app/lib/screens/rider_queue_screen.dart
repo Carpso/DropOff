@@ -286,9 +286,26 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final label = picked
         ? 'Depot — ${s['courier'] ?? 'DropOff'}'
         : '${s['ref'] ?? 'Stop'} — $addr'.trim();
+    // Whole-job context on the map (owner 2026-11-18 "fix the rider map just
+    // like the sender map tracking"): heading to the sender shows the depot
+    // pin too, heading to the depot shows the sender's stop too.
+    final otherLat = picked
+        ? (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble()
+        : (s['depot_lat'] as num?)?.toDouble();
+    final otherLng = picked
+        ? (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble()
+        : (s['depot_lng'] as num?)?.toDouble();
     if (lat != null && lng != null) {
       Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => InAppNavigatorScreen(destLat: lat, destLng: lng, label: label),
+        builder: (_) => InAppNavigatorScreen(
+          destLat: lat,
+          destLng: lng,
+          label: label,
+          destIsDepot: picked,
+          otherLat: otherLat,
+          otherLng: otherLng,
+          otherIsDepot: !picked,
+        ),
       ));
       return;
     }
@@ -311,6 +328,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           destLat: hit.point.latitude,
           destLng: hit.point.longitude,
           label: label,
+          destIsDepot: picked,
+          otherLat: otherLat,
+          otherLng: otherLng,
+          otherIsDepot: !picked,
         ),
       ));
       return;

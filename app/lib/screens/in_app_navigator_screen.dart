@@ -17,11 +17,28 @@ class InAppNavigatorScreen extends StatefulWidget {
   final double destLng;
   final String label;
 
+  /// True when the destination is a DEPOT (rider navigating post-collection):
+  /// the pin renders the warehouse badge, not the storefront one.
+  final bool destIsDepot;
+
+  /// The other half of the job (sender's stop when heading to the depot, depot
+  /// when heading to the sender) — drawn as a context pin so the rider sees
+  /// the whole job on one map, like the sender's tracking view does.
+  final double? otherLat;
+  final double? otherLng;
+  final bool otherIsDepot;
+  final String? otherLabel;
+
   const InAppNavigatorScreen({
     super.key,
     required this.destLat,
     required this.destLng,
     required this.label,
+    this.destIsDepot = false,
+    this.otherLat,
+    this.otherLng,
+    this.otherIsDepot = false,
+    this.otherLabel,
   });
 
   @override
@@ -229,9 +246,25 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
       body: Stack(children: [
         RiderMap(
           pickup: _dest,
+          pickupIsDepot: widget.destIsDepot,
           rider: me,
           route: displayLine,
           routeIsStraightLine: isStraight,
+          // The other half of the job as context: depot gets the full
+          // warehouse pin, a sender stop gets the small storefront badge.
+          depot: (widget.otherLat != null && widget.otherIsDepot)
+              ? LatLng(widget.otherLat!, widget.otherLng!)
+              : null,
+          stops: (widget.otherLat != null && !widget.otherIsDepot)
+              ? [
+                  {
+                    'lat': widget.otherLat,
+                    'lng': widget.otherLng,
+                    'kind': 'pickup',
+                    if (widget.otherLabel != null) 'label': widget.otherLabel,
+                  },
+                ]
+              : null,
         ),
         // Floating search — our own geocoder, biased to Lusaka.
         Positioned(

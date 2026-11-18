@@ -17,6 +17,11 @@ class RiderMap extends StatefulWidget {
   final LatLng? rider;
   final LatLng? depot;
 
+  /// True when [pickup] is actually a DEPOT (rider navigating post-collection):
+  /// renders the warehouse badge instead of the storefront one, so the pin
+  /// never lies about what the stop is.
+  final bool pickupIsDepot;
+
   /// Optional route to draw as a polyline (e.g. rider → pickup → drop-off).
   /// Road-following when the caller resolved one (OSRM); a straight line is
   /// fine for overview but the caller must label it as such.
@@ -34,6 +39,7 @@ class RiderMap extends StatefulWidget {
     required this.pickup,
     required this.rider,
     this.depot,
+    this.pickupIsDepot = false,
     this.route,
     this.routeIsStraightLine = false,
     this.stops,
@@ -56,10 +62,16 @@ class RiderMap extends StatefulWidget {
   State<RiderMap> createState() => _RiderMapState();
 }
 
-class _RiderMapState extends State<RiderMap> {
+class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin {
   late final Future<PmTilesVectorTileProvider> _provider =
       PmTilesVectorTileProvider.fromSource(RiderMap.tileUrl);
   final MapController _mapCtl = MapController();
+
+  // BIKE PULSE (owner 2026-11-18: "make the bike icon more 3d or lively"): a
+  // repeating radar ring behind the rider badge — the map reads as live even
+  // between the 12 s fixes.
+  late final AnimationController _pulse =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..repeat();
 
   // COMPASS (owner directive 2026-11-17: "I kept turning the phone in order
   // to track my north of the route direction"): a live needle badge that
@@ -81,6 +93,7 @@ class _RiderMapState extends State<RiderMap> {
   @override
   void dispose() {
     _compassSub?.cancel();
+    _pulse.dispose();
     super.dispose();
   }
 
@@ -127,6 +140,81 @@ class _RiderMapState extends State<RiderMap> {
           ),
         ),
       );
+
+  /// The rider's bike badge — 3D and alive (owner 2026-11-18): a radar ring
+  /// that breathes outwards behind a gradient dome with rim light and a
+  /// ground shadow, so the pin reads as lifted off the map, not painted on.
+  Widget _riderMarker() {
+    const amber = Color(0xFFE8A020);
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, _) {
+        final t = Curves.easeOut.transform(_pulse.value);
+        return SizedBox(
+          width: 76,
+          height: 76,
+          child: Stack(alignment: Alignment.center, children: [
+            // Expanding radar ring — fades as it grows.
+            Transform.scale(
+              scale: 0.55 + 0.85 * t,
+              child: Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: amber.withValues(alpha: (1 - t) * 0.6), width: 3),
+                ),
+              ),
+            ),
+            // Second, slower echo ring for depth.
+            Transform.scale(
+              scale: 0.4 + 0.85 * ((t + 0.5) % 1.0),
+              child: Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: amber.withValues(alpha: (1 - (t + 0.5) % 1.0) * 0.35), width: 2),
+                ),
+              ),
+            ),
+            // Ground shadow — the "3D lift" cue.
+            Positioned(
+              bottom: 8,
+              child: Container(
+                width: 30,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.30),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+              ),
+            ),
+            // The dome: amber gradient sphere, white rim, soft drop shadow.
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFFFFD268), amber, Color(0xFFB97A0E)],
+                  stops: [0.0, 0.55, 1.0],
+                ),
+                border: Border.all(color: Colors.white, width: 2.4),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 3)),
+                  BoxShadow(color: Color(0x2EE8A020), blurRadius: 14, spreadRadius: 2),
+                ],
+              ),
+              child: const Icon(Icons.two_wheeler, size: 25, color: Color(0xFF10312A)),
+            ),
+          ]),
+        );
+      },
+    );
+  }
 
   /// Compass tap → north-up. flutter_map's rotate(0) is due-north; guarded —
   /// the camera may not be ready yet, in which case the map is already north.
@@ -190,7 +278,12 @@ class _RiderMapState extends State<RiderMap> {
             options: MapOptions(
               initialCenter: center,
               initialZoom: 13.5,
-              initialCameraFit: bounds == null ? null : CameraFit.bounds(bounds: bounds),
+              // Zoom discipline (owner 2026-11-18 "why is the rider map
+              // different"): a tight fit — rider standing on the stop — used
+              // to zoom past the basemap's detail level and render a bare
+              // area. Capped, so the rider map always reads like the sender's
+              // tracking view.
+              initialCameraFit: bounds == null ? null : CameraFit.bounds(bounds: bounds, maxZoom: 16.5),
             ),
             children: [
               VectorTileLayer(
@@ -209,7 +302,9 @@ class _RiderMapState extends State<RiderMap> {
                     point: widget.pickup!,
                     width: 56,
                     height: 56,
-                    child: const Icon(Icons.storefront, size: 36, color: Color(0xFF17855F)),
+                    child: widget.pickupIsDepot
+                        ? const Icon(Icons.warehouse_outlined, size: 36, color: Color(0xFF10312A))
+                        : const Icon(Icons.storefront, size: 36, color: Color(0xFF17855F)),
                   ),
                 if (widget.stops != null)
                   for (var i = 0; i < widget.stops!.length; i++)
@@ -218,11 +313,18 @@ class _RiderMapState extends State<RiderMap> {
                           (widget.stops![i]['lng'] as num).toDouble()),
                       width: 34,
                       height: 34,
-                      child: CircleAvatar(
-                        backgroundColor: const Color(0xFFF6B73C),
-                        radius: 17,
-                        child: Text('${i + 1}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF123C32))),
-                      ),
+                      // Context pins carry a kind → a small icon badge (the
+                      // "other half" of the job the rider isn't heading to
+                      // right now); unkinded stops stay numbered (batch stops).
+                      child: switch (widget.stops![i]['kind']) {
+                        'pickup' => const Icon(Icons.storefront, size: 24, color: Color(0xFF17855F)),
+                        'depot' => const Icon(Icons.warehouse_outlined, size: 24, color: Color(0xFF10312A)),
+                        _ => CircleAvatar(
+                            backgroundColor: const Color(0xFFF6B73C),
+                            radius: 17,
+                            child: Text('${i + 1}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF123C32))),
+                          ),
+                      },
                     ),
                 if (widget.depot != null)
                   Marker(
@@ -234,9 +336,9 @@ class _RiderMapState extends State<RiderMap> {
                 if (widget.rider != null)
                   Marker(
                     point: widget.rider!,
-                    width: 56,
-                    height: 56,
-                    child: const Icon(Icons.two_wheeler, size: 38, color: Color(0xFFE8A020)),
+                    width: 76,
+                    height: 76,
+                    child: _riderMarker(),
                   ),
               ]),
             ],
