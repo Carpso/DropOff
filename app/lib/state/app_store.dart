@@ -170,6 +170,7 @@ class AppStore extends ChangeNotifier {
     _deviceId = dev;
     _shareLocationOn = preferences.getBool(_shareLocationKey) ?? true;
     DropOffApi.installDeviceId(dev);
+    unawaited(DropOffApi.resolveDeviceName());
     unawaited(refreshCourierAvailability());
     if (!remember) {
       // Session-only login: drop any persisted credential on cold start.

@@ -53,6 +53,7 @@ class RiderQueueScreen extends StatefulWidget {
 
 class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _data;
+  Map<String, dynamic>? _stats; // TODAY · LIVE card (rider daily stats)
   bool _loading = true;
   String? _busyRef;
   Timer? _pollTimer;
@@ -115,6 +116,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final data = await DropOffApi.riderQueue(widget.phone);
     if (!mounted) return;
     setState(() { _data = data; _loading = false; });
+    // Stats ride the same 20 s poll — the card stays live with the queue.
+    final stats = await DropOffApi.riderStats(widget.phone);
+    if (!mounted) return;
+    setState(() => _stats = (stats?['stats'] as Map<String, dynamic>?));
   }
 
   /* ----------------------- live clock + arrival GPS ----------------------- */
@@ -1020,31 +1025,38 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   onRefresh: _load,
                   child: LayoutBuilder(builder: (ctx, cons) => SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    child: SizedBox(
-                      height: cons.maxHeight,
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(32),
-                          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            const Icon(Icons.assignment_turned_in_outlined, size: 46, color: AppColors.muted),
-                            const SizedBox(height: 14),
-                            const Text('No rides on your queue yet',
-                                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Slot batches land here the moment ops assigns you a run — you do not have to book anything. Pull down or tap refresh to sync.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: AppColors.muted, height: 1.5),
+                    child: Column(
+                      children: [
+                        // The day's numbers survive an empty queue — a rider
+                        // who has delivered everything still sees the score.
+                        if (_stats != null) _statsCard(),
+                        SizedBox(
+                          height: cons.maxHeight - 160,
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                const Icon(Icons.assignment_turned_in_outlined, size: 46, color: AppColors.muted),
+                                const SizedBox(height: 14),
+                                const Text('No rides on your queue yet',
+                                    style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'Slot batches land here the moment ops assigns you a run — you do not have to book anything. Pull down or tap refresh to sync.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: AppColors.muted, height: 1.5),
+                                ),
+                                const SizedBox(height: 20),
+                                OutlinedButton.icon(
+                                  onPressed: _load,
+                                  icon: const Icon(Icons.refresh),
+                                  label: const Text('Check for new rides'),
+                                ),
+                              ]),
                             ),
-                            const SizedBox(height: 20),
-                            OutlinedButton.icon(
-                              onPressed: _load,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Check for new rides'),
-                            ),
-                          ]),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   )),
                 )
@@ -1053,12 +1065,79 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   child: ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 90),
-                    itemCount: batches.length,
-                    itemBuilder: (context, i) => _batchCard(batches[i]),
+                    itemCount: batches.length + (_stats != null ? 1 : 0),
+                    itemBuilder: (context, i) {
+                      if (_stats != null && i == 0) return _statsCard();
+                      return _batchCard(batches[_stats != null ? i - 1 : i]);
+                    },
                   ),
                 ),
     );
   }
+
+  /// TODAY · LIVE — the rider's daily scoreboard (owner 2026-11-18): all
+  /// assigned, still waiting to be picked up, in hand, done, parcels moved
+  /// and fees earned — bucketed by the rider's CAT day server-side and
+  /// refreshed with the same 20 s poll as the queue.
+  Widget _statsCard() {
+    final s = _stats ?? const {};
+    final total = (s['total'] as num?)?.toInt() ?? 0;
+    final waiting = (s['waiting'] as num?)?.toInt() ?? 0;
+    final picked = (s['picked'] as num?)?.toInt() ?? 0;
+    final delivered = (s['delivered'] as num?)?.toInt() ?? 0;
+    final parcels = (s['parcels'] as num?)?.toInt() ?? 0;
+    final earned = (s['earned_zmw'] as num?)?.toDouble() ?? 0;
+    if (total == 0 && delivered == 0) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF10312A),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.forest.withValues(alpha: 0.5)),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.insights, size: 16, color: AppColors.amber),
+            const SizedBox(width: 7),
+            Text('TODAY · LIVE',
+                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, letterSpacing: 1.4,
+                    color: Colors.white.withValues(alpha: 0.85))),
+            const Spacer(),
+            Text('K${earned.toStringAsFixed(0)}',
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: AppColors.amber)),
+            const SizedBox(width: 4),
+            const Text('earned', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white70)),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            _statTile('$total', 'ALL', Colors.white),
+            _statTile('$waiting', 'TO PICK UP', waiting > 0 ? AppColors.amber : Colors.white70),
+            _statTile('$picked', 'IN HAND', const Color(0xFF1F9E6B)),
+            _statTile('$delivered', 'DONE', Colors.white),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Icon(Icons.circle, size: 7, color: Colors.greenAccent.withValues(alpha: 0.9)),
+            const SizedBox(width: 6),
+            Text('$parcels parcels · live every 20 s',
+                style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.6), fontWeight: FontWeight.w600)),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _statTile(String value, String label, Color color) => Expanded(
+        child: Column(children: [
+          Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: color, height: 1)),
+          const SizedBox(height: 3),
+          Text(label,
+              style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.7,
+                  color: Colors.white.withValues(alpha: 0.55)), textAlign: TextAlign.center),
+        ]),
+      );
 
   Widget _batchCard(Map<String, dynamic> b) {
     final dest = b['destination'] as Map<String, dynamic>?;

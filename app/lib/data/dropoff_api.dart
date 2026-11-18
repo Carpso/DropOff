@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -177,11 +178,33 @@ class DropOffApi {
   /// Called by AppStore on init once the stable device id is known.
   static void installDeviceId(String id) => _deviceId = id;
 
+  static String? _deviceName;
+
+  /// Resolves the REAL device label once (manufacturer · model · OS, via
+  /// device_info_plus) for the X-Device-Name header — security alerts show
+  /// the actual handset instead of a fingerprint hash (owner 2026-11-18).
+  static Future<void> resolveDeviceName() async {
+    if (_deviceName != null) return;
+    try {
+      final info = await DeviceInfoPlugin().deviceInfo;
+      if (info is AndroidDeviceInfo) {
+        _deviceName = '${info.manufacturer} ${info.model} · Android ${info.version.release}';
+      } else if (info is IosDeviceInfo) {
+        _deviceName = 'iPhone · iOS ${info.systemVersion}';
+      } else {
+        _deviceName = 'DropOff device';
+      }
+    } catch (_) {
+      _deviceName = 'DropOff device';
+    }
+  }
+
   static Map<String, String> get _headers => {
       'Content-Type': 'application/json',
       if (apiKey.isNotEmpty) 'X-Api-Key': apiKey,
       if (token != null) 'Authorization': 'Bearer $token',
       if (_deviceId != null && _deviceId!.isNotEmpty) 'X-Device-Id': _deviceId!,
+      if (_deviceName != null && _deviceName!.isNotEmpty) 'X-Device-Name': _deviceName!,
     };
 
   static Map<String, String> get _adminHeaders => {
@@ -950,6 +973,13 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> riderQueue(String? phone) {
     final q = phone == null || phone.isEmpty ? '' : '?phone=$phone';
     return get('/rider/queue$q');
+  }
+
+  /// Live daily stats for the task-queue card: {stats: {total, waiting,
+  /// picked, delivered, parcels, earned_zmw}} for the rider's CAT day.
+  static Future<Map<String, dynamic>?> riderStats(String? phone) {
+    final q = phone == null || phone.isEmpty ? '' : '?phone=$phone';
+    return get('/rider/stats$q');
   }
 
   /// Rider self-remit and the rider "cash float" list were removed with the

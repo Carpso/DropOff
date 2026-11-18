@@ -4,7 +4,7 @@
 name: dropoff
 description: DropOff - home or shop pickup to your chosen Zambian courier depot.
 publish_to: "none"
-version: 0.5.43+53
+version: 0.5.44+54
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -17,6 +17,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   url_launcher: ^6.3.1
   geolocator: ^13.0.2
+  device_info_plus: ^11.0.0
   image_picker: ^1.1.2
   flutter_map: ^8.3.2
   vector_map_tiles_pmtiles: ^1.5.2

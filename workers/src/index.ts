@@ -6852,6 +6852,36 @@ function hmOf(minutes: number): string {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 }
 
+// Daily live stats for the rider's task-queue card (owner 2026-11-18): the
+// rider's day runs on CAT (UTC+2), so jobs bucket by the CAT calendar day of
+// their scheduled sweep (pickup_at, falling back to created_at). Canceled
+// jobs never count; earnings are the rider fees on legs already done.
+app.get('/rider/stats', async (c) => {
+  let phone = c.get('phone') ?? '';
+  if (c.get('role') === 'ops') {
+    try { phone = normalizeZmPhone(c.req.query('phone') ?? (phone || '')); }
+    catch { return c.json({ error: 'invalid_phone' }, 400); }
+  }
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const rider = await c.env.DB.prepare(
+    'SELECT id FROM riders WHERE phone = ?1 AND active = 1',
+  ).bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider not found' }, 404);
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN status = 'rider_assigned' THEN 1 ELSE 0 END), 0) AS waiting,
+            COALESCE(SUM(CASE WHEN status IN ('picked_up','at_depot','departed','arrived') THEN 1 ELSE 0 END), 0) AS picked,
+            COALESCE(SUM(CASE WHEN status IN ('delivered','ready_for_collection') THEN 1 ELSE 0 END), 0) AS delivered,
+            COALESCE(SUM(parcels), 0) AS parcels,
+            COALESCE(SUM(CASE WHEN status IN ('delivered','ready_for_collection') THEN rider_fee_zmw ELSE 0 END), 0) AS earned_zmw
+       FROM jobs
+      WHERE rider_id = ?1
+        AND COALESCE(status,'') NOT IN ('canceled','cancelled','deleted')
+        AND date(COALESCE(pickup_at, created_at), '+2 hours') = date('now', '+2 hours')`,
+  ).bind(rider.id).first<any>();
+  return c.json({ stats: row ?? {} });
+});
+
 app.get('/rider/queue', async (c) => {
   let phone = c.get('phone') ?? '';
   if (c.get('role') === 'ops') {
