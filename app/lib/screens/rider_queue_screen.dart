@@ -9,6 +9,7 @@ import 'dart:async';
 
 import '../ui/app_toast.dart';
 import '../widgets/help_sheet.dart';
+import '../widgets/photo_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
@@ -1048,6 +1049,14 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 setDialog(() => podUrl = url);
               },
             ),
+          if (podUrl != null) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              PhotoPreview(pathOrUrl: podUrl!, label: 'PROOF', size: 96),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('Check this is the parcel you handed over before you confirm.', style: AppType.caption)),
+            ]),
+          ],
           ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Cancel')),

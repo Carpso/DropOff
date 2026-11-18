@@ -17,6 +17,7 @@ import 'package:image_picker/image_picker.dart';
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../data/map_services.dart';
+import '../widgets/photo_preview.dart';
 import '../data/saved_places.dart';
 import '../data/analytics_service.dart';
 import '../main.dart';
@@ -102,6 +103,7 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _saving = false;
   bool _aiBusy = false;
   String? _parcelPhotoUrl;
+  String? _parcelPhotoPath;
   bool _parcelPhotoUploading = false;
   String? _tidyPinLabel; // '✨ Tidy pinned ≈ Kabwata — bands apply (±1 km)'
   String? _plusCode;
@@ -411,6 +413,8 @@ class _BookingScreenState extends State<BookingScreen> {
     if (source == null || !mounted) return;
     final picked = await ImagePicker().pickImage(source: source, imageQuality: 82, maxWidth: 1600);
     if (picked == null) return;
+    // Show the shot immediately — before the upload finishes.
+    setState(() => _parcelPhotoPath = picked.path);
     setState(() => _parcelPhotoUploading = true);
     final bytes = await picked.readAsBytes();
     final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'parcel.jpg', kind: 'kyc');
@@ -1011,6 +1015,21 @@ class _BookingScreenState extends State<BookingScreen> {
               : Icon(_parcelPhotoUrl == null ? Icons.add_a_photo_outlined : Icons.check_circle, color: _parcelPhotoUrl == null ? null : AppColors.success),
           label: Text(_parcelPhotoUrl == null ? 'Add parcel photo (recommended)' : 'Parcel photo attached'),
         ),
+        if (_parcelPhotoUrl != null || _parcelPhotoPath != null) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            PhotoPreview(
+              pathOrUrl: _parcelPhotoUrl ?? _parcelPhotoPath!,
+              label: 'PARCEL',
+              onRemove: () => setState(() {
+                _parcelPhotoUrl = null;
+                _parcelPhotoPath = null;
+              }),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('This is the photo the rider sees at pickup — check it before you book.', style: AppType.caption)),
+          ]),
+        ],
         const Padding(
           padding: EdgeInsets.only(top: 4, bottom: 4),
           child: Row(children: [
