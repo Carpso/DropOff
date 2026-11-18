@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -57,6 +58,8 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   Timer? _timer;
   Timer? _searchDebounce;
   final _search = TextEditingController();
+  final FlutterTts _tts = FlutterTts();
+  String? _spokenRouteKey;
   final _searchFocus = FocusNode();
   bool _searchBusy = false;
   List<MapSearchResult> _results = const [];
@@ -65,6 +68,9 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   @override
   void initState() {
     super.initState();
+    _tts.setLanguage('en-US');
+    _tts.setSpeechRate(0.95);
+    _tts.setVolume(1.0);
     _destPos = LatLng(widget.destLat, widget.destLng);
     _destLabel = widget.label;
     _fix();
@@ -76,6 +82,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   void dispose() {
     _timer?.cancel();
     _searchDebounce?.cancel();
+    unawaited(_tts.stop());
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -115,6 +122,17 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
   LatLng? _lastRouteFix;
 
+  void _speakTurns(RouteResult? route) {
+    final steps = route?.steps ?? const <RouteStep>[];
+    if (steps.isEmpty) return;
+    final key = steps.map((s) => '${s.distanceMetres.round()}:${s.instruction}').join('|');
+    if (key == _spokenRouteKey) return; // don't repeat on every 10 s GPS tick
+    _spokenRouteKey = key;
+    final say = steps.take(6).map((s) =>
+        'In ${s.distanceMetres.round()} metres, ${s.instruction}.').join(' Then ');
+    unawaited(_tts.speak('Route ready. $say').catchError((_) => 0));
+  }
+
   Future<void> _refreshRoute() async {
     final me = _me;
     if (me == null || _routeLoading) return;
@@ -127,6 +145,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
       _routeLoading = false;
       _lastRouteFix = me;
     });
+    _speakTurns(route);
   }
 
   void _onSearchChanged(String value) {
@@ -137,10 +156,15 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     }
     _searchDebounce = Timer(const Duration(milliseconds: 400), () async {
       setState(() => _searchBusy = true);
+      // Saved places answer instantly and offline — never an empty box.
+      final q = value.trim().toLowerCase();
+      final local = _saved.where((p) => p.label.toLowerCase().contains(q)).map((p) =>
+          MapSearchResult(p.label, LatLng(p.lat ?? _destPos.latitude, p.lng ?? _destPos.longitude))).toList();
       final hits = await MapServices.search(value, bias: _me);
       if (!mounted) return;
+      final seen = <String>{};
       setState(() {
-        _results = hits;
+        _results = [...local, ...hits].where((r) => seen.add(r.label.toLowerCase())).toList();
         _searchBusy = false;
       });
     });

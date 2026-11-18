@@ -2055,6 +2055,10 @@ app.post('/jobs', async (c) => {
     const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class)
       ? b.vehicle_class : 'motorcycle';
     const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, (b.parcel_size ?? b.weight_class) as string | undefined)));
+    // ROUND TRIP = TWO BILLABLE RIDES (owner 2026-11-18): out to the depot and
+    // back to the sender. Physical `parcels` count stays 1.
+    const isRoundTrip = b.round_trip === 1 || b.round_trip === true;
+    const billableRides = parcels * (isRoundTrip ? 2 : 1);
     let riderFee = baseRiderFee(fromCity, Number(b.pickup_lat ?? 0), Number(b.pickup_lng ?? 0), vehicleClass);
     let packInclusion: 'pack' | 'payg' | 'none' = 'none';
     let planUsed = 0;
@@ -2071,7 +2075,7 @@ app.post('/jobs', async (c) => {
       const plan = packs[activeSub.tier as PlanTier];
       if (plan && activeSub.period_start && activeSub.period_end) {
         const used = await c.env.DB.prepare(
-          `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
+          `SELECT COALESCE(SUM(parcels * COALESCE(billable_rides, 1)), 0) AS n FROM jobs j
             WHERE sender_phone = ?1
             AND created_at >= ?2 AND created_at < ?3
             AND status NOT IN ('cancelled', 'canceled')
@@ -2091,7 +2095,7 @@ app.post('/jobs', async (c) => {
         planCap = cycleDays <= 1
           ? (plan.parcels_per_day || plan.parcels_per_month)
           : (plan.parcels_per_month || plan.parcels_per_day);
-        if (planUsed + parcels <= planCap) {
+        if (planUsed + billableRides <= planCap) {
           riderFee = plan.rider_fee_zmw;
           packInclusion = 'pack';
         } else {
@@ -2148,10 +2152,12 @@ app.post('/jobs', async (c) => {
 
     // Round trip: if the parcel can't travel on, the rider returns it from the
     // depot back to the seller/sender's door (second priced leg, no re-booking).
-    const isRoundTrip = b.round_trip === 1 || b.round_trip === true;
     let returnLegFee = 0;
     if (isRoundTrip) {
-      returnLegFee = Math.max(0, Number(b.return_leg_fee_zmw ?? 0));
+      // Plan packs cover BOTH rides (2 slots deducted); PAYG pays twice -
+      // when the client sends no return price, it costs the outbound leg.
+      returnLegFee = packInclusion === 'pack' ? 0 : Math.max(0, Number(b.return_leg_fee_zmw ?? 0));
+      if (returnLegFee <= 0 && packInclusion !== 'pack') returnLegFee = riderFee;
       if (!b.return_city) return c.json({ error: 'return_city required for round trips' }, 400);
     }
 
@@ -2284,10 +2290,10 @@ app.post('/jobs', async (c) => {
          leg2_processing_fee_zmw, total_zmw,
          promo_code, promo_discount_zmw,
          pickup_time, pickup_window, pay_method,
-         round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile,
+         round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile, billable_rides,
          parcels, vehicle_class, branch, from_city, parcel_photo_url,
          declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42)`,
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43)`,
     ).bind(
       ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -2580,13 +2586,14 @@ app.post('/collections', async (c) => {
   let planInclusion: 'pack' | 'payg' | 'none' = 'none';
   let planUsed = 0;
   let planCap = 0;
+  const billableRides = parcels; // collections are single-leg
   if (activeSub) {
     const planCatalogue = await plans(c.env.DB, { forExistingSubscribers: true });
     const overageOn = flagOn(await getSetting(c.env.DB, 'overage_discount_enabled'));
     const plan = planCatalogue[activeSub.tier as PlanTier];
     if (plan && activeSub.period_start && activeSub.period_end) {
       const used = await c.env.DB.prepare(
-        `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
+        `SELECT COALESCE(SUM(parcels * COALESCE(billable_rides, 1)), 0) AS n FROM jobs j
             WHERE sender_phone = ?1
             AND created_at >= ?2 AND created_at < ?3
             AND status NOT IN ('cancelled', 'canceled')
@@ -2601,7 +2608,7 @@ app.post('/collections', async (c) => {
       planCap = cycleDays <= 1
         ? (plan.parcels_per_day || plan.parcels_per_month)
         : (plan.parcels_per_month || plan.parcels_per_day);
-      if (planUsed + parcels <= planCap) {
+      if (planUsed + billableRides <= planCap) {
         riderFee = plan.rider_fee_zmw;
         planInclusion = 'pack';
       } else {
@@ -3499,9 +3506,11 @@ app.post('/jobs/:ref/events', async (c) => {
       // override for genuine mis-submissions.
       if (!override) {
         const locked = (cur: unknown) => typeof cur === 'string' && cur.trim().length > 0 && cur.trim() !== photo;
-        if (locked(job.dropoff_photo_url)) return c.json({
+        // Stage-specific: a pickup photo lives in dropoff_photo_url, so it
+        // must NOT block the later depot drop (different photo/stage).
+        if (stage !== 'pickup' && stage !== 'delivery' && locked(job.dropoff_photo_url)) return c.json({
           error: 'photo_locked',
-          detail: 'Lodgement photo already on file — the photo is the evidence. Ops can correct a genuine mis-submission.',
+          detail: 'Lodgement photo already on file - ops can correct a genuine mis-submission.',
         }, 409);
         if (stage === 'pickup' && status === 'picked_up' && locked(job.pod_pickup_url)) return c.json({
           error: 'photo_locked',
@@ -7076,7 +7085,8 @@ async function nearestAvailableRider(
   const riders = await env.DB.prepare(
     `SELECT id, phone, full_name, vehicle, last_lat, last_lng, last_seen_at, status, active, capacity, current_load, photo_url
        FROM riders WHERE active = 1 AND status IN ('available', 'on_route')
-        AND verification_status = 'verified'`
+         AND verification_status = 'verified'
+         AND last_seen_at > datetime('now', '-15 minutes')`
   ).all<any>();
   // Freshness tiers (owner directive: algorithm picks riders actually available
   // NOW — never a rider coasting on a stale CBD default):
@@ -7315,9 +7325,17 @@ app.get('/rider/queue', async (c) => {
   }
 
   const depot = { lat: -15.4255, lng: 28.2805 };
+  // GROUP BY DEPOT (owner 2026-11-18): parcels headed to the same depot
+  // ride together as one pack inside the time slot.
   const batches = Object.entries(buckets)
     .filter(([, jobs]) => jobs.length > 0)
-    .map(([slot, jobs]) => {
+    .flatMap(([slot, jobs]) => {
+      const byDepot = new Map<string, any[]>();
+      for (const j of jobs) {
+        const k = String(j.courier_id ?? j.depot_name ?? j.courier_name ?? 'depot');
+        const arr = byDepot.get(k) ?? []; arr.push(j); byDepot.set(k, arr);
+      }
+      return [...byDepot.entries()].map(([depotKey, groupJobs]) => {
       // Slot metadata (the TOMORROW roll-up reuses the 06:00 timings).
       const meta = slot === TOMORROW_SLOT ? SWEEP_SLOTS['06:00'] : SWEEP_SLOTS[slot];
       const slotLabel = slot === TOMORROW_SLOT ? 'TOMORROW 06:00—07:30 SLOT' : meta.label;
@@ -7390,7 +7408,7 @@ app.get('/rider/queue', async (c) => {
         counts.set(key, e);
       }
       const dest = [...counts.values()].sort((a, b) => b.n - a.n)[0];
-      const totalParcels = jobs.reduce((s, j) => s + Number(j.parcels ?? 1), 0);
+      const totalParcels = groupJobs.reduce((s, j) => s + Number(j.parcels ?? 1), 0);
       return {
         slot,
         label: slotLabel,
@@ -7399,12 +7417,13 @@ app.get('/rider/queue', async (c) => {
         // 2026-11-17: the footer range was ambiguous).
         range: slot === TOMORROW_SLOT ? 'Tomorrow 6:00—7:30 AM' : meta.range,
         total_parcels: totalParcels,
-        total_stops: jobs.length,
+        total_stops: groupJobs.length,
         destination: dest ? { courier: dest.name, branch: dest.branch, city: dest.city } : null,
         target_dropoff: meta.target,
         minutes_on_road: chainMin - slotStartMin,
         stops,
       };
+    });
     });
 
   return c.json({
@@ -7848,7 +7867,7 @@ app.get('/subscriptions/:phone?', async (c) => {
   if (sub.period_start && sub.period_end) {
     // Every parcel counts: usage is the sum of parcels across the cycle's trips.
     usedThisPeriod = (await c.env.DB.prepare(
-      `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
+      `SELECT COALESCE(SUM(parcels * COALESCE(billable_rides, 1)), 0) AS n FROM jobs j
             WHERE sender_phone = ?1
             AND created_at >= ?2 AND created_at < ?3
             AND status NOT IN ('cancelled', 'canceled')
@@ -11204,7 +11223,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
         const overageOn = flagOn(await getSetting(env.DB, 'overage_discount_enabled'));
         if (planInfo) {
           const used = await env.DB.prepare(
-            `SELECT COALESCE(SUM(parcels), 0) AS n FROM jobs j
+            `SELECT COALESCE(SUM(parcels * COALESCE(billable_rides, 1)), 0) AS n FROM jobs j
               WHERE sender_phone = ?1
                 AND created_at >= ?2 AND created_at < ?3
                 AND status NOT IN ('cancelled', 'canceled')

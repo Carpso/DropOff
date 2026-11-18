@@ -53,9 +53,13 @@ class RiderQueueScreen extends StatefulWidget {
   State<RiderQueueScreen> createState() => _RiderQueueScreenState();
 }
 
-class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBindingObserver {
+class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+  // Empty-state radar + pending-task pulse (owner 2026-11-18).
+  late final AnimationController _radar = AnimationController(
+    vsync: this, duration: const Duration(seconds: 2))..repeat();
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _stats; // TODAY · LIVE card (rider daily stats)
+  bool _offline = false; // last-synced data shown while the network is down
   bool _loading = true;
   String? _busyRef;
   Timer? _pollTimer;
@@ -106,6 +110,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     _posSub?.cancel();
+    _radar.dispose();
     super.dispose();
   }
 
@@ -117,11 +122,17 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Future<void> _load() async {
     final data = await DropOffApi.riderQueue(widget.phone);
     if (!mounted) return;
-    setState(() { _data = data; _loading = false; });
+    setState(() {
+      // OFFLINE: keep the last successful queue instead of blanking the screen.
+      if (data != null) _data = data;
+      _offline = data == null;
+      _loading = false;
+    });
     // Stats ride the same 20 s poll — the card stays live with the queue.
     final stats = await DropOffApi.riderStats(widget.phone);
     if (!mounted) return;
-    setState(() => _stats = (stats?['stats'] as Map<String, dynamic>?));
+    final s = stats?['stats'] as Map<String, dynamic>?;
+    if (s != null) setState(() => _stats = s);
   }
 
   /* ----------------------- live clock + arrival GPS ----------------------- */
@@ -766,6 +777,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // Each depot receipt: its own amount field + its own photo. A batch may
     // be split across receipts by the depot — file them all, one by one.
     final receipts = <_ReceiptEntry>[];
+    bool filing = false;
     // The SELLER's booking photo travels with the stop (owner directive
     // 2026-11-17): the rider sees the parcel they are collecting next to the
     // one they just photographed, so swaps are caught at the drop, not at
@@ -875,7 +887,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Cancel')),
             FilledButton(
-              onPressed: () async {
+              onPressed: filing ? null : () async {
                 if (parcelPhotos.isEmpty) {
                   _snack('At least one parcel photo is required.');
                   return;
@@ -897,6 +909,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   }
                 }
                 final branch = branchCtrl.text.trim();
+                setDialog(() => filing = true); // visible progress while filing
                 final r = await DropOffApi.jobEvent(
                   jobRef: ref, status: 'delivered',
                   photoUrl: parcelPhotos.first, stage: 'delivery',
@@ -913,7 +926,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 if (!ctx.mounted) return;
                 Navigator.pop(ctx, r);
               },
-              child: const Text('Submit drop'),
+              child: Text(filing ? 'Filing drop...' : 'Submit drop'),
             ),
           ],
         ),
@@ -949,6 +962,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       'receipt_required' => detail.isEmpty ? 'Every depot receipt needs its photo and exact amount.' : detail,
       'photo_required' => detail.isEmpty ? 'A parcel photo is required.' : detail,
       'two_photos_required' => detail.isEmpty ? 'Parcel photos and receipt photos must be separate images.' : detail,
+      'photo_locked' => detail.isEmpty ? 'That proof photo is already filed — pull to refresh; contact support if the task stays open.' : detail,
+      'counter_receipt_locked' => detail.isEmpty ? 'The depot receipt is already paid and locked — contact support.' : detail,
       _ => 'Could not submit the drop ($err).',
     });
     return res;
@@ -1150,7 +1165,20 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         icon: const Icon(Icons.refresh),
         label: const Text('Refresh'),
       ),
-      body: _loading
+      body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (_offline)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            color: AppColors.amber.withValues(alpha: 0.18),
+            child: const Row(children: [
+              Icon(Icons.cloud_off, size: 16, color: AppColors.ink),
+              SizedBox(width: 8),
+              Expanded(child: Text('Offline — showing your last synced queue. It refreshes automatically when you reconnect.',
+                  style: TextStyle(fontSize: 11.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
+            ]),
+          ),
+        Expanded(
+          child: _loading
           ? const Center(child: CircularProgressIndicator())
           : batches.isEmpty
               // Pull-to-refresh works on the empty state too — new assignments
@@ -1163,14 +1191,14 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       children: [
                         // The day's numbers survive an empty queue — a rider
                         // who has delivered everything still sees the score.
-                        if (_stats != null) _statsCard(),
+                        _statsCard(),
                         SizedBox(
                           height: cons.maxHeight - 160,
                           child: Center(
                             child: Padding(
                               padding: const EdgeInsets.all(32),
                               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                const Icon(Icons.assignment_turned_in_outlined, size: 46, color: AppColors.muted),
+                                 _radarEmpty(),
                                 const SizedBox(height: 14),
                                 const Text('No rides on your queue yet',
                                     style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
@@ -1199,13 +1227,15 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   child: ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 90),
-                    itemCount: batches.length + (_stats != null ? 1 : 0),
+                    itemCount: batches.length + 1,
                     itemBuilder: (context, i) {
-                      if (_stats != null && i == 0) return _statsCard();
-                      return _batchCard(batches[_stats != null ? i - 1 : i]);
+                      if (i == 0) return _statsCard();
+                      return _batchCard(batches[i - 1]);
                     },
                   ),
                 ),
+        ),
+      ]),
     );
   }
 
@@ -1213,6 +1243,34 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// assigned, still waiting to be picked up, in hand, done, parcels moved
   /// and fees earned — bucketed by the rider's CAT day server-side and
   /// refreshed with the same 20 s poll as the queue.
+  /// Animated "scanning for signal" radar for the empty queue (owner 2026-11-18).
+  Widget _radarEmpty() => AnimatedBuilder(
+    animation: _radar,
+    builder: (context, _) {
+      final t = _radar.value;
+      return SizedBox(width: 132, height: 132, child: Stack(alignment: Alignment.center, children: [
+        for (final phase in const [0.0, 0.5])
+          Transform.scale(
+            scale: 0.45 + 1.15 * ((t + phase) % 1.0),
+            child: Container(width: 96, height: 96, decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.forest.withValues(alpha: 0.45 * (1 - ((t + phase) % 1.0))), width: 2),
+            )),
+          ),
+        // Sweeping radar beam.
+        Transform.rotate(angle: t * 6.2832, child: Container(width: 96, height: 3,
+          decoration: BoxDecoration(gradient: LinearGradient(colors: [Colors.transparent, AppColors.amber.withValues(alpha: 0.7)]), borderRadius: BorderRadius.circular(3)))),
+        // 3D-ish map badge in the middle.
+        Container(width: 60, height: 60, decoration: BoxDecoration(shape: BoxShape.circle,
+          gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+            colors: [Color(0xFF2EA376), Color(0xFF0F5C40)]),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12, offset: Offset(0, 5))]),
+          child: const Icon(Icons.map_outlined, size: 30, color: Colors.white)),
+      ]));
+    },
+  );
+
   Widget _statsCard() {
     final s = _stats ?? const {};
     final total = (s['total'] as num?)?.toInt() ?? 0;
@@ -1221,7 +1279,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final delivered = (s['delivered'] as num?)?.toInt() ?? 0;
     final parcels = (s['parcels'] as num?)?.toInt() ?? 0;
     final earned = (s['earned_zmw'] as num?)?.toDouble() ?? 0;
-    if (total == 0 && delivered == 0) return const SizedBox.shrink();
+    // Always visible (owner 2026-11-18): a quiet day still shows the card —
+    // a zero-total card used to shrink away and look "missing".
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Container(
@@ -1302,6 +1361,17 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 Expanded(child: Text(_slotWindowLine(b),
                     style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w800, fontSize: 12))),
               ]),
+              if (pickedCount < ((b['total_stops'] as num?)?.toInt() ?? 0)) ...[
+                const SizedBox(height: 4),
+                AnimatedBuilder(animation: _radar, builder: (_, __) => Row(children: [
+                  Container(width: 8, height: 8,
+                    decoration: BoxDecoration(shape: BoxShape.circle,
+                      color: AppColors.amber.withValues(alpha: 0.35 + 0.65 * (_radar.value % 1)))),
+                  const SizedBox(width: 6),
+                  const Text('TASKS PENDING — pulse until you file these stops',
+                      style: TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w700)),
+                ])),
+              ],
             ]),
           ),
           Padding(
@@ -1634,6 +1704,11 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
           _row('Parcels', '${w['parcels'] ?? 1}'),
           _row('Contents', '${w['description'] ?? ''}'),
           _row('Size', '${w['weight_class'] ?? ''}'),
+          // Declared parcel VALUE (owner request): for the counter receipt.
+          // No fees, rates or rider payouts are ever shown on this sheet.
+          if ((w['declared_value_zmw'] as num?)?.toDouble() != null &&
+              (w['declared_value_zmw'] as num).toDouble() > 0)
+            _row('Declared value', 'K${(w['declared_value_zmw'] as num).toStringAsFixed(2)}'),
         ]),
         const Divider(height: 12),
         Text('Depot fare is paid at the counter — DropOff never collects partner money. Money fields are never shown on the rider sheet.',

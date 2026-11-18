@@ -141,6 +141,20 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
         ),
       );
 
+  /// World bearing from the rider to their current destination. The bike badge
+  /// rotates to this heading (minus map rotation) so it always points forward
+  /// along the route — not true north (owner 2026-11-18, phone holders).
+  double get _destinationBearing {
+    if (widget.rider == null) return 0;
+    final target = widget.route?.isNotEmpty == true ? widget.route!.last : (widget.pickup ?? widget.depot);
+    if (target == null) return 0;
+    return const Distance().bearing(widget.rider!, target);
+  }
+
+  double get _mapRotationDeg {
+    try { return _mapCtl.camera.rotationRad * 180 / math.pi; } catch (_) { return 0; }
+  }
+
   /// The rider's bike badge — 3D and alive (owner 2026-11-18): a radar ring
   /// that breathes outwards behind a gradient dome with rim light and a
   /// ground shadow, so the pin reads as lifted off the map, not painted on.
@@ -208,7 +222,10 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                   BoxShadow(color: Color(0x2EE8A020), blurRadius: 14, spreadRadius: 2),
                 ],
               ),
-              child: const Icon(Icons.two_wheeler, size: 25, color: Color(0xFF10312A)),
+              child: Transform.rotate(
+                angle: (_destinationBearing - _mapRotationDeg) * math.pi / 180,
+                child: const Icon(Icons.two_wheeler, size: 25, color: Color(0xFF10312A)),
+              ),
             ),
           ]),
         );
@@ -218,13 +235,21 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
 
   /// Compass tap → north-up. flutter_map's rotate(0) is due-north; guarded —
   /// the camera may not be ready yet, in which case the map is already north.
+  bool _headingUp = false; // compass toggles heading-up / north-up
+
+  /// Compass tap → FACE FORWARD (owner 2026-11-18): rotate the map so the
+  /// direction the phone/rider faces is the top of the screen — for riders
+  /// with the phone in a holder, "up" must mean where they are going.
   void _snapNorth() {
     HapticFeedback.selectionClick();
+    _headingUp = !_headingUp;
+    final deg = _headingUp ? _headingDeg : 0.0;
     try {
-      _mapCtl.rotate(0);
+      _mapCtl.rotate(deg * math.pi / 180);
     } catch (_) {
       /* camera not ready — the map is already north-up */
     }
+    setState(() {}); // repaint the rider badge against the new rotation
   }
 
   LatLngBounds? get _bounds {
@@ -245,6 +270,24 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       minLat -= pad; maxLat += pad; minLng -= pad; maxLng += pad;
     }
     return LatLngBounds(LatLng(minLat, minLng), LatLng(maxLat, maxLng));
+  }
+
+  @override
+  void didUpdateWidget(covariant RiderMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // SMART NAVIGATION (owner 2026-11-18): as the rider moves, follow the bike
+    // and zoom in nearer the destination — the map scales with the journey.
+    if (widget.rider == null || widget.rider == oldWidget.rider) return;
+    final target = widget.route?.isNotEmpty == true ? widget.route!.last : (widget.pickup ?? widget.depot);
+    if (target == null) return;
+    final metres = const Distance().as(LengthUnit.Meter, widget.rider!, target);
+    final zoom = metres > 1000 ? 13.8 : metres > 400 ? 15.0 : metres > 120 ? 16.0 : 16.5;
+    try {
+      _mapCtl.move(widget.rider!, zoom);
+      if (_headingUp) _mapCtl.rotate(_headingDeg * math.pi / 180);
+    } catch (_) {
+      /* camera not ready yet — initialCameraFit takes over */
+    }
   }
 
   @override
