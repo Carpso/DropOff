@@ -982,6 +982,17 @@ class DropOffApi {
     return get('/rider/stats$q');
   }
 
+  /// The rider's order waybill — full sheet (contacts, both addresses, depot,
+  /// parcels) with every money field stripped server-side.
+  static Future<Map<String, dynamic>?> riderWaybill(String ref) =>
+      get('/jobs/$ref/waybill');
+
+  /// Re-fires the 4-digit pickup-code SMS (fresh code, both sender and
+  /// recipient copies) when the sender never received the booking SMS —
+  /// without it the rider cannot verify the pickup at all.
+  static Future<ApiResponse> resendPickupPin(String ref) =>
+      post('/jobs/$ref/resend-pin', const {});
+
   /// Rider self-remit and the rider "cash float" list were removed with the
   /// no-COD policy: riders never collect cash at the door. Senders pay in
   /// advance via momo; recipients pay nothing in cash, so the float is gone.

@@ -173,6 +173,15 @@ const DRIVER_OVER_TARGET_BONUS_ZMW = 5;
 const DRIVER_OVER_TARGET_CAP = 135;            // 4.5x the daily target / month
 const DRIVER_STRETCH_RATIO = 1.25;
 const DRIVER_STRETCH_BONUS_ZMW = 150;
+// LUSAKA-FIRST POLICY (owner directive 2026-11-18): same-city recipients get
+// NO 4-digit PIN SMS — they track live in-app, optionally confirm receipt and
+// rate. Door codes are minted ONLY for true intercity collections (e.g.
+// Ndola), where a depot handover needs the stronger proof.
+function isIntercity(fromCity: string | null | undefined, destCity: string | null | undefined): boolean {
+  const a = `${fromCity ?? ''}`.trim().toLowerCase();
+  const b = `${destCity ?? ''}`.trim().toLowerCase();
+  return a.length > 0 && b.length > 0 && a !== b;
+}
 const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
 // Business day = Central Africa Time (UTC+2). D1's 'localtime' is UTC, so every
 // daily-cap / sweep query must use this explicit offset or the day rolls over
@@ -2431,20 +2440,29 @@ app.post('/jobs', async (c) => {
     // generated at that moment too (only its hash is stored, so it cannot be
     // re-sent from booking time).
     if (!depositRequired && !depositInitFailed) {
-      const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
+      // SPLIT + CITY-GATED CODES (owner decisions 2026-11-18): the sender's
+      // PICKUP code is independent of the recipient's DOOR code, and the
+      // recipient's code is minted ONLY for intercity collections (Ndola) —
+      // Lusaka recipients track live in-app and confirm receipt instead.
+      const intercity = isIntercity(b.from_city, b.dest_city);
+      const pickupOtp = String(Math.floor(1000 + Math.random() * 9000));
+      const doorOtp = intercity ? String(Math.floor(1000 + Math.random() * 9000)) : null;
       await c.env.DB.prepare(
-        'UPDATE jobs SET delivery_otp_hash = ?2 WHERE ref = ?1',
-      ).bind(ref, await handoverOtpHash(c.env, ref, deliveryOtp)).run();
+        'UPDATE jobs SET delivery_otp_hash = ?2, pickup_otp_hash = ?3 WHERE ref = ?1',
+      ).bind(ref,
+        doorOtp ? await handoverOtpHash(c.env, ref, doorOtp) : null,
+        await handoverOtpHash(c.env, ref, pickupOtp)).run();
       c.executionCtx.waitUntil(
-        sendSms(c.env, recipientPhone,
-        `DropOff: parcel ${ref}. Track: ${trackUrl}. Code ${deliveryOtp} - never share before handover.`, { transactional: true }).catch(() => {}),
+        sendSms(c.env, recipientPhone, intercity
+          ? `DropOff: parcel ${ref}. Track: ${trackUrl}. Code ${doorOtp} - never share before handover.`
+          : `DropOff: parcel ${ref}. Track: ${trackUrl} - follow it live in the DropOff app and confirm receipt when it lands.`,
+          { transactional: true }).catch(() => {}),
       );
       // PICKUP CODE FOR THE SENDER (owner directive 2026-11-17): the rider
-      // confirms the collection with the SENDER's code, so the sender gets
-      // their own copy at booking.
+      // confirms the collection with the SENDER's own code.
       c.executionCtx.waitUntil(
         sendSms(c.env, senderPhone,
-        `DropOff: parcel ${ref}. Pickup code ${deliveryOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {}),
+        `DropOff: parcel ${ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {}),
       );
     }
 
@@ -2897,6 +2915,260 @@ app.get('/jobs/:ref/live', async (c) => {
   });
 });
 
+/* ------------------- rider: order waybill + resend PIN --------------------- */
+// Both serve the ASSIGNED rider (the stop-sheet owner) plus ops/admin. The
+// rider gets the full order sheet (waybill) with every money field stripped,
+// and can re-fire the 4-digit pickup-code SMS when the sender's booking SMS
+// never landed — otherwise the pickup can never be verified at all
+// (owner directive 2026-11-18).
+
+// The rider's waybill: everything needed to act (contacts, both addresses,
+// depot/branch, parcels) — never any money field.
+app.get('/jobs/:ref/waybill', async (c) => {
+  const job = await c.env.DB.prepare(
+    `SELECT j.ref, j.created_at, j.pickup_at, j.pickup_window, j.eta_minutes, j.status,
+            j.parcels, j.last_mile, j.description, j.weight_class, j.rider_id,
+            j.pickup_address, j.dest_address, j.from_city, j.dest_city, j.branch,
+            j.sender_name, j.sender_phone, j.recipient_name, j.recipient_phone,
+            co.name AS courier_name, co.depot_name
+       FROM jobs j JOIN couriers co ON co.id = j.courier_id
+      WHERE j.ref = ?1`,
+  ).bind(c.req.param('ref')).first() as any;
+  if (!job) return c.json({ error: 'not found' }, 404);
+  const wbStaff = c.get('role') === 'ops' || isAdmin(c);
+  if (!wbStaff) {
+    const phone = c.get('phone') ?? '';
+    if (!phone) return c.json({ error: 'identity_required' }, 401);
+    const rider = await c.env.DB.prepare(
+      'SELECT id FROM riders WHERE phone = ?1 AND active = 1',
+    ).bind(phone).first<any>();
+    // Only the ASSIGNED rider reads the sheet — strangers get the same 404 as
+    // a missing job, so there is no existence leak either way.
+    if (!rider || job.rider_id !== rider.id) return c.json({ error: 'not found' }, 404);
+  }
+  return c.json({ waybill: {
+    ref: job.ref,
+    created_at: job.created_at,
+    pickup_at: job.pickup_at,
+    pickup_window: job.pickup_window,
+    eta_minutes: job.eta_minutes,
+    status: job.status,
+    parcels: job.parcels,
+    last_mile: job.last_mile,
+    description: job.description,
+    weight_class: job.weight_class,
+    pickup_address: job.pickup_address,
+    dest_address: job.dest_address,
+    from_city: job.from_city,
+    dest_city: job.dest_city,
+    branch: job.branch,
+    sender_name: job.sender_name,
+    sender_phone: job.sender_phone,
+    recipient_name: job.recipient_name,
+    recipient_phone: job.recipient_phone,
+    courier_name: job.courier_name,
+    depot_name: job.depot_name,
+  } });
+});
+
+// RESEND THE 4-DIGIT PICKUP CODE (owner 2026-11-18): the code is stored
+// HASHED, so "resend" generates a FRESH code, overwrites the hash and re-fires
+// BOTH copies — sender's pickup code and recipient's handover code — so the
+// chain stays consistent (the recipient's tracking SMS carried the old one).
+// Max 3 resends per job per day; the attempt is logged as a job event either
+// way so a dead gateway shows up in ops.
+app.post('/jobs/:ref/resend-pin', async (c) => {
+  const job = await c.env.DB.prepare(
+    `SELECT id, ref, status, sender_phone, recipient_phone, rider_id, from_city, dest_city, delivery_otp_hash
+       FROM jobs WHERE ref = ?1`,
+  ).bind(c.req.param('ref')).first() as any;
+  if (!job) return c.json({ error: 'not found' }, 404);
+  const rpStaff = c.get('role') === 'ops' || isAdmin(c);
+  if (!rpStaff) {
+    const phone = c.get('phone') ?? '';
+    if (!phone) return c.json({ error: 'identity_required' }, 401);
+    const rider = await c.env.DB.prepare(
+      'SELECT id FROM riders WHERE phone = ?1 AND active = 1',
+    ).bind(phone).first<any>();
+    if (!rider || job.rider_id !== rider.id) return c.json({ error: 'not found' }, 404);
+  }
+  const st = String(job.status ?? '');
+  if (['picked_up', 'at_depot', 'departed', 'arrived', 'delivered',
+    'ready_for_collection', 'canceled', 'cancelled'].includes(st)) {
+    return c.json({ error: 'not_needed',
+      detail: 'This job no longer needs a pickup code — the pickup already moved.' }, 409);
+  }
+  const cnt = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM job_events
+      WHERE job_id = ?1 AND status = 'resend_pin'
+        AND created_at > datetime('now', '-1 day')`,
+  ).bind(job.id).first<any>();
+  if (Number(cnt?.n ?? 0) >= 3) {
+    return c.json({ error: 'rate_limited',
+      detail: 'Resend limit reached for today (3). DropOff support has been flagged — call ops.' }, 429);
+  }
+  // Fresh codes (the old ones die with the hash overwrites) + zero both
+  // attempt locks, so a rider locked out by wrong codes gets a clean chance.
+  // SPLIT CODES (2026-11-18): sender and recipient each get their OWN fresh
+  // secret — the pickup code never opens the door.
+  const pickupOtp = String(Math.floor(1000 + Math.random() * 9000));
+  // Door code only for intercity collections (owner 2026-11-18): same-city
+  // recipients have no PIN — the resend simply clears any stale door hash.
+  const intercity = isIntercity(job.from_city, job.dest_city);
+  const doorOtp = intercity ? String(Math.floor(1000 + Math.random() * 9000)) : null;
+  await c.env.DB.prepare(
+    `UPDATE jobs SET pickup_otp_hash = ?2, delivery_otp_hash = ?3,
+            pickup_otp_attempts = 0, delivery_otp_attempts = 0 WHERE id = ?1`,
+  ).bind(job.id,
+    await handoverOtpHash(c.env, job.ref, pickupOtp),
+    doorOtp ? await handoverOtpHash(c.env, job.ref, doorOtp) : null).run();
+  const sends: Promise<{ sent: boolean }>[] = [];
+  if (job.sender_phone) {
+    sends.push(sendSms(c.env, job.sender_phone,
+      `DropOff: parcel ${job.ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`,
+      { transactional: true }));
+  }
+  if (doorOtp && job.recipient_phone && job.recipient_phone !== job.sender_phone) {
+    sends.push(sendSms(c.env, job.recipient_phone,
+      `DropOff: parcel ${job.ref}. Code ${doorOtp} - never share before handover.`,
+      { transactional: true }));
+  }
+  const results = await Promise.allSettled(sends);
+  const sentAny = results.some((r) => r.status === 'fulfilled' && r.value?.sent === true);
+  await c.env.DB.prepare(
+    `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'resend_pin', ?2)`,
+  ).bind(job.id, sentAny
+    ? `Pickup code re-sent at the rider's request — sender ${job.sender_phone ?? 'n/a'}, recipient ${job.recipient_phone ?? 'n/a'}.`
+    : `Pickup code RESEND FAILED at the SMS gateway — sender ${job.sender_phone ?? 'n/a'}. Ops: check the AT account / sms logs.`)
+    .run().catch(() => {});
+  return c.json({
+    ok: true,
+    resent: true,
+    sent: sentAny,
+    sender_sent: results[0]?.status === 'fulfilled' ? results[0].value?.sent === true : false,
+    detail: sentAny
+      ? 'New 4-digit code sent — ask the sender to read their FRESH SMS (older codes no longer work).'
+      : 'The SMS gateway rejected the resend — the attempt is logged; call DropOff support.',
+  });
+});
+
+/* ------------------------ admin: live-order seed sweep ---------------------- */
+// SEED SWEEP (owner directive 2026-11-18): old test-era orders miss details
+// the new flows depend on — pickup pins, codes, tracking links, sweep times.
+// One admin tap completes every LIVE job with mechanically-derivable data
+// (never invented fares or addresses): geocodes the REAL typed pickup
+// address, sets a missing sweep time to the booking time, REGENERATES both
+// split codes (attempt locks reset), mints a tracking token, and texts each
+// phone its OWN fresh code so the whole chain can be tested end to end.
+// Canceled and terminal jobs are never touched. ?dry=1 previews only.
+async function geocodePickup(address: string, city: string): Promise<{ lat: number; lng: number } | null> {
+  const q = [address, city, 'Zambia'].map((s) => `${s ?? ''}`.trim()).filter(Boolean).join(', ');
+  if (q.replace(/[,\s]/g, '').length < 6) return null;
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+      { headers: { 'User-Agent': 'DropOff seed sweep (ops)', 'Accept-Language': 'en' } });
+    if (!res.ok) return null;
+    const rows = await res.json() as Array<{ lat: string; lon: string }>;
+    const hit = rows?.[0];
+    const lat = Number(hit?.lat);
+    const lng = Number(hit?.lon);
+    return Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0) ? { lat, lng } : null;
+  } catch {
+    return null;
+  }
+}
+
+app.post('/admin/jobs/seed-sweep', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const dry = c.req.query('dry') === '1';
+  const { results: jobs } = await c.env.DB.prepare(
+    `SELECT id, ref, status, last_mile, sender_phone, recipient_phone,
+            pickup_address, from_city, dest_city, pickup_lat, pickup_lng, pickup_at, created_at
+       FROM jobs
+      WHERE COALESCE(status,'') NOT IN ('canceled','cancelled','deleted','delivered','ready_for_collection')
+      ORDER BY id LIMIT 50`,
+  ).all<any>();
+  const report: any[] = [];
+  for (const job of jobs ?? []) {
+    const out: any = { ref: job.ref, status: job.status };
+    // 1) Missing pickup pin — geocode the REAL typed address (never invent).
+    if (job.pickup_lat == null && `${job.pickup_address ?? ''}`.trim()) {
+      const hit = await geocodePickup(`${job.pickup_address}`, `${job.from_city ?? ''}`);
+      if (hit) {
+        out.geocoded = { lat: hit.lat, lng: hit.lng };
+        if (!dry) {
+          await c.env.DB.prepare(
+            'UPDATE jobs SET pickup_lat = ?2, pickup_lng = ?3 WHERE id = ?1',
+          ).bind(job.id, hit.lat, hit.lng).run();
+        }
+      } else out.geocode_failed = true;
+      await new Promise((r) => setTimeout(r, 1200)); // Nominatim 1 req/s policy
+    }
+    // 2) Missing sweep time — the booking time is the truthful floor (keeps
+    //    the TODAY card and sweep bucketing sane for old test rows).
+    if (job.pickup_at == null && job.created_at) {
+      out.pickup_at_set = job.created_at;
+      if (!dry) {
+        await c.env.DB.prepare(
+          'UPDATE jobs SET pickup_at = ?2 WHERE id = ?1',
+        ).bind(job.id, job.created_at).run();
+      }
+    }
+    // 3) Fresh SPLIT + CITY-GATED codes: sender pickup code always; the
+    //    recipient door code only for intercity collections — same-city rows
+    //    get any stale door hash CLEARED (Lusaka recipients have no PIN).
+    const intercity = isIntercity(job.from_city, job.dest_city);
+    const pickupOtp = String(Math.floor(1000 + Math.random() * 9000));
+    const doorOtp = intercity ? String(Math.floor(1000 + Math.random() * 9000)) : null;
+    if (!dry) {
+      await c.env.DB.prepare(
+        `UPDATE jobs SET pickup_otp_hash = ?2, delivery_otp_hash = ?3,
+                pickup_otp_attempts = 0, delivery_otp_attempts = 0 WHERE id = ?1`,
+      ).bind(job.id,
+        await handoverOtpHash(c.env, job.ref, pickupOtp),
+        doorOtp ? await handoverOtpHash(c.env, job.ref, doorOtp) : null).run();
+    }
+    // 4) Tracking link for the recipient's SMS.
+    let token: string | null = null;
+    if (!dry) {
+      const t = await c.env.DB.prepare(
+        'SELECT token FROM tracking_tokens WHERE job_id = ?1 ORDER BY created_at DESC LIMIT 1',
+      ).bind(job.id).first<any>();
+      token = t?.token ?? await issueTrackingToken(c.env, job.id, job.ref,
+        job.recipient_phone ?? job.sender_phone ?? job.ref);
+    }
+    const trackUrl = token ? trackingUrl(c.env, token) : null;
+    // 5) SMS each phone its OWN code. In-hand jobs skip the sender (the
+    //    pickup already happened); their recipient still gets the door code.
+    const inHand = ['picked_up', 'at_depot', 'departed', 'arrived'].includes(String(job.status ?? ''));
+    if (!dry) {
+      if (!inHand && job.sender_phone) {
+        const r = await sendSms(c.env, job.sender_phone,
+          `DropOff: parcel ${job.ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`,
+          { transactional: true });
+        out.sender_sms = r.sent ? 'sent' : `failed:${r.error ?? '?'}`;
+      }
+      if (job.recipient_phone) {
+        const r = await sendSms(c.env, job.recipient_phone,
+          intercity
+            ? `DropOff: parcel ${job.ref}.${trackUrl ? ` Track: ${trackUrl}.` : ''} Code ${doorOtp} - never share before handover.`
+            : `DropOff: parcel ${job.ref}.${trackUrl ? ` Track: ${trackUrl}.` : ''} Follow it live in the DropOff app and confirm receipt when it lands.`,
+          { transactional: true });
+        out.recipient_sms = r.sent ? 'sent' : `failed:${r.error ?? '?'}`;
+      }
+      await c.env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'seed_sweep', ?2)`,
+      ).bind(job.id, 'Seed sweep: pins/codes/links refreshed for testing — fresh codes texted to each phone.')
+        .run().catch(() => {});
+    } else {
+      out.would_send = { sender: !inHand && !!job.sender_phone, recipient: !!job.recipient_phone };
+    }
+    report.push(out);
+  }
+  return c.json({ ok: true, dry, jobs: report.length, report });
+});
+
 /* ------------------------- rider app: act on a job ------------------------- */
 // Auth: ops key, admin key, or the ASSIGNED rider's own JWT. Statuses move
 // pickup -> picked_up -> at_depot -> departed -> arrived -> delivered/ready.
@@ -2976,31 +3248,35 @@ app.post('/jobs/:ref/events', async (c) => {
 
   // PICKUP PROOF (owner directive 2026-11-17): the SENDER holds the 4-digit
   // code for the first leg (seller → depot). The rider confirms it at
-  // collection — same hash, same attempt gate as the door handover. Ops/admin
-  // keys bypass; jobs minted before the code existed pass through.
+  // collection — same attempt gate as the door handover. Ops/admin keys
+  // bypass; jobs minted before the code existed pass through.
   if (status === 'picked_up' && !isAdminKey && !isOpsKey) {
     const pickupOtp = await c.env.DB.prepare(
-      'SELECT delivery_otp_hash, delivery_otp_attempts FROM jobs WHERE id = ?1',
+      'SELECT pickup_otp_hash, delivery_otp_hash, pickup_otp_attempts FROM jobs WHERE id = ?1',
     ).bind(job.id).first<any>();
-    if (pickupOtp?.delivery_otp_hash) {
-      if ((pickupOtp.delivery_otp_attempts ?? 0) >= 8) {
+    // SPLIT CODES (2026-11-18): verify against the SENDER's own
+    // pickup_otp_hash. Legacy rows were backfilled pickup = delivery; rows
+    // from before codes existed have neither and pass through.
+    const pickupHash = pickupOtp?.pickup_otp_hash ?? pickupOtp?.delivery_otp_hash;
+    if (pickupHash) {
+      if ((pickupOtp.pickup_otp_attempts ?? 0) >= 8) {
         await addStrike(c.env, phone ?? '', job.id, 'otp_abuse');
         return c.json({ error: 'otp_locked', detail: 'Too many wrong codes — contact DropOff support to unlock this pickup.' }, 429);
       }
       const otp = String(b.otp ?? '').replace(/\D/g, '');
-      const want = String(pickupOtp.delivery_otp_hash);
+      const want = String(pickupHash);
       const got = otp.length === 4 ? await handoverOtpHash(c.env, c.req.param('ref'), otp) : '';
       const match = got.length === want.length && got.split('').every((ch, i) => ch === want[i]);
       if (!match) {
         await c.env.DB.prepare(
-          'UPDATE jobs SET delivery_otp_attempts = COALESCE(delivery_otp_attempts, 0) + 1 WHERE id = ?1',
+          'UPDATE jobs SET pickup_otp_attempts = COALESCE(pickup_otp_attempts, 0) + 1 WHERE id = ?1',
         ).bind(job.id).run();
         return c.json({
           error: 'otp_required',
           detail: 'Ask the SENDER for their 4-digit pickup code — it is in the booking SMS. It protects both of you against false parcels.',
         }, 403);
       }
-      dbStatements.push(c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id));
+      dbStatements.push(c.env.DB.prepare('UPDATE jobs SET pickup_otp_attempts = 0 WHERE id = ?1').bind(job.id));
     }
   }
 
@@ -3453,6 +3729,42 @@ app.post('/jobs/:ref/rate', async (c) => {
   ).bind(job.id, `${targetType} rated ${stars}/5`).run();
 
   return c.json({ ok: true, target_type: targetType, stars });
+});
+
+// OPTIONAL RECEIPT CONFIRMATION (owner 2026-11-18, Lusaka-first): same-city
+// recipients carry no PIN — they track live in-app and CONFIRM RECEIPT
+// instead. The confirmation is a real job event from the recipient's own
+// signed session (real account holders only), idempotent per job, and the
+// sender gets a push nudge (no SMS cost for good news).
+app.post('/jobs/:ref/confirm-receipt', async (c) => {
+  const job = await c.env.DB.prepare(
+    'SELECT id, ref, sender_phone, recipient_phone, status FROM jobs WHERE ref = ?1',
+  ).bind(c.req.param('ref')).first() as any;
+  if (!job) return c.json({ error: 'not found' }, 404);
+  const phone = c.get('phone') ?? '';
+  const staff = c.get('role') === 'ops' || isAdmin(c);
+  if (!staff && phone !== job.recipient_phone) {
+    return c.json({ error: 'not found' }, 404); // no existence leak
+  }
+  const already = await c.env.DB.prepare(
+    `SELECT id FROM job_events WHERE job_id = ?1 AND status = 'receipt_confirmed' LIMIT 1`,
+  ).bind(job.id).first<any>();
+  if (!already) {
+    await c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'receipt_confirmed', ?2)`,
+    ).bind(job.id, staff
+      ? 'Receipt confirmed by ops on the recipient\'s behalf.'
+      : 'Recipient confirmed receipt in-app — from their own DropOff account.')
+      .run();
+    if (job.sender_phone) {
+      await sendToPhone(c.env, job.sender_phone, {
+        title: 'Parcel received ✓',
+        body: `The recipient confirmed receipt of ${job.ref}.`,
+        data: { kind: 'receipt_confirmed', ref: job.ref },
+      }).catch(() => {});
+    }
+  }
+  return c.json({ ok: true, ref: job.ref, confirmed: true });
 });
 
 app.get('/jobs/:ref/ratings', async (c) => {
@@ -5326,50 +5638,83 @@ async function counterFareFees(env: Env, phone: string, receipt: number) {
 }
 
 // Recipient tracking SMS, deferred edition (owner directive 2026-11-15):
-// payment-held bookings mint their handover code + tracking link ONLY when
+// payment-held bookings mint their handover codes + tracking link ONLY when
 // the prepayment actually lands — never "share tracking" a held parcel.
 // Called from settlePaymentSuccess for the job's OWN payment approval. The
-// no-op guard is the OTP hash: bookings that dispatched immediately already
-// hashed a code at booking time (and SMSed it), so they are skipped here.
+// no-op guard is the OTP hashes: bookings that dispatched immediately already
+// hashed BOTH codes at booking time (and SMSed them), so they are skipped.
+// SPLIT CODES (2026-11-18): mints the recipient's DOOR code and the sender's
+// PICKUP code independently — each phone gets only its own secret.
 async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> {
   const job = await env.DB.prepare(
-    `SELECT j.ref, j.recipient_phone, j.sender_phone, j.delivery_otp_hash, t.token AS tracking_token
+    `SELECT j.ref, j.recipient_phone, j.sender_phone, j.from_city, j.dest_city,
+            j.delivery_otp_hash, j.pickup_otp_hash, t.token AS tracking_token
        FROM jobs j LEFT JOIN tracking_tokens t ON t.job_id = j.id
       WHERE j.id = ?1 ORDER BY t.created_at DESC LIMIT 1`,
   ).bind(jobId).first<any>();
-  if (!job?.ref || !job.recipient_phone || job.delivery_otp_hash) return;
-  const deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
+  if (!job?.ref || !job.recipient_phone) return;
+  // CITY-GATED (owner 2026-11-18): same-city recipients never get a PIN —
+  // tracking link only; the door code exists for intercity collections.
+  const intercity = isIntercity(job.from_city, job.dest_city);
+  const wantDoor = intercity && !job.delivery_otp_hash;
+  // Legacy-shape rows (pre-split): the shared code doubles as the pickup code,
+  // no new mint, no new SMS — the sender already holds that code.
+  let wantPickup = !job.pickup_otp_hash;
+  if (wantPickup && !wantDoor && job.delivery_otp_hash) {
+    await env.DB.prepare(
+      'UPDATE jobs SET pickup_otp_hash = delivery_otp_hash WHERE ref = ?1',
+    ).bind(job.ref).run();
+    wantPickup = false;
+  }
+  if (!wantDoor && !wantPickup) return;
+  const doorOtp = wantDoor ? String(Math.floor(1000 + Math.random() * 9000)) : null;
+  const pickupOtp = wantPickup ? String(Math.floor(1000 + Math.random() * 9000)) : null;
   await env.DB.prepare(
-    'UPDATE jobs SET delivery_otp_hash = ?2 WHERE ref = ?1',
-  ).bind(job.ref, await handoverOtpHash(env, job.ref, deliveryOtp)).run();
+    `UPDATE jobs SET
+       delivery_otp_hash = COALESCE(?2, delivery_otp_hash),
+       pickup_otp_hash   = COALESCE(?3, pickup_otp_hash)
+      WHERE ref = ?1`,
+  ).bind(job.ref,
+    doorOtp ? await handoverOtpHash(env, job.ref, doorOtp) : null,
+    pickupOtp ? await handoverOtpHash(env, job.ref, pickupOtp) : null).run();
   let token: string | null = job.tracking_token ?? null;
+  const mintedToken = !token;
   if (!token) {
     // The booking minted nothing (payment was held at booking time) — mint
     // NOW, at settlement, so the paid parcel's first-ever link is a live one.
     token = await issueTrackingToken(env, jobId, job.ref, job.recipient_phone);
   }
   const trackUrl = trackingUrl(env, token);
-  await sendSms(env, job.recipient_phone,
-    `DropOff: parcel ${job.ref} paid. Track: ${trackUrl}. Code ${deliveryOtp} - never share before handover.`, { transactional: true }).catch(() => {});
+  if (doorOtp) {
+    await sendSms(env, job.recipient_phone,
+      `DropOff: parcel ${job.ref} paid. Track: ${trackUrl}. Code ${doorOtp} - never share before handover.`, { transactional: true }).catch(() => {});
+  } else if (mintedToken) {
+    // Same-city parcel paid: link only — no PIN for Lusaka recipients.
+    await sendSms(env, job.recipient_phone,
+      `DropOff: parcel ${job.ref} paid. Track: ${trackUrl} - follow it live in the DropOff app and confirm receipt when it lands.`, { transactional: true }).catch(() => {});
+  }
   // Sender's pickup-code copy lands here too (held bookings mint the code at
-  // settlement — see /jobs booking comment).
-  if (job.sender_phone) {
+  // settlement — see /jobs booking comment) — their OWN code, not the door's.
+  if (pickupOtp && job.sender_phone) {
     await sendSms(env, job.sender_phone,
-      `DropOff: parcel ${job.ref} paid. Pickup code ${deliveryOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {});
+      `DropOff: parcel ${job.ref} paid. Pickup code ${pickupOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {});
   }
 }
 
 // Self-heal (2026-11-17): the SMS/OTP mint could die AFTER the money landed
 // (bug: ORDER BY t.id on a table with no id column) — a paid, live parcel
 // with no handover code, no tracking link, no sender pickup code. Idempotent:
-// mints only when delivery_otp_hash IS NULL, so it's a safe permanent guard
-// in the minute cron, not a one-off patch. Recipient SMS is a one-time send
-// per job (the hash becomes set on success).
+// mints only when a code hash is missing (either one), so it's a safe
+// permanent guard in the minute cron, not a one-off patch. Recipient SMS is a
+// one-time send per job (the hash becomes set on success).
 async function healMissingTrackingSms(env: Env): Promise<void> {
   try {
     const { results } = await env.DB.prepare(
       `SELECT id FROM jobs
-        WHERE paid = 1 AND delivery_otp_hash IS NULL
+        WHERE paid = 1 AND (pickup_otp_hash IS NULL
+             OR (LOWER(TRIM(COALESCE(dest_city,''))) != LOWER(TRIM(COALESCE(from_city,'')))
+                 AND COALESCE(from_city,'') != '' AND COALESCE(dest_city,'') != ''
+                 AND delivery_otp_hash IS NULL))
           AND COALESCE(status, '') != 'canceled'
           AND created_at > datetime('now', '-2 days')
         ORDER BY id LIMIT 25`,
@@ -6896,8 +7241,10 @@ app.get('/rider/queue', async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.parcels, j.status, j.last_mile,
-            j.sender_name, j.sender_phone, j.eta_minutes, j.pickup_window, j.created_at, j.from_city,
+            j.sender_name, j.sender_phone, j.description, j.recipient_name, j.recipient_phone,
+            j.eta_minutes, j.pickup_window, j.created_at, j.from_city,
             co.name AS courier_name, co.depot_name, co.city AS courier_city,
+            co.lat AS courier_lat, co.lng AS courier_lng,
             cb.lat AS branch_lat, cb.lng AS branch_lng
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
         LEFT JOIN courier_branches cb ON cb.courier_id = co.id AND cb.name = j.branch AND cb.active = 1
@@ -6973,16 +7320,27 @@ app.get('/rider/queue', async (c) => {
           lat: job.pickup_lat ?? null,
           lng: job.pickup_lng ?? null,
           // Depot drop coordinates for the "navigate to depot" leg after the
-          // pickup is done.
-          depot_lat: job.branch_lat ?? null,
-          depot_lng: job.branch_lng ?? null,
+          // pickup is done — the matched branch first, else the courier's own
+          // depot pin, so the leg almost always opens the in-app navigator
+          // instead of falling through to address geocoding (owner bug
+          // 2026-11-18: "keeps toasting Finding… but never navigates").
+          depot_lat: job.branch_lat ?? job.courier_lat ?? null,
+          depot_lng: job.branch_lng ?? job.courier_lng ?? null,
           from_city: job.from_city ?? '',
           seller: job.sender_name,
           seller_phone: job.sender_phone ?? '',
+          // Parcel content names the pickup/collection sheet ("PICKUP-BOOKS-…"),
+          // and the recipient contact names who holds the door code.
+          description: job.description ?? '',
+          recipient: job.recipient_name ?? '',
+          recipient_phone: job.recipient_phone ?? '',
           parcels: Number(job.parcels ?? 1),
           status: job.status,
           last_mile: Number(job.last_mile ?? 0),
           courier: job.courier_name,
+          // The DEPOT name itself ("Platinum", "Icypeed") — the depot-leg
+          // button and navigator label read this, not a generic "depot".
+          depot: job.depot_name ?? job.courier_name,
         });
         curLat = Number(job.pickup_lat ?? curLat);
         curLng = Number(job.pickup_lng ?? curLng);
