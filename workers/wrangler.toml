@@ -51,6 +51,12 @@ ROUTER_UPSTREAM = "https://router.project-osrm.org"
 ENV = "production"
 AT_USERNAME = "ChurchOnApp"                        # AT app: ChurchOnApp (funded)
 AT_FROM = "Carpso"                                 # approved sender ID — DropOff SMS
+# Cross-wallet fallback (owner 2026-11-18: "one wallet — when one app's
+# balance shows zero it uses the other app's balance"): if the ChurchOnApp
+# send fails (key dead, wallet empty), sendSms retries on the fallback app's
+# wallet via its DEFAULT route (kingdom_sponsor has no approved sender, so
+# those SMS go out unbranded). Secret: AT_FALLBACK_API_KEY.
+AT_FALLBACK_USERNAME = "kingdom_sponsor"           # funded ZMW 99.77 — emergency wallet
 # Legacy SMS_* names still read as a fallback (sms.ts).
 
 # CORS: comma-separated origins allowed to call the API cross-origin (the

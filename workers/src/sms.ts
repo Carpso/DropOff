@@ -66,6 +66,11 @@ export async function sendSms(
     AT_USERNAME?: string;
     AT_API_KEY?: string;
     AT_FROM?: string;
+    // Cross-wallet fallback (owner 2026-11-18 "one wallet"): when the primary
+    // app cannot send — bad key, empty wallet — the send retries on the
+    // fallback app's wallet so OTP/payment SMS never die with the balance.
+    AT_FALLBACK_USERNAME?: string;
+    AT_FALLBACK_API_KEY?: string;
     SMS_USERNAME?: string;
     SMS_API_KEY?: string;
     SMS_SENDER_ID?: string;
@@ -91,11 +96,12 @@ export async function sendSms(
   }
   const user = String(env.AT_USERNAME ?? env.SMS_USERNAME ?? '');
   const key = String(env.AT_API_KEY ?? env.SMS_API_KEY ?? '');
-  // Sender ID is OPTIONAL now (2026-11-18): the funded kingdom_sponsor app has
-  // NO approved alphanumeric sender, but its default route delivers fine
-  // (K0.24). A hardcoded fallback forced "Carpso" onto every call and got
-  // InvalidSenderId — the sender is only used when explicitly configured.
+  // Sender ID is OPTIONAL: it is only used when explicitly configured (a
+  // hardcoded fallback once forced "Carpso" onto every call and got
+  // InvalidSenderId).
   const from = String(env.AT_FROM ?? env.SMS_SENDER_ID ?? '').trim();
+  const fbUser = String(env.AT_FALLBACK_USERNAME ?? '').trim();
+  const fbKey = String(env.AT_FALLBACK_API_KEY ?? '').trim();
   const production = String(env.ENV ?? '').toLowerCase() === 'production';
 
   // Dev / sandbox: never call AT (no billing), just surface the text so the
@@ -110,17 +116,17 @@ export async function sendSms(
   // AT returns HTTP 201 even when ZERO recipients were accepted (e.g.
   // InvalidSenderId) — so success is judged from the per-recipient statuses,
   // never from the HTTP status alone.
-  const post = async (useFrom: boolean): Promise<SmsResult> => {
+  const post = async (u: string, k: string, sender: string): Promise<SmsResult> => {
     const form = new URLSearchParams({
-      username: user,
+      username: u,
       to: safePhone(phoneE164),
       message: text,
-      ...(useFrom && from ? { from } : {}),
+      ...(sender ? { from: sender } : {}),
     });
     const res = await fetch(AT_MESSAGES_URL, {
       method: 'POST',
       headers: {
-        Apikey: key,
+        Apikey: k,
         'Content-Type': 'application/x-www-form-urlencoded',
         Accept: 'application/json',
       },
@@ -145,15 +151,34 @@ export async function sendSms(
     return { sent: false, error: `at_reject:${String(recipients[0]?.status ?? 'unknown').slice(0, 80)}` };
   };
   try {
-    // Preferred: the configured sender ID. On InvalidSenderId (sender not
-    // approved on this AT app) fall back to the default route — delivery
-    // beats branding, and the OTP/payment SMS must land either way.
+    // Ladder (delivery beats branding beats nothing):
+    //   1. primary app + configured sender ID (branded),
+    //   2. primary app + default route (sender rejected),
+    //   3. fallback app's wallet + default route (primary key dead or wallet
+    //      empty — owner 2026-11-18: one Carpso wallet, the other app's
+    //      balance keeps the OTPs flowing).
+    let primaryError: string | undefined;
     if (from) {
-      const withSender = await post(true);
+      const withSender = await post(user, key, from);
       if (withSender.sent) return withSender;
-      if (!/InvalidSenderId/i.test(withSender.error ?? '')) return withSender;
+      primaryError = withSender.error;
+      if (/InvalidSenderId/i.test(primaryError ?? '')) {
+        const onDefault = await post(user, key, '');
+        if (onDefault.sent) return onDefault;
+        primaryError = onDefault.error;
+      }
+    } else {
+      const onDefault = await post(user, key, '');
+      if (onDefault.sent) return onDefault;
+      primaryError = onDefault.error;
     }
-    return await post(false);
+    if (fbUser && fbKey) {
+      const viaFallback = await post(fbUser, fbKey, '');
+      if (viaFallback.sent) return viaFallback;
+      // Surface whichever failure explains the delivery best (both shown).
+      return { sent: false, error: `${primaryError ?? 'sms_failed'} | fallback:${viaFallback.error ?? 'sms_failed'}` };
+    }
+    return { sent: false, error: primaryError ?? 'sms_failed' };
   } catch (e: any) {
     return { sent: false, error: e?.message ?? 'sms_failed' };
   }
