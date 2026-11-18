@@ -1,6 +1,9 @@
-// OTP / notification SMS via Africa's Talking — the Carpso account
-// (AT_USERNAME=ChurchOnApp, AT_FROM=Carpso), same wiring as Kingdom Sponsor
-// (chisomo/src/sms.ts) and Grand Elephants.
+// OTP / notification SMS via Africa's Talking — the Kingdom Sponsor app
+// (AT_USERNAME=kingdom_sponsor, wallet ZMW 99.77 — from 2026-11-17; the old
+// ChurchOnApp app was out of credit). AT_FROM is empty (2026-11-18): the
+// kingdom_sponsor app has no approved alphanumeric sender yet, so SMS rides
+// AT's default route (K0.24, verified live). If a sender is configured and AT
+// rejects it (InvalidSenderId), sendSms retries without it — delivery first.
 //
 // Env:
 //   secrets: AT_API_KEY (npx wrangler secret put AT_API_KEY)  [SMS_API_KEY still works]
@@ -87,7 +90,11 @@ export async function sendSms(
   }
   const user = String(env.AT_USERNAME ?? env.SMS_USERNAME ?? '');
   const key = String(env.AT_API_KEY ?? env.SMS_API_KEY ?? '');
-  const from = String(env.AT_FROM ?? env.SMS_SENDER_ID ?? 'Carpso');
+  // Sender ID is OPTIONAL now (2026-11-18): the funded kingdom_sponsor app has
+  // NO approved alphanumeric sender, but its default route delivers fine
+  // (K0.24). A hardcoded fallback forced "Carpso" onto every call and got
+  // InvalidSenderId — the sender is only used when explicitly configured.
+  const from = String(env.AT_FROM ?? env.SMS_SENDER_ID ?? '').trim();
   const production = String(env.ENV ?? '').toLowerCase() === 'production';
 
   // Dev / sandbox: never call AT (no billing), just surface the text so the
@@ -99,13 +106,15 @@ export async function sendSms(
   if (!user || !key) return { sent: false, error: 'sms_not_configured' };
 
   const text = clampSms(message);
-  try {
-    // AT requires lowercase form fields (username/to/message/from).
+  // AT returns HTTP 201 even when ZERO recipients were accepted (e.g.
+  // InvalidSenderId) — so success is judged from the per-recipient statuses,
+  // never from the HTTP status alone.
+  const post = async (useFrom: boolean): Promise<SmsResult> => {
     const form = new URLSearchParams({
       username: user,
       to: safePhone(phoneE164),
       message: text,
-      ...(from ? { from } : {}),
+      ...(useFrom && from ? { from } : {}),
     });
     const res = await fetch(AT_MESSAGES_URL, {
       method: 'POST',
@@ -116,9 +125,34 @@ export async function sendSms(
       },
       body: form.toString(),
     });
-    if (res.ok) return { sent: true };
     const body = await res.text().catch(() => '');
-    return { sent: false, error: `at_status_${res.status}${body ? `:${body.slice(0, 120)}` : ''}` };
+    if (!res.ok) {
+      return { sent: false, error: `at_status_${res.status}${body ? `:${body.slice(0, 120)}` : ''}` };
+    }
+    let recipients: any[] = [];
+    try {
+      recipients = JSON.parse(body)?.SMSMessageData?.Recipients ?? [];
+    } catch { /* non-JSON body — treat as unconfirmed */ }
+    if (!recipients.length) {
+      const reason = String(body.match(/"Message":"([^"]+)"/)?.[1] ?? 'no_recipients');
+      return { sent: false, error: `at_reject:${reason.slice(0, 80)}` };
+    }
+    const ok = recipients.some(
+      (r) => Number(r?.statusCode) === 100 || String(r?.status ?? '').toLowerCase() === 'success',
+    );
+    if (ok) return { sent: true };
+    return { sent: false, error: `at_reject:${String(recipients[0]?.status ?? 'unknown').slice(0, 80)}` };
+  };
+  try {
+    // Preferred: the configured sender ID. On InvalidSenderId (sender not
+    // approved on this AT app) fall back to the default route — delivery
+    // beats branding, and the OTP/payment SMS must land either way.
+    if (from) {
+      const withSender = await post(true);
+      if (withSender.sent) return withSender;
+      if (!/InvalidSenderId/i.test(withSender.error ?? '')) return withSender;
+    }
+    return await post(false);
   } catch (e: any) {
     return { sent: false, error: e?.message ?? 'sms_failed' };
   }
