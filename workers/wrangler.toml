@@ -2,6 +2,9 @@ name = "dropoff-api"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 account_id = "ab82a97ce2c926279c483fef36c41945"
+# Keep the default workers.dev URL attached: deploying with [[routes]] would
+# otherwise detach it (seen live 2026-11-18 — old APKs lost the API).
+workers_dev = true
 
 # Transactional email (password reset / email verification) via Cloudflare
 # Email Service. MUST be a top-level binding (an array-of-tables) — putting it
