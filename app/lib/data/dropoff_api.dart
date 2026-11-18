@@ -24,6 +24,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 class DropOffApi {
   static const String baseUrl = String.fromEnvironment('DROPOFF_API_URL',
       defaultValue: 'https://api.carpsosolutions.store');
+  // Second front door: both hosts serve the SAME Worker. If a device/network
+  // blocks one (or it is briefly detached), the app silently uses the other —
+  // no "can't reach the DropOff API" dead ends (owner 2026-11-18).
+  static const String fallbackBaseUrl =
+      'https://dropoff-api.godfreymoseskalambo.workers.dev';
+  static String? _activeBaseUrl;
+  static String get _currentBase => _activeBaseUrl ?? baseUrl;
+  static bool _flipToFallback() {
+    final other = _currentBase == baseUrl ? fallbackBaseUrl : baseUrl;
+    if (other.isEmpty || other == _currentBase) return false;
+    _activeBaseUrl = other;
+    return true;
+  }
+  // Header values must be latin-1: a phone whose manufacturer/model contains
+  // non-ASCII characters otherwise makes EVERY http call throw in the client
+  // (browser works, app dies) — sanitise at the source.
+  static String _asciiHeader(String v) => String.fromCharCodes(
+      v.codeUnits.where((c) => c >= 32 && c < 127).take(96));
   // SECURITY: the ops/rider service key must NEVER ship inside a store build.
   // It arrives only via --dart-define at build time on trusted rider/operator
   // devices. Without it, customers sign in with the email/OTP JWT and every
@@ -167,7 +185,7 @@ class DropOffApi {
   }
 
   static Uri _uri(String path, [Map<String, String>? query]) =>
-      Uri.parse('$baseUrl$path').replace(queryParameters: query);
+      Uri.parse('$_currentBase$path').replace(queryParameters: query);
 
   static String? _deviceId;
 
@@ -201,10 +219,10 @@ class DropOffApi {
 
   static Map<String, String> get _headers => {
       'Content-Type': 'application/json',
-      if (apiKey.isNotEmpty) 'X-Api-Key': apiKey,
+      if (apiKey.isNotEmpty) 'X-Api-Key': _asciiHeader(apiKey),
       if (token != null) 'Authorization': 'Bearer $token',
-      if (_deviceId != null && _deviceId!.isNotEmpty) 'X-Device-Id': _deviceId!,
-      if (_deviceName != null && _deviceName!.isNotEmpty) 'X-Device-Name': _deviceName!,
+      if (_deviceId != null && _deviceId!.isNotEmpty) 'X-Device-Id': _asciiHeader(_deviceId!),
+      if (_deviceName != null && _deviceName!.isNotEmpty) 'X-Device-Name': _asciiHeader(_deviceName!),
     };
 
   static Map<String, String> get _adminHeaders => {
@@ -252,6 +270,18 @@ class DropOffApi {
       }
       return _readCache(cacheKey);
     } catch (_) {
+      // Other host, one attempt — then fall back to the on-device cache.
+      if (_flipToFallback()) {
+        try {
+          final res2 = await http.get(_uri(path, query), headers: _headers).timeout(_timeout);
+          if (res2.statusCode == 200) {
+            final decoded2 = jsonDecode(res2.body) as Map<String, dynamic>;
+            unawaited(_saveCache(cacheKey, res2.body));
+            _memCache[cacheKey] = (value: decoded2, expiry: DateTime.now().add(_freshWindow));
+            return decoded2;
+          }
+        } catch (_) {}
+      }
       final mem = _memCache[cacheKey];
       if (mem != null) return mem.value;
       return _readCache(cacheKey);
@@ -304,6 +334,11 @@ class DropOffApi {
       // Only transport-level failures retry — an HTTP error answer from the
       // server is a definite outcome, never a silent re-fire.
       if (res.error != 'network_error') return res;
+    }
+    // Secondary front door: if every attempt died at the transport layer,
+    // try the SAME request on the other host and stay there for the session.
+    if (res.error == 'network_error' && _flipToFallback()) {
+      res = await _postOnce(path, body, admin: admin, timeout: timeout, extraHeaders: extraHeaders);
     }
     return res;
   }

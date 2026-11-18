@@ -51,6 +51,9 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _photoBusy = false;
   String? _otpMsg;
   String? _error;
+  // "Resend verification email" only matters when the error actually mentions
+  // verification — otherwise it just crowds the sign-in screen (owner request).
+  bool _showResendVerification = false;
   final _listController = ScrollController();
   final _plansAnchorKey = GlobalKey();
 
@@ -171,7 +174,11 @@ class _AccountScreenState extends State<AccountScreen> {
       Navigator.of(context).pop();
       AppToast.show(context, _creating ? 'Account created — you are signed in.' : 'Signed in.');
     } else {
-      setState(() => _error = store.lastAuthError ?? AppStore.authErrorText('unknown'));
+      final message = store.lastAuthError ?? AppStore.authErrorText('unknown');
+      setState(() {
+        _error = message;
+        _showResendVerification = message.toLowerCase().contains('verif');
+      });
     }
   }
 
@@ -676,10 +683,13 @@ class _AccountScreenState extends State<AccountScreen> {
                   onPressed: () => _forgotPassword(),
                   child: const Text('Forgot password?'),
                 ),
-                TextButton(
-                  onPressed: () => _resendVerification(),
-                  child: const Text('Resend verification email'),
-                ),
+                // Hidden until an error actually mentions verification —
+                // one less thing to read on the default sign-in screen.
+                if (_showResendVerification)
+                  TextButton(
+                    onPressed: () => _resendVerification(),
+                    child: const Text('Resend verification email'),
+                  ),
               ]),
             ],
             const SizedBox(height: 16),

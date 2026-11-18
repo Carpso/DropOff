@@ -12,7 +12,10 @@ param(
   [switch]$SkipAnalyze
 )
 
-$ErrorActionPreference = 'Stop'
+# Flutter writes gradle warnings to stderr; with 'Stop' they abort the build
+# before artifacts are copied (silently killing dist/). Keep going and check
+# exit codes explicitly below.
+$ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location "$root\app"
 
@@ -35,7 +38,10 @@ if (-not $SkipAnalyze) {
   flutter test
 }
 
-$apiUrl = '--dart-define=DROPOFF_API_URL=https://dropoff-api.godfreymoseskalambo.workers.dev'
+# Custom domain shared by ALL share links + API (owner 2026-11-18). This used
+# to hardcode the old workers.dev host, which silently overrode the app's new
+# default — every "0.5.47" build still pointed at the old blocked host.
+$apiUrl = '--dart-define=DROPOFF_API_URL=https://api.carpsosolutions.store'
 
 # Default: rebuild everything
 $doApk = $Apk -or -not ($Apk -or $Aab -or $Web)
@@ -45,14 +51,19 @@ $doWeb = $Web -or -not ($Apk -or $Aab -or $Web)
 if ($doApk) {
   Write-Host '== build APK =='
   flutter build apk --release $apiUrl
+  if ($LASTEXITCODE -ne 0) { throw 'APK build failed' }
 }
 if ($doAab) {
   Write-Host '== build AAB =='
   flutter build appbundle --release $apiUrl
+  if ($LASTEXITCODE -ne 0) { throw 'AAB build failed' }
 }
 if ($doWeb) {
   Write-Host '== build web =='
   flutter build web --release $apiUrl
+  # Web is a secondary target (the recipient portal): never let a web-only
+  # compile failure abort APK/AAB copies for Play.
+  if ($LASTEXITCODE -ne 0) { Write-Host '!! web build failed - APK/AAB still copied' }
 }
 
 # Copy fresh artifacts into dist/ (the source of truth for uploads).
