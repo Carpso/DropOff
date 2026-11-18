@@ -302,7 +302,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                   final n = int.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
                   setState(() => _parcels = (n == null || n < 1) ? 1 : n);
                 },
-              )),
+              ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           initialValue: _size,
