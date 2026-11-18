@@ -3067,7 +3067,7 @@ async function geocodePickup(address: string, city: string): Promise<{ lat: numb
   if (q.replace(/[,\s]/g, '').length < 6) return null;
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=zm&q=${encodeURIComponent(q)}`,
       { headers: { 'User-Agent': 'DropOff seed sweep (ops)', 'Accept-Language': 'en' } });
     if (!res.ok) return null;
     const rows = await res.json() as Array<{ lat: string; lon: string }>;
