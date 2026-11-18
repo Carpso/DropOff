@@ -2368,12 +2368,10 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
     final ppm = (t['parcels_per_month'] as num?)?.toInt() ?? 0;
     final cap = ppd > 0 ? '$ppd parcel${ppd == 1 ? '' : 's'}/day' : (ppm > 0 ? '$ppm parcels/month' : 'no cap');
     final cycle = (t['cycle_days'] as num?)?.toInt() ?? 0;
-    final disc = (t['overage_discount_pct'] as num?)?.toDouble() ?? 0;
     final fee = (t['fee_zmw'] as num?)?.toDouble() ?? 0;
-    // The live tag rides on the subtitle (owner 2026-11-18): admins see at a
-    // glance what the seller page currently badges without opening the editor.
+    // Overage discounts removed entirely (owner 2026-11-18) — no discount copy.
     final tag = '${t['tag'] ?? ''}'.trim();
-    return 'K${fee.toStringAsFixed(0)} • $cap • ${cycle}d cycle${disc > 0 ? ' • ${disc.toStringAsFixed(0)}% overage discount' : ''}${tag.isNotEmpty ? ' • tag: $tag' : ' • no tag'}';
+    return 'K${fee.toStringAsFixed(0)} • $cap • ${cycle}d cycle${tag.isNotEmpty ? ' • tag: $tag' : ' • no tag'}';
   }
 
   Future<void> _editPlan(Map<String, dynamic> t) async {
@@ -2381,7 +2379,6 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
     final ppd = TextEditingController(text: '${(t['parcels_per_day'] as num?)?.toInt() ?? 0}');
     final ppm = TextEditingController(text: '${(t['parcels_per_month'] as num?)?.toInt() ?? 0}');
     final rider = TextEditingController(text: '${(t['rider_fee_zmw'] as num?)?.toDouble() ?? 0}');
-    final disc = TextEditingController(text: '${(t['overage_discount_pct'] as num?)?.toDouble() ?? 0}');
     final days = TextEditingController(text: '${(t['cycle_days'] as num?)?.toInt() ?? 30}');
     final tag = TextEditingController(text: '${t['tag'] ?? ''}');
     var active = (t['active'] == true || t['active'] == 1);
@@ -2396,7 +2393,6 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             TextField(controller: ppd, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Parcels per day (0 = monthly plan)')),
             TextField(controller: ppm, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Parcels per month (0 = none)')),
             TextField(controller: rider, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rider fee inside cap (0 = bundled)')),
-            TextField(controller: disc, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Overage discount %')),
             TextField(controller: days, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cycle length (days)')),
             TextField(controller: tag, decoration: const InputDecoration(labelText: 'Tag (shown in the app)', hintText: 'e.g. Most popular')),
             StatefulBuilder(
@@ -2420,7 +2416,6 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
                 'parcels_per_day': int.tryParse(ppd.text.trim()) ?? 0,
                 'parcels_per_month': int.tryParse(ppm.text.trim()) ?? 0,
                 'rider_fee_zmw': double.tryParse(rider.text.trim()) ?? 0,
-                'overage_discount_pct': double.tryParse(disc.text.trim()) ?? 0,
                 'cycle_days': int.tryParse(days.text.trim()) ?? 30,
                 'tag': tag.text.trim().isEmpty ? null : tag.text.trim(),
                 'active': active ? 1 : 0,
@@ -2477,7 +2472,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
           const SizedBox(height: 6),
           _flagRow(
             'Tier overage discount',
-            'Silver 15% / Gold 25% / Platinum 35% off PAYG overage. Off — the model is already lean. Every seller sees plans without the discount until this is flipped.',
+            'Overage discount permanently OFF (owner 2026-11-18): no plan gives a discount after the cap; extras bill at full pay-as-you-go. The switch stays OFF as a kill switch.',
             _overageDiscount,
             (v) => _toggleFlag('overage_discount_enabled', v),
           ),

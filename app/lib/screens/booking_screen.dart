@@ -1394,7 +1394,7 @@ class _BookingScreenState extends State<BookingScreen> {
           if (_planLeg == 'pack')
             _priceLine('DropOff leg (sender → depot)', 'Covered by plan')
           else if (_planLeg == 'overage')
-            _priceLine(_overageEnabled ? 'DropOff rider fee ($_overagePct% overage discount)' : 'DropOff rider fee', kwacha(_riderFeeEstimate))
+            _priceLine('DropOff rider fee', kwacha(_riderFeeEstimate))
           else
             _priceLine('DropOff rider fee', kwacha(_riderFeeEstimate)),
           if (_lastMile) ...[

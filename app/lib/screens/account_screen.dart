@@ -1508,9 +1508,7 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
             const SizedBox(height: 7),
             Text(
               used >= cap
-                  ? ((snap.data?['feature_flags']?['overage_discount_enabled'] as bool?) ?? false
-                      ? 'Cap reached — extra parcels now pay your tier discount (auto-applied at booking).'
-                      : 'Cap reached — extra parcels now bill at pay-as-you-go rates.')
+                  ? 'Cap reached — extra parcels now bill at pay-as-you-go rates.'
                   : 'Each parcel counts as one. Cycle renews $renews.',
               style: AppType.caption,
             ),

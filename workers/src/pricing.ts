@@ -85,7 +85,7 @@ export function tierOverageFee(tier: string, walkUpFeeZmw: number, discountPct?:
     const pct = Math.max(0, Math.min(100, Number(discountPct)));
     return round2(Math.max(0, walkUpFeeZmw * (1 - pct / 100)));
   }
-  const discount: Record<string, number> = { weekly: 10, rider_daily: 0, silver: 15, gold: 25, platinum: 35 };
+  const discount: Record<string, number> = { weekly: 0, rider_daily: 0, silver: 0, gold: 0, platinum: 0 };
   const pct = discount[tier] ?? 0;
   return round2(Math.max(0, walkUpFeeZmw * (1 - pct / 100)));
 }

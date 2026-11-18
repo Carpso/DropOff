@@ -67,10 +67,10 @@ const PLANS: Record<PlanTier, PlanDef> = {
   // (The old Daily Dash was removed per product decision; this is a different,
   // leaner product re-introduced at the owner's request.)
   rider_daily: { fee_zmw: 49, windows: ['now', '06:00', '10:00', '14:00'], parcels_per_day: 1, parcels_per_month: 0, rider_fee_zmw: 0, overage_discount_pct: 0, cycle_days: 1, tag: 'Daily Rider' },
-  weekly:  { fee_zmw: 399, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 20, rider_fee_zmw: 0, overage_discount_pct: 10, cycle_days: 7, tag: 'Weekly Sprint' },
-  silver: { fee_zmw: 250, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 10, rider_fee_zmw: 0, overage_discount_pct: 15, cycle_days: 30 },
-  gold:   { fee_zmw: 500, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 25, rider_fee_zmw: 0, overage_discount_pct: 25, cycle_days: 30 },
-  platinum: { fee_zmw: 750, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 50, rider_fee_zmw: 0, overage_discount_pct: 35, cycle_days: 30 },
+  weekly:  { fee_zmw: 399, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 20, rider_fee_zmw: 0, overage_discount_pct: 0, cycle_days: 7, tag: 'Weekly Sprint' },
+  silver: { fee_zmw: 250, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 10, rider_fee_zmw: 0, overage_discount_pct: 0, cycle_days: 30 },
+  gold:   { fee_zmw: 500, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 25, rider_fee_zmw: 0, overage_discount_pct: 0, cycle_days: 30 },
+  platinum: { fee_zmw: 750, windows: ['06:00', '10:00', '14:00'], parcels_per_day: 0, parcels_per_month: 50, rider_fee_zmw: 0, overage_discount_pct: 0, cycle_days: 30 },
 };
 
 /**
