@@ -39,21 +39,18 @@ AUTH_DEV_MODE = "0"                            # "1" = return OTP codes / reset 
 ROUTER_UPSTREAM = "https://router.project-osrm.org"
 # The Worker proxy uses it ahead of any keyed service; riders get road-following routes; no keys involved.
 
-# SMS — Africa's Talking. AT_USERNAME = "kingdom_sponsor" (from 2026-11-17):
-# the funded production app (wallet ZMW 99.77) — the old "ChurchOnApp" app was
-# out of credit, so every SMS (OTP, pickup codes) was silently dropped.
-# AT_FROM is EMPTY (2026-11-18): the kingdom_sponsor app has NO approved
-# alphanumeric sender — Carpso/KSPONSOR were registered on the old account and
-# AT rejects them here with InvalidSenderId. The DEFAULT route delivers fine
-# (K0.24/SMS, verified live to the owner's phone). To brand later: register
-# the sender ID on THIS account in the AT dashboard (MNO approval ~1-3 days),
-# then set AT_FROM and redeploy — sms.ts auto-falls back to the default route
-# if AT rejects it, so SMS never silently dies again.
+# SMS — Africa's Talking. DropOff sends on the ChurchOnApp app (from
+# 2026-11-18): it is funded (wallet ZMW 49.92) and holds the approved
+# alphanumeric sender "Carpso" — DropOff's brand. Kingdom Sponsor sends on the
+# SAME app with sender "KSPONSOR": one funded wallet, each app its own sender
+# ID (owner directive). The kingdom_sponsor app has NO approved sender, so
+# DropOff does not use it. The key is also saved at
+# OneDrive/Documents/"Settings - API Key.txt" (owner's copy).
 # Secret: AT_API_KEY (npx wrangler secret put AT_API_KEY) — must be the
-# "Kingdom Sponsor" app's API key, not the retired ChurchOnApp one.
+# ChurchOnApp app's API key (verified live 2026-11-18: Carpso delivered).
 ENV = "production"
-AT_USERNAME = "kingdom_sponsor"                    # AT app: Kingdom Sponsor
-AT_FROM = ""                                       # no approved sender on this app yet — default route
+AT_USERNAME = "ChurchOnApp"                        # AT app: ChurchOnApp (funded)
+AT_FROM = "Carpso"                                 # approved sender ID — DropOff SMS
 # Legacy SMS_* names still read as a fallback (sms.ts).
 
 # CORS: comma-separated origins allowed to call the API cross-origin (the

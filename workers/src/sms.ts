@@ -1,9 +1,10 @@
-// OTP / notification SMS via Africa's Talking — the Kingdom Sponsor app
-// (AT_USERNAME=kingdom_sponsor, wallet ZMW 99.77 — from 2026-11-17; the old
-// ChurchOnApp app was out of credit). AT_FROM is empty (2026-11-18): the
-// kingdom_sponsor app has no approved alphanumeric sender yet, so SMS rides
-// AT's default route (K0.24, verified live). If a sender is configured and AT
-// rejects it (InvalidSenderId), sendSms retries without it — delivery first.
+// OTP / notification SMS via Africa's Talking — the ChurchOnApp app
+// (AT_USERNAME=ChurchOnApp, AT_FROM=Carpso; funded 2026-11-18, wallet
+// ZMW 49.92). Kingdom Sponsor shares this app's wallet but sends as
+// KSPONSOR — each app its own sender ID. sendSms judges success
+// per-recipient (AT returns HTTP 201 even when nothing was sent) and, if a
+// configured sender is ever rejected (InvalidSenderId), retries without it
+// so the default route still delivers — payment/OTP SMS must never die.
 //
 // Env:
 //   secrets: AT_API_KEY (npx wrangler secret put AT_API_KEY)  [SMS_API_KEY still works]
