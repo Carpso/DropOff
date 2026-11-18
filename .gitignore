@@ -24,6 +24,8 @@ key.properties
 .env
 .env.*
 client_secret*.json
+workers/.prod-secrets.txt
+build_*_log.txt
 
 # Local build outputs
 dist/

@@ -1178,9 +1178,10 @@ app.post('/delete-data/confirm', async (c) => {
   return c.json({ ok: true, deleted: true });
 });
 
-// Deep-linkwell-known assets: let Android/iOS open DropOff links instead of
-// a bare browser tab. Hosted on the API origin until the branded domain exists.
-const APP_LINK_HOST = 'dropoff-api.godfreymoseskalambo.workers.dev';
+// Deep-link well-known assets: let Android/iOS open DropOff links instead of
+// a bare browser tab. Served on the shared API host — the apex
+// carpsosolutions.store belongs to the company site and is untouched.
+const APP_LINK_HOST = 'api.carpsosolutions.store';
 const DROPOFF_PACKAGE = 'zm.dropoff.dropoff';
 const UPLOAD_CERT_SHA256 = 'D0:DB:11:37:43:29:51:04:02:8F:42:3B:AB:B7:89:06:67:68:F0:48:D2:F1:AB:BF:76:21:A4:B8:5A:B0:E9:37';
 app.get('/.well-known/assetlinks.json', (c) => c.json([{
@@ -7416,7 +7417,7 @@ app.get('/refer/code', async (c) => {
   ).bind(phone).first<any>();
   return c.json({
     code,
-    share_text: `Join me on DropOff — sellers get home pickup to their courier. Use my link: https://dropoff-api.godfreymoseskalambo.workers.dev/r/${code}`,
+    share_text: `Join me on DropOff — sellers get home pickup to their courier. Use my link: https://api.carpsosolutions.store/r/${code}`,
     stats: { pending: stats?.pending ?? 0, rewarded: stats?.rewarded ?? 0, total: stats?.total ?? 0 },
   });
 });

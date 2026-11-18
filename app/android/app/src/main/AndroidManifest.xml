@@ -55,6 +55,18 @@
                 <data android:scheme="https" android:host="dropoff-api.godfreymoseskalambo.workers.dev" android:pathPrefix="/plans" />
                 <data android:scheme="https" android:host="dropoff-api.godfreymoseskalambo.workers.dev" android:pathPrefix="/couriers" />
                 <data android:scheme="https" android:host="dropoff-api.godfreymoseskalambo.workers.dev" android:pathPrefix="/auth" />
+                <!-- Shared API host (2026-11-18): same domain as SMS links + share cards. Old host stays so existing installs keep deep-linking. -->
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/track" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/t" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/bookings" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/rate" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/waybill" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/r" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/promo" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/claim" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/plans" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/couriers" />
+                <data android:scheme="https" android:host="api.carpsosolutions.store" android:pathPrefix="/auth" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

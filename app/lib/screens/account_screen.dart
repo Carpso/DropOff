@@ -58,10 +58,6 @@ class _AccountScreenState extends State<AccountScreen> {
   void initState() {
     super.initState();
     // /r/CODE deep link: prefill the referral box on account creation.
-    if (AccountScreen.prefillReferral != null && _cReferral.text.isEmpty) {
-      _cReferral.text = AccountScreen.prefillReferral!;
-      AccountScreen.prefillReferral = null;
-    }
     if (widget.focusPlans) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToPlans());
     }
@@ -73,15 +69,8 @@ class _AccountScreenState extends State<AccountScreen> {
     Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 350), alignment: 0);
   }
 
-  // Self-contained create-account modal (kept separate from the sign-in flow so
-  // the default Account screen is always sign-in first).
-  final _cEmail = TextEditingController();
-  final _cPassword = TextEditingController();
-  final _cPhone = TextEditingController();
-  final _cFullName = TextEditingController();
-  final _cReferral = TextEditingController();
-  bool _cAgreed = false;
-  bool _cBusy = false;
+  // Create-account modal lives as a self-contained StatefulWidget at the
+  // bottom of this file (own controllers, error and busy state).
 
   @override
   void dispose() {
@@ -93,15 +82,17 @@ class _AccountScreenState extends State<AccountScreen> {
     _referral.dispose();
     _otpPhone.dispose();
     _otpCode.dispose();
-    _cEmail.dispose();
-    _cPassword.dispose();
-    _cPhone.dispose();
-    _cFullName.dispose();
-    _cReferral.dispose();
     super.dispose();
   }
 
   Future<void> _sendOtp() async {
+    // Client-side gate first: the server would answer 400 and the user
+    // shouldn't have to learn what shape a Zambian number takes by failing.
+    final digits = _otpPhone.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length < 9 || digits.length > 15) {
+      setState(() => _otpMsg = 'Enter a full mobile number — 09…, 097… or +260…');
+      return;
+    }
     setState(() { _otpBusy = true; _otpMsg = null; });
     final res = await DropOffApi.requestOtp(_otpPhone.text);
     if (!mounted) return;
@@ -109,11 +100,18 @@ class _AccountScreenState extends State<AccountScreen> {
       _otpBusy = false;
       if (res.ok && res.body['sent'] == true) {
         _otpSent = true;
+        _otpCode.clear();
         _otpMsg = 'Code sent by SMS — it expires in 10 minutes.';
+        if (context.mounted) AppToast.show(context, 'Code sent — check your SMS.');
       } else if (res.ok) {
         _otpMsg = 'SMS could not be delivered (${res.body['sms_error'] ?? 'gateway error'}). Use email sign-in below.';
       } else {
-        _otpMsg = 'Could not send a code (${res.error}). Try again shortly.';
+        final why = res.error ?? 'error';
+        _otpMsg = why == 'network_error'
+            // Name the usual blockers explicitly — "network error" alone sent
+            // this owner chasing the wrong screen half the morning.
+            ? 'Can\'t reach the DropOff API — check your connection, and any Private DNS / VPN / ad-blocker.'
+            : 'Could not send a code ($why). Try again shortly.';
       }
     });
   }
@@ -144,6 +142,14 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   Future<void> _submit() async {
+    if (!_inputsValid) {
+      setState(() => _error = _email.text.trim().contains('@')
+          ? (_password.text.isEmpty
+              ? 'Enter your password.'
+              : 'Password must be at least 8 characters.')
+          : 'Enter a valid email address.');
+      return;
+    }
     final store = AppScope.of(context);
     setState(() { _busy = true; _error = null; });
     final ok = _creating
@@ -169,90 +175,12 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  /// Create account from the modal bottom sheet — self-contained, never
-  // entangled with the sign-in form above.
-  Future<void> _createSubmit() async {
-    final store = AppScope.of(context);
-    if (!_cAgreed) {
-      if (!mounted) return;
-      setState(() => _cBusy = false);
-      return;
-    }
-    final digits = _cPhone.text.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length < 9) {
-      if (!mounted) return;
-      setState(() { _cBusy = false; });
-      return;
-    }
-    setState(() { _cBusy = true; });
-    final ok = await AppScope.of(context).registerEmail(
-      email: _cEmail.text.trim(),
-      password: _cPassword.text,
-      phone: _cPhone.text,
-      fullName: _cFullName.text.trim().isEmpty ? null : _cFullName.text.trim(),
-      remember: false,
-    );
-    if (!mounted) return;
-    setState(() => _cBusy = false);
-    if (ok) {
-      if (_cReferral.text.trim().isNotEmpty) {
-        unawaited(DropOffApi.claimReferral(_cReferral.text.trim()));
-      }
-      if (!mounted) return;
-      Navigator.of(context).pop();
-      AppToast.show(context, 'Account created — you are signed in.');
-    } else {
-      setState(() => _error = store.lastAuthError ?? AppStore.authErrorText('unknown'));
-    }
-  }
-
   void _showCreateAccountSheet() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Create account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
-            const SizedBox(height: 4),
-            const Row(children: [
-              Expanded(child: Text('How sign-in works', style: AppType.bodyStrong)),
-              HelpIconButton(topic: HelpTopic.signIn),
-            ]),
-            const SizedBox(height: 6),
-            TextField(controller: _cEmail, keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email], decoration: const InputDecoration(labelText: 'Email')),
-            const SizedBox(height: 12),
-            TextField(controller: _cPassword, obscureText: true, autofillHints: const [AutofillHints.password], decoration: const InputDecoration(labelText: 'Password (8+ chars)', helperText: 'At least 8 characters')),
-            const SizedBox(height: 12),
-            TextField(controller: _cPhone, keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber], decoration: const InputDecoration(labelText: 'Mobile money phone', helperText: '09…, 097… or +260… — parcels addressed to it appear automatically')),
-            const SizedBox(height: 12),
-            TextField(controller: _cFullName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Full name (optional)')),
-            const SizedBox(height: 12),
-            TextField(controller: _cReferral, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Referral code (optional)', hintText: 'DRP-XXXXX', prefixIcon: Icon(Icons.redeem_rounded))),
-            const SizedBox(height: 14),
-            Row(children: [
-              Checkbox(value: _cAgreed, onChanged: (v) => setSheetState(() => _cAgreed = v ?? false), visualDensity: VisualDensity.compact),
-              const SizedBox(width: 8),
-              Expanded(child: RichText(text: TextSpan(style: const TextStyle(color: AppColors.muted, fontSize: 12), children: [
-                const TextSpan(text: 'I agree to the '),
-                TextSpan(text: 'Terms of use', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest), recognizer: TapGestureRecognizer()..onTap = () => Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const LegalScreen(title: 'Terms of use', asset: 'assets/legal/terms.md')))),
-                const TextSpan(text: ' and '),
-                TextSpan(text: 'Privacy policy', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest), recognizer: TapGestureRecognizer()..onTap = () => Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const LegalScreen(title: 'Privacy policy', asset: 'assets/legal/privacy.md')))),
-              ]))),
-            ]),
-            if (_error != null) ...[const SizedBox(height: 10), Text(_error!, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 13))],
-            const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: FilledButton.icon(
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-              onPressed: _cBusy ? null : _createSubmit,
-              icon: _cBusy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.person_add_alt_1),
-              label: const Text('Create account'),
-            )),
-          ]),
-        ),
-      ),
+      builder: (sheetContext) => const _CreateAccountSheet(),
     );
   }
 
@@ -654,8 +582,10 @@ class _AccountScreenState extends State<AccountScreen> {
             FilledButton.icon(
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: AppColors.forest),
               onPressed: _otpBusy ? null : _sendOtp,
-              icon: const Icon(Icons.sms_outlined),
-              label: Text(_otpSent ? 'Send a new 6-digit code' : 'Send 6-digit code by SMS', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+              icon: _otpBusy
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.sms_outlined),
+              label: Text(_otpBusy ? 'Sending…' : (_otpSent ? 'Send a new 6-digit code' : 'Send 6-digit code by SMS'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
             ),
             if (_otpSent) ...[
               const SizedBox(height: 12),
@@ -671,8 +601,10 @@ class _AccountScreenState extends State<AccountScreen> {
               FilledButton.icon(
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50), backgroundColor: AppColors.forest),
                 onPressed: _otpBusy ? null : _verifyOtp,
-                icon: const Icon(Icons.check_rounded),
-                label: const Text('Verify & sign in', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                icon: _otpBusy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.check_rounded),
+                label: Text(_otpBusy ? 'Verifying…' : 'Verify & sign in', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
               ),
             ],
             if (_otpMsg != null) ...[
@@ -727,7 +659,9 @@ class _AccountScreenState extends State<AccountScreen> {
             const SizedBox(height: 8),
             FilledButton.icon(
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-              onPressed: (!_busy && _inputsValid) ? _submit : null,
+              // Always tappable — the tap explains what is missing instead of a
+              // silently dead button.
+              onPressed: _busy ? null : _submit,
               icon: _busy
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                   : Icon(_creating ? Icons.person_add_alt_1 : Icons.login),
@@ -1576,3 +1510,133 @@ class _PlanUsageMeterState extends State<_PlanUsageMeter> {
     );
   }
 }
+
+/// Create-account modal — fully self-contained StatefulWidget with its own
+/// controllers, error and busy state. Its feedback must never depend on the
+/// Account screen's rebuild cycle (the old StatefulBuilder swallowed the
+/// sheet's state, so the spinner and errors never appeared and tapping
+/// "Create account" silently did nothing).
+class _CreateAccountSheet extends StatefulWidget {
+  const _CreateAccountSheet();
+
+  @override
+  State<_CreateAccountSheet> createState() => _CreateAccountSheetState();
+}
+
+class _CreateAccountSheetState extends State<_CreateAccountSheet> {
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _phone = TextEditingController();
+  final _fullName = TextEditingController();
+  final _referral = TextEditingController();
+  bool _agreed = false;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    // /r/CODE deep link: prefill the referral box on account creation.
+    if (AccountScreen.prefillReferral?.isNotEmpty ?? false) {
+      _referral.text = AccountScreen.prefillReferral!;
+      AccountScreen.prefillReferral = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    _phone.dispose();
+    _fullName.dispose();
+    _referral.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final email = _email.text.trim();
+    final digits = _phone.text.replaceAll(RegExp(r'[^0-9]'), '');
+    String? problem;
+    if (!email.contains('@')) {
+      problem = 'Enter a valid email address.';
+    } else if (_password.text.length < 8) {
+      problem = 'Password must be at least 8 characters.';
+    } else if (digits.length < 9 || digits.length > 15) {
+      problem = 'Enter a full mobile number — 09..., 097... or +260...';
+    } else if (!_agreed) {
+      problem = 'Tick the agreement to create the account.';
+    }
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+    setState(() { _busy = true; _error = null; });
+    final store = AppScope.of(context);
+    final ok = await store.registerEmail(
+      email: email,
+      password: _password.text,
+      phone: _phone.text.trim(),
+      fullName: _fullName.text.trim().isEmpty ? null : _fullName.text.trim(),
+      remember: false,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (ok) {
+      if (_referral.text.trim().isNotEmpty) {
+        unawaited(DropOffApi.claimReferral(_referral.text.trim().toUpperCase()));
+      }
+      Navigator.of(context).pop();
+      AppToast.show(context, 'Account created — you are signed in.');
+      return;
+    }
+    setState(() => _error = store.lastAuthError ?? AppStore.authErrorText('unknown'));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Create account', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
+        const SizedBox(height: 4),
+        const Row(children: [
+          Expanded(child: Text('How sign-in works', style: AppType.bodyStrong)),
+          HelpIconButton(topic: HelpTopic.signIn),
+        ]),
+        const SizedBox(height: 6),
+        TextField(controller: _email, keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email], decoration: const InputDecoration(labelText: 'Email')),
+        const SizedBox(height: 12),
+        TextField(controller: _password, obscureText: true, autofillHints: const [AutofillHints.password], decoration: const InputDecoration(labelText: 'Password (8+ chars)', helperText: 'At least 8 characters')),
+        const SizedBox(height: 12),
+        TextField(controller: _phone, keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber], decoration: const InputDecoration(labelText: 'Mobile money phone', helperText: '09..., 097... or +260... — parcels addressed to it appear automatically')),
+        const SizedBox(height: 12),
+        TextField(controller: _fullName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Full name (optional)')),
+        const SizedBox(height: 12),
+        TextField(controller: _referral, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: 'Referral code (optional)', hintText: 'DRP-XXXXX', prefixIcon: Icon(Icons.redeem_rounded))),
+        const SizedBox(height: 14),
+        Row(children: [
+          Checkbox(value: _agreed, onChanged: (v) => setState(() => _agreed = v ?? false), visualDensity: VisualDensity.compact),
+          const SizedBox(width: 8),
+          Expanded(child: RichText(text: TextSpan(style: const TextStyle(color: AppColors.muted, fontSize: 12), children: [
+            const TextSpan(text: 'I agree to the '),
+            TextSpan(text: 'Terms of use', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest), recognizer: TapGestureRecognizer()..onTap = () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalScreen(title: 'Terms of use', asset: 'assets/legal/terms.md')))),
+            const TextSpan(text: ' and '),
+            TextSpan(text: 'Privacy policy', style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.forest), recognizer: TapGestureRecognizer()..onTap = () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalScreen(title: 'Privacy policy', asset: 'assets/legal/privacy.md')))),
+          ]))),
+        ]),
+        if (_error != null) ...[
+          const SizedBox(height: 10),
+          Text(_error!, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 13)),
+        ],
+        const SizedBox(height: 12),
+        SizedBox(width: double.infinity, child: FilledButton.icon(
+          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+          onPressed: _busy ? null : _submit,
+          icon: _busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.person_add_alt_1),
+          label: Text(_busy ? 'Creating...' : 'Create account'),
+        )),
+      ]),
+    );
+  }
+}
+

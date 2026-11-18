@@ -1,5 +1,5 @@
 // Legal page content for the Play Store listing (privacy policy URL must be
-// live at https://dropoff-api.godfreymoseskalambo.workers.dev/legal/privacy).
+// live at https://api.carpsosolutions.store/legal/privacy).
 // Rendered with a tiny markdown subset converter in index.ts.
 
 export const PRIVACY_MD: string = `# DropOff - Privacy Policy
