@@ -27,3 +27,56 @@ Every upload to Google Play **must** use a **strictly higher `versionCode`** tha
 - Cover is **quoted protection, not insurance**, until legal/commercial sign-off; never market as insured.
 - SMS stays English-only until user locale is applied; TOI = Tonga (Zambia) / Chitonga.
 - Ops/admin endpoints are gated (`isAdmin` = admin key | role=admin | admin phone). Never ship `DROPOFF_API_KEY`/`ADMIN_AUTH_KEY` in store builds.
+
+## 2026-11-18 — Rider flow, Lusaka-first gating, custom domain, auth overhaul
+
+Dated engineering log of the fixes shipped 2026-11-18. Release train: 0.5.45+55 → 0.5.46+56 → 0.5.47+57 (in progress).
+
+### Split handover codes (migration 0065, applied live)
+- Sender PICKUP code ≠ recipient DOOR code. `pickup_otp_hash` / `pickup_otp_attempts` added; backfilled pickup = delivery for legacy rows.
+- Pickup confirms only against the sender's code; door handover only against the recipient's code (intercity only — see below).
+- Endpoints: `POST /jobs/:ref/waybill` (assigned rider/ops, money stripped), `POST /jobs/:ref/resend-pin` (fresh split codes, 3/day/phone), `POST /jobs/:ref/confirm-receipt` (recipient session, idempotent, sender push).
+- App: "View waybill" opens the order sheet pre-drop; rider stop sheet has a resend-PIN tile; pickup dialog gets resend button on otp_required/otp_locked.
+
+### Lusaka-first city gate (owner directive 2026-11-18)
+- Same-city recipients get NO 4-digit PIN SMS. They track live in-app and CONFIRM RECEIPT (optional, from their own session) and rate.
+- DOOR codes are minted ONLY for intercity collections (e.g. Ndola). Enforcement keys off `delivery_otp_hash` existing; minting is city-gated everywhere (booking, settle, heal, resend, seed sweep).
+- Sweep REGENERATES codes for live jobs; same-city rows get stale door hashes CLEARED.
+- 6 live jobs seeded for real (4 geocoded); 6/6 recipient tracking-only SMS sent; 0 sender SMS (pickups done).
+
+### Promos + plans
+- Every plan carries a tag now: weekly / silver / gold / platinum all set to `Promo` (live `/plans` shows it).
+- Tags editable by admins live via `/admin/tiers` (in-app plans editor has a Tag field); admin plans list now shows the current tag inline.
+
+### API outage 2026-11-18 (root cause + fix)
+- Adding `[[routes]]` custom_domain detaches the default workers.dev subdomain — every pre-0.5.47 APK saw 404s: tiers hidden ("Tier prices load when the server is reachable"), rider screens hidden (`/me` unreachable → role null).
+- Fix: `workers_dev = true` in wrangler.toml; both hosts verified serving (`/health`, `/plans`). **Lesson: any time you add [[routes]], also set workers_dev = true.**
+- Custom domain `api.carpsosolutions.store` added to the DropOff worker. Apex `carpsosolutions.store` = the company site (carpsosolutions.pages.dev) and `www` / `db` / cf-bounce email records are UNTOUCHED. Only the `api.` subdomain is DropOff's.
+- Share links and deep links now use the same domain: Android intent-filter hosts (old host kept), iOS `applinks:api.carpsosolutions.store` entitlement, SMS tracking links and referral share text point at the new domain. Android App Links: dropoff-api host retained alongside; iOS AASA 404s until `APPLE_TEAM_ID` is set on the worker (iOS app not shipped yet).
+- LIPILA_CALLBACK_URL deliberately still points at workers.dev (works on both; do not touch live payment wiring without a Lipila-side flip).
+
+### OTP/auth resilience + UI overhaul
+- Africa's Talking call bounded to 8s in `sms.ts` (was unbounded — could eat the app's 15s timeout → "network error" with no error surfaced).
+- App retries `/auth/request` once silently on transport failure before showing the error.
+- Truthful errors: client-side phone validation on the OTP screen; "network error" copy now names Private DNS / VPN / ad-blocker.
+- Account screen rebuilt: `_CreateAccountSheet` is now fully self-contained (own controllers/state) — it used to swallow all feedback (silent dead create button). OTP send/verify buttons show spinners and progress labels; email sign-in button always tappable with explicit validation errors.
+
+### Vehicle fields (booking + collections)
+- Half-width Vehicle dropdown clipped labels ("Motor…"). Vehicle + parcels fields are full width now; no ellipsis on vehicle labels anywhere.
+
+### Secrets hygiene (action required)
+- `workers/.prod-secrets.txt` was TRACKED IN GIT and contains production secrets (JWT_SECRET, API_AUTH_KEY, ADMIN_AUTH_KEY, LIPILA_API_KEY, upload keystore password). Now untracked + gitignored; the file itself stays local only.
+- **History still contains it — rotate:** JWT_SECRET, API_AUTH_KEY, ADMIN_AUTH_KEY (cheap, just re-login), LIPILA_API_KEY (needs Lipila portal — owner), upload keystore password (heavy; evaluate before rotating).
+- Admin key earlier synced to live worker secret from .dev.vars (13 chars); rotation still pending.
+
+### Known/parked
+- Lipila payouts: HTTP 401 (empty body) — nothing works until Lipila flips it or CSV batch fallback; K1/test payouts pending owner action.
+- Webhook secrets + chat-exposed `atsk_2b2c…` AT key rotation: deferred.
+- `APPLE_TEAM_ID` to enable iOS AASA; iOS/web recipient registration portal: needs web assets deploy (dist/web built, wrangler assets binding pending).
+- Play upload for the current release pair pending owner press.
+- FCM device test, keystore rotation, UptimeRobot: open items.
+- **dist/ discipline:** never ship artifacts not built from a verified-clean source tree; verify `flutter analyze` before trusting build outputs.
+
+### Release 0.5.47+57 contents
+- api.carpsosolutions.store default base URL; auth retry + truthful errors; self-contained create-account sheet; full-width vehicle fields; Promo tag visible in admin list; Auth/OTP bounded; deeplink hosts on the new domain.
+

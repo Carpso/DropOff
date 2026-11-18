@@ -276,34 +276,33 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         const SizedBox(height: 10),
         TextField(controller: _senderName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Your name (optional)', prefixIcon: Icon(Icons.person_outline))),
         const SizedBox(height: 16),
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: DropdownButtonFormField<String>(
-            initialValue: _vehicleClass,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Vehicle', prefixIcon: Icon(Icons.directions)),
-            items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) { if (v != null) { _vehicleClass = v; final cap = _parcelCapFor(v, _size); if (_parcels > cap) _parcels = cap; setState(() {}); } },
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: _vehicleClass == 'motorcycle'
-              ? DropdownButtonFormField<int>(
-                  initialValue: _parcels.clamp(1, _parcelCapFor(_vehicleClass, _size)),
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Parcels', prefixIcon: Icon(Icons.inventory)),
-                  items: List.generate(_parcelCapFor(_vehicleClass, _size), (i) => i + 1).map((i) => DropdownMenuItem(value: i, child: Text('$i', maxLines: 1))).toList(),
-                  onChanged: (v) { if (v != null) setState(() => _parcels = v); },
-                )
-              // Cars, vans and trucks: no practical limit — type any number.
-              : TextFormField(
-                  initialValue: '$_parcels',
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Parcels (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
-                  onChanged: (v) {
-                    final n = int.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
-                    setState(() => _parcels = (n == null || n < 1) ? 1 : n);
-                  },
-                )),
-        ]),
+        // VEHICLE FIELD (owner 2026-11-18): full width, no truncated labels.
+        DropdownButtonFormField<String>(
+          initialValue: _vehicleClass,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Vehicle', prefixIcon: Icon(Icons.directions)),
+          items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+          onChanged: (v) { if (v != null) { _vehicleClass = v; final cap = _parcelCapFor(v, _size); if (_parcels > cap) _parcels = cap; setState(() {}); } },
+        ),
+        const SizedBox(height: 10),
+        _vehicleClass == 'motorcycle'
+            ? DropdownButtonFormField<int>(
+                initialValue: _parcels.clamp(1, _parcelCapFor(_vehicleClass, _size)),
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Parcels', prefixIcon: Icon(Icons.inventory)),
+                items: List.generate(_parcelCapFor(_vehicleClass, _size), (i) => i + 1).map((i) => DropdownMenuItem(value: i, child: Text('$i'))).toList(),
+                onChanged: (v) { if (v != null) setState(() => _parcels = v); },
+              )
+            // Cars, vans and trucks: no practical limit — type any number.
+            : TextFormField(
+                initialValue: '$_parcels',
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Parcels (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+                onChanged: (v) {
+                  final n = int.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
+                  setState(() => _parcels = (n == null || n < 1) ? 1 : n);
+                },
+              )),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           initialValue: _size,

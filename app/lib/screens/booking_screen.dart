@@ -1015,38 +1015,38 @@ class _BookingScreenState extends State<BookingScreen> {
           child: Text('Optional — printed on the depot counter receipt so the depot knows what it is carrying.', style: AppType.caption),
         ),
         const SizedBox(height: 10),
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: DropdownButtonFormField<String>(
-            initialValue: _vehicleClass,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Vehicle', hintText: 'Motorcycle', prefixIcon: Icon(Icons.directions)),
-            items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
-            onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _parcelCapFor(v)) { _parcels = _parcelCapFor(v); _parcelsCtl.text = '$_parcels'; } setState(() {}); } },
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: _vehicleClass == 'motorcycle'
-              ? DropdownButtonFormField<int>(
-                  initialValue: _parcels.clamp(1, _parcelCap),
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Parcels', hintText: '1', prefixIcon: Icon(Icons.inventory)),
-                  items: List.generate(_parcelCap, (i) => i + 1)
-                      .map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}', maxLines: 1, overflow: TextOverflow.ellipsis)))
-                      .toList(),
-                  onChanged: (v) { if (v != null) { _parcels = v; _parcelsCtl.text = '$v'; setState(() {}); } },
-                )
-              // Cars, vans and trucks: UNLIMITED parcels — type any number.
-              // Controller-driven so the value stays in sync with every clamp.
-              : TextFormField(
-                  controller: _parcelsCtl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Parcels (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
-                  onChanged: (v) {
-                    final n = int.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
-                    setState(() => _parcels = (n == null || n < 1) ? 1 : n);
-                  },
-                ),
+        // VEHICLE FIELD (owner 2026-11-18): the half-width dropdown clipped
+        // "Truck (large cargo)" to "Motor..."-style fragments. Both fields go
+        // full width now — nothing is ever cut off.
+        DropdownButtonFormField<String>(
+          initialValue: _vehicleClass,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Vehicle', hintText: 'Motorcycle', prefixIcon: Icon(Icons.directions)),
+          items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
+          onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _parcelCapFor(v)) { _parcels = _parcelCapFor(v); _parcelsCtl.text = '$_parcels'; } setState(() {}); } },
+        ),
+        const SizedBox(height: 10),
+        _vehicleClass == 'motorcycle'
+            ? DropdownButtonFormField<int>(
+                initialValue: _parcels.clamp(1, _parcelCap),
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Parcels', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+                items: List.generate(_parcelCap, (i) => i + 1)
+                    .map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}')))
+                    .toList(),
+                onChanged: (v) { if (v != null) { _parcels = v; _parcelsCtl.text = '$v'; setState(() {}); } },
+              )
+            // Cars, vans and trucks: UNLIMITED parcels — type any number.
+            // Controller-driven so the value stays in sync with every clamp.
+            : TextFormField(
+                controller: _parcelsCtl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Parcels (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+                onChanged: (v) {
+                  final n = int.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
+                  setState(() => _parcels = (n == null || n < 1) ? 1 : n);
+                },
               ),
-        ]),
         if (_vehicleClass == 'motorcycle') ...[
           const SizedBox(height: 6),
           Text(_size == ParcelSize.large

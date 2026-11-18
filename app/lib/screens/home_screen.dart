@@ -448,6 +448,7 @@ class _FareCheckerState extends State<_FareChecker> {
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             initialValue: _vehicle,
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'Vehicle class', isDense: true),
             items: const [
               DropdownMenuItem(value: 'motorcycle', child: Text('Motorcycle')),

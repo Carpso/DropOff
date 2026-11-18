@@ -1361,6 +1361,7 @@ class _ParcelsForYou extends StatelessWidget {
                       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.line)),
                       child: Text(_statusLabel('${p['status'] ?? ''}'),
                           maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.6, color: AppColors.forest)),
                     ),
                     const SizedBox(width: 4),
