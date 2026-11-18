@@ -59,6 +59,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     vsync: this, duration: const Duration(seconds: 2))..repeat();
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _stats; // TODAY · LIVE card (rider daily stats)
+  Map<String, dynamic>? _targets; // pace/bonus strip on the same card
   bool _offline = false; // last-synced data shown while the network is down
   bool _loading = true;
   String? _busyRef;
@@ -133,6 +134,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (!mounted) return;
     final s = stats?['stats'] as Map<String, dynamic>?;
     if (s != null) setState(() => _stats = s);
+    final tdata = await DropOffApi.riderTargets();
+    if (!mounted) return;
+    final t = tdata?['targets'] as Map<String, dynamic>?;
+    if (t != null) setState(() => _targets = t);
   }
 
   /* ----------------------- live clock + arrival GPS ----------------------- */
@@ -1038,7 +1043,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             Text('Hand this parcel to: ${recName.isEmpty ? 'the recipient' : recName}${recPhone.isNotEmpty ? ' · $recPhone' : ''}',
                 style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35)),
             const SizedBox(height: 8),
-            const Text('Intercity parcels: the recipient shows their 4-digit DropOff code from the handover SMS. Lusaka parcels carry no PIN — just attach the proof photo; the recipient confirms receipt in their own app.',
+            const Text('Intercity parcels: the recipient shows their 4-digit DropOff code from the handover SMS. Lusaka parcels carry no SMS PIN — but if the recipient set their own door PIN in the app, ask for it here. Otherwise attach the proof photo; they confirm receipt in their own app.',
               style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
             const SizedBox(height: 12),
             TextField(
@@ -1047,7 +1052,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               maxLength: 4,
               decoration: const InputDecoration(
                 counterText: '',
-                labelText: '4-digit DropOff code (intercity only)',
+                labelText: '4-digit door PIN / code (if the recipient has one)',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -1310,6 +1315,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             _statTile('$picked', 'IN HAND', const Color(0xFF1F9E6B)),
             _statTile('$delivered', 'DONE', Colors.white),
           ]),
+          // Pace + bonus strip (owner 2026-11-18) from /rider/targets.
+          if (_targets != null) _targetsStrip(),
           const SizedBox(height: 8),
           Row(children: [
             Icon(Icons.circle, size: 7, color: Colors.greenAccent.withValues(alpha: 0.9)),
@@ -1319,6 +1326,43 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ]),
         ]),
       ),
+    );
+  }
+
+  /// Pace gate + bonus in one compact strip under the stats tiles.
+  Widget _targetsStrip() {
+    final t = _targets ?? const {};
+    final today = (t['today'] as num?)?.toInt() ?? 0;
+    final daily = (t['daily_target'] as num?)?.toInt() ?? 30;
+    final month = (t['month'] as num?)?.toInt() ?? 0;
+    final pace = (t['pace_target'] as num?)?.toInt() ?? 0;
+    final behind = (t['behind_by'] as num?)?.toInt() ?? 0;
+    final bonus = (t['bonus'] as Map?) ?? const {};
+    final bonusZmw = (bonus['total_bonus_zmw'] as num?)?.toDouble() ?? 0;
+    final progress = daily > 0 ? (today / daily).clamp(0.0, 1.0) : 0.0;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.flag_outlined, size: 13, color: AppColors.amber),
+          const SizedBox(width: 6),
+          Expanded(child: Text('TODAY $today/$daily  ·  MONTH $month/$pace',
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800))),
+          Text('BONUS K${bonusZmw.toStringAsFixed(0)}',
+              style: const TextStyle(color: AppColors.amber, fontSize: 11, fontWeight: FontWeight.w900)),
+        ]),
+        const SizedBox(height: 5),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(value: progress, minHeight: 5,
+              backgroundColor: Colors.white24, color: AppColors.amber),
+        ),
+        const SizedBox(height: 4),
+        Text(behind > 0
+            ? 'Behind monthly pace by $behind trips — bonus needs the pace target.'
+            : 'On pace — keep the streak for the month-close bonus.',
+            style: const TextStyle(color: Colors.white70, fontSize: 10)),
+      ]),
     );
   }
 

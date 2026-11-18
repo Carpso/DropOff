@@ -3251,6 +3251,31 @@ app.post('/jobs/:ref/events', async (c) => {
       }
       doorVerified = true;
       dbStatements.push(c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id));
+    } else if (Number(otpRow?.last_mile) === 1) {
+      // Lusaka-first: no SMS door code was minted. A registered recipient may
+      // set their OWN 4-digit door PIN — the rider verifies it at the door.
+      const rec = await c.env.DB.prepare(
+        'SELECT door_pin_hash FROM auth_users WHERE phone = ?1',
+      ).bind(job.recipient_phone).first<any>();
+      if (rec?.door_pin_hash) {
+        if ((otpRow?.delivery_otp_attempts ?? 0) >= 8) {
+          await addStrike(c.env, phone ?? '', job.id, 'otp_abuse');
+          return c.json({ error: 'otp_locked', detail: 'Too many wrong door PINs — contact DropOff support.' }, 429);
+        }
+        const pin = String(b.otp ?? '').replace(/\D/g, '');
+        const got = pin.length === 4 ? await hashOtp(pin, c.env.JWT_SECRET) : '';
+        if (got !== rec.door_pin_hash) {
+          await c.env.DB.prepare(
+            'UPDATE jobs SET delivery_otp_attempts = COALESCE(delivery_otp_attempts, 0) + 1 WHERE id = ?1',
+          ).bind(job.id).run();
+          return c.json({
+            error: 'otp_required',
+            detail: 'Ask the recipient for their 4-digit DropOff door PIN (set in their account).',
+          }, 403);
+        }
+        doorVerified = true;
+        dbStatements.push(c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id));
+      }
     }
   }
 
@@ -8009,7 +8034,7 @@ app.post('/subscriptions/upgrade', async (c) => {
   const newPlan = packs[tier];
   if (!newPlan || newPlan.fee_zmw <= 0) return c.json({ error: `tier must be one of ${Object.keys(packs).join(', ')}` }, 400);
   const sub = await c.env.DB.prepare(
-    `SELECT id, phone, tier, period_start, period_end FROM subscriptions WHERE phone = ?1 ORDER BY id DESC LIMIT 1`,
+    `SELECT id, phone, tier, status, period_start, period_end FROM subscriptions WHERE phone = ?1 ORDER BY id DESC LIMIT 1`,
   ).bind(phone).first<any>();
   if (!sub) return c.json({ error: 'no_subscription', detail: 'Choose a pack first.' }, 404);
   if ((TIER_RANK[tier] ?? 0) <= (TIER_RANK[sub.tier] ?? 0)) {
@@ -9330,6 +9355,26 @@ app.delete('/me/photo', async (c) => {
     c.env.DB.prepare('UPDATE riders SET photo_url = NULL WHERE phone = ?1 AND active = 1').bind(phone),
   ]);
   return c.json({ ok: true });
+});
+
+/* ---- recipient door PIN (owner 2026-11-18) ------------------------------- */
+// A registered recipient sets their OWN 4-digit door PIN. No SMS code is sent
+// for same-city parcels — the rider asks for this PIN at the door instead.
+app.post('/me/door-pin', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const pin = String(b?.pin ?? '').replace(/\D/g, '');
+  if (!/^\d{4}$/.test(pin)) return c.json({ error: 'pin_must_be_4_digits' }, 400);
+  await c.env.DB.prepare('UPDATE auth_users SET door_pin_hash = ?2 WHERE phone = ?1')
+    .bind(phone, await hashOtp(pin, c.env.JWT_SECRET)).run();
+  return c.json({ ok: true, pin_set: true });
+});
+app.delete('/me/door-pin', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  await c.env.DB.prepare('UPDATE auth_users SET door_pin_hash = NULL WHERE phone = ?1').bind(phone).run();
+  return c.json({ ok: true, pin_set: false });
 });
 
 // Rider self-check: run the AI face review on their OWN current selfie

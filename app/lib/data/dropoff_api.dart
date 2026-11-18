@@ -1046,6 +1046,12 @@ class DropOffApi {
     return get('/rider/stats$q');
   }
 
+  /// Pace gate + bonus programme for the rider's stats card.
+  /// (Also declared below with the other rider helpers — keep one.)
+  /// Recipient's own 4-digit door PIN (Lusaka door handover).
+  static Future<ApiResponse> setDoorPin(String pin) => post('/me/door-pin', {'pin': pin});
+  static Future<ApiResponse> clearDoorPin() => delete('/me/door-pin');
+
   /// The rider's order waybill — full sheet (contacts, both addresses, depot,
   /// parcels) with every money field stripped server-side.
   static Future<Map<String, dynamic>?> riderWaybill(String ref) =>

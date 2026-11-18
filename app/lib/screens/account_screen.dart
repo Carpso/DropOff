@@ -196,6 +196,46 @@ class _AccountScreenState extends State<AccountScreen> {
     if (mounted) setState(() {});
   }
 
+  /// Set / change / remove the recipient's own door PIN.
+  Future<void> _editDoorPin() async {
+    final ctrl = TextEditingController();
+    bool busy = false;
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialog) => AlertDialog(
+        title: const Text('Door handover PIN', style: TextStyle(fontWeight: FontWeight.w900)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Choose a 4-digit code. The rider asks for it when your parcel reaches your door. Keep it secret — never share it by SMS.',
+              style: TextStyle(fontSize: 12.5, height: 1.4)),
+          const SizedBox(height: 12),
+          TextField(controller: ctrl, keyboardType: TextInputType.number, maxLength: 4,
+            decoration: const InputDecoration(labelText: '4-digit PIN', counterText: '', border: OutlineInputBorder())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          if (busy) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+          else TextButton(
+            onPressed: () async {
+              final pin = ctrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+              if (pin.length != 4) { _snackSimple('Enter exactly 4 digits.'); return; }
+              setDialog(() => busy = true);
+              final out = await DropOffApi.setDoorPin(pin);
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx, out.ok);
+              if (mounted) _snackSimple(out.ok ? 'Door PIN saved.' : moneyErrorText(out, 'Could not save PIN'));
+            },
+            child: const Text('Save PIN')),
+        ],
+      )),
+    );
+    if (res == true && mounted) setState(() {});
+  }
+
+  void _snackSimple(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   Future<void> _openDevices() async {
     final data = await DropOffApi.get('/me/devices');
     if (!mounted) return;
@@ -558,6 +598,15 @@ class _AccountScreenState extends State<AccountScreen> {
                   subtitle: const Text('Unlock with fingerprint or face on this phone.', style: TextStyle(fontSize: 11.5)),
                   value: store.biometricEnabled,
                   onChanged: (v) => _setBiometric(v, store),
+                ),
+                // Recipient door PIN (owner 2026-11-18): your own 4-digit code
+                // shown to the rider at the door — no SMS code for same-city.
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.pin_outlined, color: AppColors.forest),
+                  title: const Text('Door handover PIN', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  subtitle: const Text('Set your own 4-digit code — show it to the rider at your door.', style: TextStyle(fontSize: 11.5)),
+                  onTap: _editDoorPin,
                 ),
                 const SizedBox(height: 6),
                 Align(
