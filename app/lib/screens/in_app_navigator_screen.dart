@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../data/map_services.dart';
+import '../data/saved_places.dart';
 import '../ui/app_theme.dart';
 import '../widgets/rider_map.dart';
 
@@ -59,6 +60,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   final _searchFocus = FocusNode();
   bool _searchBusy = false;
   List<MapSearchResult> _results = const [];
+  List<SavedPlace> _saved = const [];
 
   @override
   void initState() {
@@ -67,6 +69,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     _destLabel = widget.label;
     _fix();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _fix());
+    SavedPlaces.load().then((list) { if (mounted) setState(() => _saved = list); });
   }
 
   @override
@@ -144,6 +147,8 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   }
 
   void _pickResult(MapSearchResult r) {
+    // Every place used gets remembered automatically — the book grows.
+    unawaited(SavedPlaces.remember(r.label, lat: r.point.latitude, lng: r.point.longitude));
     setState(() {
       _destPos = r.point;
       _destLabel = r.label;
@@ -311,10 +316,27 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                   child: ListView.separated(
                     shrinkWrap: true,
                     padding: EdgeInsets.zero,
-                    itemCount: _results.length,
+                    itemCount: (_saved.isEmpty ? 0 : _saved.length + 1) + _results.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (ctx, i) {
-                      final r = _results[i];
+                      // Saved places first (growing list), then live results.
+                      final savedCount = _saved.isEmpty ? 0 : _saved.length + 1;
+                      if (_saved.isNotEmpty && i == 0) {
+                        return const ListTile(
+                          dense: true,
+                          title: Text('SAVED PLACES', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 10.5, letterSpacing: 0.7, color: AppColors.forest)),
+                        );
+                      }
+                      if (i < savedCount) {
+                        final p = _saved[i - 1];
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.bookmark_border, color: AppColors.forest),
+                          title: Text(p.label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                          onTap: () => _pickResult(MapSearchResult(p.label, LatLng(p.lat ?? _destPos.latitude, p.lng ?? _destPos.longitude))),
+                        );
+                      }
+                      final r = _results[i - savedCount];
                       return ListTile(
                         dense: true,
                         leading: const Icon(Icons.place_outlined, color: AppColors.forest),

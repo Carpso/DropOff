@@ -17,6 +17,7 @@ import 'package:image_picker/image_picker.dart';
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../data/map_services.dart';
+import '../data/saved_places.dart';
 import '../data/analytics_service.dart';
 import '../main.dart';
 import '../models/booking.dart';
@@ -111,6 +112,7 @@ class _BookingScreenState extends State<BookingScreen> {
   /// Vehicle class for this trip. Trucks are for large cargo (fridges, sofas);
   /// cars/vans cover most everyday parcels.
   String _vehicleClass = 'motorcycle';
+  List<SavedPlace> _saved = const [];
   int _parcels = 1;
   /// Mirrors [_parcels] so the free-typed parcels field always shows the real
   /// value — size/vehicle picks clamp the count and the field must follow
@@ -146,6 +148,7 @@ class _BookingScreenState extends State<BookingScreen> {
   @override
   void initState() {
     super.initState();
+    SavedPlaces.load().then((list) { if (mounted) setState(() => _saved = list); });
     _refreshPlan();
     // Repeat last booking: adopt the snapshot's fields, then clear it so we
     // never prefill twice for a fresh booking.
@@ -547,6 +550,9 @@ class _BookingScreenState extends State<BookingScreen> {
         _pickupLat = pos.latitude;
         _pickupLng = pos.longitude;
       });
+      unawaited(SavedPlaces.remember(
+        _pickup.text.trim().isEmpty ? 'My current location' : _pickup.text.trim(),
+        lat: pos.latitude, lng: pos.longitude));
       _message('Pickup location pinned — the nearest rider will dispatch.');
     } catch (_) {
       _message('Could not get your location — type the address or try again.');
@@ -679,6 +685,7 @@ class _BookingScreenState extends State<BookingScreen> {
       return _message('Enter the return address for the round trip.');
     }
     setState(() => _saving = true);
+    unawaited(SavedPlaces.remember(_pickup.text.trim(), lat: _pickupLat, lng: _pickupLng));
     final store = AppScope.of(context);
     final booking = await store.createBooking(
       senderName: _senderName.text,
@@ -930,6 +937,18 @@ class _BookingScreenState extends State<BookingScreen> {
         const InfoPill(icon: Icons.receipt_long, label: 'Your parcel is dropped at the courier depot. The destination above is for your receipt only — it is not the actual door drop-off.', color: AppColors.amber),
         const SizedBox(height: 18),
               TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market — or a plus code like 8FQ4+J9', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _tidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('✨ Tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
+        if (_saved.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 2, children: [
+            const Text('Saved:', style: TextStyle(fontSize: 10.5, color: AppColors.muted, fontWeight: FontWeight.w800)),
+            for (final p in _saved.take(8))
+              ActionChip(
+                visualDensity: VisualDensity.compact,
+                label: Text(p.label, style: const TextStyle(fontSize: 11)),
+                onPressed: () => setState(() => _pickup.text = p.label),
+              ),
+          ]),
+        ],
         if (_tidyPinLabel != null) ...[
           const SizedBox(height: 4),
           Row(children: [

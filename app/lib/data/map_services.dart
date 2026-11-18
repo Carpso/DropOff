@@ -132,7 +132,7 @@ class MapServices {
       final b = bias ?? const LatLng(-15.4167, 28.2833); // Lusaka
       final url = Uri.parse(
           '$_photonBase?q=${Uri.encodeQueryComponent(q)}&lat=${b.latitude}&lon=${b.longitude}'
-          '&bbox=$_lusakaMinLon,$_lusakaMinLat,$_lusakaMaxLon,$_lusakaMaxLat&limit=6&lang=en');
+          '&bbox=$_lusakaMinLon,$_lusakaMinLat,$_lusakaMaxLon,$_lusakaMaxLat&limit=20&lang=en');
       final res = await http.get(url).timeout(_timeout);
       if (res.statusCode != 200) return const [];
       final data = jsonDecode(res.body);
