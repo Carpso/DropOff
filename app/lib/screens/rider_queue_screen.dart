@@ -60,6 +60,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _stats; // TODAY · LIVE card (rider daily stats)
   Map<String, dynamic>? _targets; // pace/bonus strip on the same card
+  String _statsSynced = '--:--'; // visible proof the card is live
   bool _offline = false; // last-synced data shown while the network is down
   bool _loading = true;
   String? _busyRef;
@@ -133,7 +134,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final stats = await DropOffApi.riderStats(widget.phone);
     if (!mounted) return;
     final s = stats?['stats'] as Map<String, dynamic>?;
-    if (s != null) setState(() => _stats = s);
+    if (s != null) {
+      setState(() {
+        _stats = s;
+        final n = DateTime.now();
+        _statsSynced = '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}:${n.second.toString().padLeft(2, '0')}';
+      });
+    }
     final tdata = await DropOffApi.riderTargets();
     if (!mounted) return;
     final t = tdata?['targets'] as Map<String, dynamic>?;
@@ -1303,6 +1310,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, letterSpacing: 1.4,
                     color: Colors.white.withValues(alpha: 0.85))),
             const Spacer(),
+            // Manual sync — pull-to-refresh and the 20 s timer also refresh.
+            IconButton(tooltip: 'Sync now', onPressed: _load,
+              icon: const Icon(Icons.sync, size: 16, color: Colors.white70)),
             Text('K${earned.toStringAsFixed(0)}',
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: AppColors.amber)),
             const SizedBox(width: 4),
@@ -1321,7 +1331,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           Row(children: [
             Icon(Icons.circle, size: 7, color: Colors.greenAccent.withValues(alpha: 0.9)),
             const SizedBox(width: 6),
-            Text('$parcels parcels · live every 20 s',
+            Text('$parcels parcels · synced $_statsSynced · auto 20 s',
                 style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.6), fontWeight: FontWeight.w600)),
           ]),
         ]),

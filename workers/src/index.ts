@@ -7293,7 +7293,12 @@ app.get('/rider/stats', async (c) => {
        FROM jobs
       WHERE rider_id = ?1
         AND COALESCE(status,'') NOT IN ('canceled','cancelled','deleted')
-        AND date(COALESCE(pickup_at, created_at), '+2 hours') = date('now', '+2 hours')`,
+        AND (
+          date(COALESCE(pickup_at, created_at), '+2 hours') = date('now', '+2 hours')
+          OR EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id
+            AND e.status IN ('rider_assigned','picked_up','at_depot','departed','arrived','delivered','ready_for_collection','counter_receipt_submitted','pickup_photos_filed')
+            AND date(e.created_at, '+2 hours') = date('now', '+2 hours'))
+        )`,
   ).bind(rider.id).first<any>();
   return c.json({ stats: row ?? {} });
 });
