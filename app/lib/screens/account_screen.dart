@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../data/catalog.dart';
 import '../widgets/help_sheet.dart';
+import '../widgets/tutorial_sheet.dart';
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../data/push_service.dart';
@@ -395,7 +396,7 @@ class _AccountScreenState extends State<AccountScreen> {
     final st = '${res.body['verification_status'] ?? ''}';
     _snackPhoto(st == 'pending'
         ? 'Photo saved — it does not look like one person, so you are back in the review queue.'
-        : 'Photo saved — sellers will see you on the tracking page.');
+        : 'Photo saved — senders will see you on the tracking page.');
   }
 
   Future<void> _removePhoto() async {
@@ -601,6 +602,14 @@ class _AccountScreenState extends State<AccountScreen> {
                 ),
                 // Recipient door PIN (owner 2026-11-18): your own 4-digit code
                 // shown to the rider at the door — no SMS code for same-city.
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.menu_book_outlined, color: AppColors.forest),
+                  title: const Text('How DropOff works — tutorial', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  subtitle: const Text('6 quick steps for senders and riders.', style: TextStyle(fontSize: 11.5)),
+                  onTap: () => TutorialSheet.show(context),
+                ),
+                const SizedBox(height: 6),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.pin_outlined, color: AppColors.forest),
@@ -1025,7 +1034,7 @@ class _ReferralCardState extends State<_ReferralCard> {
     final code = _data?['code'] as String? ?? '';
     if (code.isEmpty) return;
     final link = 'https://api.carpsosolutions.store/r/$code';
-    final text = 'Join me on DropOff — sellers get home pickup to their courier: $link';
+    final text = 'Join me on DropOff — senders get home pickup to their courier: $link';
     await openInApp('https://wa.me/?text=${Uri.encodeComponent(text)}');
   }
 
@@ -1041,7 +1050,7 @@ class _ReferralCardState extends State<_ReferralCard> {
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Invite sellers — earn', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+          const Text('Invite senders — earn', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
           const SizedBox(height: 4),
           const Row(children: [
             Expanded(child: Text('Friend-code → you get a 20% promo when they book their first pickup.', style: AppType.bodyStrong)),
@@ -1239,7 +1248,7 @@ class _TiersCardState extends State<_TiersCard> {
                   final currentActive = '${_current?['status'] ?? ''}' == 'active';
                   return Column(children: [
                     /// Only render tiers an admin has toggled ON —
-                    /// a toggled-off plan vanishes from the seller page entirely.
+                    /// a toggled-off plan vanishes from the sender page entirely.
                     for (final entry in display.entries)
                       if (models[entry.key] != null)
                         Padding(

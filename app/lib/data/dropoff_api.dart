@@ -622,7 +622,7 @@ class DropOffApi {
         if (branch != null) 'branch': branch,
       });
 
-  /// AI parcel photo check: compares the seller's booking capture against the
+  /// AI parcel photo check: compares the sender's booking capture against the
   /// rider's depot/delivery photo. Returns {same_parcel, confidence, note, flagged}.
   /// 409 when either photo is missing — treat as "no check available", not an error.
   static Future<ApiResponse> parcelCheck(String ref) =>
@@ -657,7 +657,7 @@ class DropOffApi {
     }
   }
 
-  /// Rate one side of a delivery — seller, driver (rider) or courier — with an
+  /// Rate one side of a delivery — sender, driver (rider) or courier — with an
   /// optional comment. Resubmitting updates the previous score.
   static Future<ApiResponse> rateJob({
     required String jobRef,
@@ -886,7 +886,7 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> adminSupportThread(int threadId) =>
       getAdmin('/admin/support/threads/$threadId');
 
-  /// Admin/ops reply into a support ticket (same endpoint sellers use).
+  /// Admin/ops reply into a support ticket (same endpoint senders use).
   static Future<ApiResponse> supportReply(int threadId, String body) =>
       post('/chat/support/$threadId/reply', {'body': body}, admin: true);
 
@@ -1343,7 +1343,7 @@ class DropOffApi {
 
   /// Upload a photo to the Worker. [kind] selects the storage namespace:
   ///   'selfie' → uploads/selfie/<uuid> — any signed-in user may fetch it
-  ///              (sellers see the rider collecting their parcel);
+  ///              (senders see the rider collecting their parcel);
   ///   'kyc'    → uploads/kyc/<phone>/<uuid> — staff or the uploading rider only.
   /// Defaults to the PRIVATE one.
   static Future<ApiResponse> uploadImage(List<int> bytes, String filename, {String kind = 'kyc'}) async {

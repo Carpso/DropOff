@@ -7501,7 +7501,7 @@ app.get('/refer/code', async (c) => {
   ).bind(phone).first<any>();
   return c.json({
     code,
-    share_text: `Join me on DropOff — sellers get home pickup to their courier. Use my link: https://api.carpsosolutions.store/r/${code}`,
+    share_text: `Join me on DropOff — senders get home pickup to their courier. Use my link: https://api.carpsosolutions.store/r/${code}`,
     stats: { pending: stats?.pending ?? 0, rewarded: stats?.rewarded ?? 0, total: stats?.total ?? 0 },
   });
 });

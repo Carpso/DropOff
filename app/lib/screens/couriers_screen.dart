@@ -49,7 +49,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
     AnalyticsService.instance.trackScreenView('couriers');
     final store = AppScope.of(context);
     if (!store.linked) {
-      // The courier directory is seller tooling — sign up first.
+      // The courier directory is sender tooling — sign up first.
       return SafeArea(
         child: Center(
           child: Padding(

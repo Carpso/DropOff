@@ -124,7 +124,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
   }
 
   /// DropOff leg spend across the last 30 days: rider fee + door legs +
-  /// processing (what the seller pays DropOff per parcel). Partner money is not
+  /// processing (what the sender pays DropOff per parcel). Partner money is not
   /// counted — sellers don't see courier fares here anyway.
   ({double k, int parcels}) get _spend {
     var k = 0.0;
@@ -174,7 +174,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
     _load();
   }
 
-  /// Retention card: the maths that keeps sellers subscribed — pay-for-itself
+  /// Retention card: the maths that keeps senders subscribed — pay-for-itself
   /// (no plan but regular shipping), overage savings (cap exhausted), and
   /// renewal-in-window with one tap.
   Widget? _retentionCard() {
@@ -348,7 +348,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
     _load();
   }
 
-  /// DropOff Predict card: what the seller will likely ship next 30 days,
+  /// DropOff Predict card: what the sender will likely ship next 30 days,
   /// and the cheapest plan that covers it. Hidden when the worker has no data.
   ///
   /// Honest savings wording: a "recommendation" that actually costs more than
@@ -792,7 +792,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
           Row(children: [
             const Icon(Icons.card_giftcard_outlined, color: AppColors.forest),
             const SizedBox(width: 8),
-            const Expanded(child: Text('Invite sellers — earn', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            const Expanded(child: Text('Invite senders — earn', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             const SizedBox(width: 8),
             Text('$rewarded earned', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: AppColors.forest)),
           ]),

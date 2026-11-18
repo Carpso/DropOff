@@ -525,7 +525,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        const Text('Rider controls update this device. Photo proof, courier waybill upload and seller notifications run through the linked backend.', textAlign: TextAlign.center, style: AppType.caption),
+        const Text('Rider controls update this device. Photo proof, courier waybill upload and sender notifications run through the linked backend.', textAlign: TextAlign.center, style: AppType.caption),
       ]),
     );
   }
@@ -1176,7 +1176,7 @@ class _RatingCardState extends State<_RatingCard> {
     if (!mounted) return;
     setState(() {
       _submitting = false;
-      _message = 'Thanks — your rating keeps sellers, drivers and couriers honest.';
+      _message = 'Thanks — your rating keeps senders, drivers and couriers honest.';
     });
     _load();
   }
@@ -1209,7 +1209,7 @@ class _RatingCardState extends State<_RatingCard> {
           ]),
           const SizedBox(height: 4),
           const Text(
-            'Score the driver, the courier and — if you were the recipient — the seller. Comments are optional but help everyone.',
+            'Score the driver, the courier and — if you were the recipient — the sender. Comments are optional but help everyone.',
             style: AppType.caption,
           ),
           const SizedBox(height: 14),
@@ -1220,7 +1220,7 @@ class _RatingCardState extends State<_RatingCard> {
           if (!_canRateSeller) ...[
             const SizedBox(height: 14),
             const Text(
-              'Sellers are rated by recipients — share the tracking link so the buyer can score you here.',
+              'Senders are rated by recipients — share the tracking link so the buyer can score you here.',
               style: AppType.caption,
             ),
           ],

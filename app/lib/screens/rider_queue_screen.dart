@@ -9,6 +9,7 @@ import 'dart:async';
 
 import '../ui/app_toast.dart';
 import '../widgets/help_sheet.dart';
+import '../widgets/tutorial_sheet.dart';
 import '../widgets/photo_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -790,7 +791,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // be split across receipts by the depot — file them all, one by one.
     final receipts = <_ReceiptEntry>[];
     bool filing = false;
-    // The SELLER's booking photo travels with the stop (owner directive
+    // The SENDER's booking photo travels with the stop (owner directive
     // 2026-11-17): the rider sees the parcel they are collecting next to the
     // one they just photographed, so swaps are caught at the drop, not at
     // delivery. Riders are authorized on /jobs/:ref/evidence.
@@ -813,7 +814,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               const SizedBox(height: 12),
               // ── Sender's booking photo — compare before you drop ──
               if (sellerPhoto.isNotEmpty) ...[
-                const Text('SELLER PHOTO (FROM BOOKING)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
+                const Text('SENDER PHOTO (FROM BOOKING)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
                 const SizedBox(height: 4),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(10),
@@ -1130,7 +1131,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   @override
   Widget build(BuildContext context) {
     // Fleet view is staff-only (Team tab + this gate). The server also
-    // validates the phone belongs to an active rider — a seller whose phone
+    // validates the phone belongs to an active rider — a sender whose phone
     // is not a rider row gets an empty queue, never someone else's stops.
     final store = AppScope.of(context);
     if (!store.linked) {
@@ -1165,6 +1166,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       appBar: AppBar(
         title: const Text('Task queue', style: TextStyle(fontWeight: FontWeight.w900)),
         actions: [
+          IconButton(
+            tooltip: 'Rider tutorial',
+            icon: const Icon(Icons.menu_book_outlined),
+            onPressed: () => TutorialSheet.show(context, rider: true),
+          ),
           IconButton(
             tooltip: 'Account & sign out',
             icon: Icon(store.email != null ? Icons.account_circle : Icons.account_circle_outlined),
@@ -1492,7 +1498,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   ? '✓ picked — ${'${s['last_mile'] ?? 0}' == '1' ? 'door handover next' : 'drop at the $depotName depot'}'
                   : arrived
                       ? 'ARRIVED — tap ✓ to file the pickup'
-                      : 'Seller: ${s['seller']} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${'${s['status']}'.replaceAll('_', ' ')}',
+                      : 'Sender: ${s['seller']} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${'${s['status']}'.replaceAll('_', ' ')}',
               style: TextStyle(color: picked ? AppColors.forest : arrived ? AppColors.ink : AppColors.muted,
                   fontSize: 11.5, fontWeight: picked || arrived ? FontWeight.w800 : FontWeight.w400),
             ),
@@ -1511,7 +1517,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       Row(children: [
         if ('${s['seller_phone'] ?? ''}'.trim().isNotEmpty)
           IconButton(
-            tooltip: 'Call the seller',
+            tooltip: 'Call the sender',
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.phone_outlined, size: 20, color: AppColors.forest),
             onPressed: () async {

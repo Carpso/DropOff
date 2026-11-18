@@ -783,7 +783,7 @@ class _BookingScreenState extends State<BookingScreen> {
     } else if (booking.dispatched && depositRequired && DropOffApi.enabled && store.linked && due != null && due > 0) {
       // The server already sent the momo prompt at booking; PayJob reuses
       // that exact prompt (idempotent server-side) and polls until it lands.
-      // Discount copy follows the platform flag — sellers never see a
+      // Discount copy follows the platform flag — senders never see a
       // discount the platform switch has hidden.
       final overageOffered = (_planSnap?['feature_flags']?['overage_discount_enabled'] as bool?) ?? false;
       final overCap = inclusion == 'payg' && used != null && cap != null && used >= cap;
@@ -1239,7 +1239,7 @@ class _BookingScreenState extends State<BookingScreen> {
           textCapitalization: TextCapitalization.characters,
           decoration: InputDecoration(
             labelText: 'Promo code (optional)',
-            hintText: 'SELLER20 · FIRSTM10 · LOYAL5',
+            hintText: 'SENDER20 · FIRSTM10 · LOYAL5',
             prefixIcon: const Icon(Icons.local_offer_outlined),
             suffixIcon: TextButton(onPressed: _checkPromo, child: const Text('Apply')),
             helperText: _promoPct != null ? '-${_promoPct!.toStringAsFixed(0)}% — $_promoNote' : null,
@@ -1846,7 +1846,7 @@ class _CounterReminder extends StatelessWidget {
   }
 }
 
-/// Shows the signed-in seller which plan is active and how this trip deducts
+/// Shows the signed-in sender which plan is active and how this trip deducts
 /// from it — no more guessing between plan parcels and pay-as-you-go.
 class _PlanBanner extends StatefulWidget {
   final int parcels;
@@ -1956,7 +1956,7 @@ class _DeliveryIqCardState extends State<_DeliveryIqCard> {
         final p50 = (data?['minutes_p50'] as num?)?.toInt();
         final p90 = ((data?['minutes_p90'] as num?)?.toInt() ?? p50 ?? 45).toString();
         if (p50 == null) return const SizedBox.shrink(); // no data yet — stay quiet
-        // Hide the advertised fallback — sellers reading "~50 min" are being
+        // Hide the advertised fallback — senders reading "~50 min" are being
         // told a fabricated number. Show only real measured averages.
         final fallback = data?['fallback'] == true;
         final n = (data?['sample_count'] as num?)?.toInt() ?? 0;

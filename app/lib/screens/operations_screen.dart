@@ -504,7 +504,7 @@ class OperationsScreen extends StatelessWidget {
         const SizedBox(height: 22),
         // Driver economics are staff-only (admin/ops). This screen is already
         // behind the Team tab which only staff see — keep the card for them
-        // but never surface rider payout splits to sellers/recipients.
+        // but never surface rider payout splits to senders/recipients.
         if (AppScope.of(context).isStaff) ...[
           const SectionTitle('How DropOff earns'),
           const SizedBox(height: 8),
@@ -816,7 +816,7 @@ class _RiderReviewsCardState extends State<_RiderReviewsCard> {
           if (n == 0)
             const Padding(
               padding: EdgeInsets.only(top: 6),
-              child: Text('No ratings yet — sellers and recipients rate you after each delivery; they show up here.', style: AppType.caption),
+              child: Text('No ratings yet — senders and recipients rate you after each delivery; they show up here.', style: AppType.caption),
             )
           else
             ...reviews.take(2).map((r) => Padding(
@@ -1681,7 +1681,7 @@ class _SelfieBannerState extends State<_SelfieBanner> {
     final st = '${res.body['verification_status'] ?? ''}';
     _snack(st == 'pending'
         ? 'This photo does not look like one person - you are back in the review queue.'
-        : 'Photo added - sellers will see you on the tracking page.');
+        : 'Photo added - senders will see you on the tracking page.');
     setState(() => _needed = false);
   }
 
@@ -1704,7 +1704,7 @@ class _SelfieBannerState extends State<_SelfieBanner> {
           const SizedBox(width: 12),
           const Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text("Sellers can't see you yet", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+              Text("Senders can't see you yet", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
               SizedBox(height: 3),
               Text('Add your photo - the person collecting their parcel should be a face, not an icon.',
                   style: AppType.caption),

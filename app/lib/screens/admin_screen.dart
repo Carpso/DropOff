@@ -10,7 +10,7 @@ import '../ui/app_theme.dart';
 
 /// Admin console inside the app: live business stats, security
 /// alerts, the fraud queue, depot branches, and SMS broadcasts. The screen
-/// re-checks GET /me on open — a seller who deep-links here gets a lock door.
+/// re-checks GET /me on open — a sender who deep-links here gets a lock door.
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
 
@@ -813,7 +813,7 @@ class _AdminScreenState extends State<AdminScreen> {
               decoration: const InputDecoration(labelText: 'Audience', prefixIcon: Icon(Icons.groups_outlined)),
               items: const [
                 DropdownMenuItem(value: 'accounts', child: Text('Registered accounts')),
-                DropdownMenuItem(value: 'sellers', child: Text('All sellers (booked before)')),
+                DropdownMenuItem(value: 'sellers', child: Text('All senders (booked before)')),
                 DropdownMenuItem(value: 'subscribers', child: Text('Active plan subscribers')),
                 DropdownMenuItem(value: 'riders', child: Text('Verified riders')),
                 DropdownMenuItem(value: 'all', child: Text('Everyone')),
@@ -886,7 +886,7 @@ class _AdminScreenState extends State<AdminScreen> {
               decoration: const InputDecoration(labelText: 'Or broadcast audience', prefixIcon: Icon(Icons.groups_outlined)),
               items: const [
                 DropdownMenuItem(value: 'accounts', child: Text('Registered accounts')),
-                DropdownMenuItem(value: 'sellers', child: Text('All sellers (booked before)')),
+                DropdownMenuItem(value: 'sellers', child: Text('All senders (booked before)')),
                 DropdownMenuItem(value: 'subscribers', child: Text('Active plan subscribers')),
                 DropdownMenuItem(value: 'all', child: Text('Everyone')),
               ],
@@ -918,7 +918,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
 /// Support inbox: every support ticket (kind='support' chat thread) with the
 /// seller's last message and unread count. Tap a ticket to read the thread and
-/// reply (POST /chat/support/:id/reply — the same endpoint sellers reply with).
+/// reply (POST /chat/support/:id/reply — the same endpoint senders reply with).
 class _SupportInboxCard extends StatefulWidget {
   const _SupportInboxCard();
 
@@ -1485,7 +1485,7 @@ class _UsersCardState extends State<_UsersCard> {
             IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
           const SizedBox(height: 4),
-          const Text('Admins decide who is who. Roles you can grant: customer (regular sender/seller), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves), cfo (finances only — payroll, turnover tax and filings; never moves money on their own).',
+          const Text('Admins decide who is who. Roles you can grant: customer (regular sender), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves), cfo (finances only — payroll, turnover tax and filings; never moves money on their own).',
               style: AppType.caption),
           const SizedBox(height: 8),
           if (_loading)
@@ -1515,7 +1515,7 @@ class _UsersCardState extends State<_UsersCard> {
                       initialValue: role,
                       onSelected: (r) => _setRole(u, r),
                       itemBuilder: (context) => const [
-                        PopupMenuItem(value: 'customer', child: Text('customer — regular sender/seller')),
+                        PopupMenuItem(value: 'customer', child: Text('customer — regular sender')),
                         PopupMenuItem(value: 'rider', child: Text('rider — team member (salary)')),
                         PopupMenuItem(value: 'partner', child: Text('partner — courier depot console')),
                         PopupMenuItem(value: 'ops', child: Text('ops — dispatch tools (fleet-wide)')),
@@ -1799,7 +1799,7 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
 /// (depot → door). Locations come from what app users actually type (most-used
 /// first), with free typing allowed; depots come from the live courier list.
 /// Every entry is keyed to the depot courier it belongs to so ops can read
-/// leg coverage per courier. No counter fares are published to sellers here.
+/// leg coverage per courier. No counter fares are published to senders here.
 class _CounterQuoteCard extends StatefulWidget {
   const _CounterQuoteCard();
 
@@ -2045,7 +2045,7 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
 
 
 /// Mint bulk plan codes for offline/agent sale. Codes activate a plan with no
-/// payment prompt when a seller redeems one on their own number.
+/// payment prompt when a sender redeems one on their own number.
 class _PackCodesCard extends StatefulWidget {
   const _PackCodesCard();
 
@@ -2145,7 +2145,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
               TextButton(onPressed: _copyAll, child: const Text('Copy all')),
           ]),
           const SizedBox(height: 4),
-          const Text('Sell plans at the counter or to agents. The seller redeems the code in the app — no payment prompt, the plan goes live instantly.', style: AppType.caption),
+          const Text('Sell plans at the counter or to agents. The sender redeems the code in the app — no payment prompt, the plan goes live instantly.', style: AppType.caption),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
@@ -2260,7 +2260,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
 
 /// Owner/admin console: full plans editor (duration, limits, price, discount,
 /// tag, active) + courier availability toggles. A hidden plan/courier stops
-/// showing up for sellers immediately; existing subscribers keep their cycle
+/// showing up for senders immediately; existing subscribers keep their cycle
 /// benefit (server-side). Nothing here holds money — it changes the offer.
 class _PlansAndCouriersCard extends StatefulWidget {
   const _PlansAndCouriersCard();
@@ -2317,7 +2317,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
     setState(() => _flagBusy = false);
     _snack(res.ok
         ? (key == 'door_to_door_enabled'
-            ? (on ? 'Door-to-door drop-off ON — sellers see the option.' : 'Door-to-door OFF — collection points only.')
+            ? (on ? 'Door-to-door drop-off ON — senders see the option.' : 'Door-to-door OFF — collection points only.')
             : (on ? 'Overage discount ON — tiers apply on PAYG overage.' : 'Overage discount OFF — overage bills at full PAYG.'))
         : 'Could not flip the switch (${res.error ?? 'admins only'})');
     unawaited(Future.delayed(const Duration(milliseconds: 400), _load));
@@ -2454,7 +2454,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             ),
           ]),
           const SizedBox(height: 2),
-          const Text('Off hides the offer from sellers instantly (new subscriptions stop; existing subscribers keep their cycle benefit). Edit every field below — price, parcels/day, parcels/month, cycle length, discount, tag.',
+          const Text('Off hides the offer from senders instantly (new subscriptions stop; existing subscribers keep their cycle benefit). Edit every field below — price, parcels/day, parcels/month, cycle length, discount, tag.',
               style: AppType.caption),
           const SizedBox(height: 10),
           const Row(children: [
@@ -2502,7 +2502,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
           const Row(children: [
             Icon(Icons.local_shipping_outlined, size: 16, color: AppColors.forest),
             SizedBox(width: 6),
-            Text('Couriers — availability for sellers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            Text('Couriers — availability for senders', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
           ]),
           const SizedBox(height: 8),
           for (final c in _couriers)
@@ -3250,7 +3250,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
               ]),
               const SizedBox(height: 8),
               Row(children: [
-                Expanded(child: _KpiMetric('Active sellers', '${ops['active_sellers'] ?? 0}', Icons.storefront_outlined)),
+                Expanded(child: _KpiMetric('Active senders', '${ops['active_sellers'] ?? 0}', Icons.storefront_outlined)),
                 const SizedBox(width: 8),
                 Expanded(child: _KpiMetric('Riders', '${ops['active_riders'] ?? 0} worked · ${ops['riders_on_books'] ?? 0} on books', Icons.two_wheeler)),
               ]),

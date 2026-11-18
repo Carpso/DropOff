@@ -102,7 +102,7 @@ class AppStore extends ChangeNotifier {
 
   /// Server-active courier ids (DB). The owner can toggle couriers OFF in the
   /// admin console; null until the first fetch succeeds — offline or unknown,
-  /// the full catalog shows so sellers are never bricked.
+  /// the full catalog shows so senders are never bricked.
   List<int>? _activeCourierIds;
   List<int>? get activeCourierIds => _activeCourierIds;
 

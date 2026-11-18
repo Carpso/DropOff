@@ -252,7 +252,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   String _roleLabel(Object? role) => switch ('$role') {
-        'seller' => 'Seller',
+        'seller' => 'Sender',
         'recipient' => 'Recipient',
         'rider' => 'Rider',
         'courier' => 'Courier',
