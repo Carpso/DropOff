@@ -11397,6 +11397,50 @@ async function eveningHealthProbe(env: Env): Promise<void> {
   }
 }
 
+// UPTIME MONITOR (owner 2026-11-18): every 5 minutes the Worker checks its own
+// health endpoint, records the result in D1 and alerts the owner on the first
+// failure and every 6th consecutive failure (30 min). An UptimeRobot-style
+// heartbeat without needing a separate account.
+async function runUptimeProbe(env: Env): Promise<void> {
+  const base = String(env.APP_URL ?? 'https://api.carpsosolutions.store').replace(/\/$/, '');
+  const url = `${base}/health`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8000);
+  const t0 = Date.now();
+  let ok = false, status = 0, detail = '';
+  try {
+    const res = await fetch(url, { signal: ac.signal });
+    status = res.status;
+    const body = await res.text().catch(() => '');
+    try { ok = res.ok && (JSON.parse(body)?.ok === true); } catch { ok = false; }
+    detail = body.slice(0, 160);
+  } catch (e: any) {
+    detail = String(e?.message ?? e).slice(0, 160);
+  } finally {
+    clearTimeout(timer);
+  }
+  const latency = Date.now() - t0;
+  try {
+    await env.DB.prepare(
+      'INSERT INTO uptime_checks (ok, status, latency_ms, detail) VALUES (?1, ?2, ?3, ?4)',
+    ).bind(ok ? 1 : 0, status, latency, detail).run();
+  } catch { /* logging must never break the probe */ }
+  if (ok) return;
+  let consecutive = 0;
+  try {
+    const rows = await env.DB.prepare('SELECT ok FROM uptime_checks ORDER BY id DESC LIMIT 12').all<any>();
+    for (const r of (rows.results ?? [])) { if (Number(r.ok) === 0) consecutive++; else break; }
+  } catch { consecutive = 1; }
+  if (consecutive !== 1 && consecutive % 6 !== 0) return;
+  const msg = `DropOff API DOWN for ~${consecutive * 5} min — ${url} returned ${status || 'no response'} (${detail}). Check Workers logs.`;
+  const phone = ownerPhone(env);
+  if (phone) await sendToPhone(env, phone, {
+    title: 'DropOff API DOWN', body: msg, data: { kind: 'security_alert' },
+  }).catch(() => {});
+  const email = ownerEmail(env);
+  if (email) await sendMail(env, { to: email, subject: 'DropOff API DOWN', text: msg, html: `<p>${msg}</p>` }).catch(() => {});
+}
+
 async function captureError(env: Env, err: unknown, req: { method: string; url: string }): Promise<void> {
   // Always record to D1 first — the daily health probe reads error_events.
   // Sentry remains optional when SENTRY_DSN is set.
@@ -11482,6 +11526,10 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
       try {
+        if (event.cron === '*/5 * * * *') {
+          await runUptimeProbe(env);
+          return;
+        }
         if (event.cron === '0 19 * * *') {
           try { await eveningHealthProbe(env); } catch (e) {
             await captureError(env, e, { method: 'CRON', url: 'https://cron/evening-probe' });

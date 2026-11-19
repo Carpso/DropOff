@@ -18,7 +18,7 @@ name = "EMAIL"
 # export app-data backups to R2 at 02:00 CAT.
 # timed-pickup reminders: T-30 / T-10 pushes + missed flags (every minute).
 # weekly ops digest: Monday 08:00 CAT (06:00 UTC).
-crons = ["0 2 * * *", "* * * * *", "0 19 * * *", "0 14 * * SUN", "0 14 1 * *", "0 6 * * MON"]
+crons = ["*/5 * * * *", "0 2 * * *", "* * * * *", "0 19 * * *", "0 14 * * SUN", "0 14 1 * *", "0 6 * * MON"]
 
 [vars]
 # Lipila: PRODUCTION https://blz.lipila.io (live key required in LIPILA_API_KEY secret)

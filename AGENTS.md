@@ -88,3 +88,9 @@ Dated engineering log of the fixes shipped 2026-11-18. Release train: 0.5.45+55 
 - Seeded 10 real pickup addresses from existing jobs into the owner's account (never invented).
 - Three `prepaid_refund_failed` events from test jobs were VOIDED (note updated) — no real refund owed; financial rows retained.
 
+
+### Web access for iOS users + uptime monitor (2026-11-19)
+- Flutter web build deployed to a NEW Cloudflare Pages project `dropoff-web` (pages.dev: dropoff-web-9gk.pages.dev). Custom domain `dropoff.carpsosolutions.store` attached (CNAME to the Pages project); apex/company site untouched.
+- iOS users can open the site in Safari and "Add to Home Screen" (PWA manifest, apple-touch-icon and iOS meta tags already in app/web/index.html).
+- No UptimeRobot API key available, so an equivalent runs on the Worker: cron `*/5 * * * *` calls `/health`, logs to D1 `uptime_checks` (migration 0069), and pushes/emails the owner on the first failure and every 6th consecutive failure (30 min).
+
