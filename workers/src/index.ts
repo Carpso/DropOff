@@ -479,7 +479,7 @@ app.use('*', async (c, next) => {
       }
       c.set('phone', claims.phone);
       if (user?.email) c.set('email', user.email);
-      if (claims.did) {
+      if (claims.did && claims.did !== 'unknown') {
         const dev = await c.env.DB.prepare(
           'SELECT trusted FROM device_sessions WHERE phone = ?1 AND device_id = ?2',
         ).bind(claims.phone, claims.did).first<{ trusted: number }>();
@@ -1334,7 +1334,9 @@ app.post('/me/devices/revoke-others', async (c) => {
   const phone = c.get('phone') as string | null | undefined;
   if (!phone) return c.json({ error: 'identity_required' }, 401);
   const selfDev = deviceId(c);
-  if (!selfDev) return c.json({ error: 'device_id_required' }, 400);
+  // 'unknown' is not a real device identity (web/legacy clients) — never let it
+  // revoke every genuine device from the account.
+  if (!selfDev || selfDev === 'unknown') return c.json({ error: 'device_id_required' }, 400);
   await c.env.DB.prepare('UPDATE device_sessions SET trusted = 0 WHERE phone = ?1 AND device_id <> ?2')
     .bind(phone, selfDev).run();
   return c.json({ ok: true });
@@ -1433,6 +1435,15 @@ app.post('/auth/verify', async (c) => {
     return c.json({ error: 'wrong_code' }, 401);
   }
   await c.env.DB.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?1').bind(row.id).run();
+  // A FRESH OTP proves possession of the phone again — if this device was
+  // previously revoked, re-trust THIS device id only (owner 2026-11-19: a
+  // revoked generic 'unknown' web device locked every new login out).
+  const did = deviceId(c);
+  if (did && did !== 'unknown') {
+    await c.env.DB.prepare(
+      'UPDATE device_sessions SET trusted = 1, last_seen = datetime("now") WHERE phone = ?1 AND device_id = ?2',
+    ).bind(phone, did).run().catch(() => {});
+  }
   // JWT carries the account's current token_version — a password reset bumps it
   // and forces a fresh OTP sign-in; minting ver=0 here used to leave every
   // OTP session instantly revoked (session_revoked on the first request).
