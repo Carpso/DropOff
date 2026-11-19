@@ -1322,12 +1322,15 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               Container(
                 width: 76, height: 76,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle, color: Colors.white,
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF0F5C40),
                   border: Border.all(color: Colors.white, width: 2.5),
                   boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 14, offset: Offset(0, 5))],
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: Image.asset('assets/brand/dropoff_logo.png', fit: BoxFit.contain),
+                // Cover fills the whole circle with the green app artwork —
+                // no white corners/patches around the pin + parcel mark.
+                child: Image.asset('assets/brand/dropoff_logo.png', width: 76, height: 76, fit: BoxFit.cover),
               ),
             ]),
           ),
