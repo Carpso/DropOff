@@ -487,9 +487,9 @@ app.use('*', async (c, next) => {
           return c.json({ error: 'device_revoked' }, 401);
         }
         if (!dev) {
-          try { await noteDevice(c.env.DB, claims.phone, claims.did, clientIp(c), userAgent(c)); } catch { /* best-effort */ }
+          try { await noteDevice(c.env.DB, claims.phone, claims.did, clientIp(c), userAgent(c), { deviceName: deviceName(c), location: c.req.header('CF-IPCountry') }); } catch { /* best-effort */ }
         } else {
-          try { await noteDevice(c.env.DB, claims.phone, claims.did, clientIp(c), userAgent(c)); } catch { /* best-effort */ }
+          try { await noteDevice(c.env.DB, claims.phone, claims.did, clientIp(c), userAgent(c), { deviceName: deviceName(c), location: c.req.header('CF-IPCountry') }); } catch { /* best-effort */ }
         }
       }
       // The app owner's phone is always admin (OWNER_PHONE secret) — covers
@@ -1309,7 +1309,7 @@ app.get('/me/devices', async (c) => {
   if (!phone) return c.json({ error: 'identity_required' }, 401);
   const selfDev = deviceId(c);
   const { results } = await c.env.DB.prepare(
-    `SELECT ds.id, ds.device_id, ds.ip, ds.ua, ds.first_seen, ds.last_seen, ds.trusted
+    `SELECT ds.id, ds.device_id, ds.ip, ds.ua, ds.device_name, ds.location, ds.first_seen, ds.last_seen, ds.trusted
        FROM device_sessions ds
       WHERE ds.phone = ?1
       ORDER BY ds.last_seen DESC
@@ -1323,6 +1323,8 @@ app.get('/me/devices', async (c) => {
     last_seen: r.last_seen,
     trusted: Number(r.trusted ?? 1) === 1,
     user_agent: r.ua ?? null,
+    device_name: r.device_name ?? null,
+    location: r.location ?? null,
     is_current_session: selfDev && r.device_id === selfDev,
   }));
   return c.json({ devices: list, current_device_id: selfDev || null });
@@ -1434,7 +1436,7 @@ app.post('/auth/verify', async (c) => {
   // JWT carries the account's current token_version — a password reset bumps it
   // and forces a fresh OTP sign-in; minting ver=0 here used to leave every
   // OTP session instantly revoked (session_revoked on the first request).
-  try { await noteDevice(c.env.DB, phone, deviceId(c), clientIp(c), userAgent(c)); } catch { /* best-effort */ }
+  try { await noteDevice(c.env.DB, phone, deviceId(c), clientIp(c), userAgent(c), { deviceName: deviceName(c), location: c.req.header('CF-IPCountry') }); } catch { /* best-effort */ }
   const acct = await c.env.DB.prepare(
     'SELECT COALESCE(token_version, 0) AS ver FROM auth_users WHERE phone = ?1',
   ).bind(phone).first<{ ver: number }>();
@@ -1483,7 +1485,7 @@ app.post('/auth/register', async (c) => {
     `INSERT INTO auth_users (email, password_hash, phone, full_name) VALUES (?1, ?2, ?3, ?4)`,
   ).bind(email, passwordHash, phone, fullName).run();
 
-  try { await noteDevice(c.env.DB, phone, deviceId(c), clientIp(c), userAgent(c)); } catch { /* best-effort */ }
+  try { await noteDevice(c.env.DB, phone, deviceId(c), clientIp(c), userAgent(c), { deviceName: deviceName(c), location: c.req.header('CF-IPCountry') }); } catch { /* best-effort */ }
 
   // verification email (non-blocking: the account works immediately)
   const verifyLink = await createEmailLink(c, email, 'verify_email');
@@ -1694,7 +1696,7 @@ app.post('/auth/login', async (c) => {
   // successful login — fingerprint the device and alert the owner on a new device
   await recordAttempt(c.env.DB, email, true, ip, ua, devId);
   const phone = user.phone;
-  const dev = await noteDevice(c.env.DB, phone, deviceId(c), ip, userAgent(c));
+  const dev = await noteDevice(c.env.DB, phone, deviceId(c), ip, userAgent(c), { deviceName: deviceName(c), location: c.req.header('CF-IPCountry') });
   if (dev.isNew) {
     await alertOwner(c.env, phone, 'new_device', 'medium',
       `New device signed in to ${email}.`,
@@ -2191,6 +2193,18 @@ app.post('/jobs', async (c) => {
       return c.json({
         error: 'missing_required_fields',
         required: ['pickup_address', 'recipient_name', 'recipient_phone', 'dest_city'].filter((k) => !String(b[k] ?? '').trim()),
+      }, 400);
+    }
+    // Parcel contents are MANDATORY (owner 2026-11-19): we cannot carry illegal
+    // or hazardous items, and a blank description hides them from the rider.
+    if (String(b.description ?? '').trim().length < 3) {
+      return c.json({ error: 'description_required', detail: 'Declare what is inside the parcel (at least 3 characters).' }, 400);
+    }
+    const forbidden = forbiddenParcelReason(String(b.description ?? ''));
+    if (forbidden) {
+      return c.json({
+        error: 'prohibited_item',
+        detail: `DropOff cannot carry ${forbidden}. Book a specialist courier for this parcel.`,
       }, 400);
     }
 
@@ -3069,6 +3083,27 @@ app.post('/jobs/:ref/resend-pin', async (c) => {
 // split codes (attempt locks reset), mints a tracking token, and texts each
 // phone its OWN fresh code so the whole chain can be tested end to end.
 // Canceled and terminal jobs are never touched. ?dry=1 previews only.
+// PROHIBITED PARCEL CONTENT (owner 2026-11-18): DHL/UPS/FedEx publish the same
+// restricted categories; online lookup was unavailable in this environment on
+// 2026-11-19, so this uses the industry-standard published list: illegal drugs,
+// weapons/firearms, explosives, flammables/fuel, corrosives/poisons,
+// radioactive material, live animals and human remains. Sender MUST declare
+// contents so these never enter a rider's bag.
+const FORBIDDEN_PARCEL: Array<[RegExp, string]> = [
+  [/\b(cocaine|heroin|meth(amphetamine)?|marijuana|cannabis|weed|ecstasy|narcotics?|illegal drugs?)\b/i, 'illegal drugs'],
+  [/\b(firearm|firearms|guns?|rifles?|pistols?|ammunition|bullets?|grenades?)\b/i, 'firearms/ammunition'],
+  [/\b(explosives?|dynamite|fireworks|bombs?)\b/i, 'explosives'],
+  [/\b(petrol|gasoline|diesel|fuel|kerosene|lighter fluid|flammable)\b/i, 'flammable fuel'],
+  [/\b(poison|cyanide|arsenic|acid|corrosive|toxic chemicals?)\b/i, 'poisons/corrosives'],
+  [/\b(radioactive|uranium|plutonium)\b/i, 'radioactive material'],
+  [/\b(live animals?|snakes?|birds?|puppies|kittens)\b/i, 'live animals'],
+  [/\b(human remains?|corpse|body parts?)\b/i, 'human remains'],
+];
+function forbiddenParcelReason(description: string): string | null {
+  for (const [pattern, label] of FORBIDDEN_PARCEL) if (pattern.test(description)) return label;
+  return null;
+}
+
 async function geocodePickup(address: string, city: string): Promise<{ lat: number; lng: number } | null> {
   const q = [address, city, 'Zambia'].map((s) => `${s ?? ''}`.trim()).filter(Boolean).join(', ');
   if (q.replace(/[,\s]/g, '').length < 6) return null;
@@ -7355,17 +7390,12 @@ app.get('/rider/queue', async (c) => {
   }
 
   const depot = { lat: -15.4255, lng: 28.2805 };
-  // GROUP BY DEPOT (owner 2026-11-18): parcels headed to the same depot
-  // ride together as one pack inside the time slot.
+  // ONE CARD PER SLOT (owner 2026-11-19: depot grouping produced duplicate
+  // 06:00 cards). Each stop still carries its depot name; the app groups
+  // visually without splitting the slot.
   const batches = Object.entries(buckets)
     .filter(([, jobs]) => jobs.length > 0)
-    .flatMap(([slot, jobs]) => {
-      const byDepot = new Map<string, any[]>();
-      for (const j of jobs) {
-        const k = String(j.courier_id ?? j.depot_name ?? j.courier_name ?? 'depot');
-        const arr = byDepot.get(k) ?? []; arr.push(j); byDepot.set(k, arr);
-      }
-      return [...byDepot.entries()].map(([depotKey, groupJobs]) => {
+    .map(([slot, jobs]) => {
       // Slot metadata (the TOMORROW roll-up reuses the 06:00 timings).
       const meta = slot === TOMORROW_SLOT ? SWEEP_SLOTS['06:00'] : SWEEP_SLOTS[slot];
       const slotLabel = slot === TOMORROW_SLOT ? 'TOMORROW 06:00—07:30 SLOT' : meta.label;
@@ -7438,7 +7468,7 @@ app.get('/rider/queue', async (c) => {
         counts.set(key, e);
       }
       const dest = [...counts.values()].sort((a, b) => b.n - a.n)[0];
-      const totalParcels = groupJobs.reduce((s, j) => s + Number(j.parcels ?? 1), 0);
+      const totalParcels = jobs.reduce((s, j) => s + Number(j.parcels ?? 1), 0);
       return {
         slot,
         label: slotLabel,
@@ -7447,13 +7477,12 @@ app.get('/rider/queue', async (c) => {
         // 2026-11-17: the footer range was ambiguous).
         range: slot === TOMORROW_SLOT ? 'Tomorrow 6:00—7:30 AM' : meta.range,
         total_parcels: totalParcels,
-        total_stops: groupJobs.length,
+        total_stops: jobs.length,
         destination: dest ? { courier: dest.name, branch: dest.branch, city: dest.city } : null,
         target_dropoff: meta.target,
         minutes_on_road: chainMin - slotStartMin,
         stops,
       };
-    });
     });
 
   return c.json({

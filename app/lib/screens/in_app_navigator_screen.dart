@@ -122,15 +122,19 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
   LatLng? _lastRouteFix;
 
-  void _speakTurns(RouteResult? route) {
+  Future<void> _speakTurns(RouteResult? route) async {
     final steps = route?.steps ?? const <RouteStep>[];
     if (steps.isEmpty) return;
     final key = steps.map((s) => '${s.distanceMetres.round()}:${s.instruction}').join('|');
     if (key == _spokenRouteKey) return; // don't repeat on every 10 s GPS tick
     _spokenRouteKey = key;
-    final say = steps.take(6).map((s) =>
-        'In ${s.distanceMetres.round()} metres, ${s.instruction}.').join(' Then ');
-    unawaited(_tts.speak('Route ready. $say').catchError((_) => 0));
+    // One instruction at a time — a queue of spoken turns, not a paragraph.
+    for (final s in steps.take(8)) {
+      if (!mounted) return;
+      await _tts.speak('In ${s.distanceMetres.round()} metres, ${s.instruction}')
+          .catchError((_) => 0);
+      await Future.delayed(const Duration(seconds: 3));
+    }
   }
 
   Future<void> _refreshRoute() async {
@@ -302,7 +306,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         // Floating search — our own geocoder, biased to Lusaka.
         Positioned(
           left: 12,
-          right: 12,
+          right: 64, // leave the top-right compass badge visible/tappable
           top: 10,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(

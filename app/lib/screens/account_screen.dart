@@ -273,11 +273,15 @@ class _AccountScreenState extends State<AccountScreen> {
                   ...rows.map((d) {
                     final isCurrent = d['is_current_session'] == true;
                     final trusted = d['trusted'] == true;
+                      bool revoking = false;
                     final tz = '${d['last_seen'] ?? ''}';
                     final parts = tz.split(' ');
                     final day = parts.isNotEmpty ? parts.first : tz;
                     final time = parts.length >= 2 ? parts[1] : '';
-                    final ua = '${d['user_agent'] ?? d['device_id'] ?? 'unknown'}';
+                      final realName = '${d['device_name'] ?? ''}'.trim();
+                      final uaRaw = '${d['user_agent'] ?? ''}'.trim();
+                      final ua = realName.isNotEmpty ? realName : (uaRaw.isEmpty ? '${d['device_id'] ?? 'unknown'}' : uaRaw);
+                      final loc = '${d['location'] ?? ''}'.trim();
                     final ip = '${d['ip'] ?? 'unknown'}';
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -294,24 +298,30 @@ class _AccountScreenState extends State<AccountScreen> {
                                   const Padding(padding: EdgeInsets.only(left: 6), child: Chip(visualDensity: VisualDensity.compact, label: Text('This device', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800)))),
                               ]),
                               const SizedBox(height: 2),
-                              Text('$day $time · IP $ip${trusted ? '' : ' (revoked)'}', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                              Text('$day $time${loc.isNotEmpty ? ' · $loc' : ''} · IP $ip${trusted ? '' : ' (revoked)'}', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
                             ]),
                           ),
                           TextButton(
-                            onPressed: isCurrent
+                            onPressed: isCurrent || revoking
                                 ? null
                                 : () async {
+                                    setSheetState(() => revoking = true);
                                     final ok = await DropOffApi.post('/me/devices/${d['id']}/revoke', const {});
+                                    setSheetState(() => revoking = false);
                                     if (ok.ok && mounted) {
                                       setSheetState(() {
                                         d['trusted'] = false;
                                       });
-                                      _snackPhoto('Device revoked.');
+                                      _snackPhoto('Device revoked — its sessions are now signed out.');
                                     } else if (mounted) {
-                                      _snackPhoto('Could not revoke this device.');
+                                      _snackPhoto('Could not revoke this device — check your connection and try again.');
                                     }
                                   },
-                            child: Text(isCurrent ? 'current' : 'Revoke'),
+                            child: isCurrent
+                                ? const Text('current')
+                                : (revoking
+                                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Text('Revoke')),
                           ),
                         ]),
                       ),

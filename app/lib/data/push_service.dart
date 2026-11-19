@@ -148,7 +148,7 @@ class PushService {
     }
     return const AndroidNotificationChannel('dropoff_jobs', 'DropOff — Parcels & riders',
         description: 'Booking, dispatch, rider assignment and delivery updates.',
-        importance: Importance.high);
+        importance: Importance.max);
   }
 
   static Future<void> _show(Map<String, dynamic> data, String? title, String? body) async {
@@ -167,7 +167,11 @@ class PushService {
       largeIcon: const DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
       icon: '@drawable/ic_stat_dropoff',
       ticker: t,
-      category: AndroidNotificationCategory.message,
+      category: (kind.contains('job') || kind.contains('assign') || kind.contains('status'))
+          ? AndroidNotificationCategory.alarm
+          : AndroidNotificationCategory.message,
+      fullScreenIntent: kind.contains('job') || kind.contains('assign'),
+      visibility: NotificationVisibility.public,
       styleInformation: BigTextStyleInformation(b, contentTitle: t, htmlFormatBigText: false),
       groupKey: 'dropoff',
     );

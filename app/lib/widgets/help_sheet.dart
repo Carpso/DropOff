@@ -8,6 +8,7 @@ abstract final class HelpTopic {
   static const signIn = 'sign_in';
   static const courierFare = 'courier_fare';
   static const parcelPhoto = 'parcel_photo';
+  static const forbiddenItems = 'forbidden_items';
   static const depositRejection = 'prepay_rejected';
   static const planCap = 'plan_cap';
   static const plansBlurb = 'plans_blurb';
@@ -46,6 +47,15 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
       (heading: 'Checked at drop-off', body: 'The rider photographs the parcel again when they hand it to the depot. Yours vs. theirs — mismatch triggers a review before the waybill is signed.'),
       (heading: 'What makes it "clear"', body: 'Parcel label visible, packing intact, no other parcels in frame. One photo per parcel, taken in daylight if you can.'),
       (heading: 'Privacy', body: 'Photos go to DropOff for the parcel\'s lifetime only — dispute evidence or the receiver\'s re-pack inspection. Not shared, not marketed.'),
+    ],
+  ),
+  HelpTopic.forbiddenItems: (
+    title: 'What DropOff cannot carry',
+    rows: [
+      (heading: 'Declare every parcel', body: 'Parcel contents are mandatory. The rider and depot must know what is inside before a parcel enters a bag. A blank or false description cancels the booking.'),
+      (heading: 'Never book these', body: 'Illegal drugs/narcotics, firearms and ammunition, explosives/fireworks, petrol/fuel and other flammables, poisons/corrosives, radioactive material, live animals and human remains. These follow the same published restrictions as DHL, UPS and FedEx.'),
+      (heading: 'Restricted, not banned', body: 'Medicines, liquids, glass and high-value goods need secure packaging and an accurate description — declare them clearly so the rider can handle them properly.'),
+      (heading: 'If in doubt', body: 'Contact DropOff support before booking. If a parcel is found to contain a prohibited item, the booking is cancelled with no refund.'),
     ],
   ),
   HelpTopic.depositRejection: (

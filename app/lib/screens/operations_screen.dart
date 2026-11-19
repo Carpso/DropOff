@@ -26,7 +26,7 @@ class OperationsScreen extends StatelessWidget {
     final code = TextEditingController();
     String phrase = store.linked
         ? 'Linked as ${store.linkedPhone}. Lipila prompts and job receipts flow through this identity.'
-        : 'Verify with a one-time code for receipts, live tracking and ops access.';
+        : 'Verify with a one-time code for receipts, live tracking and team access.';
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -1044,11 +1044,19 @@ class _RiderTargetsCard extends StatefulWidget {
 class _RiderTargetsCardState extends State<_RiderTargetsCard> {
   Map<String, dynamic>? _t;
   bool _loading = true;
+  Timer? _poll; // same 20 s cadence as the Task Queue card
 
   @override
   void initState() {
     super.initState();
     _load();
+    _poll = Timer.periodic(const Duration(seconds: 20), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {

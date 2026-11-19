@@ -724,7 +724,7 @@ class _BookingScreenState extends State<BookingScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       final msg = switch (store.lastBookingError) {
-        'booking_on_hold' => 'Recent missed pickups put new bookings on hold. Contact DropOff support or ask ops to review your account.',
+        'booking_on_hold' => 'Recent missed pickups put new bookings on hold. Contact DropOff support to review your account.',
         'slot_required' || 'pickup_window_required' => 'Every parcel must be booked onto a Sweep slot (no untimed pickups).',
         _ => store.lastBookingErrorDetail?.isNotEmpty == true
             ? store.lastBookingErrorDetail!
@@ -1006,7 +1006,11 @@ class _BookingScreenState extends State<BookingScreen> {
           }),
         ),
         const SizedBox(height: 16),
-        TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents', hintText: 'e.g. Two boxed phones', prefixIcon: Icon(Icons.inventory_2_outlined))),
+        TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents (required)', hintText: 'e.g. Two boxed phones', helperText: 'Declare what is inside — drugs, weapons, fuel and live animals are forbidden.', prefixIcon: Icon(Icons.inventory_2_outlined))),
+        const Row(children: [
+          Expanded(child: Text('Contents are required — undeclared items are refused at pickup.', style: AppType.caption)),
+          HelpIconButton(topic: HelpTopic.forbiddenItems),
+        ]),
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: _parcelPhotoUploading ? null : _pickParcelPhoto,

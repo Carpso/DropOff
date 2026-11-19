@@ -343,9 +343,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // "To Platinum" / "To Icypeed" (owner 2026-11-18): the depot leg is named
     // by the DEPOT, not a generic "depot" — stop rows carry `depot` now.
     final depotName = '${s['depot'] ?? s['courier'] ?? 'DropOff'}'.trim();
+    final senderName = '${s['seller'] ?? ''}'.trim();
     final label = picked
         ? '$depotName depot'
-        : '${s['ref'] ?? 'Stop'} — $addr'.trim();
+        : (senderName.isNotEmpty ? '$senderName — $addr' : '${s['ref'] ?? 'Stop'} — $addr').trim();
     // Whole-job context on the map (owner 2026-11-18 "fix the rider map just
     // like the sender map tracking"): heading to the sender shows the depot
     // pin too, heading to the depot shows the sender's stop too.
@@ -1191,15 +1192,15 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ),
           IconButton(
             tooltip: 'Account & sign out',
-            icon: Icon(store.email != null ? Icons.account_circle : Icons.account_circle_outlined),
+            icon: (store.photoUrl ?? '').isNotEmpty
+                ? ClipOval(child: Image.network(
+                    '${DropOffApi.baseUrl}${store.photoUrl}',
+                    width: 28, height: 28, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.account_circle)))
+                : Icon(store.email != null ? Icons.account_circle : Icons.account_circle_outlined),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _loading ? null : _load,
-        icon: const Icon(Icons.refresh),
-        label: const Text('Refresh'),
       ),
       body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (_offline)
@@ -1240,7 +1241,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                                     style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
                                 const SizedBox(height: 8),
                                 const Text(
-                                  'Slot batches land here the moment ops assigns you a run — you do not have to book anything. Pull down or tap refresh to sync.',
+                                  'Slot batches land here the moment the system assigns you a run — you do not have to book anything. Pull down or tap Check for new rides to sync.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(color: AppColors.muted, height: 1.5),
                                 ),
@@ -1280,33 +1281,60 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// and fees earned — bucketed by the rider's CAT day server-side and
   /// refreshed with the same 20 s poll as the queue.
   /// Animated "scanning for signal" radar for the empty queue (owner 2026-11-18).
-  Widget _radarEmpty() => AnimatedBuilder(
-    animation: _radar,
-    builder: (context, _) {
-      final t = _radar.value;
-      return SizedBox(width: 132, height: 132, child: Stack(alignment: Alignment.center, children: [
-        for (final phase in const [0.0, 0.5])
-          Transform.scale(
-            scale: 0.45 + 1.15 * ((t + phase) % 1.0),
-            child: Container(width: 96, height: 96, decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.forest.withValues(alpha: 0.45 * (1 - ((t + phase) % 1.0))), width: 2),
-            )),
+  Widget _radarEmpty() => LayoutBuilder(builder: (context, cons) {
+    final screenW = cons.maxWidth;
+    return AnimatedBuilder(
+      animation: _radar,
+      builder: (context, _) {
+        final t = _radar.value;
+        // Rings start near the logo and expand past the screen edges, so the
+        // radar reads as searching the whole city for a parcel signal.
+        return ClipRect(
+          child: SizedBox(
+            width: double.infinity,
+            height: 210,
+            child: Stack(alignment: Alignment.center, children: [
+              for (final phase in const [0.0, 0.34, 0.67])
+                Transform.scale(
+                  scale: 0.35 + 1.85 * ((t + phase) % 1.0),
+                  child: Container(
+                    width: screenW * 0.9, height: screenW * 0.9,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: AppColors.forest.withValues(alpha: 0.42 * (1 - ((t + phase) % 1.0))),
+                        width: 2.5),
+                    ),
+                  ),
+                ),
+              Transform.rotate(
+                angle: t * 6.2832,
+                child: Container(
+                  width: screenW * 0.92, height: 3,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [
+                      Colors.transparent, AppColors.amber.withValues(alpha: 0.65), Colors.transparent,
+                    ]),
+                  ),
+                ),
+              ),
+              // OUR APP LOGO in the centre of the radar.
+              Container(
+                width: 76, height: 76,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle, color: Colors.white,
+                  border: Border.all(color: Colors.white, width: 2.5),
+                  boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 14, offset: Offset(0, 5))],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Image.asset('assets/brand/dropoff_logo.png', fit: BoxFit.contain),
+              ),
+            ]),
           ),
-        // Sweeping radar beam.
-        Transform.rotate(angle: t * 6.2832, child: Container(width: 96, height: 3,
-          decoration: BoxDecoration(gradient: LinearGradient(colors: [Colors.transparent, AppColors.amber.withValues(alpha: 0.7)]), borderRadius: BorderRadius.circular(3)))),
-        // 3D-ish map badge in the middle.
-        Container(width: 60, height: 60, decoration: BoxDecoration(shape: BoxShape.circle,
-          gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-            colors: [Color(0xFF2EA376), Color(0xFF0F5C40)]),
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 12, offset: Offset(0, 5))]),
-          child: const Icon(Icons.map_outlined, size: 30, color: Colors.white)),
-      ]));
-    },
-  );
-
+        );
+      },
+    );
+  });
   Widget _statsCard() {
     final s = _stats ?? const {};
     final total = (s['total'] as num?)?.toInt() ?? 0;
@@ -1516,7 +1544,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   ? '✓ picked — ${'${s['last_mile'] ?? 0}' == '1' ? 'door handover next' : 'drop at the $depotName depot'}'
                   : arrived
                       ? 'ARRIVED — tap ✓ to file the pickup'
-                      : 'Sender: ${s['seller']} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${'${s['status']}'.replaceAll('_', ' ')}',
+                      : 'Sender: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${'${s['status']}'.replaceAll('_', ' ')}',
               style: TextStyle(color: picked ? AppColors.forest : arrived ? AppColors.ink : AppColors.muted,
                   fontSize: 11.5, fontWeight: picked || arrived ? FontWeight.w800 : FontWeight.w400),
             ),
@@ -1546,8 +1574,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ),
         const Spacer(),
         _navBtn(
-          picked ? 'To ${_depotShort(s)}' : 'Navigate',
-          picked ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to pickup in the DropOff map',
+          picked ? 'To ${_depotShort(s)}' : 'To ${'${s['seller'] ?? 'Sender'}'.trim().isEmpty ? 'Sender' : '${s['seller']}'.trim()}',
+          picked ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to ${s['seller'] ?? 'the sender'} in the DropOff map',
           picked ? const Color(0xFF0F5C40) : const Color(0xFF17855F),
           Icons.navigation_rounded,
           () => _navigateToStop(s),

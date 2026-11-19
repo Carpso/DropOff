@@ -119,19 +119,22 @@ export async function recordAttempt(
  *  for this phone (caller should then raise a new_device alert). */
 export async function noteDevice(
   db: D1Database, phone: string, devId: string, ip: string, ua?: string | null,
+  meta?: { deviceName?: string | null; location?: string | null },
 ): Promise<{ isNew: boolean }> {
+  const name = String(meta?.deviceName ?? '').trim().slice(0, 120) || null;
+  const where = String(meta?.location ?? '').trim().slice(0, 80) || null;
   const existing = await db.prepare(
     'SELECT id FROM device_sessions WHERE phone = ?1 AND device_id = ?2',
   ).bind(phone, devId).first<{ id: number }>();
   if (existing) {
     await db.prepare(
-      'UPDATE device_sessions SET last_seen = datetime("now"), ip = COALESCE(?2, ip), ua = COALESCE(?3, ua) WHERE id = ?1',
-    ).bind(existing.id, ip, ua ?? null).run();
+      'UPDATE device_sessions SET last_seen = datetime("now"), ip = COALESCE(?2, ip), ua = COALESCE(?3, ua), device_name = COALESCE(?4, device_name), location = COALESCE(?5, location) WHERE id = ?1',
+    ).bind(existing.id, ip, ua ?? null, name, where).run();
     return { isNew: false };
   }
   await db.prepare(
-    'INSERT INTO device_sessions (phone, device_id, ip, ua, first_seen, last_seen, trusted) VALUES (?1, ?2, ?3, ?4, datetime("now"), datetime("now"), 1)',
-  ).bind(phone, devId, ip, ua ?? null).run();
+    'INSERT INTO device_sessions (phone, device_id, ip, ua, device_name, location, first_seen, last_seen, trusted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime("now"), datetime("now"), 1)',
+  ).bind(phone, devId, ip, ua ?? null, name, where).run();
   return { isNew: true };
 }
 

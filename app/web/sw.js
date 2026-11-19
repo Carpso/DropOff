@@ -1,5 +1,8 @@
-// Lightweight offline fallback: cache what we can and show a styled splash.
-const CACHE = 'dropoff-web-v1';
+// Lightweight offline shell cache (v2, 2026-11-19).
+// IMPORTANT: API calls go cross-origin to api.carpsosolutions.store and must
+// NEVER be answered with index.html — a failed API fetch must reach the app as
+// a real network error, not as fake JSON that silently shows cached data.
+const CACHE = 'dropoff-web-v2';
 const SHELL = ['./', './index.html', './favicon.png', './manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -16,15 +19,22 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
+});
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  // Never touch cross-origin requests (the API). Let the browser handle them.
+  if (url.origin !== self.location.origin) return;
   if (SHELL.includes(url.pathname)) {
     event.respondWith(
       caches.match(event.request).then((hit) => hit || fetch(event.request)),
     );
     return;
   }
-  event.respondWith(
-    fetch(event.request).catch(() => caches.match('./index.html')),
-  );
+  // Navigation fallback only — the app shell when offline.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(fetch(event.request).catch(() => caches.match('./index.html')));
+  }
 });

@@ -372,6 +372,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             prefixIcon: Icon(Icons.redeem_rounded),
           ),
         ),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, left: 4),
+          child: Text('Got a plan? Your code is in Account → Redeem a plan code, or on the receipt from the agent where you bought it. Leaving this blank pays per collection.',
+              style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.3)),
+        ),
         const SizedBox(height: 10),
         const Text('Payment', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),

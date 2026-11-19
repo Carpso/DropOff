@@ -74,6 +74,17 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="dropoff" />
             </intent-filter>
+            <!-- NAVIGATION APP (owner 2026-11-19): appear in Android's navigation
+                 chooser when another app asks to navigate to a place. DropOff
+                 routes inside our own map — no external navigation app needed. -->
+            <intent-filter>
+                <action android:name="android.intent.action.NAVIGATE" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <category android:name="android.intent.category.APP_MAPS" />
+                <data android:scheme="geo" />
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

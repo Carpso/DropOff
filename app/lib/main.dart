@@ -19,6 +19,7 @@ import 'screens/booking_screen.dart';
 import 'screens/chat_screen.dart';
 import 'package:app_links/app_links.dart';
 import 'screens/app_shell.dart';
+import 'screens/in_app_navigator_screen.dart';
 import 'screens/bookings_screen.dart';
 import 'screens/lock_screen.dart';
 import 'state/app_store.dart';
@@ -38,6 +39,18 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void _handleDeepLink(AppStore store, Uri uri) {
   final ctx = navigatorKey.currentContext;
   if (ctx == null) return;
+  if (uri.scheme == 'geo') {
+    // Another app asked Android to navigate here — answer with OUR map.
+    final bits = uri.path.split(',');
+    final lat = double.tryParse(bits.isNotEmpty ? bits[0] : '');
+    final lng = double.tryParse(bits.length > 1 ? bits[1] : '');
+    if (lat != null && lng != null) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => InAppNavigatorScreen(
+        destLat: lat, destLng: lng, label: uri.queryParameters['q'] ?? 'Destination',
+      )));
+    }
+    return;
+  }
   final seg = uri.pathSegments;
   AnalyticsService.instance.track(feature: 'deeplink', action: 'open', context: uri.path, meta: {'query': uri.queryParameters});
   if (seg.isEmpty) return;
