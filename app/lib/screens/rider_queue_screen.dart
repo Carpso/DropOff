@@ -81,13 +81,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Position? _riderPos;
 
   // AUTOMATIC LIVE-LOCATION SHARING (owner directive 2026-11-17: "make rider
-  // share live location automatically to seller/sender"): while the rider is
-  // on duty (the queue has batches), the GPS stream feeds POST /rider/ping —
-  // throttled to one ping per ≥20 s AND ≥30 m of real movement — keeping the
-  // server's riders.last_lat/last_lng fresh so the SENDER's tracking map
-  // (GET /jobs/:ref/live, polled every 12 s) shows the rider pin with no
-  // action from the rider. Honours the Team-screen share toggle; pings are
-  // fire-and-forget (a failed one simply waits for the next GPS fix).
+  // share live location automatically to seller/sender"): while the Team-screen
+  // share toggle is on, the GPS stream feeds POST /rider/ping even with an
+  // EMPTY queue — throttled to ≥20 s, and at least once a minute even when
+  // stationary. This keeps riders.last_seen_at fresh so (a) the SENDER's
+  // tracking map shows the rider pin and (b) auto-assign still considers the
+  // rider for the FIRST order. Pings are fire-and-forget.
   DateTime? _lastPingAt;
   double? _lastPingLat;
   double? _lastPingLng;
@@ -288,10 +287,16 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final store = AppScope.of(context);
     if (!store.linked || store.linkedPhone == null || !store.shareLocationOn) return;
     final batches = ((_data?['batches'] as List?) ?? const []);
-    if (batches.isEmpty) return; // off duty — nothing to share
+    // NO empty-queue bail-out (owner 2026-11-19 "riders not getting orders"):
+    // dispatch only considers riders pinged in the last 15 minutes. A rider
+    // waiting for their FIRST order has an empty queue — if we stop pinging,
+    // their last_seen_at goes stale and the algorithm can never pick them.
     final now = DateTime.now();
     if (_lastPingAt != null && now.difference(_lastPingAt!).inSeconds < 20) return;
-    if (_lastPingLat != null && _lastPingLng != null &&
+    // A stationary rider still refreshes every 60 s. Distance filtering alone
+    // would let last_seen_at expire while they wait at the same spot.
+    final mustRefresh = _lastPingAt == null || now.difference(_lastPingAt!).inSeconds >= 60;
+    if (!mustRefresh && _lastPingLat != null && _lastPingLng != null &&
         Geolocator.distanceBetween(_lastPingLat!, _lastPingLng!, pos.latitude, pos.longitude) < 30) {
       return;
     }

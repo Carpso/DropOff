@@ -55,9 +55,15 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   it, and the navigator speaks ONE next-turn cue at 400/250/100/30 m bands,
   re-anchoring on re-route. It no longer reads the step list back-to-back.
 
+- **Rider presence fix (the real "not getting orders" bug):** the queue's
+  auto-ping used to bail when `batches.isEmpty`, so a rider waiting for a first
+  order never refreshed `last_seen_at` and dispatch (15-minute freshness gate)
+  could never pick them. It now pings with an empty queue and refreshes at
+  least every 60 s even when stationary. Never restore that empty-queue guard.
+
 ### Release
-- Version bumped to `0.5.51+61` (57/58/59/60 are consumed on Play). Worker
-  deployed with migration 0072 applied.
+- Version bumped to `0.5.52+62` (57/58/59/60/61 are consumed or superseded on
+  Play). Worker deployed with migration 0072 applied.
 
 ## Repo conventions
 
