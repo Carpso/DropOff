@@ -136,8 +136,26 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (!mounted) return;
     final s = stats?['stats'] as Map<String, dynamic>?;
     if (s != null) {
+      // Sync the card to the EXACT queue on screen — the figures a rider sees
+      // in the batches must equal the figures in the stats card. Server keeps
+      // the fields the queue cannot know (delivered today, earnings).
+      final qBatches = ((data?['batches'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      var stops = 0, pickedStops = 0, parcels = 0;
+      for (final b in qBatches) {
+        parcels += (b['total_parcels'] as num?)?.toInt() ?? 0;
+        final ss = ((b['stops'] as List?) ?? const []);
+        stops += ss.length;
+        pickedStops += ss.where((x) => _picked('${(x as Map)['status'] ?? ''}')).length;
+      }
+      final merged = Map<String, dynamic>.from(s);
+      if (qBatches.isNotEmpty) {
+        merged['total'] = stops;
+        merged['waiting'] = stops - pickedStops;
+        merged['picked'] = pickedStops;
+        merged['parcels'] = parcels;
+      }
       setState(() {
-        _stats = s;
+        _stats = merged;
         final n = DateTime.now();
         _statsSynced = '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}:${n.second.toString().padLeft(2, '0')}';
       });
@@ -1164,7 +1182,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       // rider's first screen opens the Account screen — profile, plans and
       // the sign-out path live there.
       appBar: AppBar(
-        title: const Text('Task queue', style: TextStyle(fontWeight: FontWeight.w900)),
+        title: const Text('Task Queue', style: TextStyle(fontWeight: FontWeight.w900)),
         actions: [
           IconButton(
             tooltip: 'Rider tutorial',
