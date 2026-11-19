@@ -713,7 +713,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 ]),
               if (inlineError != null) ...[
                 const SizedBox(height: 8),
-                Text(inlineError!, style: const TextStyle(fontSize: 12, color: Color(0xFFB3261E), height: 1.35)),
+                Text(inlineError!, style: const TextStyle(fontSize: 12, color: AppColors.danger, height: 1.35)),
                 // The stuck moment (owner 2026-11-18): the sender never got
                 // a booking SMS, so no code exists to show. One tap re-fires
                 // a fresh code to their phone — no dead-end pickup.
@@ -1323,7 +1323,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 width: 76, height: 76,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFF0F5C40),
+                  color: AppColors.forest,
                   border: Border.all(color: Colors.white, width: 2.5),
                   boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 14, offset: Offset(0, 5))],
                 ),
@@ -1352,7 +1352,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       padding: const EdgeInsets.only(bottom: 16),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF10312A),
+          color: AppColors.forest,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: AppColors.forest.withValues(alpha: 0.5)),
         ),
@@ -1377,7 +1377,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           Row(children: [
             _statTile('$total', 'ALL', Colors.white),
             _statTile('$waiting', 'TO PICK UP', waiting > 0 ? AppColors.amber : Colors.white70),
-            _statTile('$picked', 'IN HAND', const Color(0xFF1F9E6B)),
+            _statTile('$picked', 'IN HAND', AppColors.mint),
             _statTile('$delivered', 'DONE', Colors.white),
           ]),
           // Pace + bonus strip (owner 2026-11-18) from /rider/targets.
@@ -1579,7 +1579,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         _navBtn(
           picked ? 'To ${_depotShort(s)}' : 'To ${'${s['seller'] ?? 'Sender'}'.trim().isEmpty ? 'Sender' : '${s['seller']}'.trim()}',
           picked ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to ${s['seller'] ?? 'the sender'} in the DropOff map',
-          picked ? const Color(0xFF0F5C40) : const Color(0xFF17855F),
+          picked ? AppColors.forest : AppColors.forestLight,
           Icons.navigation_rounded,
           () => _navigateToStop(s),
         ),

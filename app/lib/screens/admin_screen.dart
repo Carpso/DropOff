@@ -352,7 +352,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 5),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Icon(a['severity'] == 'high' || a['severity'] == 'critical' ? Icons.error_outline : Icons.info_outline,
-                      size: 17, color: a['severity'] == 'high' || a['severity'] == 'critical' ? const Color(0xFFB3261E) : AppColors.muted),
+                      size: 17, color: a['severity'] == 'high' || a['severity'] == 'critical' ? AppColors.danger : AppColors.muted),
                   const SizedBox(width: 8),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('${a['type']} · ${a['phone']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
@@ -485,7 +485,7 @@ class _AdminScreenState extends State<AdminScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text('ATO turnover (3-mo avg): ${_kwacha(avgTurn)} · payroll = ${share?.toStringAsFixed(1) ?? '?'}% of it',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: (share ?? 0) <= 25 ? AppColors.forest : (share ?? 100) <= 50 ? const Color(0xFF8A5A00) : const Color(0xFFB3261E))),
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: (share ?? 0) <= 25 ? AppColors.forest : (share ?? 100) <= 50 ? AppColors.warning : AppColors.danger)),
             ),
           ],
           const SizedBox(height: 4),
@@ -1368,7 +1368,7 @@ class _UsersCardState extends State<_UsersCard> {
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete account'),
           ),
@@ -1537,7 +1537,7 @@ class _UsersCardState extends State<_UsersCard> {
                       IconButton(
                         tooltip: 'Delete account',
                         visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFB3261E)),
+                        icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
                         onPressed: () => _deleteUser(u),
                       ),
                     ],
@@ -1579,7 +1579,7 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete booking'),
           ),
@@ -1618,7 +1618,7 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Row(children: [
-            Icon(Icons.delete_outline, color: Color(0xFFB3261E)),
+            Icon(Icons.delete_outline, color: AppColors.danger),
             SizedBox(width: 8),
             Expanded(child: Text('Delete a booking', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
           ]),
@@ -1641,7 +1641,7 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
             ),
             const SizedBox(width: 10),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
               onPressed: _busy ? null : _delete,
               icon: _busy
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -1760,7 +1760,7 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
                         content: Text('Remove "${b['name'] ?? 'this branch'}"? This cannot be undone.'),
                         actions: [
                           TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
-                          FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)), onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
+                          FilledButton(style: FilledButton.styleFrom(backgroundColor: AppColors.danger), onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
                         ],
                       ),
                     );
@@ -2920,19 +2920,19 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     final faceMatch = (res.body['face_match'] as Map?)?.cast<String, dynamic>();
     final faceVerdict = '${face?['verdict'] ?? ''}';
     final faceNote = '${face?['note'] ?? ''}';
-    final faceColor = faceVerdict == 'pass' ? AppColors.forest : const Color(0xFFB3261E);
+    final faceColor = faceVerdict == 'pass' ? AppColors.forest : AppColors.danger;
     final matchSame = '${faceMatch?['same_person'] ?? ''}';
     final matchLabel = matchSame == 'yes' ? 'SAME PERSON' : matchSame == 'no' ? 'DIFFERENT' : 'UNCERTAIN';
-    final matchColor = matchSame == 'yes' ? AppColors.forest : matchSame == 'no' ? const Color(0xFFB3261E) : const Color(0xFF8A5A00);
+    final matchColor = matchSame == 'yes' ? AppColors.forest : matchSame == 'no' ? AppColors.danger : AppColors.warning;
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('AI KYC identity check'),
         content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Plate match: ${plateMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: plateMatch ? AppColors.forest : const Color(0xFFB3261E))),
+          Text('Plate match: ${plateMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: plateMatch ? AppColors.forest : AppColors.danger)),
           const SizedBox(height: 4),
-          Text('NRC match: ${nrcMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: nrcMatch ? AppColors.forest : const Color(0xFFB3261E))),
+          Text('NRC match: ${nrcMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: nrcMatch ? AppColors.forest : AppColors.danger)),
           const SizedBox(height: 4),
           Text('Selfie face: ${faceVerdict.isEmpty ? 'not checked' : faceVerdict.toUpperCase()}',
               style: TextStyle(fontWeight: FontWeight.w800, color: faceVerdict.isEmpty ? AppColors.muted : faceColor)),
@@ -3059,7 +3059,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
                   ],
                   if ('${rider['verification_note'] ?? ''}'.trim().isNotEmpty) ...[
                     const SizedBox(height: 6),
-                    Text('Note: ${rider['verification_note']}', style: const TextStyle(color: Color(0xFFB3261E), fontSize: 11, height: 1.35)),
+                    Text('Note: ${rider['verification_note']}', style: const TextStyle(color: AppColors.danger, fontSize: 11, height: 1.35)),
                   ],
                   const SizedBox(height: 8),
                   Wrap(spacing: 8, runSpacing: 6, children: [
@@ -3102,8 +3102,8 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
   Widget _statusChip(String status) {
     final (color, label) = switch (status) {
       'verified' => (AppColors.forest, 'VERIFIED'),
-      'rejected' => (const Color(0xFFB3261E), 'REJECTED'),
-      _ => (const Color(0xFF8A5A00), 'PENDING'),
+      'rejected' => (AppColors.danger, 'REJECTED'),
+      _ => (AppColors.warning, 'PENDING'),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -3124,7 +3124,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
       padding: const EdgeInsets.only(top: 5),
       child: Text(
         'Today $today/$daily${met ? ' (met)' : ''} - month $month vs pace $pace${onTrack ? ' (on track)' : ' (behind)'}',
-        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: onTrack ? AppColors.forest : const Color(0xFF8A5A00)),
+        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: onTrack ? AppColors.forest : AppColors.warning),
       ),
     );
   }
@@ -3585,7 +3585,7 @@ class _ClientCrashesCardState extends State<_ClientCrashesCard> {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Icon(Icons.bug_report_outlined, color: total > 0 ? const Color(0xFFB3261E) : AppColors.forest),
+            Icon(Icons.bug_report_outlined, color: total > 0 ? AppColors.danger : AppColors.forest),
             const SizedBox(width: 8),
             const Expanded(child: Text('Client crashes', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
@@ -3602,7 +3602,7 @@ class _ClientCrashesCardState extends State<_ClientCrashesCard> {
               ...rows.take(8).map((c) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('×${(c['count'] as num?)?.toInt() ?? 1}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: Color(0xFFB3261E))),
+                  Text('×${(c['count'] as num?)?.toInt() ?? 1}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: AppColors.danger)),
                   const SizedBox(width: 10),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('${c['message']}', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, height: 1.35), maxLines: 3, overflow: TextOverflow.ellipsis),

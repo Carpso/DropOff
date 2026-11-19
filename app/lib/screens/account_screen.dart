@@ -717,7 +717,7 @@ class _AccountScreenState extends State<AccountScreen> {
             ]),
             if (_error != null) ...[
               const SizedBox(height: 14),
-              Text(_error!, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 13)),
+              Text(_error!, style: const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700, fontSize: 13)),
             ],
             const SizedBox(height: 10),
             Row(children: [
@@ -876,7 +876,7 @@ class _RecurringCardState extends State<_RecurringCard> {
             const SizedBox(height: 4),
             const Text('Pre-load a repeat drop — tap to book it with one tap when due.', style: TextStyle(color: AppColors.ink, fontSize: 13)),
             const SizedBox(height: 14),
-            if (errorText != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(errorText, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 12))),
+            if (errorText != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(errorText, style: const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700, fontSize: 12))),
             ValueListenableBuilder<String>(
               valueListenable: destCtl,
               builder: (context, dest, _) => DropdownButtonFormField<String>(
@@ -993,7 +993,7 @@ class _RecurringCardState extends State<_RecurringCard> {
                       content: const Text('This will remove the recurring plan. This cannot be undone.'),
                       actions: [
                         TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
-                        FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)), onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
+                        FilledButton(style: FilledButton.styleFrom(backgroundColor: AppColors.danger), onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
                       ],
                     ),
                   );
@@ -1071,7 +1071,7 @@ class _ReferralCardState extends State<_ReferralCard> {
             if (code != null)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(color: const Color(0xFF10312A), borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(12)),
                 child: Text(code, style: const TextStyle(color: Color(0xFFF6B73C), fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 16)),
               )
             else
@@ -1702,7 +1702,7 @@ class _CreateAccountSheetState extends State<_CreateAccountSheet> {
         ]),
         if (_error != null) ...[
           const SizedBox(height: 10),
-          Text(_error!, style: const TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700, fontSize: 13)),
+          Text(_error!, style: const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700, fontSize: 13)),
         ],
         const SizedBox(height: 12),
         SizedBox(width: double.infinity, child: FilledButton.icon(

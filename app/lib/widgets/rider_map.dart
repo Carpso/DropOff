@@ -9,6 +9,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
+import '../ui/app_theme.dart';
+
 /// Live in-app map on the DropOff basemap (Protomaps Zambia/Zimbabwe/Malawi/
 /// Mozambique archive on our R2 bucket — no Google, no MapTiler, no external
 /// navigation app). The map is ours; it grows with the fleet's rider density.
@@ -127,14 +129,14 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.94),
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF123C32), width: 1.3),
+              border: Border.all(color: AppColors.forest, width: 1.3),
               boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1))],
             ),
             child: Transform.rotate(
               angle: _needleAngle(),
               child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.arrow_upward, size: 15, color: Color(0xFFB3261E)),
-                Text('N', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: Color(0xFF123C32), height: 1)),
+                Icon(Icons.arrow_upward, size: 15, color: AppColors.danger),
+                Text('N', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: AppColors.forest, height: 1)),
               ]),
             ),
           ),
@@ -224,7 +226,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               ),
               child: Transform.rotate(
                 angle: (_destinationBearing - _mapRotationDeg) * math.pi / 180,
-                child: const Icon(Icons.two_wheeler, size: 25, color: Color(0xFF10312A)),
+                child: const Icon(Icons.two_wheeler, size: 25, color: AppColors.forest),
               ),
             ),
           ]),
@@ -313,7 +315,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
             ? Polyline(points: widget.route!, strokeWidth: 7.5, color: const Color(0xFF0F3B2D))
             : null;
         final core = widget.route != null && widget.route!.length > 1
-            ? Polyline(points: widget.route!, strokeWidth: 4.5, color: const Color(0xFF1F9E6B))
+            ? Polyline(points: widget.route!, strokeWidth: 4.5, color: AppColors.mint)
             : null;
         return Stack(children: [
           FlutterMap(
@@ -336,7 +338,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               ),
               if (casing != null && core != null)
                 PolylineLayer(polylines: widget.routeIsStraightLine
-                    ? [Polyline(points: widget.route!, strokeWidth: 4, color: const Color(0xFF1F9E6B),
+                    ? [Polyline(points: widget.route!, strokeWidth: 4, color: AppColors.mint,
                         pattern: StrokePattern.dashed(segments: const [12.0, 9.0]))]
                     : [casing, core]),
               MarkerLayer(markers: [
@@ -346,8 +348,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                     width: 56,
                     height: 56,
                     child: widget.pickupIsDepot
-                        ? const Icon(Icons.warehouse_outlined, size: 36, color: Color(0xFF10312A))
-                        : const Icon(Icons.storefront, size: 36, color: Color(0xFF17855F)),
+                        ? const Icon(Icons.warehouse_outlined, size: 36, color: AppColors.forest)
+                        : const Icon(Icons.storefront, size: 36, color: AppColors.forestLight),
                   ),
                 if (widget.stops != null)
                   for (var i = 0; i < widget.stops!.length; i++)
@@ -360,13 +362,13 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                       // "other half" of the job the rider isn't heading to
                       // right now); unkinded stops stay numbered (batch stops).
                       child: switch (widget.stops![i]['kind']) {
-                        'pickup' => const Icon(Icons.storefront, size: 24, color: Color(0xFF17855F)),
-                        'depot' => const Icon(Icons.warehouse_outlined, size: 24, color: Color(0xFF10312A)),
+                        'pickup' => const Icon(Icons.storefront, size: 24, color: AppColors.forestLight),
+                        'depot' => const Icon(Icons.warehouse_outlined, size: 24, color: AppColors.forest),
                         'saved' => const Icon(Icons.bookmark, size: 22, color: Color(0xFF7B5710)),
                         _ => CircleAvatar(
                             backgroundColor: const Color(0xFFF6B73C),
                             radius: 17,
-                            child: Text('${i + 1}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF123C32))),
+                            child: Text('${i + 1}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.forest)),
                           ),
                       },
                     ),
@@ -375,7 +377,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                     point: widget.depot!,
                     width: 56,
                     height: 56,
-                    child: const Icon(Icons.warehouse_outlined, size: 36, color: Color(0xFF10312A)),
+                    child: const Icon(Icons.warehouse_outlined, size: 36, color: AppColors.forest),
                   ),
                 if (widget.rider != null)
                   Marker(
@@ -438,12 +440,12 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
 
   Widget _mapBtn({required IconData icon, required VoidCallback onTap}) => Material(
         color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: Color(0xFF123C32), width: 1.2)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.forest, width: 1.2)),
         elevation: 2,
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: onTap,
-          child: SizedBox(width: 38, height: 38, child: Icon(icon, size: 20, color: const Color(0xFF123C32))),
+          child: SizedBox(width: 38, height: 38, child: Icon(icon, size: 20, color: AppColors.forest)),
         ),
       );
 
@@ -466,7 +468,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   }
 
   Widget _offlineFallback(String message) => Container(
-        color: const Color(0xFF10312A),
+        color: AppColors.forest,
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),

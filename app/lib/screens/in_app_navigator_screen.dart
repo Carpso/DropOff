@@ -313,7 +313,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF123C32).withValues(alpha: 0.35)),
+                border: Border.all(color: AppColors.forest.withValues(alpha: 0.35)),
                 boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2))],
               ),
               child: TextField(
@@ -340,7 +340,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFF123C32).withValues(alpha: 0.3)),
+                  border: Border.all(color: AppColors.forest.withValues(alpha: 0.3)),
                   boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))],
                 ),
                 child: ConstrainedBox(
@@ -386,7 +386,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
       bottomNavigationBar: SafeArea(
         top: false,
         child: Container(
-          decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFF123C32), width: 1, strokeAlign: BorderSide.strokeAlignOutside))),
+          decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.forest, width: 1, strokeAlign: BorderSide.strokeAlignOutside))),
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text(_destLabel, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14.5)),

@@ -106,7 +106,7 @@ class HomeScreen extends StatelessWidget {
             decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(28)),
             clipBehavior: Clip.antiAlias,
             child: Stack(children: [
-              const Positioned(right: -45, top: -45, child: CircleAvatar(radius: 105, backgroundColor: Color(0xFF1B4B3E))),
+              const Positioned(right: -45, top: -45, child: CircleAvatar(radius: 105, backgroundColor: AppColors.forest)),
               const Positioned(right: 20, bottom: 72, child: Icon(Icons.two_wheeler_rounded, color: Color(0x33FFFFFF), size: 112)),
               Padding(
                 padding: const EdgeInsets.all(24),

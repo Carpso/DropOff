@@ -17,24 +17,22 @@ abstract final class AppType {
 }
 
 abstract final class AppColors {
-  static const forest = Color(0xFF123C32);
-  static const forestLight = Color(0xFF1C5445);
+  // Brand palette — sampled from assets/brand/dropoff_logo.png:
+  // deep green background, gold pin, white parcel, mint live dot.
+  static const forest = Color(0xFF0E3B32);
+  static const forestLight = Color(0xFF1C6B52);
+  static const mint = Color(0xFF34D399);
   static const amber = Color(0xFFF6B73C);
+  static const amberSoft = Color(0xFFFFE9BE);
   static const canvas = Color(0xFFF5F5F0);
   static const ink = Color(0xFF17221E);
   static const muted = Color(0xFF65736D);
   static const line = Color(0xFFE2E6E1);
 
-  // Extended small-business palette (target look, deeper accents)
-  static const terracotta = Color(0xFFB85C38);
-  static const sky = Color(0xFF2E6F95);
-  static const sage = Color(0xFF7FA650);
-  static const plum = Color(0xFF6B4F7A);
-  static const slate = Color(0xFF4A5568);
+  // Semantic signals only — not decorative accents.
   static const success = Color(0xFF2E7D32);
   static const warning = Color(0xFFB26A00);
   static const danger = Color(0xFFB3261E);
-  static const info = Color(0xFF1565C0);
 }
 
 ThemeData buildAppTheme() {
@@ -45,7 +43,7 @@ ThemeData buildAppTheme() {
   ).copyWith(
     secondary: AppColors.amber,
     onSecondary: AppColors.ink,
-    tertiary: AppColors.terracotta,
+    tertiary: AppColors.mint,
     error: AppColors.danger,
   );
   return ThemeData(

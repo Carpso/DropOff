@@ -234,7 +234,7 @@ class OperationsScreen extends StatelessWidget {
             child: const Text('Deactivate instead'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: openCount > 0 ? null : () => Navigator.pop(ctx, true),
             child: const Text('Delete permanently'),
           ),
@@ -1106,7 +1106,7 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
             Row(children: [
               Expanded(child: Text('Today: $today / $daily parcels', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
               Text(met ? 'MET' : '${daily - today} to go',
-                  style: TextStyle(color: met ? AppColors.forest : const Color(0xFF8A5A00), fontWeight: FontWeight.w900, fontSize: 11.5)),
+                  style: TextStyle(color: met ? AppColors.forest : AppColors.warning, fontWeight: FontWeight.w900, fontSize: 11.5)),
             ]),
             const SizedBox(height: 6),
             ClipRRect(
@@ -1138,7 +1138,7 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
               onTrack
                   ? 'On pace: $pace expected by day $day of the month.'
                   : '$behind behind pace - clear the daily $daily first, then use the rest of the month to catch up.',
-              style: TextStyle(color: onTrack ? AppColors.forest : const Color(0xFF8A5A00), fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600),
+              style: TextStyle(color: onTrack ? AppColors.forest : AppColors.warning, fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600),
             ),
             if (targetBonus != null) ...[
               const SizedBox(height: 12),
@@ -1450,8 +1450,8 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
     final verdict = '${f['verdict'] ?? 'review'}';
     final (color, label) = switch (verdict) {
       'pass' => (AppColors.forest, 'One real photo of you'),
-      'fail' => (const Color(0xFFB3261E), 'Not one person - retake?'),
-      _ => (const Color(0xFF8A5A00), 'AI unsure - admin will decide'),
+      'fail' => (AppColors.danger, 'Not one person - retake?'),
+      _ => (AppColors.warning, 'AI unsure - admin will decide'),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -1478,8 +1478,8 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
     final (chipColor, chipText) = verified
         ? (AppColors.forest, 'VERIFIED')
         : rejected
-            ? (const Color(0xFFB3261E), 'REJECTED')
-            : (const Color(0xFF8A5A00), 'PENDING REVIEW');
+            ? (AppColors.danger, 'REJECTED')
+            : (AppColors.warning, 'PENDING REVIEW');
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Theme(
@@ -1514,8 +1514,8 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: const Color(0xFFB3261E).withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12)),
-              child: Text('Reviewer: $note', style: const TextStyle(color: Color(0xFFB3261E), fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600)),
+              decoration: BoxDecoration(color: AppColors.danger.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12)),
+              child: Text('Reviewer: $note', style: const TextStyle(color: AppColors.danger, fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600)),
             ),
           ],
           if (_loading)
@@ -1548,16 +1548,16 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF8A5A00).withValues(alpha: 0.08),
+                  color: AppColors.warning.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF8A5A00).withValues(alpha: 0.35)),
+                  border: Border.all(color: AppColors.warning.withValues(alpha: 0.35)),
                 ),
                 child: const Row(children: [
-                  Icon(Icons.lock_outline, size: 16, color: Color(0xFF8A5A00)),
+                  Icon(Icons.lock_outline, size: 16, color: AppColors.warning),
                   SizedBox(width: 8),
                   Expanded(child: Text(
                     'Photos and details are locked. To change them, request it from the admin team — they re-open your file.',
-                    style: TextStyle(fontSize: 11.5, height: 1.35, color: Color(0xFF8A5A00), fontWeight: FontWeight.w600),
+                    style: TextStyle(fontSize: 11.5, height: 1.35, color: AppColors.warning, fontWeight: FontWeight.w600),
                   )),
                 ]),
               ),

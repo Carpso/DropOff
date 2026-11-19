@@ -1731,7 +1731,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
             padding: const EdgeInsets.all(26),
             child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               const Spacer(),
-              const CircleAvatar(radius: 48, backgroundColor: Color(0xFFFDECEA), child: Icon(Icons.pause_rounded, color: Color(0xFFB3261E), size: 52)),
+              const CircleAvatar(radius: 48, backgroundColor: Color(0xFFFDECEA), child: Icon(Icons.pause_rounded, color: AppColors.danger, size: 52)),
               const SizedBox(height: 22),
               Text(paused ? 'Reminders paused — payment held' : 'Payment required to dispatch', textAlign: TextAlign.center, style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900)),
               const SizedBox(height: 10),
@@ -1763,7 +1763,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
               if (!paused) SizedBox(
                 height: 54,
                 child: FilledButton.icon(
-                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E), foregroundColor: Colors.white),
+                  style: FilledButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: Colors.white),
                   onPressed: _busy ? null : () => _payNow(booking),
                   icon: _busy
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -1778,7 +1778,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                     : Icon(paused ? Icons.notifications_active_outlined : Icons.notifications_off_outlined, size: 18),
                 label: Text(_pausing ? 'Working…' : (paused ? 'Resume reminders' : 'Pause reminders — I can\'t pay right now'),
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: paused ? AppColors.forest : const Color(0xFFB3261E))),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: paused ? AppColors.forest : AppColors.danger)),
               ),
               const SizedBox(height: 4),
               FilledButton.tonalIcon(

@@ -63,8 +63,8 @@ class AppToast {
     final (bg, icon) = switch (type) {
       AppToastType.success => (AppColors.forest, Icons.check_circle_rounded),
       AppToastType.info => (const Color(0xFF2B5A86), Icons.info_rounded),
-      AppToastType.warning => (const Color(0xFF8A5A00), Icons.warning_amber_rounded),
-      AppToastType.error => (const Color(0xFFB3261E), Icons.error_rounded),
+      AppToastType.warning => (AppColors.warning, Icons.warning_amber_rounded),
+      AppToastType.error => (AppColors.danger, Icons.error_rounded),
     };
     // Root-scope messenger: renders above sheets, dialogs and route transitions
     // (a nearest-ScaffoldMessenger would be BELOW them).

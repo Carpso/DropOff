@@ -227,14 +227,14 @@ class BookingCard extends StatelessWidget {
                   border: Border.all(color: const Color(0x66B3261E)),
                 ),
                 child: const Row(children: [
-                  Icon(Icons.lock_clock_outlined, size: 20, color: Color(0xFFB3261E)),
+                  Icon(Icons.lock_clock_outlined, size: 20, color: AppColors.danger),
                   SizedBox(width: 10),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Booking held — payment pending', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: Color(0xFFB3261E))),
+                    Text('Booking held — payment pending', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.danger)),
                     SizedBox(height: 2),
                     Text('No rider is assigned until the prepayment lands. Tap to open and pay.', style: TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.35)),
                   ])),
-                  Icon(Icons.chevron_right, color: Color(0xFFB3261E)),
+                  Icon(Icons.chevron_right, color: AppColors.danger),
                 ]),
               ),
             ],
@@ -244,7 +244,7 @@ class BookingCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(color: const Color(0xFFFFF1D2), borderRadius: BorderRadius.circular(20)),
-                  child: const Text('PAYMENT PENDING', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFFB3261E))),
+                  child: const Text('PAYMENT PENDING', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.danger)),
                 )
               else
                 Container(
@@ -709,8 +709,8 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   final same = '${check['same_parcel'] ?? ''}';
   final (chipIcon, chipColor, chipLabel) = switch (same) {
     'yes' => (Icons.verified_outlined, AppColors.forest, 'Same parcel'),
-    'no' => (Icons.warning_amber_rounded, const Color(0xFFB3261E), 'Mismatch — review'),
-    'uncertain' => (Icons.help_outline_rounded, const Color(0xFF8A5A00), 'Uncertain — review'),
+    'no' => (Icons.warning_amber_rounded, AppColors.danger, 'Mismatch — review'),
+    'uncertain' => (Icons.help_outline_rounded, AppColors.warning, 'Uncertain — review'),
     _ => (Icons.hourglass_empty_rounded, AppColors.muted, 'Comparison pending'),
   };
 
@@ -1475,7 +1475,7 @@ class _PrepayCardState extends State<_PrepayCard> {
           padding: const EdgeInsets.all(14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Row(children: [
-              Icon(Icons.notifications_off_outlined, size: 18, color: Color(0xFFB3261E)),
+              Icon(Icons.notifications_off_outlined, size: 18, color: AppColors.danger),
               SizedBox(width: 8),
               Expanded(child: Text('Reminders paused — booking HELD', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
             ]),
@@ -1503,7 +1503,7 @@ class _PrepayCardState extends State<_PrepayCard> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Icon(held ? Icons.pause_circle_outline : Icons.schedule_outlined,
-                size: 18, color: held ? const Color(0xFFB3261E) : const Color(0xFF7B5710)),
+                size: 18, color: held ? AppColors.danger : const Color(0xFF7B5710)),
             const SizedBox(width: 8),
             Expanded(child: Text(held ? 'Booking HELD — prepayment not started'
                     : 'Prepayment prompt waiting on your phone',
@@ -1530,7 +1530,7 @@ class _PrepayCardState extends State<_PrepayCard> {
             onPressed: _pausing ? null : () => _togglePause(true),
             icon: const Icon(Icons.notifications_off_outlined, size: 16),
             label: Text(_pausing ? 'Pausing…' : 'Pause reminders — I can\'t pay right now',
-                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Color(0xFFB3261E))),
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.danger)),
           ),
         ]),
       ),

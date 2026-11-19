@@ -173,8 +173,8 @@ class _LiveDepotsSection extends StatelessWidget {
     if (url == null || url.isEmpty) {
       return Container(
         width: size, height: size, alignment: Alignment.center,
-        decoration: BoxDecoration(color: const Color(0xFF17855F).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(size * 0.3)),
-        child: Text(_initialsOf(name), style: const TextStyle(color: Color(0xFF17855F), fontWeight: FontWeight.w900, fontSize: 15)),
+        decoration: BoxDecoration(color: AppColors.forestLight.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(size * 0.3)),
+        child: Text(_initialsOf(name), style: const TextStyle(color: AppColors.forestLight, fontWeight: FontWeight.w900, fontSize: 15)),
       );
     }
     return ClipRRect(
@@ -185,8 +185,8 @@ class _LiveDepotsSection extends StatelessWidget {
           url, fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => Container(
             alignment: Alignment.center,
-            color: const Color(0xFF17855F).withValues(alpha: 0.1),
-            child: Text(_initialsOf(name), style: TextStyle(color: const Color(0xFF17855F), fontWeight: FontWeight.w900, fontSize: size * 0.3)),
+            color: AppColors.forestLight.withValues(alpha: 0.1),
+            child: Text(_initialsOf(name), style: TextStyle(color: AppColors.forestLight, fontWeight: FontWeight.w900, fontSize: size * 0.3)),
           ),
         ),
       ),
