@@ -36,6 +36,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   int _parcels = 1;
   bool _saving = false;
   bool _aiBusy = false;
+  // Retry state — set when the momo prompt fails so the form shows a Pay now button.
+  String? _payRetryRef;
+  double? _payRetryDue;
 
   /// ✨ Tidy — normalises a free-text address (best-effort; never blocks).
   Future<void> _aiTidy(TextEditingController ctl) async {
@@ -149,31 +152,37 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       if (pay.ok) {
         final paymentId = '${pay.body['payment_id']}';
         var status = 'pending';
-        String? failReason;
         for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
           await Future<void>.delayed(const Duration(seconds: 2));
           final st = await DropOffApi.paymentStatus(paymentId);
           status = st.$1 ?? 'pending';
-          failReason = st.$2;
         }
         if (!mounted) return;
         _message(switch (status) {
           'success' => 'Paid — a rider will collect from $_courierId point.',
-          'failed' => (failReason == null || failReason.isEmpty)
-              ? 'The mobile-money prompt was rejected — verify your momo balance has the funds, then try again. Tap Pay now to resend the prompt, or contact DropOff support.'
-              : 'Payment failed: $failReason — top up your momo wallet, then try again. Tap Pay now to resend the prompt, or contact DropOff support.',
-          _ => 'Payment still pending — the rider sweep confirms when your money lands.',
+          _ => 'Payment failed — tap Pay now below to retry the prompt.',
         });
+        if (status == 'failed' && mounted) {
+          setState(() { _payRetryRef = ref; _payRetryDue = due; });
+        }
+      } else {
+        _message(due > 0
+            ? 'Collection $ref booked — approve the prepayment prompt sent to this number.'
+            : 'Collection $ref booked — your plan covers the DropOff leg.');
       }
+    } else if (due <= 0) {
+      _message('Collection $ref booked — your plan covers the DropOff leg.');
     } else {
-      _message(due > 0
-          ? 'Collection $ref booked — approve the prepayment prompt sent to this number.'
-          : 'Collection $ref booked — your plan covers the DropOff leg.');
+      _message('Collection $ref booked — approve the prompt in your momo app.');
     }
     if (!mounted) return;
-    // Pull the new collection into the local bookings list immediately.
-    AppScope.of(context).syncJobsFromServer();
-    Navigator.of(context).pop();
+    // Only leave the screen when there is nothing left to pay.
+    if (_payRetryRef == null) {
+      AppScope.of(context).syncJobsFromServer();
+      Navigator.of(context).pop();
+    } else {
+      AppScope.of(context).syncJobsFromServer();
+    }
     AnalyticsService.instance.track(
       feature: 'collections', action: 'submit', context: 'collections_form',
       meta: {
@@ -401,6 +410,30 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             ]),
           );
         }),
+        // Failed prepayment → keep the sheet open and re-send the prompt here.
+        if (_payRetryRef != null) ...[
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+            onPressed: () async {
+              final ref = _payRetryRef!;
+              setState(() => _saving = true);
+              final pay = await DropOffApi.pay(jobRef: ref, phone: store.linkedPhone ?? _recipientPhone.text, idempotencyKey: 'pay-$ref-retry');
+              if (!mounted) return;
+              setState(() => _saving = false);
+              if (!pay.ok) return _message('Pay now failed — check your momo balance and try again.');
+              final status = pay.body['status'] as String? ?? 'pending';
+              _message(status == 'success'
+                  ? 'Paid — a rider will collect from the depot.'
+                  : 'Payment sent — approve the prompt. The rider sweep dispatches when the money lands.');
+              if (status == 'success') setState(() => _payRetryRef = null);
+            },
+            icon: const Icon(Icons.payments_outlined),
+            label: Text(_payRetryDue != null
+                ? 'Pay now K${_payRetryDue!.toStringAsFixed(2)}'
+                : 'Pay now'),
+          ),
+        ],
         const SizedBox(height: 6),
         const Row(children: [
           Expanded(child: Text('Approve the momo prompt on this number. No cash, no hidden charges.', style: AppType.caption)),

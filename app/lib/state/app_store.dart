@@ -1031,6 +1031,7 @@ class AppStore extends ChangeNotifier {
     return Booking(
       id: 'srv-${j['id']}',
       reference: '${j['ref']}',
+      service: '${j['service'] ?? 'standard'}',
       createdAt: _parseDbDate('${j['created_at'] ?? ''}'),
       senderName: '${j['sender_name'] ?? 'You'}',
       senderPhone: '${j['sender_phone'] ?? ''}',

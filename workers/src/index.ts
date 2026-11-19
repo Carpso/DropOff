@@ -2074,6 +2074,7 @@ app.post('/jobs', async (c) => {
     const billableRides = parcels * (isRoundTrip ? 2 : 1);
     let riderFee = baseRiderFee(fromCity, Number(b.pickup_lat ?? 0), Number(b.pickup_lng ?? 0), vehicleClass);
     let packInclusion: 'pack' | 'payg' | 'none' = 'none';
+    let packCovered = 0; // 1 = plan-covered job; deducts a parcel from the cycle
     let planUsed = 0;
     let planCap = 0;
     const activeSub = await c.env.DB.prepare(
@@ -2093,7 +2094,7 @@ app.post('/jobs', async (c) => {
             AND created_at >= ?2 AND created_at < ?3
             AND status NOT IN ('cancelled', 'canceled')
             AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
-            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
+            AND COALESCE(j.pack_covered, 0) = 1`,
         ).bind(senderPhone, activeSub.period_start, activeSub.period_end).first<any>();
         planUsed = used?.n ?? 0;
         // No rollover: unused parcels expire with the cycle.
@@ -2111,6 +2112,7 @@ app.post('/jobs', async (c) => {
         if (planUsed + billableRides <= planCap) {
           riderFee = plan.rider_fee_zmw;
           packInclusion = 'pack';
+          packCovered = 1;
         } else {
           packInclusion = 'payg';
           riderFee = tierOverageFee(activeSub.tier,
@@ -2317,8 +2319,8 @@ app.post('/jobs', async (c) => {
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile, billable_rides,
          parcels, vehicle_class, branch, from_city, parcel_photo_url,
-         declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43)`,
+          declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44)`,
     ).bind(
       ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -2326,13 +2328,13 @@ app.post('/jobs', async (c) => {
       promoCode, promoDiscount,
       b.pickup_time ?? pickupWindow, pickupWindow, payMethod,
       isRoundTrip ? 1 : 0, b.return_city ?? null, b.return_address ?? null, returnLegFee,
-      pickupAt, lastMile,
+      pickupAt, lastMile, billableRides,
       parcels, vehicleClass,
       b.branch ? String(b.branch).trim().slice(0, 80) : null,
       fromCity,
       parcelUrl,
       declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
-      coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt,
+      coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt, packCovered,
     ).run();
 
     if (promoCode) {
@@ -2609,6 +2611,7 @@ app.post('/collections', async (c) => {
   ).bind(phone).first<any>();
   let riderFee = baseRiderFee('Lusaka', 0, 0, vehicleClass);
   let planInclusion: 'pack' | 'payg' | 'none' = 'none';
+  let packCovered = 0; // 1 = plan-covered job; deducts a parcel from the cycle
   let planUsed = 0;
   let planCap = 0;
   const billableRides = parcels; // collections are single-leg
@@ -2623,7 +2626,7 @@ app.post('/collections', async (c) => {
             AND created_at >= ?2 AND created_at < ?3
             AND status NOT IN ('cancelled', 'canceled')
             AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
-            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
+            AND COALESCE(j.pack_covered, 0) = 1`,
       ).bind(phone, activeSub.period_start, activeSub.period_end).first<any>();
       planUsed = used?.n ?? 0;
       // CAP SEMANTICS (fix 2026-11-15): day-cycles cap per day, multi-day
@@ -2636,6 +2639,7 @@ app.post('/collections', async (c) => {
       if (planUsed + billableRides <= planCap) {
         riderFee = plan.rider_fee_zmw;
         planInclusion = 'pack';
+        packCovered = 1;
       } else {
         planInclusion = 'payg';
         riderFee = tierOverageFee(activeSub.tier, baseRiderFee('Lusaka', 0, 0, vehicleClass), overageOn ? plan.overage_discount_pct : 0);
@@ -2681,9 +2685,9 @@ app.post('/collections', async (c) => {
     `INSERT INTO jobs (ref, sender_phone, sender_name, pickup_address, courier_id,
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
        counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
-       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, delivery_otp_hash, parcel_photo_url,
-       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka',?19,?20,?21,?22,?23,?24,?25,?26,?27)`,
+       pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, service, delivery_otp_hash, parcel_photo_url,
+       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka','collection',?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)`,
   ).bind(
     ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
@@ -2691,7 +2695,7 @@ app.post('/collections', async (c) => {
     riderFee, processing, total, window, pickupAt, payMethod, parcels, vehicleClass,
     deliveryOtpHash, parcelUrl,
     declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
-    coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt,
+    coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt, packCovered,
   ).run();
 
   await c.env.DB.prepare(
@@ -7942,7 +7946,7 @@ app.get('/subscriptions/:phone?', async (c) => {
             AND created_at >= ?2 AND created_at < ?3
             AND status NOT IN ('cancelled', 'canceled')
             AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
-            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
+            AND COALESCE(j.pack_covered, 0) = 1`,
     ).bind(phone, sub.period_start, sub.period_end).first<any>())?.n ?? 0;
     rollover = 0; // no rollover — unused parcels expire with the cycle
     const cycleDays = Number(plan?.cycle_days ?? 30) || 30;
@@ -11318,7 +11322,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
                 AND created_at >= ?2 AND created_at < ?3
                 AND status NOT IN ('cancelled', 'canceled')
                 AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))
-                AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.kind IN ('booking_deposit', 'job'))`,
+                AND COALESCE(j.pack_covered, 0) = 1`,
           ).bind(plan.phone, sub.period_start, sub.period_end).first<any>();
           const cycleDays = Number(planInfo.cycle_days ?? 30) || 30;
           const cap = cycleDays <= 1

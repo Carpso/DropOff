@@ -147,29 +147,41 @@ class Rider {
 }
 
 class Booking {
+  /// 'standard' | 'collection' — a Collection job is rider-to-courier → door.
+  final String service;
+
   /// DropOff-fulfilled leg only: rider fee + last-mile door delivery.
   /// The courier counter fare is partner money and is NEVER collected by DropOff.
   double get dropoffLeg => riderFee + lastMileFee;
 
-  /// Stage timeline for this booking — tracking ends at depot drop-off
-  /// (tracking of partner legs is a future opt-in per depot).
-  List<String> get timeline => lastMileFee > 0
+  bool get isCollection => service == 'collection';
+
+  /// Stage timeline for this booking.
+  List<String> get timeline => isCollection
       ? const [
           'Booking placed',
           'Rider assigned',
+          'Rider at depot',
           'Parcel collected',
-          'At courier depot',
-          'Dropped at depot',
-          'Out for door delivery',
-          'Delivered to door',
+          'Parcel delivered',
         ]
-      : const [
-          'Booking placed',
-          'Rider assigned',
-          'Parcel collected',
-          'At courier depot',
-          'Dropped at depot',
-        ];
+      : lastMileFee > 0
+          ? const [
+              'Booking placed',
+              'Rider assigned',
+              'Parcel collected',
+              'At courier depot',
+              'Dropped at depot',
+              'Out for door delivery',
+              'Delivered to door',
+            ]
+          : const [
+              'Booking placed',
+              'Rider assigned',
+              'Parcel collected',
+              'At courier depot',
+              'Dropped at depot',
+            ];
 
   final String id;
   final String reference;
@@ -216,6 +228,7 @@ class Booking {
 
   const Booking({
     required this.id,
+    this.service = 'standard',
     required this.reference,
     required this.createdAt,
     required this.senderName,
@@ -307,6 +320,7 @@ class Booking {
 
   Booking copyWith({int? stage, String? riderId, double? courierFare, String? serverRef, String? promoCode, double? promoDiscount, int? parcels, String? vehicleClass, String? riderName, String? riderPhone, String? lastEvent, bool? paymentHeld}) => Booking(
         id: id,
+        service: service,
         reference: reference,
         createdAt: createdAt,
         senderName: senderName,
@@ -349,6 +363,7 @@ class Booking {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'service': service,
         'reference': reference,
         'createdAt': createdAt.toIso8601String(),
         'senderName': senderName,
@@ -393,6 +408,7 @@ class Booking {
   factory Booking.fromJson(Map<String, dynamic> json) => Booking(
         id: json['id'] as String,
         reference: json['reference'] as String,
+        service: json['service'] as String? ?? 'standard',
         createdAt: DateTime.parse(json['createdAt'] as String),
         senderName: json['senderName'] as String,
         senderPhone: json['senderPhone'] as String,
