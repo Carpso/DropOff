@@ -546,10 +546,11 @@ const isFinanceExec = (c: { env?: Env; req: { header: (k: string) => string | un
 const isOwner = (c: { env: Env; get?: (k: string) => unknown }) =>
   Boolean(typeof c.get === 'function' && c.get('phone') && c.get('phone') === ownerPhone(c.env));
 
-// Superadmin ⊂ Admin (single role, no hierarchy): every admin can do every
-// admin thing. The one server-side hard refusal kept deliberately is that the
-// OWNER_PHONE account can never be deleted/demoted — silent guard, no UI hint.
-const isSuperAdmin = isAdmin;
+// Superadmin = OWNER_PHONE identity OR the ADMIN_AUTH_KEY. Delegated admin
+// accounts (role=admin) and CFO/ops cannot refund. Refunds move real money.
+const isSuperAdmin = (c: { env: Env; req: { header: (k: string) => string | undefined }; get?: (k: string) => unknown }) =>
+  c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY
+  || (typeof c.get === 'function' && c.get('phone') === ownerPhone(c.env));
 
 /** Naive per-IP throttle in D1 (e.g. 20 auth requests / hour / ip). */
 async function rateLimited(
@@ -2646,7 +2647,9 @@ app.post('/collections', async (c) => {
       }
     }
   }
-  const processing = round2(platformFee(riderFee));
+  // PLAN-COVERED BOOKINGS ARE FULLY INCLUDED IN THE SUBSCRIPTION — no per-parcel
+  // processing fee on top (owner directive 2026-11-19: plan covers the parcel).
+  const processing = planInclusion === 'pack' ? 0 : round2(platformFee(riderFee));
   const total = round2(riderFee + processing);
   const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
   const senderName = String(b.sender_name ?? '').trim() || phoneName || 'DropOff customer';
@@ -10600,9 +10603,10 @@ app.get('/rider/reviews', async (c) => {
   });
 });
 
-// Refund a settled payment to the payer's momo. Admin-key only: this moves money.
+// Refund a settled payment to the payer's momo. Superadmin-only: this moves
+// real money; delegated admins cannot do it without the owner key/phone.
 app.post('/admin/payments/:id/refund', async (c) => {
-  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
   const id = Number(c.req.param('id'));
   const pay = await c.env.DB.prepare(
     `SELECT id, job_id, phone, provider, amount_zmw, status FROM payments WHERE id = ?1`,

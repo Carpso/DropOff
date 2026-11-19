@@ -4,20 +4,16 @@
 
 Every upload to Google Play **must** use a **strictly higher `versionCode`** than every previously uploaded build — Play Console rejects duplicates (`Version code N has already been used`).
 
-- Version lives in `app/pubspec.yaml` as `version: <semver>+<versionCode>` (e.g. `0.5.2+13`).
-- **For every Play Store submission, increment BOTH**:
-  - `versionCode` (`+N` → `+N+1`) — required at minimum for each new upload, even for hotfixes;
-  - `version` (`x.y.z`) — bump by convention (patch/minor/major).
-- Before building a Play artifact:
+**DEFAULT: always increment BOTH `version` and `versionCode` on every release build, even if the app is already built.**
+- Version lives in `app/pubspec.yaml` as `version: <semver>+<versionCode>` (e.g. `0.5.49+59`).
+- Before ANY Play upload or any build you intend to upload:
   1. Open `app/pubspec.yaml`, read the current `versionCode`.
-  2. Increase it by 1.
-  3. Rebuild via `tools/build_release.ps1` (always `flutter clean` first; script handles `flutter pub get`, versioned artifact copy from pubspec).
-  4. Commit with a message like `Release 0.5.2+13` (or `Bump versionCode to 13`).
-- Never reuse a `versionCode`, even locally or on internal/track builds. Released Play version codes are immutable in effect.
-- `dist/DropOff-<version>-release.apk|.aab` names come from this script; don’t hand-rename.
-- `dist/` artifacts are the upload source of truth; do not upload stale builds.
-- **Release artifacts only**: `dist/` never carries debug or profile builds. Every artifact copied there must come from a release build path (`tools/build_release.ps1`).
-- **Clean `dist/` on each build**: after copying a new release pair into `dist/`, delete the previous versioned `DropOff-<version>-release.apk|.aab` so `dist/` only ever holds the current release plus `DropOff-release.apk|.aab` (unversioned alias of the latest). Never leave superseded version pairs for upload or inspection.
+  2. **Increase it by 1**, even if you didn't change app code — Play locks used codes forever.
+  3. Rebuild via `tools/build_release.ps1` (it handles flutter clean + artifact copy).
+  4. Upload the freshly built `dist/DropOff-<version>-release.aab`.
+- Never reuse a `versionCode` — codes 57, 58 and 59 are already used on Play (as of 2026-11-19).
+- **Clean `dist/` on each build**: delete superseded `DropOff-<version>-release.*` so only the newest pair + aliases remain.
+- Release artifacts only: `dist/` never carries debug or profile builds.
 
 ## Repo conventions
 
