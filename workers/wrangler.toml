@@ -62,7 +62,7 @@ AT_FROM = "Carpso"                                 # approved sender ID — Drop
 # CORS: comma-separated origins allowed to call the API cross-origin (the
 # Flutter-web admin build). Empty = same-origin consoles only. e.g.
 # CORS_ORIGINS = "https://admin.yourdomain.com"
-CORS_ORIGINS = ""
+CORS_ORIGINS = "https://dropoff.carpsosolutions.store, https://dropoff-web-9gk.pages.dev, http://localhost:8080"
 
 [ai]
 binding = "AI"

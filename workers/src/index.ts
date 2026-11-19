@@ -769,7 +769,7 @@ app.use('*', (c, next) => {
   if (!allow.length) return next();
   return cors({
     origin: (o) => (allow.includes(o) ? o : null),
-    allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key', 'X-Admin-Key'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key', 'X-Admin-Key', 'X-Device-Id', 'X-Device-Name'],
     allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     maxAge: 86400,
   })(c, next);
