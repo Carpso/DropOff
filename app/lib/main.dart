@@ -16,7 +16,7 @@ import 'screens/track_screen.dart';
 import 'screens/waybill_screen.dart';
 import 'screens/account_screen.dart';
 import 'screens/booking_screen.dart';
-import 'screens/chat_screen.dart';
+import 'screens/tickets_screen.dart';
 import 'package:app_links/app_links.dart';
 import 'screens/app_shell.dart';
 import 'screens/in_app_navigator_screen.dart';
@@ -162,9 +162,9 @@ Future<void> main() async {
 
     Widget? routeTo;
     if (kind == 'chat' || kind.startsWith('chat')) {
-      routeTo = jobRef != null && jobRef.isNotEmpty ? ChatScreen.job(jobRef) : const ChatScreen.supportThread();
-    } else if (kind == 'support_reply' || kind == 'support') {
-      routeTo = const ChatScreen.supportThread();
+      routeTo = const TicketsScreen();
+    } else if (kind == 'support_reply' || kind == 'support' || kind == 'ticket') {
+      routeTo = const TicketsScreen();
     } else if (kind == 'job_assigned' || kind == 'rider_assigned' || kind == 'deposit_paid' || kind == 'pickup_reminder' || kind == 'job_delivered' || kind == 'payment_received') {
       if (jobRef != null && jobRef.isNotEmpty) {
         final match = store.bookings.where((b) => b.serverRef == jobRef).firstOrNull;

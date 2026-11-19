@@ -23,8 +23,7 @@ import '../ui/app_theme.dart';
 import '../widgets/common.dart';
 import 'account_screen.dart';
 import 'booking_screen.dart';
-import 'chat_screen.dart';
-import 'inbox_screen.dart';
+import 'tickets_screen.dart';
 import 'rider_map_screen.dart';
 import 'track_screen.dart';
 import 'waybill_screen.dart';
@@ -102,7 +101,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
               const SizedBox(height: 16),
               const Text('Sign in to see your bookings', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              const Text('Your parcels, courier handovers and chats live behind your account — phone code or email, your choice.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const Text('Your parcels, courier handovers and support tickets live behind your account — phone code or email, your choice.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
               const SizedBox(height: 20),
               FilledButton.icon(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
@@ -402,10 +401,12 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           Row(children: [
             Expanded(child: FilledButton.tonalIcon(
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => ChatScreen.job(booking.serverRef!),
+                builder: (_) => TicketsScreen(
+                  prefill: 'Issue with booking ${booking.reference}: ',
+                ),
               )),
-              icon: const Icon(Icons.chat_bubble_outline),
-              label: const Text('Chat about this delivery'),
+              icon: const Icon(Icons.support_agent_outlined),
+              label: const Text('Get help with this delivery'),
             )),
           ]),
           // RECIPIENT TRACKING (owner directive 2026-11-15): the share card
@@ -517,7 +518,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         Center(
           child: TextButton(
             onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => ChatScreen.supportThread(
+              builder: (_) => TicketsScreen(
                 prefill: 'Please delete booking #${booking.reference} — it is no longer needed. I am the sender.',
               ),
             )),
@@ -850,7 +851,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   );
 }
 
-/// App-bar door into chat: total unread badge across all my threads.
+/// App-bar door into support tickets: unread staff replies badge.
 class _InboxButton extends StatefulWidget {
   const _InboxButton();
 
@@ -868,24 +869,24 @@ class _InboxButtonState extends State<_InboxButton> {
   }
 
   Future<void> _load() async {
-    final data = await DropOffApi.chatThreads();
+    final data = await DropOffApi.tickets();
     if (!mounted) return;
-    final threads = ((data?['threads'] as List?) ?? const []).cast<Map<String, dynamic>>();
-    setState(() => _unread = threads.fold<int>(0, (sum, t) => sum + ((t['unread'] as num?)?.toInt() ?? 0)));
+    final tickets = ((data?['tickets'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    setState(() => _unread = tickets.fold<int>(0, (sum, t) => sum + ((t['unread'] as num?)?.toInt() ?? 0)));
   }
 
   @override
   Widget build(BuildContext context) {
     return IconButton(
-      tooltip: 'Inbox',
+      tooltip: 'Support tickets',
       onPressed: () async {
-        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const InboxScreen()));
+        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const TicketsScreen()));
         if (mounted) _load();
       },
       icon: Badge(
         isLabelVisible: _unread > 0,
         label: Text('$_unread'),
-        child: const Icon(Icons.chat_bubble_outline),
+        child: const Icon(Icons.support_agent_outlined),
       ),
     );
   }

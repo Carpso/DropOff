@@ -143,14 +143,43 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
         ),
       );
 
-  /// World bearing from the rider to their current destination. The bike badge
-  /// rotates to this heading (minus map rotation) so it always points forward
-  /// along the route — not true north (owner 2026-11-18, phone holders).
+  /// World bearing from the rider to their current destination. Used only as a
+  /// fallback when no road route is available.
   double get _destinationBearing {
     if (widget.rider == null) return 0;
     final target = widget.route?.isNotEmpty == true ? widget.route!.last : (widget.pickup ?? widget.depot);
     if (target == null) return 0;
     return const Distance().bearing(widget.rider!, target);
+  }
+
+  /// The direction the rider is ACTUALLY travelling — the bearing of the road
+  /// segment they are on, not the straight-line bearing to the final pin. The
+  /// bike nose follows every bend instead of pointing at the destination while
+  /// the road doubles back (owner 2026-11-19: "icon faces elsewhere").
+  double get _routeHeading {
+    final me = widget.rider;
+    if (me == null) return 0;
+    final route = widget.route;
+    if (route == null || route.length < 2) return _destinationBearing;
+    const d = Distance();
+    var bestIdx = 0;
+    var bestDist = double.infinity;
+    for (var i = 0; i < route.length - 1; i++) {
+      final a = route[i];
+      final b = route[i + 1];
+      final mid = LatLng((a.latitude + b.latitude) / 2, (a.longitude + b.longitude) / 2);
+      final metres = d.as(LengthUnit.Meter, me, mid);
+      if (metres < bestDist) {
+        bestDist = metres;
+        bestIdx = i;
+      }
+    }
+    final a = route[bestIdx];
+    final b = route[bestIdx + 1];
+    if ((a.latitude - b.latitude).abs() < 1e-9 && (a.longitude - b.longitude).abs() < 1e-9) {
+      return _destinationBearing;
+    }
+    return d.bearing(a, b);
   }
 
   double get _mapRotationDeg {
@@ -225,7 +254,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 ],
               ),
               child: Transform.rotate(
-                angle: (_destinationBearing - _mapRotationDeg) * math.pi / 180,
+                angle: (_routeHeading - _mapRotationDeg) * math.pi / 180,
                 child: const Icon(Icons.two_wheeler, size: 25, color: AppColors.forest),
               ),
             ),

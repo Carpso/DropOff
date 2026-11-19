@@ -59,7 +59,12 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   Timer? _searchDebounce;
   final _search = TextEditingController();
   final FlutterTts _tts = FlutterTts();
-  String? _spokenRouteKey;
+
+  // GPS-DRIVEN VOICE: one cue at a time, triggered by the rider's distance to
+  // the NEXT maneuver point — never a timed read of the whole step list.
+  int _cueIndex = 0;
+  final Set<int> _spokenDistanceBands = {};
+  DateTime? _lastSpokeAt;
   final _searchFocus = FocusNode();
   bool _searchBusy = false;
   List<MapSearchResult> _results = const [];
@@ -115,6 +120,9 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         _error = '';
       });
       if (_route == null || moved) await _refreshRoute();
+      // Spoken strictly from where the rider IS now — one instruction, and
+      // only when the next turn is close enough to matter.
+      await _speakNextCue();
     } catch (_) {
       if (mounted) setState(() => _error = 'Could not get your position — check Location and try again.');
     }
@@ -122,19 +130,69 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
   LatLng? _lastRouteFix;
 
-  Future<void> _speakTurns(RouteResult? route) async {
+  /// Re-anchor the spoken cue to the maneuver nearest the rider whenever the
+  /// route is (re)built. A re-route every 150 m must not restart the narration.
+  void _syncCues(RouteResult? route, LatLng me) {
     final steps = route?.steps ?? const <RouteStep>[];
-    if (steps.isEmpty) return;
-    final key = steps.map((s) => '${s.distanceMetres.round()}:${s.instruction}').join('|');
-    if (key == _spokenRouteKey) return; // don't repeat on every 10 s GPS tick
-    _spokenRouteKey = key;
-    // One instruction at a time — a queue of spoken turns, not a paragraph.
-    for (final s in steps.take(8)) {
-      if (!mounted) return;
-      await _tts.speak('In ${s.distanceMetres.round()} metres, ${s.instruction}')
-          .catchError((_) => 0);
-      await Future.delayed(const Duration(seconds: 3));
+    _cueIndex = 0;
+    _spokenDistanceBands.clear();
+    var best = double.infinity;
+    for (var i = 0; i < steps.length; i++) {
+      final loc = steps[i].location;
+      if (loc == null) continue;
+      final d = const Distance().as(LengthUnit.Meter, me, loc);
+      if (d < best) {
+        best = d;
+        _cueIndex = i;
+      }
     }
+  }
+
+  /// Speak ONE upcoming turn, driven by live GPS. Steps without a maneuver
+  /// point are skipped silently — better quiet than a paragraph read aloud.
+  Future<void> _speakNextCue() async {
+    final me = _me;
+    final steps = _route?.steps ?? const <RouteStep>[];
+    if (me == null || steps.isEmpty || _cueIndex >= steps.length) return;
+    const d = Distance();
+
+    // Skip maneuvers already passed: inside 25 m of the point, or when the
+    // following maneuver is now nearer than this one.
+    while (_cueIndex < steps.length - 1) {
+      final cur = steps[_cueIndex].location;
+      final next = steps[_cueIndex + 1].location;
+      if (cur == null) { _cueIndex++; _spokenDistanceBands.clear(); continue; }
+      final curM = d.as(LengthUnit.Meter, me, cur);
+      if (curM <= 25) { _cueIndex++; _spokenDistanceBands.clear(); continue; }
+      if (next != null && d.as(LengthUnit.Meter, me, next) < curM) {
+        _cueIndex++;
+        _spokenDistanceBands.clear();
+        continue;
+      }
+      break;
+    }
+    if (_cueIndex >= steps.length) return;
+
+    final loc = steps[_cueIndex].location;
+    if (loc == null) return;
+    final metres = d.as(LengthUnit.Meter, me, loc);
+    if (metres > 400) return; // not yet — no long-range "read everything"
+
+    // Distance bands (400/250/100/30 m) say each cue at most four times, so
+    // the 10 s GPS tick never repeats the same instruction.
+    final band = metres <= 30 ? 0 : metres <= 100 ? 1 : metres <= 250 ? 2 : 3;
+    if (!_spokenDistanceBands.add(band)) return;
+    final now = DateTime.now();
+    if (_lastSpokeAt != null && now.difference(_lastSpokeAt!).inSeconds < 6) return;
+    _lastSpokeAt = now;
+
+    final quantum = band == 3 ? 100.0 : band == 2 ? 50.0 : 10.0;
+    final rounded = (metres / quantum).round() * quantum;
+    final say = metres <= 30
+        ? steps[_cueIndex].instruction
+        : 'In ${rounded.round()} metres, ${steps[_cueIndex].instruction}';
+    await _tts.stop();
+    await _tts.speak(say).catchError((_) => 0);
   }
 
   Future<void> _refreshRoute() async {
@@ -149,7 +207,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
       _routeLoading = false;
       _lastRouteFix = me;
     });
-    _speakTurns(route);
+    _syncCues(route, me);
   }
 
   void _onSearchChanged(String value) {

@@ -5,7 +5,7 @@ import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
-import 'chat_screen.dart';
+import 'tickets_screen.dart';
 import 'rider_map_screen.dart';
 import '../screens/account_screen.dart';
 
@@ -27,7 +27,6 @@ class TrackScreen extends StatefulWidget {
 class _TrackScreenState extends State<TrackScreen> {
   final _input = TextEditingController();
   Map<String, dynamic>? _data;
-  String? _resolvedToken;
   String? _autoTriggeredFor;
   bool _loading = false;
   String? _error;
@@ -56,7 +55,6 @@ class _TrackScreenState extends State<TrackScreen> {
     setState(() {
       _loading = false;
       _data = data;
-      _resolvedToken = data == null ? null : _trackTokenOfRaw(token);
       _error = data == null ? 'Not found — check the link or code from the SMS.' : null;
     });
   }
@@ -70,10 +68,6 @@ class _TrackScreenState extends State<TrackScreen> {
     if (m != null) return m.group(1);
     if (RegExp(r'^[A-Za-z0-9_-]{16,}$').hasMatch(v)) return v;
     return null;
-  }
-
-  static String _trackTokenOfRaw(String raw) {
-    return RegExp(r'/(?:track|t)/([A-Za-z0-9_-]+)').firstMatch(raw.trim())?.group(1) ?? raw.trim();
   }
 
   /// Paste fires onChanged but never submits — auto-lookup once the pasted
@@ -128,14 +122,14 @@ class _TrackScreenState extends State<TrackScreen> {
             _statusHeader(_data!),
             if (AppScope.of(context).linked) ...[
               const SizedBox(height: 14),
-              // Show chat ONLY to account holders — a stranger with the link has
-              // no participant phone and cannot read the parcel anyway.
+              // Support is ticket-only — a stranger with the tracking link has
+              // no account and cannot read the parcel or open a ticket.
               FilledButton.tonalIcon(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => ChatScreen.token(_resolvedToken!),
+                  builder: (_) => TicketsScreen(prefill: 'Question about parcel ${_data?['ref'] ?? ''}: '),
                 )),
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: const Text('Chat about this parcel'),
+                icon: const Icon(Icons.support_agent_outlined),
+                label: const Text('Get help with this parcel'),
               ),
             ],
             const SizedBox(height: 8),

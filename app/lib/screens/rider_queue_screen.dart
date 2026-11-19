@@ -67,6 +67,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   String? _busyRef;
   Timer? _pollTimer;
 
+  // CLAIM BOARD — jobs auto-assign could not place (no online rider in range,
+  // rider at a depot, everyone at capacity). Every verified rider sees the
+  // same list; the first to claim owns it and it disappears for the others.
+  List<Map<String, dynamic>> _available = const [];
+  String? _claimingRef;
+
   // LIVE ARRIVAL WATCH (owner directive 2026-11-17): a GPS position stream
   // marks stops ARRIVED within [_arrivalMetres]; a manual tap marks too.
   static const double _arrivalMetres = 80;
@@ -131,6 +137,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       _offline = data == null;
       _loading = false;
     });
+    unawaited(_loadAvailable());
     // Stats ride the same 20 s poll — the card stays live with the queue.
     final stats = await DropOffApi.riderStats(widget.phone);
     if (!mounted) return;
@@ -164,6 +171,42 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (!mounted) return;
     final t = tdata?['targets'] as Map<String, dynamic>?;
     if (t != null) setState(() => _targets = t);
+  }
+
+  /// Leftovers after automated dispatch. Refreshed with the queue — a claim by
+  /// another rider removes the card here too (server-side exclusivity).
+  Future<void> _loadAvailable() async {
+    final data = await DropOffApi.riderAvailable();
+    if (!mounted) return;
+    setState(() => _available = ((data?['jobs'] as List?) ?? const []).cast<Map<String, dynamic>>());
+  }
+
+  Future<void> _claim(Map<String, dynamic> job) async {
+    final ref = '${job['ref'] ?? ''}';
+    if (ref.isEmpty || _claimingRef != null) return;
+    setState(() => _claimingRef = ref);
+    final res = await DropOffApi.claimJob(ref);
+    if (!mounted) return;
+    setState(() => _claimingRef = null);
+    if (res.ok) {
+      AppToast.show(context, '$ref is yours — it is now on your queue.');
+      await _load();
+      return;
+    }
+    if (res.error == 'already_claimed') {
+      AppToast.show(context, '$ref was just claimed by another rider — refreshing.');
+      await _load();
+      return;
+    }
+    if (res.error == 'at_capacity') {
+      AppToast.error(context, 'You are at your capacity limit — finish a stop before claiming another.');
+      return;
+    }
+    if (res.error == 'payment_required') {
+      AppToast.error(context, 'This parcel is waiting for the sender\'s prepayment.');
+      return;
+    }
+    AppToast.error(context, 'Could not claim $ref (${res.error}). Try again.');
   }
 
   /* ----------------------- live clock + arrival GPS ----------------------- */
@@ -1147,6 +1190,56 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     return res;
   }
 
+  /// Available-orders board — only present when auto-assign left parcels over.
+  /// A claim is exclusive: another rider claiming it removes the card here on
+  /// the next 20 s poll (or the immediate refresh after the attempt).
+  Widget _claimCard() {
+    if (_available.isEmpty) return const SizedBox.shrink();
+    return Card(
+      color: AppColors.amberSoft,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            const Icon(Icons.front_hand, color: AppColors.forest, size: 18),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Available orders', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14))),
+            Text('${_available.length}', style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.forest)),
+          ]),
+          const SizedBox(height: 3),
+          const Text('Auto-assign could not place these. First to claim owns the parcel.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 8),
+          for (final j in _available.take(5)) ...[
+            Container(
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${j['ref']} · ${j['pickup_address']}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 2),
+                  Text('${j['sender_name'] ?? ''} → ${j['dest_city'] ?? ''} · ${j['parcels'] ?? 1} parcel(s) · ${j['pickup_window'] ?? ''}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+                ])),
+                const SizedBox(width: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size(72, 36)),
+                  onPressed: _claimingRef != null ? null : () => _claim(j),
+                  child: _claimingRef == '${j['ref']}'
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Claim'),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 6),
+          ],
+          if (_available.length > 5)
+            Text('+ ${_available.length - 5} more — refresh to see all', style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Fleet view is staff-only (Team tab + this gate). The server also
@@ -1229,6 +1322,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                         // The day's numbers survive an empty queue — a rider
                         // who has delivered everything still sees the score.
                         _statsCard(),
+                        if (_available.isNotEmpty) ...[
+                          _claimCard(),
+                          const SizedBox(height: 8),
+                        ],
                         SizedBox(
                           height: cons.maxHeight - 160,
                           child: Center(
@@ -1264,10 +1361,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   child: ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 90),
-                    itemCount: batches.length + 1,
+                    itemCount: batches.length + (_available.isNotEmpty ? 2 : 1),
                     itemBuilder: (context, i) {
                       if (i == 0) return _statsCard();
-                      return _batchCard(batches[i - 1]);
+                      if (_available.isNotEmpty && i == 1) return _claimCard();
+                      return _batchCard(batches[i - 1 - (_available.isNotEmpty ? 1 : 0)]);
                     },
                   ),
                 ),

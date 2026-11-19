@@ -838,6 +838,30 @@ class DropOffApi {
 
   static Future<Map<String, dynamic>?> chatThreads() => get('/chat/threads');
 
+  // ---- support tickets (parcel chat is gone; support lives here) ------------
+
+  /// All tickets opened by the signed-in phone, newest activity first.
+  static Future<Map<String, dynamic>?> tickets() => get('/tickets');
+
+  static Future<ApiResponse> createTicket({
+    required String subject,
+    required String category,
+    required String body,
+  }) => post('/tickets', {'subject': subject, 'category': category, 'body': body});
+
+  /// Ticket detail + its message thread.
+  static Future<Map<String, dynamic>?> ticket(int id) => get('/tickets/$id');
+
+  static Future<ApiResponse> ticketReply(int id, String body) =>
+      post('/tickets/$id/reply', {'body': body});
+
+  /// Customer close / reopen. [status] = open | pending | closed.
+  static Future<ApiResponse> ticketStatus(int id, String status) =>
+      post('/tickets/$id/status', {'status': status});
+
+  static Future<ApiResponse> adminTicketStatus(int id, String status) =>
+      post('/admin/support/threads/$id/status', {'status': status}, admin: true);
+
   /* ---------------------- chat moderation (UGC safety) ---------------------- */
 
   /// Report an abusive chat message. [reason] is harassment | spam | other;
@@ -1038,6 +1062,14 @@ class DropOffApi {
     final q = phone == null || phone.isEmpty ? '' : '?phone=$phone';
     return get('/rider/queue$q');
   }
+
+  /// Unassigned jobs auto-assign could not place — the claim board. Every
+  /// verified rider sees the same list; the first to claim owns the job and it
+  /// disappears for everyone else (server-side `rider_id IS NULL` guard).
+  static Future<Map<String, dynamic>?> riderAvailable() => get('/rider/available');
+
+  /// Claim one available-order. 409 already_claimed when another rider won.
+  static Future<ApiResponse> claimJob(String ref) => post('/jobs/$ref/claim', const {});
 
   /// Live daily stats for the task-queue card: {stats: {total, waiting,
   /// picked, delivered, parcels, earned_zmw}} for the rider's CAT day.

@@ -20,7 +20,12 @@ import 'dropoff_api.dart';
 class RouteStep {
   final String instruction;
   final double distanceMetres;
-  const RouteStep(this.instruction, this.distanceMetres);
+
+  /// Maneuver point [lat,lng] from the routing engine. Voice cues are spoken
+  /// from the rider's live GPS distance to THIS point — not from a timed list.
+  final LatLng? location;
+
+  const RouteStep(this.instruction, this.distanceMetres, {this.location});
 }
 
 class RouteResult {
@@ -100,7 +105,15 @@ class MapServices {
           .toList();
       if (pts.length < 2) return null;
       final steps = ((data['steps'] as List?) ?? const [])
-          .map((s) => RouteStep('${s['instruction'] ?? ''}', (s['distance_m'] as num?)?.toDouble() ?? 0))
+          .map((s) {
+            final lat = (s['lat'] as num?)?.toDouble();
+            final lng = (s['lng'] as num?)?.toDouble();
+            return RouteStep(
+              '${s['instruction'] ?? ''}',
+              (s['distance_m'] as num?)?.toDouble() ?? 0,
+              location: lat != null && lng != null ? LatLng(lat, lng) : null,
+            );
+          })
           .where((s) => s.instruction.isNotEmpty)
           .toList();
       return RouteResult(

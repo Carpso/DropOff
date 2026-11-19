@@ -1039,12 +1039,12 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
                       _customerAvatar(seed, photoUrl.isEmpty ? null : photoUrl, 16),
                       const SizedBox(width: 10),
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('Ticket #${t['id']} · $seed',
+                        Text('${t['subject'] ?? 'Ticket #${t['id']}'} · $seed',
                             maxLines: 1, overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                        if ('${t['last_message'] ?? ''}'.isNotEmpty)
-                          Text('${t['last_message']}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                        Text('${t['category'] ?? 'other'} · ${t['status'] ?? 'open'}${('${t['last_message'] ?? ''}').isNotEmpty ? ' · ${t['last_message']}' : ''}',
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                       ])),
                       if (unread > 0)
                         Container(
@@ -1078,6 +1078,7 @@ class _SupportTicketSheet extends StatefulWidget {
 
 class _SupportTicketSheetState extends State<_SupportTicketSheet> {
   List<Map<String, dynamic>> _messages = const [];
+  Map<String, dynamic>? _ticket;
   bool _loading = true;
   String? _error;
   bool _sending = false;
@@ -1113,6 +1114,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
           .toList();
       setState(() {
         _messages = rows;
+        _ticket = (data['ticket'] as Map?)?.cast<String, dynamic>();
         _error = null;
         _loading = false;
       });
@@ -1141,6 +1143,15 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
       return;
     }
     await _load();
+  }
+
+  /// Staff sets the ticket state. Closing also closes the customer's reply box.
+  Future<void> _setTicketStatus(String status) async {
+    final res = await DropOffApi.adminTicketStatus(widget.threadId, status);
+    if (!mounted) return;
+    if (!res.ok) return AppToast.show(context, 'Could not update ticket: ${res.error}');
+    AppToast.show(context, 'Ticket marked $status.');
+    _load();
   }
 
   /// Workers AI draft (never auto-sends) — the reply box fills in, the human presses send.
@@ -1228,12 +1239,21 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
               const SizedBox(width: 10),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Ticket #${widget.threadId}',
-                      style: AppType.subhead),
-                  Text(widget.customerName ?? widget.phone,
+                  Text('${_ticket?['subject'] ?? 'Ticket #${widget.threadId}'}',
+                      style: AppType.subhead, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text('${_ticket?['category'] ?? 'other'} · ${widget.customerName ?? widget.phone}',
                       maxLines: 2, overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
                 ]),
+              ),
+              DropdownButton<String>(
+                value: '${_ticket?['status'] ?? 'open'}',
+                items: const [
+                  DropdownMenuItem(value: 'open', child: Text('Open')),
+                  DropdownMenuItem(value: 'pending', child: Text('Pending')),
+                  DropdownMenuItem(value: 'closed', child: Text('Closed')),
+                ],
+                onChanged: (v) { if (v != null) _setTicketStatus(v); },
               ),
               IconButton(tooltip: 'Reload', onPressed: () { setState(() { _loading = true; _error = null; }); _load(); }, icon: const Icon(Icons.refresh, size: 18)),
             ]),

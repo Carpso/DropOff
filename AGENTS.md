@@ -15,6 +15,50 @@ Every upload to Google Play **must** use a **strictly higher `versionCode`** tha
 - **Clean `dist/` on each build**: delete superseded `DropOff-<version>-release.*` so only the newest pair + aliases remain.
 - Release artifacts only: `dist/` never carries debug or profile builds.
 
+## 2026-11-19 — Tickets replace chat, claim board, route-facing bike, GPS voice
+
+Owner directive: remove chat, keep only support, add tickets; auto-assign stays
+but leftover parcels must be claimable and exclusive; fix the bike icon facing
+the wrong way; fix turn-by-turn voice reading everything at once. The Arrived
+button was explicitly parked ("do nothing first") and was NOT changed.
+
+### Parcel chat removed; support upgraded to tickets
+- Deleted `app/lib/screens/chat_screen.dart` and `inbox_screen.dart`. Every
+  user-facing entry point now opens `app/lib/screens/tickets_screen.dart`:
+  Account "Support tickets", Bookings header (unread badge from `/tickets`),
+  "Get help with this delivery", "Get help with this parcel", and push taps.
+- Migration `0072_support_tickets.sql`: `chat_threads` gains `subject`,
+  `category`, `status` (open/pending/closed) and `updated_at`. Support threads
+  ARE the tickets; `chat_messages` is their conversation.
+- New worker endpoints: `GET/POST /tickets`, `GET/POST /tickets/:id/reply`,
+  `POST /tickets/:id/status`, plus admin status setter
+  `POST /admin/support/threads/:id/status`. Admin ticket list/detail now
+  expose subject/category/status; the admin sheet shows them + a status menu.
+- The legacy parcel-chat worker routes remain registered but are unreachable
+  from the app; do not rebuild UI on them.
+
+### Auto-assign kept; claim board for leftovers (exclusive)
+- `GET /rider/available` lists only `rider_id IS NULL AND status='created'`
+  jobs auto-assign could not place (recent only, no held payments).
+- `POST /jobs/:ref/claim` claims atomically with `rider_id IS NULL AND
+  status='created'`; a second claim gets 409, loads/rider status/event/push are
+  written exactly like algorithmic dispatch. The Rider Queue shows an
+  "Available orders" card above the slot batches and refreshes it on the
+  same 20 s poll. **Worker-side exclusivity is the authority**: never add a
+  client-only "hide for others" rule.
+
+### Bike icon + GPS voice
+- `RiderMap._routeHeading` uses the nearest ROAD SEGMENT bearing (not the
+  straight line to the final pin), so the 3D bike nose follows every bend.
+- Voice is now GPS-progress driven: the worker includes each step's maneuver
+  `lat/lng` (OSRM `maneuver.location`, ORS `way_points[0]`), `RouteStep` carries
+  it, and the navigator speaks ONE next-turn cue at 400/250/100/30 m bands,
+  re-anchoring on re-route. It no longer reads the step list back-to-back.
+
+### Release
+- Version bumped to `0.5.51+61` (57/58/59/60 are consumed on Play). Worker
+  deployed with migration 0072 applied.
+
 ## Repo conventions
 
 - Always `flutter clean` before a release build (build_release.ps1 does).

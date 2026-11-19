@@ -14,7 +14,7 @@ import '../data/analytics_service.dart';
 import '../data/push_service.dart';
 import '../main.dart';
 import '../screens/admin_screen.dart';
-import '../screens/chat_screen.dart';
+import '../screens/tickets_screen.dart';
 import '../screens/legal_screen.dart';
 import '../state/app_store.dart';
 import '../ui/app_theme.dart';
@@ -788,14 +788,14 @@ class _AccountScreenState extends State<AccountScreen> {
               child: InkWell(
                 borderRadius: BorderRadius.circular(14),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => const ChatScreen.supportThread(),
+                  builder: (_) => const TicketsScreen(),
                 )),
                 child: const Padding(
                   padding: EdgeInsets.all(16),
                   child: Row(children: [
                     Icon(Icons.support_agent, color: AppColors.forest),
                     SizedBox(width: 12),
-                    Expanded(child: Text('Chat with DropOff support', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14))),
+                    Expanded(child: Text('Support tickets', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14))),
                     Icon(Icons.chevron_right, color: AppColors.muted),
                   ]),
                 ),

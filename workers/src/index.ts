@@ -848,12 +848,17 @@ app.get('/maps/route', async (c) => {
           const instruction = typeof man.instruction === 'string' && man.instruction
             ? man.instruction
             : osrmInstruction(String(man.type ?? ''), String(man.modifier ?? ''), String(s?.name ?? ''));
+          const loc = Array.isArray(man.location) ? man.location : null;
           return {
             instruction,
             distance_m: Number(s?.distance ?? 0),
             duration_s: Number(s?.duration ?? 0),
             road: s?.name ? String(s.name) : null,
             type: man.type ?? null,
+            // Maneuver point [lat,lng] — the app speaks the next cue from the
+            // rider's GPS distance to THIS point, not from a timed step list.
+            lat: loc && Number.isFinite(Number(loc[1])) ? Number(loc[1]) : null,
+            lng: loc && Number.isFinite(Number(loc[0])) ? Number(loc[0]) : null,
           };
         }),
       );
@@ -882,13 +887,21 @@ app.get('/maps/route', async (c) => {
     const coords: [number, number][] = feat.geometry?.coordinates ?? [];
     if (coords.length < 2) return c.json({ error: 'router_empty' }, 502);
     const steps = (props.segments ?? []).flatMap((seg: any) =>
-      (seg.steps ?? []).map((s: any) => ({
-        instruction: String(s.instruction ?? ''),
-        distance_m: Number(s.distance ?? 0),
-        duration_s: Number(s.duration ?? 0),
-        road: s.name ? String(s.name) : null,
-        type: s.type ?? null,
-      })),
+      (seg.steps ?? []).map((s: any) => {
+        // ORS way_points index the route geometry: [start, end]. The start is
+        // where the instruction happens — same idea as OSRM's maneuver point.
+        const wp = Array.isArray(s?.way_points) ? s.way_points[0] : null;
+        const at = wp != null ? coords[Number(wp)] : null;
+        return {
+          instruction: String(s.instruction ?? ''),
+          distance_m: Number(s.distance ?? 0),
+          duration_s: Number(s.duration ?? 0),
+          road: s.name ? String(s.name) : null,
+          type: s.type ?? null,
+          lat: at && Number.isFinite(Number(at[1])) ? Number(at[1]) : null,
+          lng: at && Number.isFinite(Number(at[0])) ? Number(at[0]) : null,
+        };
+      }),
     );
     const body = JSON.stringify({
       points: coords.map(([lng, lat]) => [lat, lng]), // app expects [lat,lng]
@@ -4780,6 +4793,125 @@ app.post('/chat/support/:id/reply', async (c) => {
   return c.json({ ok: true });
 });
 
+/* ------------------------- support tickets (customer) ---------------------- */
+// A ticket is a chat_threads row with kind='support'; chat_messages holds its
+// conversation. Parcel chat is no longer surfaced anywhere in the app.
+const TICKET_CATEGORIES = ['delivery', 'payment', 'booking', 'account', 'other'];
+const TICKET_STATUSES = ['open', 'pending', 'closed'];
+
+app.get('/tickets', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.id, t.subject, t.category, t.status, t.created_at, t.updated_at, t.closed_at,
+            (SELECT m.body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_message,
+            (SELECT m.created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_at,
+            (SELECT COUNT(*) FROM chat_messages m
+              WHERE m.thread_id = t.id AND m.sender_role = 'ops'
+                AND m.id > COALESCE((SELECT r.last_read_id FROM chat_reads r WHERE r.thread_id = t.id AND r.phone = ?1), 0)) AS unread
+       FROM chat_threads t
+      WHERE t.kind = 'support' AND t.phone = ?1
+      ORDER BY COALESCE(t.updated_at, t.created_at) DESC LIMIT 100`,
+  ).bind(phone).all();
+  return c.json({ tickets: results });
+});
+
+app.post('/tickets', async (c) => {
+  if (await rateLimited(c, 'chat_send', 20, 10)) return c.json({ error: 'too_many_requests' }, 429);
+  const b: any = await c.req.json().catch(() => null);
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const subject = String(b?.subject ?? '').trim().slice(0, 120);
+  const category = TICKET_CATEGORIES.includes(String(b?.category ?? '')) ? String(b.category) : 'other';
+  const body = String(b?.body ?? '').trim().slice(0, 2000);
+  if (subject.length < 3 || body.length < 3) return c.json({ error: 'subject_and_description_required' }, 400);
+  const gate = await chatSendGate(c, body, phone);
+  if (gate) return gate;
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO chat_threads (kind, phone, subject, category, status, updated_at)
+     VALUES ('support', ?1, ?2, ?3, 'open', datetime('now'))`,
+  ).bind(phone, subject, category).run();
+  const ticketId = meta.last_row_id as number;
+  await c.env.DB.prepare(
+    `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, 'seller', ?3)`,
+  ).bind(ticketId, phone, body).run();
+  await markThreadRead(c.env, ticketId, phone);
+  c.executionCtx.waitUntil(
+    notifyChatParticipants(c.env, { id: ticketId, phone }, null, phone, `New ticket: ${subject}`).catch(() => {}),
+  );
+  return c.json({ ticket_id: ticketId, thread_id: ticketId, ok: true }, 201);
+});
+
+app.get('/tickets/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id)) return c.json({ error: 'bad_id' }, 400);
+  const phone = c.get('phone');
+  const staff = isAdmin(c) || c.get('role') === 'ops';
+  if (!phone && !staff) return c.json({ error: 'identity_required' }, 401);
+  const ticket = await c.env.DB.prepare(
+    `SELECT t.id, t.phone, t.subject, t.category, t.status, t.created_at, t.updated_at, t.closed_at, t.closed_by,
+            u.full_name AS customer_name, u.photo_url AS customer_photo_url
+       FROM chat_threads t LEFT JOIN auth_users u ON u.phone = t.phone
+      WHERE t.id = ?1 AND t.kind = 'support'`,
+  ).bind(id).first<any>();
+  if (!ticket) return c.json({ error: 'not found' }, 404);
+  if (!staff && ticket.phone !== phone) return c.json({ error: 'not found' }, 404);
+  if (phone) await markThreadRead(c.env, id, phone);
+  const chat = await chatMessages(c.env, id, phone);
+  return c.json({ ticket, ...chat });
+});
+
+app.post('/tickets/:id/reply', async (c) => {
+  if (await rateLimited(c, 'chat_send', 30, 10)) return c.json({ error: 'too_many_requests' }, 429);
+  const id = Number(c.req.param('id'));
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const ticket = await c.env.DB.prepare(
+    `SELECT id, phone, status FROM chat_threads WHERE id = ?1 AND kind = 'support'`,
+  ).bind(id).first<any>();
+  if (!ticket || ticket.phone !== phone) return c.json({ error: 'not found' }, 404);
+  if (ticket.status === 'closed') return c.json({ error: 'ticket_closed' }, 409);
+  const b: any = await c.req.json().catch(() => null);
+  const body = String(b?.body ?? '').trim().slice(0, 2000);
+  if (!body) return c.json({ error: 'body required' }, 400);
+  const gate = await chatSendGate(c, body, phone);
+  if (gate) return gate;
+  await c.env.DB.prepare(
+    `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, 'seller', ?3)`,
+  ).bind(id, phone, body).run();
+  await c.env.DB.prepare(
+    `UPDATE chat_threads SET status = 'pending', updated_at = datetime('now') WHERE id = ?1 AND status <> 'closed'`,
+  ).bind(id).run();
+  await markThreadRead(c.env, id, phone);
+  c.executionCtx.waitUntil(
+    notifyChatParticipants(c.env, { id, phone }, null, phone, body.slice(0, 60)).catch(() => {}),
+  );
+  return c.json({ ok: true });
+});
+
+app.post('/tickets/:id/status', async (c) => {
+  const id = Number(c.req.param('id'));
+  const phone = c.get('phone');
+  const staff = isAdmin(c) || c.get('role') === 'ops';
+  if (!phone && !staff) return c.json({ error: 'identity_required' }, 401);
+  const ticket = await c.env.DB.prepare(
+    `SELECT id, phone, status FROM chat_threads WHERE id = ?1 AND kind = 'support'`,
+  ).bind(id).first<any>();
+  if (!ticket) return c.json({ error: 'not found' }, 404);
+  if (!staff && ticket.phone !== phone) return c.json({ error: 'not found' }, 404);
+  const b: any = await c.req.json().catch(() => null);
+  const status = String(b?.status ?? '');
+  if (!TICKET_STATUSES.includes(status)) return c.json({ error: 'bad_status' }, 400);
+  await c.env.DB.prepare(
+    `UPDATE chat_threads SET status = ?2,
+       closed_at = CASE WHEN ?2 = 'closed' THEN datetime('now') ELSE NULL END,
+       closed_by = CASE WHEN ?2 = 'closed' THEN ?3 ELSE NULL END,
+       updated_at = datetime('now')
+     WHERE id = ?1`,
+  ).bind(id, status, phone ?? 'ops').run();
+  return c.json({ ok: true, status });
+});
+
 /* ----------------------- UGC safety: report & block ------------------------ */
 // Play-required user-reporting and user-blocking for chat content.
 
@@ -5087,7 +5219,8 @@ app.post('/chat/threads/:id/close', async (c) => {
 app.get('/admin/support/threads', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const { results } = await c.env.DB.prepare(
-    `SELECT t.id, t.phone, t.created_at, u.photo_url AS customer_photo_url, u.full_name AS customer_name,
+    `SELECT t.id, t.phone, t.subject, t.category, t.status, t.created_at, t.updated_at,
+            u.photo_url AS customer_photo_url, u.full_name AS customer_name,
             (SELECT m.body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_message,
             (SELECT m.created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_at,
             (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id) AS message_count,
@@ -5096,7 +5229,7 @@ app.get('/admin/support/threads', async (c) => {
        FROM chat_threads t
        LEFT JOIN auth_users u ON u.phone = t.phone
       WHERE t.kind = 'support'
-      ORDER BY COALESCE((SELECT m.created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1), t.created_at) DESC
+      ORDER BY COALESCE(t.updated_at, t.created_at) DESC
       LIMIT 100`,
   ).all();
   return c.json({ threads: results });
@@ -5106,13 +5239,36 @@ app.get('/admin/support/threads/:id', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const id = Number(c.req.param('id'));
   const thread = await c.env.DB.prepare(
-    `SELECT t.id, t.kind, t.phone, t.created_at, u.photo_url AS customer_photo_url, u.full_name AS customer_name
+    `SELECT t.id, t.kind, t.phone, t.subject, t.category, t.status, t.created_at, t.updated_at, t.closed_at,
+            u.photo_url AS customer_photo_url, u.full_name AS customer_name
        FROM chat_threads t LEFT JOIN auth_users u ON u.phone = t.phone
       WHERE t.id = ?1 AND t.kind = 'support'`,
   ).bind(id).first();
   if (!thread) return c.json({ error: 'not found' }, 404);
   const messages = await chatMessages(c.env, id);
   return c.json({ thread, messages });
+});
+
+// Staff sets a ticket's status (open / pending / closed). Closed tickets are
+// read-only for the customer; reopening restores their reply box.
+app.post('/admin/support/threads/:id/status', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const id = Number(c.req.param('id'));
+  const b: any = await c.req.json().catch(() => null);
+  const status = String(b?.status ?? '');
+  if (!TICKET_STATUSES.includes(status)) return c.json({ error: 'bad_status' }, 400);
+  const ticket = await c.env.DB.prepare(
+    'SELECT id, status FROM chat_threads WHERE id = ?1 AND kind = ?2',
+  ).bind(id, 'support').first<any>();
+  if (!ticket) return c.json({ error: 'not found' }, 404);
+  await c.env.DB.prepare(
+    `UPDATE chat_threads SET status = ?2,
+       closed_at = CASE WHEN ?2 = 'closed' THEN datetime('now') ELSE NULL END,
+       closed_by = CASE WHEN ?2 = 'closed' THEN ?3 ELSE NULL END,
+       updated_at = datetime('now')
+     WHERE id = ?1`,
+  ).bind(id, status, c.get('phone') ?? 'ops').run();
+  return c.json({ ok: true, status });
 });
 
 /* ------------------------------ users & roles ----------------------------- */
@@ -7229,6 +7385,86 @@ app.post('/jobs/:ref/auto-assign', async (c) => {
   const etaMin = result.eta_minutes;
   const km = result.km;
   return c.json({ ok: true, ref, rider_id: pick.id, rider: pick.full_name, photo_url: pick.photo_url ?? null, eta_minutes: etaMin, km: round2(km) });
+});
+
+/* ---------------- rider claim board (leftovers after auto-assign) ----------- */
+// Auto-assign always gets first refusal at booking, at payment approval and on
+// the 1-minute cron. Whatever it could NOT place (no online verified rider in
+// range, rider at a depot, everyone at capacity) is offered here. The atomic
+// `rider_id IS NULL` guard makes claiming exclusive: the first rider to claim
+// owns the job and it vanishes from every other rider's board and queue.
+
+app.get('/rider/available', async (c) => {
+  const phone = c.get('phone');
+  if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT id, active, verification_status FROM riders WHERE phone = ?1',
+  ).bind(phone).first<any>();
+  if (!rider || !rider.active) return c.json({ error: 'rider_not_active' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.dest_city, j.dest_address,
+            j.parcels, j.vehicle_class, j.description, j.weight_class, j.pickup_window, j.pickup_at,
+            j.sender_name, j.recipient_name, j.rider_fee_zmw, j.total_zmw, j.created_at, j.from_city,
+            co.name AS courier_name, co.depot_name
+       FROM jobs j JOIN couriers co ON co.id = j.courier_id
+      WHERE j.rider_id IS NULL AND j.status = 'created'
+        AND date(j.created_at) >= date('now', '-2 days')
+        AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.status = 'pending')
+      ORDER BY j.created_at DESC
+      LIMIT 50`,
+  ).all();
+  return c.json({ jobs: results, rider_id: rider.id });
+});
+
+app.post('/jobs/:ref/claim', async (c) => {
+  const phone = c.get('phone');
+  if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
+  const rider = await c.env.DB.prepare(
+    `SELECT id, full_name, vehicle, active, verification_status, status, current_load, capacity, last_lat, last_lng
+       FROM riders WHERE phone = ?1`,
+  ).bind(phone).first<any>();
+  if (!rider || !rider.active || rider.verification_status !== 'verified') {
+    return c.json({ error: 'verified_active_rider_required' }, 403);
+  }
+  const cap = Number(rider.capacity ?? 8);
+  if (cap > 0 && Number(rider.current_load ?? 0) >= cap) return c.json({ error: 'at_capacity' }, 409);
+  const ref = c.req.param('ref');
+  const job = await c.env.DB.prepare(
+    `SELECT id, ref, rider_id, status, sender_phone, pickup_address, pickup_lat, pickup_lng
+       FROM jobs WHERE ref = ?1`,
+  ).bind(ref).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (job.rider_id) return c.json({ error: 'already_claimed', rider_id: job.rider_id }, 409);
+  if (job.status !== 'created') return c.json({ error: 'not_claimable', status: job.status }, 409);
+  if (await jobPaymentHeld(c.env.DB, job.id)) {
+    return c.json({ error: 'payment_required', hint: 'Prepayment pending — this parcel unlocks when the money lands.' }, 402);
+  }
+  const fallback = job.pickup_lat == null || job.pickup_lng == null;
+  const lat = fallback ? -15.4255 : Number(job.pickup_lat);
+  const lng = fallback ? 28.2805 : Number(job.pickup_lng);
+  const km = haversine(lat, lng, Number(rider.last_lat ?? -15.4255), Number(rider.last_lng ?? 28.2805));
+  const etaMin = Math.round((km / 22) * 60 + 4);
+  // Exclusivity: only a job that is STILL unassigned and in 'created' can be
+  // claimed. Two simultaneous claims cannot both win.
+  const claim = await c.env.DB.prepare(
+    `UPDATE jobs SET rider_id = ?1, status = 'rider_assigned', assigned_at = datetime('now'), eta_minutes = ?2
+      WHERE id = ?3 AND rider_id IS NULL AND status = 'created'`,
+  ).bind(rider.id, etaMin, job.id).run();
+  if (!claim.meta.changes) return c.json({ error: 'already_claimed' }, 409);
+  await c.env.DB.prepare(
+    `UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`,
+  ).bind(rider.id).run();
+  await c.env.DB.prepare(
+    `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rider_assigned', ?2)`,
+  ).bind(job.id, `Claimed by ${rider.full_name} from the available-orders board (${round2(km)} km away).`).run();
+  c.executionCtx.waitUntil(
+    sendToPhone(c.env, job.sender_phone, {
+      title: 'Rider assigned',
+      body: `Rider ${rider.full_name} (${rider.vehicle}) is heading to your pickup — track live in Bookings.`,
+      data: { job_ref: ref, kind: 'rider_assigned' },
+    }).catch(() => {}),
+  );
+  return c.json({ ok: true, ref, rider_id: rider.id, rider: rider.full_name, eta_minutes: etaMin, km: round2(km) });
 });
 
 // Re-optimize ONE rider's route from their live location, optionally inserting
