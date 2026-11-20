@@ -6686,14 +6686,17 @@ app.get('/payments/:id/receipt', async (c) => {
 // payment up and re-verify the true status with Lipila's API before settling.
 // (cod_remit rows are disbursements we initiated ourselves; we only log them.)
 app.post('/webhooks/lipila', async (c) => {
-  // Optional shared-secret gate (defence in depth — the body is never trusted).
-  if (c.env.LIPILA_WEBHOOK_SECRET) {
-    const got = c.req.header('X-Lipila-Signature') ?? c.req.header('X-Webhook-Secret')
-      ?? new URL(c.req.url).searchParams.get('secret') ?? '';
-    const want = c.env.LIPILA_WEBHOOK_SECRET;
-    const equal = got.length === want.length && got.split('').every((ch, i) => ch === want[i]);
-    if (!equal) return c.json({ error: 'unauthorized' }, 401);
-  }
+  // Shared-secret gate (defence in depth — the BODY IS NEVER TRUSTED).
+  // Lipila's dashboard has both the plain and the ?secret= URL registered and
+  // the plain one cannot always be removed. A request with NO secret is still
+  // accepted, but marked unverified: every branch below re-checks the status
+  // directly with Lipila before settling anything. A WRONG secret is rejected.
+  const supplied = c.req.header('X-Lipila-Signature') ?? c.req.header('X-Webhook-Secret')
+    ?? new URL(c.req.url).searchParams.get('secret') ?? '';
+  const want = c.env.LIPILA_WEBHOOK_SECRET ?? '';
+  const verified = want.length > 0 && supplied.length === want.length
+    && supplied.split('').every((ch, i) => ch === want[i]);
+  if (want && supplied && !verified) return c.json({ error: 'unauthorized' }, 401);
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ ok: true });
   const ref = b.reference ?? b.data?.reference;
@@ -6724,7 +6727,9 @@ app.post('/webhooks/lipila', async (c) => {
     // disbursement caller already records the final status from Lipila's
     // own response. With the secret configured, the origin check at the
     // top of this handler has passed, so upgrading to success is sound.
-    if (c.env.LIPILA_WEBHOOK_SECRET && pay.status !== 'success') {
+    // ONLY a secret-verified callback may flip these straight to success —
+    // a bare POST is insufficient proof for our own outbound disbursements.
+    if (verified && pay.status !== 'success') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, 'success').run();
     }
     return c.json({ ok: true });
@@ -11041,6 +11046,37 @@ app.post('/admin/payouts/:id/retry', async (c) => {
   ).bind(id).run();
   c.executionCtx.waitUntil(runPayoutQueue(c.env));
   return c.json({ ok: true, payout_id: id, status: 'queued' });
+});
+
+// Lipila diagnostic (superadmin): tells us the Worker's egress IP and exactly
+// what the provider returns for balance / collection / disbursement status.
+// Adapted from Chisomo's /lipila-diagnostic — the way we confirm IP allowlist
+// and key problems without guessing from empty 401 bodies.
+app.get('/admin/lipila/diagnose', async (c) => {
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const out: Record<string, unknown> = {
+    baseUrl: c.env.LIPILA_BASE_URL,
+    keyPrefix: c.env.LIPILA_API_KEY ? `${c.env.LIPILA_API_KEY.slice(0, 4)}...` : 'NOT SET',
+    callbackUrl: c.env.LIPILA_CALLBACK_URL ?? null,
+  };
+  try {
+    const r = await fetch('https://ifconfig.me/ip', { signal: AbortSignal.timeout(6000) });
+    out.outboundIp = (await r.text()).trim();
+  } catch (e) { out.outboundIpError = String(e).slice(0, 120); }
+  try {
+    const r = await fetch(`${c.env.LIPILA_BASE_URL}/api/v1/merchants/balance`, {
+      headers: { accept: 'application/json', 'x-api-key': c.env.LIPILA_API_KEY },
+      signal: AbortSignal.timeout(8000),
+    });
+    out.balanceHttp = r.status;
+    out.balanceBody = (await r.text()).slice(0, 300);
+  } catch (e) { out.balanceError = String(e).slice(0, 160); }
+  const ref = c.req.query('ref');
+  if (ref) {
+    out.collection = await lipilaStatusDetail(c.env, ref);
+    out.disbursement = await lipilaDisburseStatusDetail(c.env, ref);
+  }
+  return c.json(out);
 });
 
 // Growth dashboard: tiers, paygo regulars (target: 100 paying sellers/mo)
