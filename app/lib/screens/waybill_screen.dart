@@ -24,6 +24,7 @@ import '../state/app_store.dart';
 import '../ui/app_theme.dart';
 import '../ui/thermal_print.dart';
 import '../widgets/common.dart';
+import '../ui/app_spinner.dart';
 
 /// Owner directive (2026-11-12): the waybill title leads with the sender's
 /// chosen DEPOT in its short form — "PLATINUM COUNTER WAYBILL" — not the
@@ -345,7 +346,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
             OutlinedButton.icon(
               onPressed: _linkBusy || _trackingUrl != null ? null : _fetchTrackingLink,
               icon: _linkBusy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : Icon(_trackingUrl != null ? Icons.link : Icons.link_outlined),
               label: Text(
                 _linkBusy
@@ -361,7 +362,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
           FilledButton.icon(
             onPressed: _busy ? null : _shareImage,
             icon: _busy
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                ? const AppLogoSpinner(size: 16, color: Colors.white)
                 : const Icon(Icons.share_outlined),
             label: Text(_busy ? 'Working…' : 'Share waybill image'),
           ),

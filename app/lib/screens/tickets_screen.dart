@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../data/dropoff_api.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_toast.dart';
+import '../ui/app_spinner.dart';
 
 /// Customer-facing help desk. Parcel chat was removed — every conversation with
 /// DropOff now starts here as a ticket with a subject, a category and a status.
@@ -100,7 +101,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
         ),
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const Center(child: AppLogoSpinner(size: 26))
               : _error != null
                   ? Center(child: Padding(padding: const EdgeInsets.all(28), child: Text(_error!, textAlign: TextAlign.center, style: AppType.body)))
                   : _tickets.isEmpty
@@ -237,7 +238,7 @@ class _NewTicketSheetState extends State<_NewTicketSheet> {
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: _saving ? null : _submit,
-            icon: _saving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send),
+            icon: _saving ? const AppLogoSpinner(size: 16) : const Icon(Icons.send),
             label: Text(_saving ? 'Opening ticket…' : 'Open ticket'),
           ),
         ]),
@@ -332,7 +333,7 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
           ),
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const Center(child: AppLogoSpinner(size: 26))
               : _messages.isEmpty
                   ? const Center(child: Text('No messages yet.', style: AppType.body))
                   : ListView.separated(
@@ -373,7 +374,7 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
             padding: EdgeInsets.fromLTRB(12, 8, 12, MediaQuery.of(context).viewInsets.bottom + 8),
             child: Row(children: [
               Expanded(child: TextField(controller: _reply, maxLines: 3, decoration: const InputDecoration(hintText: 'Reply to support…', border: InputBorder.none))),
-              IconButton.filled(onPressed: _sending ? null : _send, icon: _sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.send)),
+              IconButton.filled(onPressed: _sending ? null : _send, icon: _sending ? const AppLogoSpinner(size: 18, color: Colors.white) : const Icon(Icons.send)),
             ]),
           ),
       ]),

@@ -15,6 +15,7 @@ import 'bookings_screen.dart';
 import 'collections_screen.dart';
 import 'couriers_screen.dart';
 import 'track_screen.dart';
+import '../ui/app_spinner.dart';
 
 class HomeScreen extends StatelessWidget {
   final VoidCallback onOpenCouriers;
@@ -484,7 +485,7 @@ class _FareCheckerState extends State<_FareChecker> {
           OutlinedButton.icon(
             onPressed: _locating ? null : _locate,
             icon: _locating
-                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const AppLogoSpinner(size: 15)
                 : const Icon(Icons.my_location, size: 18),
             label: Text(_locating ? 'Pinning…' : (_lat != null ? 'Pickup pinned ✓ — tap to re-pin' : 'Use my current location')),
           ),

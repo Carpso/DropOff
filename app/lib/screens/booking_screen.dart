@@ -31,6 +31,7 @@ import 'in_app_navigator_screen.dart';
 import 'account_screen.dart';
 import 'bookings_screen.dart';
 import 'waybill_screen.dart';
+import '../ui/app_spinner.dart';
 
 class BookingScreen extends StatefulWidget {
   final String? initialCourierId;
@@ -922,7 +923,7 @@ class _BookingScreenState extends State<BookingScreen> {
               Expanded(child: FilledButton(
                 onPressed: _saving ? null : (_step < 2 ? _next : _submit),
                 child: _saving
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const AppLogoSpinner(size: 22, color: Colors.white)
                     : Text(_step < 2 ? 'Continue' : 'Place booking'),
               )),
             ]),
@@ -945,7 +946,7 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 8),
         const InfoPill(icon: Icons.receipt_long, label: 'Your parcel is dropped at the courier depot. The destination above is for your receipt only — it is not the actual door drop-off.', color: AppColors.amber),
         const SizedBox(height: 18),
-              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market — or a plus code like 8FQ4+J9', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _tidyAddress, child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('✨ Tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
+              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market — or a plus code like 8FQ4+J9', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _tidyAddress, child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('✨ Tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const AppLogoSpinner(size: 18) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
         if (_saved.isNotEmpty) ...[
           const SizedBox(height: 6),
           Wrap(spacing: 6, runSpacing: 2, children: [
@@ -1020,7 +1021,7 @@ class _BookingScreenState extends State<BookingScreen> {
         OutlinedButton.icon(
           onPressed: _parcelPhotoUploading ? null : _pickParcelPhoto,
           icon: _parcelPhotoUploading
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const AppLogoSpinner(size: 18)
               : Icon(_parcelPhotoUrl == null ? Icons.add_a_photo_outlined : Icons.check_circle, color: _parcelPhotoUrl == null ? null : AppColors.success),
           label: Text(_parcelPhotoUrl == null ? 'Add parcel photo (recommended)' : 'Parcel photo attached'),
         ),
@@ -1762,7 +1763,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
               const Spacer(),
               if (!paused && (_watchTimer?.isActive ?? false)) ...[
                 const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2)),
+                  AppLogoSpinner(size: 13),
                   SizedBox(width: 8),
                   Text('Checking your payment…',
                       style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.muted)),
@@ -1775,7 +1776,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
                   style: FilledButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: Colors.white),
                   onPressed: _busy ? null : () => _payNow(booking),
                   icon: _busy
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      ? const AppLogoSpinner(size: 18, color: Colors.white)
                       : const Icon(Icons.payments_outlined),
                   label: Text(_busy ? 'Sending prompt…' : 'Pay now — dispatch rider', style: AppType.subhead),
                 ),
@@ -1784,7 +1785,7 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
               TextButton.icon(
                 onPressed: _pausing ? null : () => _togglePause(booking, !paused),
                 icon: _pausing
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const AppLogoSpinner(size: 16)
                     : Icon(paused ? Icons.notifications_active_outlined : Icons.notifications_off_outlined, size: 18),
                 label: Text(_pausing ? 'Working…' : (paused ? 'Resume reminders' : 'Pause reminders — I can\'t pay right now'),
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: paused ? AppColors.forest : AppColors.danger)),

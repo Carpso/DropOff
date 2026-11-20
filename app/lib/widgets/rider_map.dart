@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -10,6 +10,7 @@ import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
 import '../ui/app_theme.dart';
+import '../ui/app_spinner.dart';
 
 /// Live in-app map on the DropOff basemap (Protomaps Zambia/Zimbabwe/Malawi/
 /// Mozambique archive on our R2 bucket — no Google, no MapTiler, no external
@@ -330,7 +331,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
           return _offlineFallback('Map could not load — the rider position still shows as "last seen" below.');
         }
         if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2.5));
+          return const Center(child: AppLogoSpinner(size: 26));
         }
         final firstStop = (widget.stops != null && widget.stops!.isNotEmpty)
             ? LatLng((widget.stops!.first['lat'] as num).toDouble(),

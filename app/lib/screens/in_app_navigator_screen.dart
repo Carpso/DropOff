@@ -8,6 +8,7 @@ import '../data/map_services.dart';
 import '../data/saved_places.dart';
 import '../ui/app_theme.dart';
 import '../widgets/rider_map.dart';
+import '../ui/app_spinner.dart';
 
 /// In-app navigator — our own map, our own route. Opens the DropOff map,
 /// drops your live GPS as the moving pin, resolves a ROAD-FOLLOWING route
@@ -383,7 +384,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                   hintText: 'Search places — e.g. Kabwata market',
                   prefixIcon: const Icon(Icons.search, color: AppColors.forest),
                   suffixIcon: _searchBusy
-                      ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+                      ? const Padding(padding: EdgeInsets.all(12), child: AppLogoSpinner(size: 18))
                       : (_search.text.isNotEmpty
                           ? IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() { _search.clear(); _results = const []; }))
                           : null),

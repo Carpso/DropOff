@@ -1,4 +1,4 @@
-// ─────────────────────────────────────────────────────────────────────
+﻿// ─────────────────────────────────────────────────────────────────────
 // DROPOFF — ownership stamp (do not remove)
 // :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
 // © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
@@ -27,6 +27,7 @@ import 'tickets_screen.dart';
 import 'rider_map_screen.dart';
 import 'track_screen.dart';
 import 'waybill_screen.dart';
+import '../ui/app_spinner.dart';
 
 class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
@@ -92,7 +93,9 @@ class _BookingsScreenState extends State<BookingsScreen> {
     final store = AppScope.of(context);
     if (!store.linked) {
       // Bookings sync and chat need an identity — show the sign-in door only.
-      return SafeArea(
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
@@ -111,10 +114,18 @@ class _BookingsScreenState extends State<BookingsScreen> {
             ]),
           ),
         ),
+        ),
       );
     }
     final bookings = store.bookings;
-    return SafeArea(
+    // SCAFFOLD + WHITE BODY (owner bug 2026-11-20, third pass): the tab used
+    // to return a bare SafeArea. When opened from a push (share link, push
+    // notification, home tile) the route had no painted background, so the
+    // area below the last card showed the grey page canvas. A white Scaffold
+    // guarantees no grey band on ANY entry path, tab or pushed route.
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Padding(
           padding: EdgeInsets.fromLTRB(20, 22, 20, 18),
@@ -164,6 +175,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
           ),
         ),
       ]),
+      ),
     );
   }
 }
@@ -172,6 +184,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
 /// shows it at the courier counter, and the sender can re-check it here.
 Future<void> _showReceipt(BuildContext context, String url) async {
   if (url.isEmpty) return;
+  final uri = url.startsWith('http') ? url : '${DropOffApi.baseUrl}$url';
   await Navigator.of(context).push<void>(MaterialPageRoute<void>(
     fullscreenDialog: true,
     builder: (_) => Scaffold(
@@ -182,9 +195,11 @@ Future<void> _showReceipt(BuildContext context, String url) async {
         title: const Text('Receipt — the rider shows this at the depot counter'),
       ),
       body: Center(child: Image.network(
-        '${DropOffApi.baseUrl}$url',
+        uri,
         headers: DropOffApi.authHeaders,
         fit: BoxFit.contain,
+        loadingBuilder: (_, child, progress) =>
+            progress == null ? child : const AppLogoSpinner(size: 34),
         errorBuilder: (_, __, ___) => const Text('Receipt could not load — check your connection.',
             style: TextStyle(color: AppColors.muted, fontSize: 12)),
       )),
@@ -664,7 +679,7 @@ class _MovementLogSheetState extends State<_MovementLogSheet> {
             const Text('Every update on this job — who recorded it and when.', style: AppType.body),
             const SizedBox(height: 14),
             if (_loading) ...[
-              const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 18), child: SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.4)))),
+              const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 18), child: AppLogoSpinner(size: 26))),
             ] else if (_failed && _timeline.isEmpty) ...[
               const Text('Couldn\'t load the journey log just now — check your connection and try again.', style: AppType.body),
               const SizedBox(height: 10),
@@ -1039,7 +1054,7 @@ class _AutoAssignCardState extends State<_AutoAssignCard> {
           FilledButton.tonalIcon(
             onPressed: _busy ? null : _run,
             icon: _busy
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const AppLogoSpinner(size: 16)
                 : const Icon(Icons.auto_mode),
             label: Text(_busy ? 'Dispatching…' : (assigned ? 'Re-run algorithm' : 'Dispatch nearest rider')),
           ),
@@ -1101,7 +1116,7 @@ class _TrackingLinkCardState extends State<_TrackingLinkCard> {
             FilledButton.tonalIcon(
               onPressed: _busy ? null : _copy,
               icon: _busy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : const Icon(Icons.link),
               label: Text(_busy ? 'Preparing…' : 'Copy tracking link'),
             ),
@@ -1231,7 +1246,7 @@ class _RatingCardState extends State<_RatingCard> {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(20),
-          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          child: Center(child: AppLogoSpinner(size: 22)),
         ),
       );
     }
@@ -1268,7 +1283,7 @@ class _RatingCardState extends State<_RatingCard> {
             child: FilledButton.icon(
               onPressed: _submitting ? null : _submit,
               icon: _submitting
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : const Icon(Icons.send_outlined),
               label: Text(_submitting ? 'Saving…' : 'Submit ratings'),
             ),
@@ -1524,7 +1539,7 @@ class _PrepayCardState extends State<_PrepayCard> {
             FilledButton.icon(
               onPressed: _pausing ? null : () => _togglePause(false),
               icon: _pausing
-                  ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 15)
                   : const Icon(Icons.notifications_active_outlined),
               label: Text(_pausing ? 'Resuming…' : 'Resume reminders'),
             ),
@@ -1559,7 +1574,7 @@ class _PrepayCardState extends State<_PrepayCard> {
           FilledButton.icon(
             onPressed: _busy ? null : _payNow,
             icon: _busy
-                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const AppLogoSpinner(size: 15)
                 : const Icon(Icons.payments_outlined),
             label: Text(_busy ? 'Starting prompt…' : 'Pay now — dispatch rider'),
           ),
@@ -1689,7 +1704,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
           FilledButton.icon(
             onPressed: _busy ? null : _payNow,
             icon: _busy
-                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const AppLogoSpinner(size: 15)
                 : const Icon(Icons.lock_open_outlined),
             label: Text(_busy ? 'Starting promptΓÇª' : 'Pay now ΓÇö reveal receipt'),
           ),
@@ -1748,7 +1763,7 @@ class _CounterReceiptPaidCard extends StatelessWidget {
                     receipts[i].$2,
                     fit: BoxFit.contain,
                     loadingBuilder: (_, child, progress) =>
-                        progress == null ? child : const Padding(padding: EdgeInsets.all(18), child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)))),
+                        progress == null ? child : const Padding(padding: EdgeInsets.all(18), child: Center(child: AppLogoSpinner(size: 22))),
                     errorBuilder: (_, __, ___) => const Text('Receipt photo could not load — it is stored safely on the server.',
                         style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
                   ),

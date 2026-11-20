@@ -1,4 +1,4 @@
-import '../ui/app_toast.dart';
+﻿import '../ui/app_toast.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -21,6 +21,8 @@ import '../ui/app_theme.dart';
 import '../ui/in_app_browser.dart';
 import '../services/device_lock.dart';
 import '../ui/money_errors.dart';
+import '../ui/app_spinner.dart';
+import '../services/step_sounds.dart';
 
 /// Email + password sign in / create account (the JWT + phone persist locally;
 /// the ops device-link stays separate under Team).
@@ -50,6 +52,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _otpBusy = false;
   bool _otpSent = false;
   bool _photoBusy = false;
+  bool _stepSounds = true; // step-complete chime — persisted option (owner 2026-11-20)
   String? _otpMsg;
   String? _error;
   // "Resend verification email" only matters when the error actually mentions
@@ -65,6 +68,9 @@ class _AccountScreenState extends State<AccountScreen> {
     if (widget.focusPlans) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToPlans());
     }
+    StepSounds.load().then((_) {
+      if (mounted) setState(() => _stepSounds = StepSounds.enabled);
+    });
   }
 
   void _scrollToPlans() {
@@ -214,7 +220,7 @@ class _AccountScreenState extends State<AccountScreen> {
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          if (busy) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+          if (busy) const AppLogoSpinner(size: 18)
           else TextButton(
             onPressed: () async {
               final pin = ctrl.text.replaceAll(RegExp(r'[^0-9]'), '');
@@ -320,7 +326,7 @@ class _AccountScreenState extends State<AccountScreen> {
                             child: isCurrent
                                 ? const Text('current')
                                 : (revoking
-                                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                    ? const AppLogoSpinner(size: 16)
                                     : const Text('Revoke')),
                           ),
                         ]),
@@ -561,7 +567,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   if (store.fullName != null && store.email != null) Text(store.email!, style: const TextStyle(color: AppColors.ink, fontSize: 12.5)),
                   if (store.linkedPhone != null && store.email != null) Text(store.linkedPhone!, style: const TextStyle(color: AppColors.ink, fontSize: 12.5)),
                 ])),
-                if (_photoBusy) const Padding(padding: EdgeInsets.only(left: 6), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+                if (_photoBusy) const Padding(padding: EdgeInsets.only(left: 6), child: AppLogoSpinner(size: 18)),
               ]),
               const SizedBox(height: 12),
               Row(children: [
@@ -609,6 +615,22 @@ class _AccountScreenState extends State<AccountScreen> {
                   subtitle: const Text('Unlock with fingerprint or face on this phone.', style: TextStyle(fontSize: 11.5)),
                   value: store.biometricEnabled,
                   onChanged: (v) => _setBiometric(v, store),
+                ),
+                // Step sounds (owner request 2026-11-20): a short chime every
+                // time a pickup, depot drop or handover is filed. Optional —
+                // riders who prefer silence switch it off here.
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.volume_up_outlined, color: AppColors.forest),
+                  title: const Text('Step completion sound', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  subtitle: const Text('Play a short chime when a delivery step is done.', style: TextStyle(fontSize: 11.5)),
+                  value: _stepSounds,
+                  onChanged: (v) async {
+                    await StepSounds.setEnabled(v);
+                    if (!mounted) return;
+                    setState(() => _stepSounds = v);
+                    if (v) await StepSounds.stepDone(); // preview
+                  },
                 ),
                 // Recipient door PIN (owner 2026-11-18): your own 4-digit code
                 // shown to the rider at the door — no SMS code for same-city.
@@ -658,7 +680,7 @@ class _AccountScreenState extends State<AccountScreen> {
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: AppColors.forest),
               onPressed: _otpBusy ? null : _sendOtp,
               icon: _otpBusy
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const AppLogoSpinner(size: 18, color: Colors.white)
                   : const Icon(Icons.sms_outlined),
               label: Text(_otpBusy ? 'Sending…' : (_otpSent ? 'Send a new 6-digit code' : 'Send 6-digit code by SMS'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
             ),
@@ -677,7 +699,7 @@ class _AccountScreenState extends State<AccountScreen> {
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50), backgroundColor: AppColors.forest),
                 onPressed: _otpBusy ? null : _verifyOtp,
                 icon: _otpBusy
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const AppLogoSpinner(size: 18, color: Colors.white)
                     : const Icon(Icons.check_rounded),
                 label: Text(_otpBusy ? 'Verifying…' : 'Verify & sign in', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
               ),
@@ -738,7 +760,7 @@ class _AccountScreenState extends State<AccountScreen> {
               // silently dead button.
               onPressed: _busy ? null : _submit,
               icon: _busy
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 18)
                   : Icon(_creating ? Icons.person_add_alt_1 : Icons.login),
               label: Text(_creating ? 'Create account' : 'Sign in'),
             ),
@@ -969,7 +991,7 @@ class _RecurringCardState extends State<_RecurringCard> {
           ]),
           const SizedBox(height: 10),
           if (_loading)
-            const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 12), child: CircularProgressIndicator(strokeWidth: 2)))
+            const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 12), child: AppLogoSpinner(size: 22)))
           else if (_plans.isEmpty)
             const Text('No standing orders yet.', style: TextStyle(color: AppColors.muted, fontSize: 12))
           else
@@ -1075,7 +1097,7 @@ class _ReferralCardState extends State<_ReferralCard> {
                 child: Text(code, style: const TextStyle(color: Color(0xFFF6B73C), fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 16)),
               )
             else
-              const SizedBox(width: 140, height: 38, child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))),
+              const SizedBox(width: 140, height: 38, child: Center(child: AppLogoSpinner(size: 18))),
             const SizedBox(width: 10),
             IconButton(tooltip: 'Copy code', icon: Icon(_copied ? Icons.check_rounded : Icons.copy, color: AppColors.forest), onPressed: _copy),
             IconButton(tooltip: 'Share on WhatsApp', icon: const Icon(Icons.share_rounded, color: AppColors.forest), onPressed: _share),
@@ -1097,6 +1119,11 @@ class _TiersCard extends StatefulWidget {
 
 class _TiersCardState extends State<_TiersCard> {
   Future<Map<String, dynamic>?> _loadPlans() => DropOffApi.plans();
+  // Cached once per mount: switching screens and coming back must never
+  // re-open an empty (grey) plan card while a fresh request is in flight
+  // (owner bug 2026-11-20: "plans show a gray screen when the user changes
+  // screens and comes back").
+  late final Future<Map<String, dynamic>?> _plansFuture = _loadPlans();
   String? _busyTier;
   int _usageCycle = 0;
   Map<String, dynamic>? _current;
@@ -1281,11 +1308,25 @@ class _TiersCardState extends State<_TiersCard> {
               const SizedBox(height: 12),
               _PlanUsageMeter(key: ValueKey(_usageCycle)),
               FutureBuilder<Map<String, dynamic>?>(
-                future: _loadPlans(),
+                future: _plansFuture,
                 builder: (context, snap) {
                   final models = snap.data?['plans'] as Map<String, dynamic>?;
                   if (models == null) {
-                    return const Text('Tier prices load when the server is reachable.', style: TextStyle(color: AppColors.muted, fontSize: 12));
+                    // Never a blank/grey card while loading: a branded spinner
+                    // plus the honest copy, on the white card surface.
+                    return Container(
+                      width: double.infinity,
+                      color: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: const Row(children: [
+                        AppLogoSpinner(size: 18),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text('Tier prices load when the server is reachable.',
+                              style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                        ),
+                      ]),
+                    );
                   }
                   const display = <String, ({String label, String blurb})>{
                     'weekly': (label: 'WEEKLY SPRINT', blurb: '20 parcels / 7 days — no monthly lock-in'),
@@ -1376,7 +1417,7 @@ class _TiersCardState extends State<_TiersCard> {
                                   ),
                                   onPressed: _busyTier != null ? null : () => _chooseTier(entry.key),
                                   child: _busyTier == entry.key
-                                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                      ? const AppLogoSpinner(size: 14)
                                       : Text(
                                           currentActive && currentTier == entry.key
                                               ? 'Renew'
@@ -1488,7 +1529,7 @@ class _PackCodeCardState extends State<_PackCodeCard> {
                 labelText: 'Plan code',
                 hintText: 'DROP-8F2K-19QA',
                 prefixIcon: const Icon(Icons.qr_code_2),
-                suffixIcon: TextButton(onPressed: _busy ? null : _redeem, child: _busy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Redeem')),
+                suffixIcon: TextButton(onPressed: _busy ? null : _redeem, child: _busy ? const AppLogoSpinner(size: 14) : const Text('Redeem')),
               ),
             ),
           ]),
@@ -1747,7 +1788,7 @@ class _CreateAccountSheetState extends State<_CreateAccountSheet> {
         SizedBox(width: double.infinity, child: FilledButton.icon(
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
           onPressed: _busy ? null : _submit,
-          icon: _busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.person_add_alt_1),
+          icon: _busy ? const AppLogoSpinner(size: 18, color: Colors.white) : const Icon(Icons.person_add_alt_1),
           label: Text(_busy ? 'Creating...' : 'Create account'),
         )),
       ]),

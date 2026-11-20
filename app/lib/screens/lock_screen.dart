@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
+import '../ui/app_spinner.dart';
 
 /// Full-screen device lock shown on cold start when "fingerprint / face
 /// unlock" is on and a session exists. Unlocking restores the app instantly
@@ -52,7 +53,7 @@ class BiometricLockScreen extends StatelessWidget {
                   ),
                   onPressed: busy ? null : onUnlock,
                   child: busy
-                      ? const SizedBox(width: 40, height: 40, child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.forest))
+                      ? const AppLogoSpinner(size: 40, color: AppColors.forest)
                       : const Icon(Icons.fingerprint, size: 64),
                 ),
               ),

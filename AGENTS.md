@@ -15,6 +15,77 @@ Every upload to Google Play **must** use a **strictly higher `versionCode`** tha
 - **Clean `dist/` on each build**: delete superseded `DropOff-<version>-release.*` so only the newest pair + aliases remain.
 - Release artifacts only: `dist/` never carries debug or profile builds.
 
+## 2026-11-20 (final) — step sounds, faster photos, named milestone copy
+
+Owner directives: quicken photo uploads; add a sound on every completed step
+WITH an option; and rewrite the "your parcel … was picked up and heading to the
+depot" messages to use the item's real name, the real depot name, correct
+collection wording, and plain "item" instead of "parcel".
+
+### Faster photo evidence
+- `app/lib/data/photo_stamp.dart` now downscales to 1600 px on the long side
+  BEFORE stamping and encodes at JPEG 84 — a 5–10 MB camera shot becomes
+  ~300–500 KB, so uploads finish several times faster on mobile data.
+- `DropOffApi.uploadImage` runs the stamp in a background isolate via
+  `compute(_stampInIsolate, _StampJob(...))`; decode/encode no longer freezes the
+  UI. Failures still fall back to the original bytes so a capture never blocks.
+- `image` stays pinned to `^4.3.0` (4.12 conflicts with pmtiles/archive ^3).
+
+### Step sounds (optional)
+- New `app/lib/services/step_sounds.dart`: two short WAV assets under
+  `app/assets/sounds/` (`step_done.wav`, `step_error.wav`), played with
+  `audioplayers`. Preference `step_sounds_enabled` (default true) is in
+  SharedPreferences; Account → Privacy & sign-in has the "Step completion
+  sound" switch (with a preview chime when enabled).
+- `StepSounds.stepDone()` fires after pickup, depot drop, door handover and
+  receipt upload; `stepError()` fires on a rejected step. Audio is best-effort
+  and never blocks a delivery.
+
+### Milestone message copy
+- Worker `/jobs/:ref/events` selects `description`, `branch` and
+  `couriers.depot_name`; helpers `itemNameOf()` (first word of the sender's
+  description, e.g. "Books", fallback "item") and `legDestinationOf()`
+  (real depot name; collections → "the recipient's door") drive push, SMS and
+  the legacy SYSTEM timeline notes.
+- Non-English "Kigoda" removed from the delivered push. No "your parcel" or
+  generic "the depot" remains in milestone copy.
+
+### Earlier 2026-11-20 fixes in this session
+- **No late cancellations (replaces the old no-show auto-cancel):** the minute
+  cron `cancelStaleOrders` now ROLLS FORWARD an elapsed window to the next open
+  sweep (06:00/10:00/14:00), returns an accepted-but-unstarted parcel to
+  `created` with `rider_id = NULL` (claim board), releases the rider's load,
+  and records `rolled_forward`. No strike, no refund, no cancellation.
+  `nextSweepAfterNow()` does the CAT maths. Do NOT restore the old cancel path.
+- **Nearest-first dispatch:** `nearestAvailableRider` scores `km + freshness`
+  only; load merely breaks near-exact ties (was `+ load * 0.5`, which could
+  pick a rider 10 km further away).
+- **Stable order times:** the rider queue chain is anchored to the SLOT START,
+  not `max(slot start, now)` — times no longer drift to the current time on
+  every 20 s poll. `minutes_on_road = chainMin - clockMin` (real route time,
+  fixes "1034 min"); app renders "1 h 20 min".
+- **One-shot handover:** the app locks Confirm (spinner + disabled) on tap and
+  the worker returns 409 `already_delivered` / `already_picked_up` for replays;
+  the app treats those as success.
+- **Collection depot pin removed:** `rider_map_screen` hides the warehouse pin
+  for `service == 'collection'`; the rider navigator draws no depot context pin
+  for collections (only the recipient door at handover); `/jobs/:ref/live`
+  exposes `service`/`status`.
+- **Collection receipt:** `/media/*` participant guard includes
+  `collection_receipt_url`; rider and sender viewers normalise absolute URLs,
+  send auth headers and show a branded loading spinner.
+- **Plans grey screen:** `_TiersCard` caches `_plansFuture` per mount and shows
+  a white loading row with `AppLogoSpinner`, so switching screens and back no
+  longer flashes a blank card.
+- **Branded spinners:** `app/lib/ui/app_spinner.dart` (`AppLogoSpinner`, const)
+  replaces bare `CircularProgressIndicator` loaders across the app.
+- **Toast wrap:** `Row(mainAxisSize: max)` + `Flexible` + `softWrap` stops long
+  messages (cap-reached) rendering vertically.
+- **Rider stats card:** the salary note moved to its own wrapped line so it no
+  longer overlaps the card edge.
+- **Bookings / every AppShell tab:** white `Scaffold` / `SizedBox.expand` +
+  `ColoredBox` wrappers remove the grey band below the last card.
+
 ## 2026-11-19 — Tickets replace chat, claim board, route-facing bike, GPS voice
 
 Owner directive: remove chat, keep only support, add tickets; auto-assign stays

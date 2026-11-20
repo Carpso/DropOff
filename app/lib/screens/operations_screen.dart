@@ -1,4 +1,4 @@
-import '../ui/app_toast.dart';
+﻿import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -16,6 +16,7 @@ import '../ui/app_theme.dart';
 import 'in_app_navigator_screen.dart';
 import '../widgets/common.dart';
 import 'rider_queue_screen.dart';
+import '../ui/app_spinner.dart';
 
 class OperationsScreen extends StatelessWidget {
   const OperationsScreen({super.key});
@@ -673,7 +674,7 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
               tooltip: 'Refresh position now',
               onPressed: _pinging ? null : () => _ping(),
               icon: _pinging
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : const Icon(Icons.gps_fixed, size: 18, color: AppColors.forest),
             ),
           ]),
@@ -877,7 +878,7 @@ class _BatchPickupCardState extends State<_BatchPickupCard> {
               const Text('Scattered stops are ordered snake (alternating east–west sweep) — no criss-cross, no backtracking.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
               const SizedBox(height: 10),
               if (snap.connectionState == ConnectionState.waiting)
-                const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 16), child: CircularProgressIndicator(strokeWidth: 2)))
+                const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 16), child: AppLogoSpinner(size: 22)))
               else if (routes.isEmpty)
                 Text('Nothing scheduled for today yet ($total stops queued).', style: const TextStyle(color: AppColors.muted, fontSize: 12))
               else
@@ -946,7 +947,7 @@ class _SmartRouteCardState extends State<_SmartRouteCard> {
             future: _future,
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
-                return const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)));
+                return const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: AppLogoSpinner(size: 26)));
               }
               final stops = (snap.data?['stops'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
               if (stops.isEmpty) {
@@ -1098,7 +1099,7 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
           if (_loading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+              child: Center(child: AppLogoSpinner(size: 18)),
             )
           else if (t == null)
             const Text('Targets unavailable offline.', style: TextStyle(color: AppColors.muted, fontSize: 12))
@@ -1393,7 +1394,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
     final busy = _busyField == field;
     Widget preview;
     if (busy) {
-      preview = const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)));
+      preview = const Center(child: AppLogoSpinner(size: 18));
     } else if (local != null) {
       preview = Image.file(File(local), fit: BoxFit.cover);
     } else if (url != null && url.isNotEmpty) {
@@ -1441,7 +1442,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
     final f = _faceCheck;
     if (_faceBusy) {
       return const Row(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.6)),
+        AppLogoSpinner(size: 12),
         SizedBox(width: 6),
         Text('AI is looking…', style: TextStyle(fontSize: 11, color: AppColors.muted)),
       ]);
@@ -1521,7 +1522,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
           if (_loading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 14),
-              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+              child: Center(child: AppLogoSpinner(size: 18)),
             )
           else if (_submitted || _locked)
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1591,7 +1592,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
               TextButton.icon(
                 onPressed: _faceBusy || _selfieUrl == null ? null : _checkFace,
                 icon: _faceBusy
-                    ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const AppLogoSpinner(size: 15)
                     : const Icon(Icons.auto_awesome, size: 17),
                 label: Text(_faceCheck == null ? 'AI check my selfie' : 'Re-check my selfie'),
               ),
@@ -1603,7 +1604,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
               child: FilledButton.icon(
                 onPressed: _saving || !_canSubmit ? null : _submit,
                 icon: _saving
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const AppLogoSpinner(size: 16, color: Colors.white)
                     : const Icon(Icons.send_outlined, size: 18),
                 label: Text(verified
                     ? 'Update details (re-review)'
@@ -1723,7 +1724,7 @@ class _SelfieBannerState extends State<_SelfieBanner> {
             style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
             onPressed: _busy ? null : _addPhoto,
             child: _busy
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const AppLogoSpinner(size: 18)
                 : const Text('Add'),
           ),
         ]),

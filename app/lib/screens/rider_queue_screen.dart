@@ -1,4 +1,4 @@
-// ─────────────────────────────────────────────────────────────────────
+﻿// ─────────────────────────────────────────────────────────────────────
 // DROPOFF — ownership stamp (do not remove)
 // :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
 // © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
@@ -27,6 +27,8 @@ import '../ui/in_app_browser.dart';
 import 'account_screen.dart';
 import 'in_app_navigator_screen.dart';
 import 'waybill_screen.dart' show waybillDepotTitle;
+import '../ui/app_spinner.dart';
+import '../services/step_sounds.dart';
 
 /// The rider's day as slot-batched task queues:
 ///   BATCH: 10:00—11:30 slot · 6:00—7:30 AM window · 23 min in
@@ -445,12 +447,22 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // Whole-job context on the map (owner 2026-11-18 "fix the rider map just
     // like the sender map tracking"): heading to the sender shows the depot
     // pin too, heading to the depot shows the sender's stop too.
-    final otherLat = picked
-        ? (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble()
-        : (s['depot_lat'] as num?)?.toDouble();
-    final otherLng = picked
-        ? (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble()
-        : (s['depot_lng'] as num?)?.toDouble();
+    //
+    // COLLECTION (owner directive 2026-11-20: "on collection the depot pin
+    // remove it, only when handover"): the depot is the parcel's ORIGIN, not
+    // a place to navigate to — no depot context pin is drawn on a collection
+    // at any stage. The only pin is the leg destination (depot counter first,
+    // recipient door at handover).
+    final otherLat = isCollection
+        ? null
+        : (picked
+            ? (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble()
+            : (s['depot_lat'] as num?)?.toDouble());
+    final otherLng = isCollection
+        ? null
+        : (picked
+            ? (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble()
+            : (s['depot_lng'] as num?)?.toDouble());
     if (lat != null && lng != null) {
       Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => InAppNavigatorScreen(
@@ -506,15 +518,17 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       ));
       return;
     }
-    // For a collection, we can still open the map even when the typed door
-    // address missed — fall back to the other pin on the job (the depot).
-    final fbLatD = (otherLat as num?)?.toDouble();
-    final fbLngD = (otherLng as num?)?.toDouble();
+    // Collection rescue: before pickup the destination really IS the depot,
+    // so its own pin is a safe fallback when the name geocode misses. After
+    // pickup the destination is the recipient's door — the depot pin must
+    // never be offered as the handover destination (owner 2026-11-20).
+    final fbLatD = isCollection && !picked ? (s['depot_lat'] as num?)?.toDouble() : null;
+    final fbLngD = isCollection && !picked ? (s['depot_lng'] as num?)?.toDouble() : null;
     if (isCollection && fbLatD != null && fbLngD != null && (fbLatD.abs() + fbLngD.abs()) > 0) {
       Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => InAppNavigatorScreen(
           destLat: fbLatD, destLng: fbLngD, label: label,
-          destIsDepot: picked, otherLat: lat, otherLng: lng, otherIsDepot: !picked,
+          destIsDepot: true, otherLat: null, otherLng: null, otherIsDepot: false,
         ),
       ));
       return;
@@ -528,6 +542,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// courier counter to collect the goods. Pinch to zoom, tap to close.
   void _showCollectionReceipt(String url) {
     if (url.isEmpty) return;
+    // Absolute paths (/media/...) get the API host; already-absolute URLs are
+    // used as-is so a CDN/legacy receipt never becomes "host/media/https://…".
+    final uri = url.startsWith('http') ? url : '${DropOffApi.baseUrl}$url';
     Navigator.of(context).push<void>(MaterialPageRoute<void>(
       fullscreenDialog: true,
       builder: (_) => Scaffold(
@@ -541,9 +558,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           maxScale: 5,
           child: Center(
             child: Image.network(
-              '${DropOffApi.baseUrl}$url',
+              uri,
               headers: DropOffApi.authHeaders,
               fit: BoxFit.contain,
+              loadingBuilder: (_, child, progress) =>
+                  progress == null ? child : const AppLogoSpinner(size: 34, color: Colors.white),
               errorBuilder: (_, __, ___) => const Padding(
                 padding: EdgeInsets.all(28),
                 child: Text('Receipt could not load — check your connection.',
@@ -620,7 +639,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     color: done || active ? AppColors.ink : AppColors.muted)),
                 subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
                 trailing: _busyRef == ref
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const AppLogoSpinner(size: 18)
                     : done
                         ? const Icon(Icons.lock, size: 15, color: AppColors.muted)
                         : null,
@@ -901,7 +920,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 if (resending)
                   const Padding(
                     padding: EdgeInsets.only(top: 4),
-                    child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    child: AppLogoSpinner(size: 16),
                   ),
               ],
             ]),
@@ -928,13 +947,14 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   lat: _riderPos?.latitude, lng: _riderPos?.longitude,
                 );
                 if (!dctx.mounted) return;
-                if (r.ok) {
-                  Navigator.pop(dctx, r);
+                if (r.ok || r.error == 'already_picked_up') {
+                  Navigator.pop(dctx, r.ok ? r : const ApiResponse(ok: true));
                   return;
                 }
                 submitting = false;
                 final err = r.error ?? '';
                 final detail = (r.body['detail'] as String?) ?? '';
+                await StepSounds.stepError(); // rejected-step tone (owner request 2026-11-20)
                 // Inline errors keep the dialog open so the rider can fix
                 // the code; evidence-lock errors explain that the file is
                 // frozen and ops handles changes.
@@ -957,6 +977,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (res == null) return null;
     if (res.ok) {
       await _snack('$ref ✓ picked up from the sender');
+      await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
       AnalyticsService.instance.track(feature: 'rider', action: 'picked_up', context: 'sender_stop');
       _load();
     }
@@ -1138,6 +1159,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (res.ok) {
       setState(() => _busyRef = null);
       await _snack('$ref ✓ ${'Dropped at the depot branch'}');
+      await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
       AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
       // Best-effort: compare seller's booking photo vs this drop photo.
       final chk = await DropOffApi.parcelCheck(ref);
@@ -1159,6 +1181,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final err = res.error ?? '';
     final detail = (res.body['detail'] as String?) ?? '';
     setState(() => _busyRef = null);
+    await StepSounds.stepError(); // rejected-step tone (owner request 2026-11-20)
     await _snack(switch (err) {
       'receipt_required' => detail.isEmpty ? 'Every depot receipt needs its photo and exact amount.' : detail,
       'photo_required' => detail.isEmpty ? 'A parcel photo is required.' : detail,
@@ -1229,6 +1252,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final recPhone = '${s['recipient_phone'] ?? ''}'.trim();
     final otpCtrl = TextEditingController();
     String? podUrl;
+    bool submitting = false;
     final res = await showDialog<ApiResponse>(
       context: context,
       barrierDismissible: false,
@@ -1275,14 +1299,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ],
           ]),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Cancel')),
+            TextButton(onPressed: submitting ? null : () => Navigator.pop(ctx, null), child: const Text('Cancel')),
             FilledButton(
-              onPressed: () async {
+              onPressed: submitting ? null : () async {
                 final code = otpCtrl.text.trim();
                 if (podUrl == null) {
                   _snack('Attach the camera photo of the handover to confirm.');
                   return;
                 }
+                // ONE-SHOT SUBMIT (owner bug 2026-11-20: "submitting photo for
+                // handover keeps accepting submissions"): lock the button the
+                // instant it is tapped; the server also rejects a replay with
+                // 409 already_delivered, which we treat as success.
+                setDialog(() => submitting = true);
                 // Intercity parcels NEED the code; Lusaka parcels hand over on
                 // the photo alone — the server enforces whichever applies.
                 final r = await DropOffApi.jobEvent(
@@ -1290,9 +1319,18 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   otp: code.length == 4 ? code : null,
                   photoUrl: podUrl, stage: 'delivery');
                 if (!ctx.mounted) return;
-                Navigator.pop(ctx, r);
+                if (r.ok || r.error == 'already_delivered') {
+                  Navigator.pop(ctx, r.ok ? r : const ApiResponse(ok: true));
+                  return;
+                }
+                setDialog(() => submitting = false);
+                _snack(r.error == 'photo_required'
+                    ? 'Attach the camera photo of the handover to confirm.'
+                    : 'Handover not filed (${r.error ?? 'network'}) — try again.');
               },
-              child: const Text('Confirm handover'),
+              child: submitting
+                  ? const AppLogoSpinner(size: 18, color: Colors.white)
+                  : const Text('Confirm handover'),
             ),
           ],
         ),
@@ -1302,12 +1340,14 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (res == null) return null; // cancelled
     if (res.ok) {
       await _snack('$ref — delivered and code-verified ✓');
+      await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
       _load();
       return res;
     }
     // Server-side OTP errors map to rider-readable guidance.
     final err = res.error ?? '';
     final detail = (res.body['detail'] as String?) ?? '';
+    await StepSounds.stepError(); // rejected-step tone (owner request 2026-11-20)
     await _snack(switch (err) {
       'otp_required' => 'Code rejected. ${detail.isEmpty ? 'Ask the recipient to re-check their SMS.' : detail}',
       'otp_locked' => 'Too many wrong codes — support has been notified.',
@@ -1352,7 +1392,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   style: FilledButton.styleFrom(minimumSize: const Size(72, 36)),
                   onPressed: _claimingRef != null ? null : () => _claim(j),
                   child: _claimingRef == '${j['ref']}'
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const AppLogoSpinner(size: 16)
                       : const Text('Claim'),
                 ),
               ]),
@@ -1435,7 +1475,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ),
         Expanded(
           child: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: AppLogoSpinner(size: 26))
           : batches.isEmpty
               // Pull-to-refresh works on the empty state too — new assignments
               // drop in without leaving the screen.
@@ -1592,8 +1632,6 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             // Manual sync — pull-to-refresh and the 20 s timer also refresh.
             IconButton(tooltip: 'Sync now', onPressed: _load,
               icon: const Icon(Icons.sync, size: 16, color: Colors.white70)),
-            const Text('Earnings: monthly & weekly salary — see your agreement',
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white70)),
           ]),
           const SizedBox(height: 12),
           Row(children: [
@@ -1608,8 +1646,23 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           Row(children: [
             Icon(Icons.circle, size: 7, color: Colors.greenAccent.withValues(alpha: 0.9)),
             const SizedBox(width: 6),
-            Text('$parcels parcels · synced $_statsSynced · auto 20 s',
-                style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.6), fontWeight: FontWeight.w600)),
+            Expanded(
+              child: Text('$parcels parcels · synced $_statsSynced · auto 20 s',
+                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.6), fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          // Salary note on its own full-width line (owner bug 2026-11-20: it
+          // sat in the header Row and overlapped the card's right edge).
+          Row(children: [
+            const Icon(Icons.badge_outlined, size: 12, color: Colors.white70),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Earnings: monthly & weekly salary — see your agreement',
+                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.7))),
+            ),
           ]),
         ]),
       ),
@@ -1815,7 +1868,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           tooltip: 'Update stop',
           visualDensity: VisualDensity.compact,
           icon: _busyRef == ref
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const AppLogoSpinner(size: 18)
               : Icon(picked ? Icons.check_circle : Icons.check_circle_outline, color: AppColors.forest),
           onPressed: () => _advanceStop(s),
         ),
@@ -1850,9 +1903,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final parts = <String>[
       if (range.isNotEmpty) 'Window $range',
       'Target depot drop-off: before $target',
-      '· ~${b['minutes_on_road']} min on the road',
+      '· ~${_routeDuration(b['minutes_on_road'])} route',
     ];
     return parts.join(' · ');
+  }
+
+  /// Human route time — "45 min" / "1 h 20 min", never a bare "1034 min"
+  /// (owner audit 2026-11-20).
+  String _routeDuration(dynamic raw) {
+    final mins = (raw as num?)?.toInt() ?? 0;
+    if (mins <= 0) return '—';
+    if (mins < 60) return '$mins min';
+    final h = mins ~/ 60, m = mins % 60;
+    return m == 0 ? '$h h' : '$h h $m min';
   }
 }
 
@@ -1981,7 +2044,7 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
                   : _wb == null
                       ? const Padding(
                           padding: EdgeInsets.symmetric(vertical: 40),
-                          child: Center(child: CircularProgressIndicator()),
+                          child: Center(child: AppLogoSpinner(size: 26)),
                         )
                       : _card(),
             ),

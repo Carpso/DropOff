@@ -5,6 +5,7 @@ import '../data/dropoff_api.dart';
 import '../ui/in_app_browser.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_spinner.dart';
 
 /// Parses a server timestamp ("2026-11-17 05:09:12", always UTC) into the
 /// phone's local time. Every screen formats times through this so the CAT
@@ -51,7 +52,7 @@ class AuthedImage extends StatelessWidget {
         fit: fit,
         headers: DropOffApi.token == null ? null : {'Authorization': 'Bearer ${DropOffApi.token}'},
         loadingBuilder: (_, child, progress) =>
-            progress == null ? child : _box(child: const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+            progress == null ? child : _box(child: const AppLogoSpinner(size: 18)),
         errorBuilder: (_, __, ___) => _box(),
       ),
     );

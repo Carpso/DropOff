@@ -7,11 +7,13 @@
 // ─────────────────────────────────────────────────────────────────────
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'photo_stamp.dart';
 
 /// REST client for the DropOff Cloudflare Worker (workers/src/index.ts).
 ///
@@ -1390,10 +1392,34 @@ class DropOffApi {
   static Future<ApiResponse> uploadImage(List<int> bytes, String filename, {String kind = 'kyc'}) async {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
+      // EVIDENCE STAMP (owner directive 2026-11-20): every sender/rider photo
+      // is burned with the DropOff watermark + exact CAT capture time before
+      // it leaves the phone. Re-encoded as JPEG so the stamp is part of the
+      // pixels the server stores. Failures fall back to the original bytes.
+      //
+      // SPEED (owner request 2026-11-20: "quicken photo uploads"): the decode →
+      // resize → watermark → JPEG encode runs in a BACKGROUND ISOLATE, and the
+      // image is capped at 1600 px on the long side. A modern phone shot is
+      // 4000–8000 px (5–10 MB); 1600 px is ~300–500 KB, so the upload itself
+      // finishes several times faster while staying crisp evidence.
+      var payload = bytes;
+      var uploadName = filename;
+      final tag = switch (kind) {
+        'receipt' => 'RECEIPT',
+        'selfie' => 'SELFIE',
+        _ => 'EVIDENCE',
+      };
+      final Uint8List source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+      final Uint8List? stamped = await compute(_stampInIsolate, _StampJob(source, tag));
+      if (stamped != null) {
+        payload = stamped;
+        final dot = filename.lastIndexOf('.');
+        uploadName = '${dot > 0 ? filename.substring(0, dot) : filename}.jpg';
+      }
       final req = http.MultipartRequest('POST', _uri('/uploads'))
         ..headers.addAll(authHeaders)
         ..fields['kind'] = kind
-        ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+        ..files.add(http.MultipartFile.fromBytes('file', payload, filename: uploadName));
       final streamed = await req.send().timeout(const Duration(seconds: 45));
       final res = await http.Response.fromStream(streamed);
       final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
@@ -1462,4 +1488,15 @@ class ApiResponse {
 
   const ApiResponse({this.status, this.ok = false, this.body = const {}, this.error});
 }
+
+/// Arguments for the background photo-stamping isolate (must be sendable).
+class _StampJob {
+  final Uint8List bytes;
+  final String tag;
+  const _StampJob(this.bytes, this.tag);
+}
+
+/// Top-level so `compute` can spawn it; returns null when the bytes are not a
+/// decodable image (the caller uploads the original unchanged).
+Uint8List? _stampInIsolate(_StampJob job) => PhotoStamp.tryApply(job.bytes, tag: job.tag);
 

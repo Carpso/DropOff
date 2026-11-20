@@ -2957,6 +2957,11 @@ app.get('/jobs/:ref/live', async (c) => {
     seen_at: job.last_seen_at,
     pickup_lat: job.pickup_lat ?? null,
     pickup_lng: job.pickup_lng ?? null,
+    // A collection starts AT the depot and ends at the recipient's door —
+    // the sender's live map must not draw the depot as the journey's end
+    // (owner directive 2026-11-20: "on collection the depot pin remove it").
+    service: job.service ?? 'standard',
+    status: job.status ?? null,
     // END of the visible leg: the courier's depot branch — real stored
     // coordinates (jobs carry no destination GPS, only an address string),
     // so the tracking map can draw where the journey ends (owner 2026-11-18).
@@ -3246,6 +3251,33 @@ app.post('/admin/jobs/seed-sweep', async (c) => {
 // Auth: ops key, admin key, or the ASSIGNED rider's own JWT. Statuses move
 // pickup -> picked_up -> at_depot -> departed -> arrived -> delivered/ready.
 // Also logs waiting minutes (billed) and COD collections (credited to rider float).
+
+/** The item's own name, taken from the sender's booking description (the
+ * first word, e.g. "Books"), so milestone messages say "your Books ..."
+ * instead of a generic "parcel" (owner request 2026-11-20). Falls back to
+ * "item" when the sender left no description. */
+function itemNameOf(job: any): string {
+  const words = String(job?.description ?? '')
+    .trim()
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
+  if (!words.length) return 'item';
+  const word = words[0];
+  return word[0].toUpperCase() + word.slice(1);
+}
+
+/** Where this leg actually ends. Collections start AT the depot and finish at
+ * the recipient's door, so "heading to the depot" was a lie for them.
+ * First-mile jobs end at the REAL depot name (Mercury, Platinum, …), not a
+ * generic "the depot" (owner request 2026-11-20). */
+function legDestinationOf(job: any): string {
+  if (String(job?.service ?? '') === 'collection') return "the recipient's door";
+  const branch = String(job?.branch ?? '').trim();
+  if (branch) return `${branch} depot`;
+  const depot = String(job?.depot_name ?? '').trim();
+  return depot ? `${depot} depot` : 'the depot';
+}
+
 app.post('/jobs/:ref/events', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ error: 'invalid JSON body' }, 400);
@@ -3260,11 +3292,32 @@ app.post('/jobs/:ref/events', async (c) => {
             j.total_zmw, j.wait_minutes, j.wait_fee_zmw, j.pay_method, j.paid,
             j.courier_id, j.from_city, j.dest_city, j.weight_class, j.service,
             j.dropoff_photo_url, j.pod_pickup_url, j.pod_delivery_url,
+            j.status AS job_status, j.collection_receipt_url,
+            j.description, j.branch, co.depot_name,
             r.phone AS rider_phone
-       FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
+       FROM jobs j
+       LEFT JOIN riders r ON r.id = j.rider_id
+       LEFT JOIN couriers co ON co.id = j.courier_id
       WHERE j.ref = ?1`,
   ).bind(c.req.param('ref')).first() as any;
   if (!job) return c.json({ error: 'not found' }, 404);
+  // ONE-SHOT HANDOVER (owner bug 2026-11-20: "submitting photo for handover
+  // keeps accepting submissions"): once the parcel is handed over, a second
+  // (or third) submit must never re-file the evidence / re-trigger handover
+  // side effects. The app treats this 409 as "already done" and refreshes.
+  const reached = String(job.job_status ?? '');
+  if (status === 'delivered' && reached === 'delivered') {
+    return c.json({
+      error: 'already_delivered',
+      detail: 'This handover is already filed — the photo and code on record are final.',
+    }, 409);
+  }
+  if (status === 'picked_up' && ['picked_up', 'at_depot', 'departed', 'arrived', 'delivered', 'ready_for_collection'].includes(reached)) {
+    return c.json({
+      error: 'already_picked_up',
+      detail: 'The pickup is already filed for this parcel — open the next step instead.',
+    }, 409);
+  }
 
   // authorization: ops/admin keys, or the assigned rider's own JWT.
   // Applies to every authenticated role — not just 'customer' — so a rider,
@@ -3648,20 +3701,25 @@ app.post('/jobs/:ref/events', async (c) => {
   const routeCity = (job.branch?.trim() ? job.branch : null) ?? job.dest_city?.trim() ?? job.to_city?.trim() ?? job.from_city?.trim() ?? null;
   const originCity = job.from_city?.trim() || null;
   const destCity = job.dest_city?.trim() || job.to_city?.trim() || null;
+  const itemName = itemNameOf(job);
+  const legDest = legDestinationOf(job);
+  const isCollectionJob = String(job.service ?? '') === 'collection';
   const chatEvent = (() => {
     switch (status) {
-      case 'rider_assigned': return `SYSTEM: Rider is on the way to the pickup${originCity ? ` in ${originCity}` : ''} — parcel handoff in progress.`;
+      case 'rider_assigned': return `SYSTEM: Rider is on the way to the pickup${originCity ? ` in ${originCity}` : ''} — ${itemName} handoff in progress.`;
       case 'picked_up':
-        return `SYSTEM: Picked up by the rider — en route to ${(job.branch?.trim()) || 'the depot'}.`;
+        return `SYSTEM: ${itemName} picked up by the rider — en route to ${legDest}.`;
       case 'at_depot':
-        return `SYSTEM: Parcel dropped at ${(job.branch?.trim()) || 'the courier depot'} — awaiting lodgement.`;
+        return isCollectionJob
+          ? `SYSTEM: ${itemName} collected from the depot — en route to the recipient's door.`
+          : `SYSTEM: ${itemName} dropped at ${legDest} — awaiting lodgement.`;
       case 'departed':
-        return `SYSTEM: Parcel dispatched from ${originCity ?? 'the depot'} to ${destCity ?? 'the destination'}.`;
+        return `SYSTEM: ${itemName} dispatched from ${originCity ?? 'the depot'} to ${destCity ?? legDest}.`;
       case 'arrived':
-        return `SYSTEM: Parcel arrived at ${destCity ?? routeCity ?? 'the destination'} — awaiting collection.`;
-      case 'delivered':      return `SYSTEM: Parcel delivered — journey complete.`;
+        return `SYSTEM: ${itemName} arrived at ${destCity ?? routeCity ?? legDest} — awaiting collection.`;
+      case 'delivered':      return `SYSTEM: ${itemName} delivered — journey complete.`;
       case 'ready_for_collection':
-        return `SYSTEM: Parcel ready for collection at ${(job.branch?.trim()) || 'the depot'}.`;
+        return `SYSTEM: ${itemName} ready for collection at ${legDest}.`;
       default: return '';
     }
   })();
@@ -3729,14 +3787,28 @@ app.post('/jobs/:ref/events', async (c) => {
   ).bind(job.id).first();
   // FCM push to the sender — status transitions are the parcel's whole story.
   if (status && updated) {
+    // Milestone copy uses the sender's own item name + the REAL destination
+    // name, and collection jobs head to the recipient's door, not the depot
+    // (owner request 2026-11-20). "Kigoda" (non-English) removed — all copy is
+    // English only.
     const stagePush: Record<string, { title: string; body: string }> = {
       rider_assigned: { title: 'Rider assigned', body: 'Your DropOff rider is on it — track them live in Bookings.' },
-      picked_up: { title: 'Parcel picked up', body: 'Collected from the sender — heading to the depot.' },
-      at_depot: { title: 'At the depot', body: 'Your parcel reached the depot. You can follow the journey live.' },
-      departed: { title: 'On the way', body: 'Left the depot on the DropOff leg.' },
-      arrived: { title: 'Arrived', body: 'Your parcel arrived at the destination city.' },
-      ready_for_collection: { title: 'Ready for collection', body: 'The parcel is waiting at your depot for pickup.' },
-      delivered: { title: 'Delivered', body: 'Success — the parcel is signed in at the depot. Kigoda.' },
+      picked_up: {
+        title: `${itemName} picked up`,
+        body: isCollectionJob
+          ? "Collected from the depot — heading to the recipient's door."
+          : `Collected from the sender — heading to ${legDest}.`,
+      },
+      at_depot: { title: 'At the depot', body: `Your ${itemName} reached ${legDest}. You can follow the journey live.` },
+      departed: { title: 'On the way', body: isCollectionJob ? `Left the depot — heading to ${legDest}.` : `Left ${legDest} on the DropOff leg.` },
+      arrived: { title: 'Arrived', body: `Your ${itemName} arrived at the destination city.` },
+      ready_for_collection: { title: 'Ready for collection', body: `Your ${itemName} is waiting at ${legDest} for collection.` },
+      delivered: {
+        title: 'Delivered',
+        body: isCollectionJob
+          ? `Success — your ${itemName} was handed to the recipient. Thank you for using DropOff.`
+          : `Success — your ${itemName} is signed in at ${legDest}. Thank you for using DropOff.`,
+      },
     };
     const push = stagePush[status];
     if (push) {
@@ -3748,12 +3820,18 @@ app.post('/jobs/:ref/events', async (c) => {
     if (status && smsMilestones.has(status) && job.sender_phone && job.recipient_phone) {
       const ref = String(updated.ref);
       const body = status === 'delivered'
-        ? `DropOff: your parcel ${ref} is delivered at the depot. Track it in the DropOff app.`
+        ? isCollectionJob
+          ? `DropOff: your ${itemName} ${ref} was delivered to the recipient. Track it in the DropOff app.`
+          : `DropOff: your ${itemName} ${ref} is delivered at ${legDest}. Track it in the DropOff app.`
         : status === 'ready_for_collection'
-          ? `DropOff: your parcel ${ref} is ready for collection at the depot.`
+          ? `DropOff: your ${itemName} ${ref} is ready for collection at ${legDest}.`
           : status === 'at_depot'
-            ? `DropOff: your parcel ${ref} reached the depot.`
-            : `DropOff: your parcel ${ref} was picked up and is heading to the depot.`;
+            ? isCollectionJob
+              ? `DropOff: your ${itemName} ${ref} was collected from the depot.`
+              : `DropOff: your ${itemName} ${ref} reached ${legDest}.`
+            : isCollectionJob
+              ? `DropOff: your ${itemName} ${ref} was picked up from the depot and is heading to the recipient's door.`
+              : `DropOff: your ${itemName} ${ref} was picked up and is heading to ${legDest}.`;
       await Promise.allSettled([
         sendSms(c.env, job.sender_phone, body, { transactional: true }),
         sendSms(c.env, job.recipient_phone, body, { transactional: true }),
@@ -6265,7 +6343,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       ]);
       await sendToPhone(env, pay.phone, {
         title: 'Receipt unlocked',
-        body: `Counter fare for ${job.ref ?? 'your parcel'} paid — the depot receipt photo is now visible in Bookings.`,
+        body: `Counter fare for ${job.ref ?? 'your item'} paid — the depot receipt photo is now visible in Bookings.`,
         data: { job_ref: job.ref ?? '', kind: 'counter_fare_paid' },
       });
       // Fire-and-forget: the reimbursement does its own error bookkeeping.
@@ -7487,6 +7565,7 @@ async function nearestAvailableRider(
   };
   let best: { rider: any; km: number } | null = null;
   let bestScore = Infinity;
+  let bestLoad = Infinity;
   for (const r of (riders.results ?? [])) {
     const riderId = Number(r.id);
     if (atDepot.has(riderId)) {
@@ -7497,8 +7576,18 @@ async function nearestAvailableRider(
     if (load >= cap) continue;
     const penalty = freshnessPenalty(r.last_seen_at);
     const km = haversine(lat, lng, Number(r.last_lat ?? -15.4255), Number(r.last_lng ?? 28.2805));
-    const score = km + penalty + load * 0.5; // near, then fresh, then emptier
-    if (!best || score < bestScore) { best = { rider: r, km }; bestScore = score; }
+    // NEAREST-FIRST (owner directive 2026-11-20): distance is the priority.
+    // The old score added load * 0.5 km, which could hand a job to a rider
+    // 10 km further away just because they were idle. Load now only breaks
+    // near-exact distance ties, so the closest available rider always wins.
+    const score = km + penalty;
+    const nearer = score < bestScore - 0.001;
+    const tie = Math.abs(score - bestScore) <= 0.001 && load < bestLoad;
+    if (!best || nearer || tie) {
+      best = { rider: r, km };
+      bestScore = score;
+      bestLoad = load;
+    }
   }
   return best;
 }
@@ -7814,14 +7903,13 @@ app.get('/rider/queue', async (c) => {
       let curLng = Number(rider.last_lng ?? depot.lng);
       const remaining = [...jobs];
       const stops: any[] = [];
-      // LIVE CHAIN (owner directive 2026-11-17): the chain ticks with the
-      // clock — it starts at max(slot start, now CAT), so times recompute
-      // from reality on every refresh instead of showing a stale plan.
-      const clockMin = slot === TOMORROW_SLOT
-        ? minutesOf(meta.start) // tomorrow's slot has not started yet
-        : Math.max(minutesOf(meta.start), nowCatMin);
+      // STABLE PLAN TIMES (owner bug 2026-11-20: "orders time keeps changing
+      // to the current time"): the stop chain is anchored to the SLOT START,
+      // not to the live clock. A rider refreshing the queue must see the same
+      // pickup times every poll; lateness is shown separately ("starts in /
+      // min in"), never by rewriting the order's time on every refresh.
+      const clockMin = minutesOf(meta.start);
       let chainMin = clockMin; // mutable running clock for the ETA chain
-      const slotStartMin = minutesOf(meta.start);
       while (remaining.length) {
         let bestIdx = 0;
         let bestKm = Infinity;
@@ -7895,7 +7983,12 @@ app.get('/rider/queue', async (c) => {
         total_stops: jobs.length,
         destination: dest ? { courier: dest.name, branch: dest.branch, city: dest.city } : null,
         target_dropoff: meta.target,
-        minutes_on_road: chainMin - slotStartMin,
+        // ROUTE TIME, not wall-clock offset (owner bug 2026-11-20: "1034 min
+        // on the road?"): the chain now starts at max(slot start, now), so
+        // subtracting the slot start counted hours that had ALREADY ELAPSED
+        // before the rider even opened the app. This is the real time the run
+        // spends moving between stops.
+        minutes_on_road: Math.max(0, chainMin - clockMin),
         stops,
       };
     });
@@ -9246,7 +9339,8 @@ app.get('/media/*', async (c) => {
         `SELECT j.sender_phone, r.phone AS rider_phone
            FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
           WHERE j.parcel_photo_url = ?1 OR j.dropoff_photo_url = ?1
-             OR j.pod_pickup_url = ?1 OR j.pod_delivery_url = ?1 LIMIT 1`,
+             OR j.pod_pickup_url = ?1 OR j.pod_delivery_url = ?1
+             OR j.collection_receipt_url = ?1 LIMIT 1`,
       ).bind(`/media/${key}`).first<any>();
       const participant = !!linked
         && (linked.sender_phone === c.get('phone') || linked.rider_phone === c.get('phone'));
@@ -11560,58 +11654,93 @@ async function cancelExpiredHolds(env: Env): Promise<number> {
   return (results ?? []).length;
 }
 
-async function cancelStaleOrders(env: Env): Promise<{ canceled: number }> {
-  let canceled = 0;
-  // A) assigned rides that never entered 'picked_up' within 3 hours
+/// Next open sweep after "now" in CAT (UTC+2). Used when a window elapses:
+/// the booking rolls forward instead of dying.
+function nextSweepAfterNow(): { window: string; pickupAt: string } {
+  const cat = new Date(Date.now() + 2 * 3600_000);
+  const nowMin = cat.getUTCHours() * 60 + cat.getUTCMinutes();
+  const slots: Array<{ window: string; start: number }> = [
+    { window: '06:00', start: 360 },
+    { window: '10:00', start: 600 },
+    { window: '14:00', start: 840 },
+  ];
+  const upcoming = slots.find((s) => s.start > nowMin);
+  const chosen = upcoming ?? slots[0];
+  const dayOffset = upcoming ? 0 : 1;
+  // 06:00 CAT == 04:00 UTC, so subtract the CAT offset when building the ISO.
+  const pickup = new Date(Date.UTC(
+    cat.getUTCFullYear(), cat.getUTCMonth(), cat.getUTCDate() + dayOffset,
+    Math.floor(chosen.start / 60) - 2, chosen.start % 60,
+  ));
+  return { window: chosen.window, pickupAt: pickup.toISOString() };
+}
+
+/// NO LATE CANCELLATIONS (owner directive 2026-11-20): when a window elapses
+/// the booking ROLLS FORWARD to the next open sweep. A rider who accepted but
+/// never started is released so the parcel lands back on the claim board for
+/// any available rider. No strike, no auto-cancel, no refund — the sender's
+/// parcel and money stay exactly where they are.
+async function cancelStaleOrders(env: Env): Promise<{ canceled: number; rolled: number; released: number }> {
+  const canceled = 0;
+  let rolled = 0;
+  let released = 0;
+  const next = nextSweepAfterNow();
+  // A) accepted but never picked up, and the booked pickup moment has passed.
   const staleAssigned = await env.DB.prepare(
-    `SELECT j.id, j.ref, j.sender_phone, r.id AS rider_id
+    `SELECT j.id, j.ref, j.sender_phone, j.pickup_at, r.id AS rider_id
        FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
-      WHERE j.status = 'rider_assigned' AND j.assigned_at < datetime('now', '-3 hours')`,
+      WHERE j.status = 'rider_assigned'
+        AND j.pickup_at IS NOT NULL
+        AND datetime(j.pickup_at) < datetime('now', '-30 minutes')
+        AND NOT EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.status = 'picked_up')
+      LIMIT 25`,
   ).all<any>();
   for (const job of staleAssigned.results ?? []) {
     try {
       await env.DB.batch([
         env.DB.prepare(
-          `UPDATE jobs SET status = 'canceled' WHERE id = ?1 AND status = 'rider_assigned'`,
-        ).bind(job.id),
+          `UPDATE jobs SET rider_id = NULL, status = 'created', assigned_at = NULL,
+                  pickup_window = ?2, pickup_at = ?3
+            WHERE id = ?1 AND status = 'rider_assigned'`,
+        ).bind(job.id, next.window, next.pickupAt),
         ...(job.rider_id ? [env.DB.prepare(
           `UPDATE riders SET current_load = MAX(0, current_load - 1), status = 'available', route_updated_at = datetime('now') WHERE id = ?1`,
         ).bind(job.rider_id)] : []),
-        env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'auto_canceled_no_show', ?2)`)
-          .bind(job.id, 'Sender never handed the parcel over (3h grace) — auto-canceled; a no-show strike was recorded.'),
+        env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rolled_forward', ?2)`)
+          .bind(job.id, `Pickup window elapsed before collection — moved to the ${next.window} sweep and back on the claim board for any available rider. The booking was NOT canceled.`),
       ]);
-      await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
-      await sendSms(env, job.sender_phone,
-        `DropOff: ${job.ref} was auto-canceled because the parcel wasn't handed over in time (no-show). Repeated missed pickups can pause new bookings.`, { transactional: true }).catch(() => {});
-      await refundUnspentPrepaid(env, job).catch(() => { /* refund bookkeeping never breaks the cron */ });
-      canceled++;
+      await sendToPhone(env, job.sender_phone, {
+        title: 'Pickup moved to the next window',
+        body: `${job.ref} moved to the ${next.window} sweep and is back on the rider claim board. Your booking is still live — nothing was charged again.`,
+        data: { job_ref: job.ref, kind: 'rolled_forward' },
+      });
+      rolled++;
+      released++;
     } catch { /* never break the minute cron */ }
   }
-  // B) slotted (never assigned) bookings whose window is long past
+  // B) never claimed: roll the window forward and keep it claimable.
   const staleUnassigned = await env.DB.prepare(
-    `SELECT j.id, j.ref, j.sender_phone
+    `SELECT j.id, j.ref, j.sender_phone, j.pickup_at
        FROM jobs j
-      WHERE j.status = 'created'
-        AND j.pickup_window IS NOT NULL AND j.pickup_window <> 'now'
-        AND datetime(j.created_at, '+16 hours') < datetime('now')`,
+      WHERE j.status = 'created' AND j.rider_id IS NULL
+        AND ((j.pickup_at IS NOT NULL AND datetime(j.pickup_at) < datetime('now', '-30 minutes'))
+             OR (j.pickup_at IS NULL AND datetime(j.created_at, '+6 hours') < datetime('now')))
+      LIMIT 25`,
   ).all<any>();
   for (const job of staleUnassigned.results ?? []) {
     try {
       await env.DB.batch([
         env.DB.prepare(
-          `UPDATE jobs SET status = 'canceled' WHERE id = ?1 AND status = 'created'`,
-        ).bind(job.id),
-        env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'auto_canceled_no_show', ?2)`)
-          .bind(job.id, 'Slotted booking stayed unassigned far past its window — auto-canceled; a no-show strike was recorded.'),
+          `UPDATE jobs SET pickup_window = ?2, pickup_at = ?3
+            WHERE id = ?1 AND status = 'created' AND rider_id IS NULL`,
+        ).bind(job.id, next.window, next.pickupAt),
+        env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rolled_forward', ?2)`)
+          .bind(job.id, `Window elapsed with no rider claim — rolled to the ${next.window} sweep and kept on the claim board. The booking was NOT canceled.`),
       ]);
-      await addStrike(env, job.sender_phone, job.id, 'no_show_pickup');
-      await sendSms(env, job.sender_phone,
-        `DropOff: ${job.ref} was auto-canceled after its slot window (no-show). Repeated missed pickups can pause new bookings.`, { transactional: true }).catch(() => {});
-      await refundUnspentPrepaid(env, job).catch(() => { /* refund bookkeeping never breaks the cron */ });
-      canceled++;
+      rolled++;
     } catch { /* never break the minute cron */ }
   }
-  return { canceled };
+  return { canceled, rolled, released };
 }
 
 /* ------------ cron: auto-dispatch paid-but-unassigned jobs ----------------- */

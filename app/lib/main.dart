@@ -30,6 +30,7 @@ import 'ui/app_theme.dart';
 import 'data/push_service.dart';
 import 'services/device_lock.dart';
 import 'widgets/common.dart';
+import 'ui/app_spinner.dart';
 
 /// Root navigator so push-notification taps and deep links can open the right screen from anywhere.
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -341,7 +342,7 @@ class _SplashScreenState extends State<_SplashScreen> {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           DropOffLogo(size: 46),
           SizedBox(height: 16),
-          SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.amber)),
+          AppLogoSpinner(size: 28, color: AppColors.amber),
           SizedBox(height: 12),
           Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
         ]),
@@ -408,7 +409,7 @@ class _PasswordReauthGate extends StatelessWidget {
                 style: FilledButton.styleFrom(backgroundColor: AppColors.amber, foregroundColor: AppColors.forest, minimumSize: const Size.fromHeight(52)),
                 onPressed: busy ? null : onSubmit,
                 icon: busy
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.forest))
+                    ? const AppLogoSpinner(size: 18, color: AppColors.forest)
                     : const Icon(Icons.login_rounded),
                 label: Text(busy ? 'Checking…' : 'Unlock', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
               ),

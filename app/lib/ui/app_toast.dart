@@ -79,7 +79,7 @@ class AppToast {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       backgroundColor: bg,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      content: Row(mainAxisSize: MainAxisSize.min, children: [
+      content: Row(mainAxisSize: MainAxisSize.max, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           padding: const EdgeInsets.all(5),
           decoration: BoxDecoration(
@@ -89,8 +89,13 @@ class AppToast {
           child: Icon(icon, color: Colors.white, size: 18),
         ),
         const SizedBox(width: 10),
-        Expanded(
+        // Flexible — never Expanded inside a min-size Row: intrinsic sizing
+        // collapsed the text to a 0-width column, which rendered long messages
+        // (e.g. "Your plan cap is reached — …") as VERTICAL text
+        // (owner bug 2026-11-20).
+        Flexible(
           child: Text(message,
+              softWrap: true,
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13, height: 1.32)),
         ),
       ]),

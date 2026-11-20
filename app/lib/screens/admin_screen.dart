@@ -1,4 +1,4 @@
-import '../ui/app_toast.dart';
+﻿import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_spinner.dart';
 
 /// Admin console inside the app: live business stats, security
 /// alerts, the fraud queue, depot branches, and SMS broadcasts. The screen
@@ -152,7 +153,7 @@ class _AdminScreenState extends State<AdminScreen> {
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Admin console', style: TextStyle(fontWeight: FontWeight.w900))),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const Center(child: AppLogoSpinner(size: 26)),
       );
     }
     if (!_authorized) {
@@ -1021,7 +1022,7 @@ class _SupportInboxCardState extends State<_SupportInboxCard> {
           ]),
           const SizedBox(height: 6),
           if (_loading)
-            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+            const Padding(padding: EdgeInsets.all(14), child: Center(child: AppLogoSpinner(size: 26)))
           else if (_threads.isEmpty)
             const Text('No tickets. Everyone is happy.', style: TextStyle(color: AppColors.ink, fontSize: 12.5))
           else
@@ -1263,7 +1264,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
           const Divider(height: 1),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: AppLogoSpinner(size: 26))
                 : _error != null
                     ? Center(
                         child: Padding(
@@ -1309,7 +1310,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
                   TextButton.icon(
                     onPressed: _drafting ? null : _aiDraft,
                     icon: _drafting
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const AppLogoSpinner(size: 14)
                         : const Icon(Icons.auto_awesome, size: 16),
                     label: const Text('AI draft reply'),
                   ),
@@ -1337,7 +1338,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
                 IconButton.filled(
                   onPressed: _sending ? null : _send,
                   icon: _sending
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const AppLogoSpinner(size: 18)
                       : const Icon(Icons.send_rounded),
                   ),
                 ]),
@@ -1511,7 +1512,7 @@ class _UsersCardState extends State<_UsersCard> {
               style: AppType.caption),
           const SizedBox(height: 8),
           if (_loading)
-            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+            const Padding(padding: EdgeInsets.all(14), child: Center(child: AppLogoSpinner(size: 26)))
           else if (_users.isEmpty)
             const Text('No accounts found.', style: TextStyle(color: AppColors.ink, fontSize: 12.5))
           else
@@ -1666,7 +1667,7 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
               style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
               onPressed: _busy ? null : _delete,
               icon: _busy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const AppLogoSpinner(size: 16, color: Colors.white)
                   : const Icon(Icons.delete_outline, size: 18),
               label: const Text('Delete'),
             ),
@@ -2028,7 +2029,7 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
             FilledButton.icon(
               onPressed: _busy ? null : _save,
               icon: _busy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : const Icon(Icons.save_outlined),
               label: Text(_busy ? 'Saving…' : 'Save to chargebook'),
             ),
@@ -2229,7 +2230,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
           ]),
           const SizedBox(height: 8),
           if (_loadingHistory)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
+            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: AppLogoSpinner(size: 18)))
           else
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 360),
@@ -2470,7 +2471,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             IconButton(
               tooltip: 'Refresh',
               icon: _loading
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : const Icon(Icons.refresh, size: 20),
               onPressed: _loading ? null : _load,
             ),
@@ -2621,7 +2622,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
             IconButton(
               tooltip: 'Refresh',
               icon: _loading
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : const Icon(Icons.refresh, size: 20),
               onPressed: _loading ? null : _load,
             ),
@@ -2790,7 +2791,7 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
             IconButton(
               tooltip: 'Refresh',
               icon: _loading
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : const Icon(Icons.refresh, size: 20),
               onPressed: _loading ? null : _load,
             ),
@@ -3038,7 +3039,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
           ]),
           const SizedBox(height: 8),
           if (_loading)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
+            const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: AppLogoSpinner(size: 18)))
           else if (_riders.isEmpty)
             const Text('No riders registered yet.', style: TextStyle(color: AppColors.muted, fontSize: 12))
           else
@@ -3255,7 +3256,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
           ]),
           const SizedBox(height: 12),
           if (_loading)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
+            const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Center(child: AppLogoSpinner(size: 18)))
           else ...[
             const Text('Operations — the real work (live data)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: AppColors.ink)),
             const SizedBox(height: 6),
@@ -3460,7 +3461,7 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
           ),
           const SizedBox(height: 12),
           if (_loading)
-            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+            const Padding(padding: EdgeInsets.all(14), child: Center(child: AppLogoSpinner(size: 26)))
           else if (days.isEmpty)
             const Text('No bookings in the last 8 weeks to learn from yet.', style: TextStyle(color: AppColors.ink, fontSize: 12.5))
           else ...[
@@ -3578,7 +3579,7 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
           const Text('Refunds retry every 30 minutes until Lipila confirms. Only you and staff see this ledger.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
           const SizedBox(height: 10),
           if (_loading)
-            const Padding(padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator()))
+            const Padding(padding: EdgeInsets.all(12), child: Center(child: AppLogoSpinner(size: 26)))
           else if (_rows.isEmpty)
             const Text('No payouts queued.', style: TextStyle(fontSize: 12.5))
           else
@@ -3607,7 +3608,7 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
                         tooltip: 'Retry now (superadmin)',
                         onPressed: _busyId != null ? null : () => _retry(id),
                         icon: _busyId == id
-                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            ? const AppLogoSpinner(size: 16)
                             : const Icon(Icons.replay, size: 19),
                       ),
                   ]),
@@ -3709,7 +3710,7 @@ class _ClientCrashesCardState extends State<_ClientCrashesCard> {
           ]),
           const SizedBox(height: 2),
           if (_loading)
-            const Padding(padding: EdgeInsets.all(14), child: Center(child: CircularProgressIndicator()))
+            const Padding(padding: EdgeInsets.all(14), child: Center(child: AppLogoSpinner(size: 26)))
           else ...[
             Text('$total crash${total == 1 ? '' : 'es'} in 24h — deduplicated. On a fresh build, any row below is urgent.', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
             const SizedBox(height: 6),

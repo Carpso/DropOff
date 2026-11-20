@@ -10,6 +10,8 @@ import '../ui/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/help_sheet.dart';
 import 'account_screen.dart';
+import '../ui/app_spinner.dart';
+import '../services/step_sounds.dart';
 
 /// Collect a parcel from a courier's point in Lusaka and deliver it to the
 /// recipient's door. No counter fare and no branch picking — the parcel is
@@ -144,6 +146,8 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     final url = '${up.body['url'] ?? ''}';
     if (url.isEmpty) return AppToast.error(context, 'The receipt upload returned no image. Try again.');
     setState(() => _receiptUrl = url);
+    await StepSounds.stepDone(); // receipt step complete (owner request 2026-11-20)
+    if (!mounted) return;
     AppToast.show(context, 'Receipt added — the rider will show it at the depot counter.');
   }
 
@@ -322,7 +326,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             hintText: points.isEmpty ? 'e.g. Longacres counter' : points.first,
             prefixIcon: const Icon(Icons.location_on_outlined),
             helperText: points.isEmpty ? 'Ask the courier which counter holds it.' : 'Popular: ${points.take(2).join(' · ')}',
-            suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_point), child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('✨ Tidy')),
+            suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_point), child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('✨ Tidy')),
           ),
         ),
         const SizedBox(height: 20),
@@ -332,7 +336,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         const SizedBox(height: 10),
         TextField(controller: _recipientPhone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Recipient mobile number', hintText: '0961234567', prefixIcon: Icon(Icons.phone_outlined))),
         const SizedBox(height: 10),
-        TextField(controller: _address, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Door address', hintText: 'e.g. 12 Kabwata Site, near the shops', prefixIcon: const Icon(Icons.house_outlined), alignLabelWithHint: true, suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_address), child: _aiBusy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('AI tidy')))),
+        TextField(controller: _address, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Door address', hintText: 'e.g. 12 Kabwata Site, near the shops', prefixIcon: const Icon(Icons.house_outlined), alignLabelWithHint: true, suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_address), child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('AI tidy')))),
         const SizedBox(height: 10),
         TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents (optional)', hintText: 'e.g. One carton of shoes', prefixIcon: Icon(Icons.inventory_2_outlined))),
         const SizedBox(height: 10),
@@ -376,7 +380,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             OutlinedButton.icon(
               onPressed: _receiptBusy ? null : _pickReceipt,
               icon: _receiptBusy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const AppLogoSpinner(size: 16)
                   : Icon(_receiptUrl != null ? Icons.camera_alt : Icons.add_a_photo),
               label: Text(_receiptBusy
                   ? 'Uploading receipt…'
@@ -543,7 +547,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         FilledButton(
           onPressed: _saving ? null : _submit,
           child: _saving
-              ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              ? const AppLogoSpinner(size: 22, color: Colors.white)
               : const Text('Book collection'),
         ),
       ],

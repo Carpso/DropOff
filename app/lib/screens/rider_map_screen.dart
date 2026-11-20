@@ -59,10 +59,18 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
   /// live API now serves — jobs carry no destination GPS). Shown as the
   /// warehouse pin so the tracking map reads start → rider → end (owner
   /// 2026-11-18: "show start and end of route to pick up and drop off").
-  LatLng? get _depot =>
-      (_live?['depot_lat'] != null && _live?['depot_lng'] != null)
-          ? LatLng((_live!['depot_lat'] as num).toDouble(), (_live!['depot_lng'] as num).toDouble())
-          : null;
+  ///
+  /// COLLECTIONS ARE REVERSED (owner directive 2026-11-20: "on collection the
+  /// depot pin remove it"): the parcel is already at the depot, so the depot
+  /// is the START, never the destination. No warehouse pin is drawn — the
+  /// route ends at the recipient's handover.
+  /// </summary>
+  LatLng? get _depot {
+    if ('${_live?['service'] ?? ''}' == 'collection') return null;
+    return (_live?['depot_lat'] != null && _live?['depot_lng'] != null)
+        ? LatLng((_live!['depot_lat'] as num).toDouble(), (_live!['depot_lng'] as num).toDouble())
+        : null;
+  }
 
   RouteResult? _route;
   LatLng? _routeOrigin;

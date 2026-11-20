@@ -1,5 +1,6 @@
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import '../ui/app_spinner.dart';
 
 /// Full-screen privacy policy / terms of use, rendered from bundled Markdown.
 class LegalScreen extends StatelessWidget {
@@ -19,7 +20,7 @@ class LegalScreen extends StatelessWidget {
         future: rootBundle.loadString(asset),
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done || !snap.hasData) {
-            return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+            return const Center(child: AppLogoSpinner(size: 22));
           }
           return ListView(
             padding: const EdgeInsets.all(18),

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
@@ -8,6 +8,7 @@ import '../widgets/common.dart';
 import 'tickets_screen.dart';
 import 'rider_map_screen.dart';
 import '../screens/account_screen.dart';
+import '../ui/app_spinner.dart';
 
 /// Recipient parcel tracking — the same view the SMS link opens, reachable
 /// in-app. Paste the tracking link or the token. The SERVER decides who sees
@@ -113,7 +114,7 @@ class _TrackScreenState extends State<TrackScreen> {
             ),
           ),
           const SizedBox(height: 14),
-          if (_loading) const Center(child: Padding(padding: EdgeInsets.all(22), child: CircularProgressIndicator())),
+          if (_loading) const Center(child: Padding(padding: EdgeInsets.all(22), child: AppLogoSpinner(size: 26))),
           if (_error != null)
             Text(_error!, style: const TextStyle(color: AppColors.ink, fontSize: 13)),
           if (gated) _accountCard(),

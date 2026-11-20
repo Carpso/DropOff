@@ -1,4 +1,4 @@
-import '../ui/app_toast.dart';
+﻿import '../ui/app_toast.dart';
 import '../widgets/help_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +14,7 @@ import 'admin_screen.dart';
 import 'booking_screen.dart';
 import 'coverage_screen.dart';
 import 'track_screen.dart';
+import '../ui/app_spinner.dart';
 
 /// The seller's business dashboard: plan usage, parcels in flight, delivered
 /// count, referral income — one glance, all server-backed. Shown as a bottom
@@ -322,7 +323,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
             const Text('Your plan, your parcels, your referrals — at a glance.', style: TextStyle(color: AppColors.muted, height: 1.4)),
             const SizedBox(height: 16),
             if (_loading)
-              const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+              const Padding(padding: EdgeInsets.all(24), child: Center(child: AppLogoSpinner(size: 26)))
             else ...[
               _planCard(),
               const SizedBox(height: 14),
