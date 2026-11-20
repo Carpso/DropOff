@@ -155,8 +155,17 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   matter what"); strikes now only produce warnings in the app. The
   no-show-based auto-cancel for riders still runs.
 
+- **Rider phone rings + stays awake on new order (owner 2026-11-20):**
+  `RiderQueueScreen` now tracks seen job refs and when NEW refs appear (first
+  poll after assignment), calls `HapticFeedback.heavyImpact()` +
+  `WakelockPlus.enable()` for 45 s. Worker push already alarms the phone; this
+  covers a rider with the app foreground-open and an idle phone.
+- **No rider earnings anywhere (owner 2026-11-20):** removed the rider stats
+  card's earned figure and the "BONUS K" figure from the targets strip —
+  riders see only counts, their income is salary.
+
 ### Release
-- Version bumped to `0.5.58+68` (57–67 are consumed or superseded on Play).
+- Version bumped to `0.5.59+69` (57–68 are consumed or superseded on Play).
 - **Pending network:** migration 0073/apply, worker deploy, git push and the
   release build could not complete while pub.dev/Cloudflare DNS was down —
   retry once connectivity returns. Do NOT change `tools/build_release.ps1`

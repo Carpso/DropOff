@@ -12,8 +12,10 @@ import '../widgets/help_sheet.dart';
 import '../widgets/tutorial_sheet.dart';
 import '../widgets/photo_preview.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../data/dropoff_api.dart';
 import '../data/map_services.dart';
@@ -73,6 +75,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   // same list; the first to claim owns it and it disappears for the others.
   List<Map<String, dynamic>> _available = const [];
   String? _claimingRef;
+
+  // NEW-ORDER ALERT (owner 2026-11-20): when the queue gains NEW assigned
+  // jobs, vibrate the phone AND keep the screen awake so the rider sees them
+  // even with the phone idle. Pings the user to notice a new order.
+  static const Duration _alarmWindow = Duration(seconds: 45);
+  final Set<String> _alarmSeenRefs = <String>{};
 
   // LIVE ARRIVAL WATCH (owner directive 2026-11-17): a GPS position stream
   // marks stops ARRIVED within [_arrivalMetres]; a manual tap marks too.
@@ -142,6 +150,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       _offline = data == null;
       _loading = false;
     });
+    if (data != null) await _ringForNewJobs(data['batches']);
     unawaited(_loadAvailable());
     // Stats ride the same 20 s poll — the card stays live with the queue.
     final stats = await DropOffApi.riderStats(widget.phone);
@@ -176,6 +185,28 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (!mounted) return;
     final t = tdata?['targets'] as Map<String, dynamic>?;
     if (t != null) setState(() => _targets = t);
+  }
+
+  /// RING + WAKE (owner 2026-11-20): when NEW jobs appear in the queue,
+  /// vibrate the phone and keep the screen awake so the rider sees a new
+  /// order even with the phone idle — the worker's FCM push is the loudest
+  /// alert, but the queue screen catching one alerts the rider immediately.
+  Future<void> _ringForNewJobs(dynamic batches) async {
+    if (!mounted) return;
+    final refs = <String>{};
+    for (final b in (batches as List?) ?? const <dynamic>[]) {
+      for (final s in ((b as Map)['stops'] as List?) ?? const <dynamic>[]) {
+        refs.add('${(s as Map)['ref'] ?? ''}');
+      }
+    }
+    refs.remove('');
+    if (refs.isEmpty) return;
+    final newRefs = refs.where((r) => !_alarmSeenRefs.contains(r)).toList();
+    _alarmSeenRefs.addAll(refs);
+    if (newRefs.isEmpty) return;
+    HapticFeedback.heavyImpact();
+    await WakelockPlus.enable();
+    Future<void>.delayed(_alarmWindow, () async => await WakelockPlus.disable());
   }
 
   /// Leftovers after automated dispatch. Refreshed with the queue — a claim by
@@ -1538,7 +1569,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final picked = (s['picked'] as num?)?.toInt() ?? 0;
     final delivered = (s['delivered'] as num?)?.toInt() ?? 0;
     final parcels = (s['parcels'] as num?)?.toInt() ?? 0;
-    final earned = (s['earned_zmw'] as num?)?.toDouble() ?? 0;
+  
     // Always visible (owner 2026-11-18): a quiet day still shows the card —
     // a zero-total card used to shrink away and look "missing".
     return Padding(
@@ -1561,10 +1592,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             // Manual sync — pull-to-refresh and the 20 s timer also refresh.
             IconButton(tooltip: 'Sync now', onPressed: _load,
               icon: const Icon(Icons.sync, size: 16, color: Colors.white70)),
-            Text('K${earned.toStringAsFixed(0)}',
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: AppColors.amber)),
-            const SizedBox(width: 4),
-            const Text('earned', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white70)),
+            const Text('Earnings: monthly & weekly salary — see your agreement',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white70)),
           ]),
           const SizedBox(height: 12),
           Row(children: [
@@ -1595,8 +1624,6 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final month = (t['month'] as num?)?.toInt() ?? 0;
     final pace = (t['pace_target'] as num?)?.toInt() ?? 0;
     final behind = (t['behind_by'] as num?)?.toInt() ?? 0;
-    final bonus = (t['bonus'] as Map?) ?? const {};
-    final bonusZmw = (bonus['total_bonus_zmw'] as num?)?.toDouble() ?? 0;
     final progress = daily > 0 ? (today / daily).clamp(0.0, 1.0) : 0.0;
     return Padding(
       padding: const EdgeInsets.only(top: 10),
@@ -1606,8 +1633,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           const SizedBox(width: 6),
           Expanded(child: Text('TODAY $today/$daily  ·  MONTH $month/$pace',
               style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800))),
-          Text('BONUS K${bonusZmw.toStringAsFixed(0)}',
-              style: const TextStyle(color: AppColors.amber, fontSize: 11, fontWeight: FontWeight.w900)),
+          const Text('Progress to the monthly target',
+              style: TextStyle(color: AppColors.amber, fontSize: 11, fontWeight: FontWeight.w900)),
         ]),
         const SizedBox(height: 5),
         ClipRRect(
