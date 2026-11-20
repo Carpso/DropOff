@@ -6535,8 +6535,11 @@ async function runPayoutQueue(env: Env): Promise<void> {
       if (!claim.meta.changes) continue;
       const note = p.kind === 'refund' ? `DropOff refund ${p.reference}` : `DropOff settlement ${p.reference}`;
       const disb = await lipilaDisburse(env, p.phone, Number(p.amount_zmw), p.reference, note);
+      const disbError = String(disb.raw ?? '').trim().length === 0
+        ? `Lipila HTTP ${disb.status}${disb.status === 401 ? ' (check LIPILA_API_KEY / IP allowlist)' : ''}`
+        : String(disb.raw).slice(0, 300);
       await logLipila(env, 'disbursement', p.reference, p.phone, Number(p.amount_zmw),
-        disb.ok ? 'pending' : 'failed', String(disb.raw ?? '').slice(0, 300));
+        disb.ok ? 'pending' : 'failed', disbError);
       if (disb.ok) {
         await env.DB.prepare(
           `UPDATE payouts SET status = 'pending', lipila_identifier = COALESCE(?2, lipila_identifier),
@@ -6548,7 +6551,7 @@ async function runPayoutQueue(env: Env): Promise<void> {
           `UPDATE payouts SET status = 'failed', last_error = ?2,
              next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
            WHERE id = ?1`,
-        ).bind(p.id, String(disb.raw ?? 'lipila disbursement failed').slice(0, 300)).run();
+        ).bind(p.id, disbError).run();
         await notifyPayout(env, 'Payout retry scheduled', `Payout ${p.reference} failed — retrying in 30 minutes. Check Lipila float/keys.`);
       }
     }
