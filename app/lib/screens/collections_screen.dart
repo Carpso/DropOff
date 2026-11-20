@@ -1,5 +1,6 @@
 import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
@@ -39,6 +40,10 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   // Retry state — set when the momo prompt fails so the form shows a Pay now button.
   String? _payRetryRef;
   double? _payRetryDue;
+  // Proof-of-payment receipt the rider shows at the courier depot to collect
+  // the goods. The rider later photographs the collected items at pickup.
+  String? _receiptUrl;
+  bool _receiptBusy = false;
 
   /// ✨ Tidy — normalises a free-text address (best-effort; never blocks).
   Future<void> _aiTidy(TextEditingController ctl) async {
@@ -96,6 +101,24 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     return now.hour * 60 + now.minute > int.parse(parts[0]) * 60 + int.parse(parts[1]);
   }
 
+  /// Capture the receipt proving the goods are paid for. The rider shows this
+  /// full-screen at the depot counter before collecting the parcel.
+  Future<void> _pickReceipt() async {
+    if (_receiptBusy) return;
+    final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
+    if (picked == null || !mounted) return;
+    setState(() => _receiptBusy = true);
+    final bytes = await picked.readAsBytes();
+    final up = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'receipt.jpg', kind: 'receipt');
+    if (!mounted) return;
+    setState(() => _receiptBusy = false);
+    if (!up.ok) return AppToast.error(context, 'Could not upload the receipt (${up.error}). Try again.');
+    final url = '${up.body['url'] ?? ''}';
+    if (url.isEmpty) return AppToast.error(context, 'The receipt upload returned no image. Try again.');
+    setState(() => _receiptUrl = url);
+    AppToast.show(context, 'Receipt added — the rider will show it at the depot counter.');
+  }
+
   Future<void> _submit() async {
     final store = AppScope.of(context);
     final serverCourierId = courierServerIdOf(_courierId);
@@ -135,6 +158,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       vehicleClass: _vehicleClass,
       payMethod: 'mobile_money',
       parcelSize: _size,
+      collectionReceiptUrl: _receiptUrl,
     );
     if (!mounted) return;
     if (!res.ok) {
@@ -284,6 +308,53 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents (optional)', hintText: 'e.g. One carton of shoes', prefixIcon: Icon(Icons.inventory_2_outlined))),
         const SizedBox(height: 10),
         TextField(controller: _senderName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Your name (optional)', prefixIcon: Icon(Icons.person_outline))),
+        const SizedBox(height: 14),
+        // COLLECTION RECEIPT (owner 2026-11-20): proof of payment for the goods
+        // at the courier depot. The rider shows this in full screen at the
+        // counter, then photographs the items they collect.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _receiptUrl != null ? AppColors.amberSoft : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _receiptUrl != null ? AppColors.amber : AppColors.line),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.receipt_long_outlined,
+                  color: _receiptUrl != null ? AppColors.forest : AppColors.muted),
+              const SizedBox(width: 9),
+              const Expanded(child: Text('Receipt for the goods to collect',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+            ]),
+            const SizedBox(height: 5),
+            const Text('Photograph the payment receipt from the seller. The rider shows it at the courier counter before collecting your parcel.',
+                style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+            const SizedBox(height: 10),
+            if (_receiptUrl != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.network('${DropOffApi.baseUrl}$_receiptUrl',
+                    headers: DropOffApi.authHeaders,
+                    height: 120, width: double.infinity, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox(
+                        height: 120,
+                        child: Center(child: Icon(Icons.broken_image_outlined, color: AppColors.muted)))),
+              ),
+              const SizedBox(height: 8),
+            ],
+            OutlinedButton.icon(
+              onPressed: _receiptBusy ? null : _pickReceipt,
+              icon: _receiptBusy
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Icon(_receiptUrl != null ? Icons.camera_alt : Icons.add_a_photo),
+              label: Text(_receiptBusy
+                  ? 'Uploading receipt…'
+                  : _receiptUrl != null ? 'Retake receipt' : 'Add receipt photo'),
+            ),
+          ]),
+        ),
         const SizedBox(height: 16),
         // VEHICLE FIELD (owner 2026-11-18): full width, no truncated labels.
         DropdownButtonFormField<String>(

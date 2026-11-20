@@ -93,8 +93,38 @@ button was explicitly parked ("do nothing first") and was NOT changed.
 - App: Admin console "Payout queue" card with status, attempt count, last
   error and a Retry button.
 
+## 2026-11-20 (late) — Collection receipt, stats, grey list, plan error
+
+- **Rider stats zeros:** `/rider/stats` SQL referenced `j.id` in an EXISTS but
+  the outer table had no `j` alias → SQLite error → empty stats. Aliased
+  `FROM jobs j`. Never remove that alias.
+- **Grey band at bottom of scroll:** `AppShell`'s `IndexedStack` gives children
+  LOOSE constraints, so nested Scaffold/ListView screens shrank to content and
+  the canvas background showed through. Each tab is now wrapped in
+  `SizedBox.expand`.
+- **Collection flow is DEPOT → RECIPIENT** (not sender → depot): `/rider/queue`
+  now returns `service`, `dest_address`, `collection_receipt_url`; the rider
+  navigates to the depot first, then geocodes the recipient door. Timeline is
+  5 steps; `_stageFromJobStatus` is collection-aware. Wording across Bookings,
+  movement log, waybill and the rider sheet now says recipient/depot correctly.
+- **Collection payment receipt:** migration `0074_collection_receipt.sql` adds
+  `jobs.collection_receipt_url`. The collection form (after Deliver to) uploads
+  a proof-of-payment receipt; the rider shows it FULL-SCREEN at the depot
+  counter, then photographs every collected item on pickup.
+- **Depot counter fare enforced:** the sender pays the DEPOT directly — the
+  Bookings counter-fare card no longer takes a DropOff momo payment and the
+  receipt is shown unblurred as proof. DropOff never collects the depot fare.
+- **Rider plan purchase:** `/subscriptions` used the JWT phone only for
+  `role==='customer'`, so rider/admin accounts 500'd ("internal error" →
+  "Could not start the plan"). Any signed-in role now buys for its own phone;
+  only staff may pass an explicit `b.phone`.
+- **Webhook secret rotated** on the Worker (`LIPILA_WEBHOOK_SECRET`) to the new
+  value given by the owner; Lipila dashboard webhook URL must be updated to
+  match. Plain (no-secret) callbacks are accepted but always re-checked
+  against Lipila before settling, so the un-removable plain URL is harmless.
+
 ### Release
-- Version bumped to `0.5.53+63` (57–62 are consumed or superseded on Play).
+- Version bumped to `0.5.54+64` (57–63 are consumed or superseded on Play).
 - **Pending network:** migration 0073/apply, worker deploy, git push and the
   release build could not complete while pub.dev/Cloudflare DNS was down —
   retry once connectivity returns. Do NOT change `tools/build_release.ps1`

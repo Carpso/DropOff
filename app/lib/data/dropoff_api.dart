@@ -1250,6 +1250,7 @@ class DropOffApi {
     String vehicleClass = 'motorcycle',
     String payMethod = 'mobile_money',
     String? parcelSize,
+    String? collectionReceiptUrl,
   }) =>
       post('/collections', {
         'courier_id': courierId,
@@ -1263,6 +1264,8 @@ class DropOffApi {
         'parcels': parcels,
         'vehicle_class': vehicleClass,
         'pay_method': payMethod,
+        if (collectionReceiptUrl != null && collectionReceiptUrl.isNotEmpty)
+          'collection_receipt_url': collectionReceiptUrl,
         if (parcelSize != null && parcelSize.isNotEmpty) 'parcel_size': parcelSize,
         if (parcelSize != null && parcelSize.isNotEmpty)
           'weight_class': switch (parcelSize) {

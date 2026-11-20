@@ -53,7 +53,14 @@ class _AppShellState extends State<AppShell> {
     ];
     final safeIndex = _index < screens.length ? _index : 0;
     return Scaffold(
-      body: IndexedStack(index: safeIndex, children: screens),
+      // IndexedStack gives its children LOOSE constraints — a Scaffold/ListView
+      // child then shrinks to its content and the canvas background shows as a
+      // grey band below the last card ("grey area on bottom scroll"). Wrapping
+      // each tab in SizedBox.expand gives it tight constraints so the list
+      // always fills the viewport (owner bug 2026-11-20).
+      body: IndexedStack(index: safeIndex, children: [
+        for (final screen in screens) SizedBox.expand(child: screen),
+      ]),
       // Universal text-scale clamp: EVERY screen in the app lives below this
       // clamp (MaterialApp.builder), so rows can't crush into a vertical
       // ribbon on large-font phones (the "Business tab text reading down",

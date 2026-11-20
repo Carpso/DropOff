@@ -942,7 +942,8 @@ class AppStore extends ChangeNotifier {
         final ref = '${j['ref'] ?? ''}';
         if (ref.isEmpty) continue;
         final door = (j['last_mile'] ?? 0) == 1 || ((j['leg2_fee_zmw'] as num?) ?? 0) > 0;
-        final stage = _stageFromJobStatus('${j['status']}', door);
+        final stage = _stageFromJobStatus('${j['status']}', door,
+            collection: '${j['service'] ?? ''}' == 'collection');
         final existing = _bookings.where((b) => b.serverRef == ref).firstOrNull;
         if (existing != null) {
           final i = _bookings.indexWhere((b) => b.id == existing.id);
@@ -995,14 +996,27 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  static int _stageFromJobStatus(String status, bool door) => switch (status) {
+  static int _stageFromJobStatus(String status, bool door, {bool collection = false}) {
+    // Collections run DEPOT → RECIPIENT on a 5-step timeline:
+    // 0 placed · 1 assigned · 2 rider at depot · 3 collected · 4 delivered.
+    if (collection) {
+      return switch (status) {
         'rider_assigned' || 'partner_confirmed' => 1,
-        'picked_up' => 2,
-        'at_depot' => door ? 4 : 3,
-        'departed' || 'arrived' => door ? 5 : 4,
-        'delivered' || 'ready_for_collection' => door ? 6 : 4,
+        'at_depot' || 'counter_recorded' => 2,
+        'picked_up' || 'departed' || 'arrived' => 3,
+        'delivered' || 'ready_for_collection' => 4,
         _ => 0,
       };
+    }
+    return switch (status) {
+          'rider_assigned' || 'partner_confirmed' => 1,
+          'picked_up' => 2,
+          'at_depot' => door ? 4 : 3,
+          'departed' || 'arrived' => door ? 5 : 4,
+          'delivered' || 'ready_for_collection' => door ? 6 : 4,
+          _ => 0,
+        };
+  }
 
   static DateTime _parseDbDate(String raw) {
     final s = raw.trim();

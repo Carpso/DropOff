@@ -381,20 +381,30 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
 
   Future<void> _navigateToStop(Map<String, dynamic> s) async {
     final picked = _picked('${s['status'] ?? ''}');
+    // COLLECTION jobs run DEPOT → RECIPIENT (the reverse of a drop-off). The
+    // first leg is the courier counter where the parcel is already waiting;
+    // only after the pickup does the rider head to the recipient's door.
+    final isCollection = '${s['service'] ?? ''}' == 'collection';
+    // After a collection pickup there is no door pin on the job (only the
+    // typed dest_address) — leave coords null so the address is geocoded.
     final lat = picked
-        ? (s['depot_lat'] as num?)?.toDouble()
+        ? (isCollection ? null : (s['depot_lat'] as num?)?.toDouble())
         : (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble();
     final lng = picked
-        ? (s['depot_lng'] as num?)?.toDouble()
+        ? (isCollection ? null : (s['depot_lng'] as num?)?.toDouble())
         : (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble();
     final addr = '${s['address'] ?? ''}'.trim();
     // "To Platinum" / "To Icypeed" (owner 2026-11-18): the depot leg is named
     // by the DEPOT, not a generic "depot" — stop rows carry `depot` now.
     final depotName = '${s['depot'] ?? s['courier'] ?? 'DropOff'}'.trim();
     final senderName = '${s['seller'] ?? ''}'.trim();
-    final label = picked
-        ? '$depotName depot'
-        : (senderName.isNotEmpty ? '$senderName — $addr' : '${s['ref'] ?? 'Stop'} — $addr').trim();
+    final label = isCollection
+        ? (picked
+            ? 'Deliver to ${'${s['recipient'] ?? 'recipient'}'}'
+            : '$depotName depot — collect the parcel')
+        : (picked
+            ? '$depotName depot'
+            : (senderName.isNotEmpty ? '$senderName — $addr' : '${s['ref'] ?? 'Stop'} — $addr').trim());
     // Whole-job context on the map (owner 2026-11-18 "fix the rider map just
     // like the sender map tracking"): heading to the sender shows the depot
     // pin too, heading to the depot shows the sender's stop too.
@@ -410,28 +420,36 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           destLat: lat,
           destLng: lng,
           label: label,
-          destIsDepot: picked,
+          destIsDepot: isCollection ? !picked : picked,
           otherLat: otherLat,
           otherLng: otherLng,
-          otherIsDepot: !picked,
+          otherIsDepot: isCollection ? picked : !picked,
         ),
       ));
       return;
     }
     // No pin on the booking — geocode the typed address OURSELVES and keep
     // the rider inside the DropOff navigator.
-    final query = picked
-        ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
-        : '$addr${'${s['from_city'] ?? ''}'.trim().isNotEmpty ? ', ${s['from_city']}' : ''}'.trim();
+    final query = isCollection
+        ? (picked
+            ? '${s['dest_address'] ?? ''}'.trim()
+            : '$depotName depot ${s['from_city'] ?? ''}'.trim())
+        : (picked
+            ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
+            : '$addr${'${s['from_city'] ?? ''}'.trim().isNotEmpty ? ', ${s['from_city']}' : ''}'.trim());
     if (query.isEmpty) {
       _snack('This stop has no pin or address yet — refresh, or ask ops.');
       return;
     }
     // Toast wording (owner 2026-11-18): say WHAT is being located and that the
     // DropOff map is doing it — a raw geocoder query reads like an error.
-    _snack(picked
-        ? 'Finding the $depotName depot on the DropOff map…'
-        : 'Finding the pickup point on the DropOff map…');
+    _snack(isCollection
+        ? (picked
+            ? 'Finding the recipient door on the DropOff map…'
+            : 'Finding the $depotName depot on the DropOff map…')
+        : (picked
+            ? 'Finding the $depotName depot on the DropOff map…'
+            : 'Finding the pickup point on the DropOff map…'));
     final hits = await MapServices.search(query);
     if (!mounted) return;
     if (hits.isNotEmpty) {
@@ -441,10 +459,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           destLat: hit.point.latitude,
           destLng: hit.point.longitude,
           label: label,
-          destIsDepot: picked,
+          destIsDepot: isCollection ? !picked : picked,
           otherLat: otherLat,
           otherLng: otherLng,
-          otherIsDepot: !picked,
+          otherIsDepot: isCollection ? picked : !picked,
         ),
       ));
       return;
@@ -452,6 +470,38 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // Geocode found nothing — silent last resort: the device's default maps
     // handler. No button label, no brand name; just get the rider there.
     await openInApp('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}');
+  }
+
+  /// Full-screen proof-of-payment receipt — the rider shows this at the
+  /// courier counter to collect the goods. Pinch to zoom, tap to close.
+  void _showCollectionReceipt(String url) {
+    if (url.isEmpty) return;
+    Navigator.of(context).push<void>(MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: const Text('Receipt — show at the depot counter'),
+        ),
+        body: InteractiveViewer(
+          maxScale: 5,
+          child: Center(
+            child: Image.network(
+              '${DropOffApi.baseUrl}$url',
+              headers: DropOffApi.authHeaders,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Padding(
+                padding: EdgeInsets.all(28),
+                child: Text('Receipt could not load — check your connection.',
+                    style: TextStyle(color: Colors.white), textAlign: TextAlign.center),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
   }
 
   Widget _navBtn(String label, String tooltip, Color bg, IconData icon, VoidCallback onTap) {
@@ -498,6 +548,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           builder: (ctx, setSheet) {
             final picked = _picked(st);
             final dropped = st == 'delivered';
+            final isCollection = '${s['service'] ?? ''}' == 'collection';
             Widget step({
               required bool done,
               required bool unlocked,
@@ -529,13 +580,31 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               const Padding(padding: EdgeInsets.symmetric(horizontal: 14), child: Text(
                 'Steps tick off as you file them — only the next one stays open.',
                 style: TextStyle(fontSize: 11.5, color: AppColors.muted))),
+              // COLLECTION: the sender's proof-of-payment receipt is shown
+              // full-screen at the depot counter before the items are handed
+              // over. Then the rider photographs every collected parcel.
+              if ('${s['service'] ?? ''}' == 'collection' && '${s['collection_receipt_url'] ?? ''}'.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showCollectionReceipt('${s['collection_receipt_url']}'),
+                    icon: const Icon(Icons.receipt_long_outlined),
+                    label: const Text('Show payment receipt at the counter'),
+                  ),
+                ),
+              ],
               const SizedBox(height: 6),
               step(
                 done: picked,
                 unlocked: true,
                 icon: Icons.local_shipping_outlined,
-                title: 'Picked up from the sender',
-                subtitle: picked ? 'Filed ✓' : 'Sender\'s 4-digit code + one photo per parcel ($parcels)',
+                title: isCollection ? 'Collected from the depot' : 'Picked up from the sender',
+                subtitle: picked
+                    ? 'Filed ✓'
+                    : isCollection
+                        ? 'Show the payment receipt, then photograph every collected item ($parcels)'
+                        : 'Sender\'s 4-digit code + one photo per parcel ($parcels)',
                 onTap: () async {
                   final res = await _pickUpFromSender(s);
                   if (!mounted) return;
@@ -1649,7 +1718,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               picked
                   ? '✓ picked — ${'${s['last_mile'] ?? 0}' == '1' ? 'door handover next' : 'drop at the $depotName depot'}'
                   : arrived
-                      ? 'ARRIVED — tap ✓ to file the pickup'
+                      ? ('${s['service'] ?? ''}' == 'collection'
+                          ? 'ARRIVED at the depot — tap ✓ to collect the parcel'
+                          : 'ARRIVED — tap ✓ to file the pickup')
                       : 'Sender: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${'${s['status']}'.replaceAll('_', ' ')}',
               style: TextStyle(color: picked ? AppColors.forest : arrived ? AppColors.ink : AppColors.muted,
                   fontSize: 11.5, fontWeight: picked || arrived ? FontWeight.w800 : FontWeight.w400),
@@ -1680,7 +1751,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ),
         const Spacer(),
         _navBtn(
-          picked ? 'To ${_depotShort(s)}' : 'To ${'${s['seller'] ?? 'Sender'}'.trim().isEmpty ? 'Sender' : '${s['seller']}'.trim()}',
+          picked
+              ? ('${s['service'] ?? ''}' == 'collection'
+                  ? 'To ${'${s['recipient'] ?? 'recipient'}'}'
+                  : 'To ${_depotShort(s)}')
+              : ('${s['service'] ?? ''}' == 'collection'
+                  ? 'To ${_depotShort(s)}'
+                  : 'To ${'${s['seller'] ?? 'Sender'}'.trim().isEmpty ? 'Sender' : '${s['seller']}'.trim()}'),
           picked ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to ${s['seller'] ?? 'the sender'} in the DropOff map',
           picked ? AppColors.forest : AppColors.forestLight,
           Icons.navigation_rounded,

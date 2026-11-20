@@ -9,7 +9,6 @@ import '../ui/app_toast.dart';
 import '../widgets/help_sheet.dart';
 import '../ui/pay_job.dart';
 import 'dart:async';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
@@ -589,14 +588,14 @@ class _MovementLogSheetState extends State<_MovementLogSheet> {
         'created' => 'Booking placed',
         'rider_assigned' => 'Rider assigned',
         'partner_confirmed' => 'Courier depot accepted the parcel',
-        'picked_up' => 'Parcel collected',
+        'picked_up' => 'Parcel collected from the depot',
         'at_depot' => 'At courier depot',
-        'departed' => 'Dispatched from depot',
-        'arrived' => 'Arrived at destination depot',
-        'delivered' => 'Delivered',
+        'departed' => 'Left the depot',
+        'arrived' => 'Arrived at the destination',
+        'delivered' => 'Delivered to the recipient',
         'ready_for_collection' => 'Ready for collection',
         'deposit_paid' => 'Prepayment approved',
-        'counter_fare_paid' => 'Depot counter fare paid',
+        'counter_fare_paid' => 'Depot fare paid at the counter',
         'refund_pending' => 'Refund pending',
         'auto_canceled_no_show' => 'Auto-canceled — no-show',
         'hold_expired' => 'Prepayment window expired',
@@ -1552,49 +1551,6 @@ class _CounterReceiptCard extends StatefulWidget {
 }
 
 class _CounterReceiptCardState extends State<_CounterReceiptCard> {
-  bool _busy = false;
-
-  Future<void> _payNow() async {
-    final store = AppScope.of(context);
-    setState(() => _busy = true);
-    final res = await DropOffApi.payCounterFare(
-      jobRef: widget.booking.serverRef!,
-      phone: widget.booking.senderPhone,
-      idempotencyKey: 'cfare-${widget.booking.serverRef}-${DateTime.now().millisecondsSinceEpoch}',
-    );
-    if (!mounted) return;
-    if (!res.ok) {
-      setState(() => _busy = false);
-      AppToast.show(context, switch (res.error) {
-        'counter_fare_already_paid' => 'This counter fare is already paid — the receipt is revealed in Bookings.',
-        _ => 'Payment could not start (${res.error ?? 'network'}) — verify your momo balance and connection, then retry.',
-      });
-      return;
-    }
-    final paymentId = '${res.body['payment_id']}';
-    final total = (res.body['amount_zmw'] as num?)?.toDouble();
-    var status = 'pending';
-    String? failReason;
-    for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      final st = await DropOffApi.paymentStatus(paymentId);
-      status = st.$1 ?? 'pending';
-      failReason = st.$2;
-    }
-    if (!mounted) return;
-    setState(() => _busy = false);
-    AppToast.show(context, switch (status) {
-      'success' => 'Counter fare paid — your depot receipt is revealed below.',
-      'failed' => (failReason == null || failReason.isEmpty)
-          ? 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.'
-          : 'Payment failed: $failReason — top up your momo wallet, then tap Pay now again.',
-      _ => total != null
-          ? 'Prompt sent for K${total.toStringAsFixed(2)} — approve it on your phone to reveal the receipt.'
-          : 'Prompt sent — approve it on your phone to reveal the receipt.',
-    });
-    unawaited(store.syncJobsFromServer());
-  }
-
   @override
   Widget build(BuildContext context) {
     final url = widget.booking.counterReceiptUrl;
@@ -1612,8 +1568,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
           ]),
           const SizedBox(height: 4),
-          Text('Your rider paid the depot counter out of their own pocket. The receipts below are YOURS — revealed when you pay — and the rider gets reimbursed.'
-              '${(widget.booking.counterReceipts.length > 1) ? ' The depot split the batch into ${widget.booking.counterReceipts.length} receipts; you repay the exact total DropOff computed from them.' : ''}',
+          const Text('Pay the courier depot directly at the counter — DropOff never collects the depot fare. The rider has filed their receipt below as proof of what was paid at the counter.',
               style: AppType.caption),
           // REAL receipt photo (owner directive): the rider's actual depot
           // receipt is served to the sender, but rendered blurred behind a
@@ -1625,37 +1580,21 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
               child: AspectRatio(
                 aspectRatio: 1.4,
                 child: Stack(fit: StackFit.expand, children: [
-                  ImageFiltered(
-                    imageFilter: ui.ImageFilter.blur(sigmaX: 9, sigmaY: 9),
-                    child: Image.network(url, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const ColoredBox(
-                            color: Color(0x11800000),
-                            child: Center(child: Icon(Icons.lock_outline, size: 34, color: Color(0xFF7B5710))))),
-                  ),
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(20)),
-                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.lock_outline, size: 14, color: Colors.white),
-                        SizedBox(width: 6),
-                        Text('Depot receipt — revealed after payment',
-                            style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
-                      ]),
-                    ),
-                  ),
+                  Image.network(url, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const ColoredBox(
+                          color: Color(0x11800000),
+                          child: Center(child: Icon(Icons.receipt_long_outlined, size: 34, color: Color(0xFF7B5710))))),
                 ]),
               ),
             ),
           ],
           const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: _busy ? null : _payNow,
-            icon: _busy
-                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.lock_open_outlined),
-            label: Text(_busy ? 'Starting prompt…' : 'Pay now — reveal receipt'),
-          ),
+          const Row(children: [
+            Icon(Icons.check_circle_outline, size: 16, color: AppColors.forest),
+            SizedBox(width: 8),
+            Expanded(child: Text('Settle the amount on this receipt at the depot counter. No momo prompt from DropOff.',
+                style: TextStyle(fontSize: 11.5, color: AppColors.ink))),
+          ]),
         ]),
       ),
     );

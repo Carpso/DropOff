@@ -2702,8 +2702,8 @@ app.post('/collections', async (c) => {
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
        counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
        pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, service, delivery_otp_hash, parcel_photo_url,
-       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka','collection',?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)`,
+       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered, collection_receipt_url)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka','collection',?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29)`,
   ).bind(
     ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
@@ -2711,7 +2711,7 @@ app.post('/collections', async (c) => {
     riderFee, processing, total, window, pickupAt, payMethod, parcels, vehicleClass,
     deliveryOtpHash, parcelUrl,
     declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
-    coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt, packCovered,
+    coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt, packCovered, typeof b.collection_receipt_url === 'string' ? b.collection_receipt_url.slice(0, 500) : null,
   ).run();
 
   await c.env.DB.prepare(
@@ -7728,8 +7728,8 @@ app.get('/rider/stats', async (c) => {
             COALESCE(SUM(CASE WHEN status IN ('delivered','ready_for_collection') THEN 1 ELSE 0 END), 0) AS delivered,
             COALESCE(SUM(parcels), 0) AS parcels,
             COALESCE(SUM(CASE WHEN status IN ('delivered','ready_for_collection') THEN rider_fee_zmw ELSE 0 END), 0) AS earned_zmw
-       FROM jobs
-      WHERE rider_id = ?1
+       FROM jobs j
+      WHERE j.rider_id = ?1
         AND COALESCE(status,'') NOT IN ('canceled','cancelled','deleted')
         AND (
           date(COALESCE(pickup_at, created_at), '+2 hours') = date('now', '+2 hours')
@@ -7756,7 +7756,8 @@ app.get('/rider/queue', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.parcels, j.status, j.last_mile,
             j.sender_name, j.sender_phone, j.description, j.recipient_name, j.recipient_phone,
-            j.eta_minutes, j.pickup_window, j.created_at, j.from_city,
+            j.eta_minutes, j.pickup_window, j.created_at, j.from_city, j.service,
+            j.dest_address, j.collection_receipt_url,
             co.name AS courier_name, co.depot_name, co.city AS courier_city,
             co.lat AS courier_lat, co.lng AS courier_lng,
             cb.lat AS branch_lat, cb.lng AS branch_lng
@@ -7853,6 +7854,11 @@ app.get('/rider/queue', async (c) => {
           recipient_phone: job.recipient_phone ?? '',
           parcels: Number(job.parcels ?? 1),
           status: job.status,
+          // Collection jobs start at the DEPOT (pickup_address) and end at the
+          // recipient's door (dest_address) — the app needs both to navigate.
+          service: job.service ?? 'standard',
+          dest_address: job.dest_address ?? '',
+          collection_receipt_url: job.collection_receipt_url ?? null,
           last_mile: Number(job.last_mile ?? 0),
           courier: job.courier_name,
           // The DEPOT name itself ("Platinum", "Icypeed") — the depot-leg
@@ -8265,8 +8271,16 @@ app.post('/subscriptions', async (c) => {
   const packs = await plans(c.env.DB);
   const plan = packs[tier];
   if (!plan || plan.fee_zmw <= 0) return c.json({ error: `tier must be one of ${Object.keys(packs).join(', ')}` }, 400);
-  // identity: customers subscribe their own phone; ops/admin may set any
-  const phone = c.get('role') === 'customer' ? c.get('phone')! : normalizeZmPhone(b.phone ?? '');
+  // Identity: ANY signed-in account (customer, rider, partner, staff) buys a
+  // plan for its OWN JWT phone. Only ops/admin may target another phone with
+  // an explicit b.phone. The old `role === 'customer' ? jwt : normalize(b.phone)`
+  // made rider/admin accounts throw a 500 ("internal error") on plan purchase.
+  const role = c.get('role');
+  const jwtPhone = c.get('phone');
+  let phone: string;
+  if (b.phone && (role === 'ops' || isAdmin(c))) phone = normalizeZmPhone(String(b.phone));
+  else if (jwtPhone) phone = String(jwtPhone);
+  else phone = normalizeZmPhone(String(b.phone ?? ''));
   if (!phone) return c.json({ error: 'missing phone' }, 401);
   const window: string = b.pickup_window ?? '10:00';
   if (!plan.windows.includes(window)) {
@@ -11056,7 +11070,7 @@ app.get('/admin/lipila/diagnose', async (c) => {
   if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
   const out: Record<string, unknown> = {
     baseUrl: c.env.LIPILA_BASE_URL,
-    keyPrefix: c.env.LIPILA_API_KEY ? `${c.env.LIPILA_API_KEY.slice(0, 4)}...` : 'NOT SET',
+    keyPrefix: c.env.LIPILA_API_KEY ? `${c.env.LIPILA_API_KEY.slice(0, 8)}...` : 'NOT SET',
     callbackUrl: c.env.LIPILA_CALLBACK_URL ?? null,
   };
   try {
