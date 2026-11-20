@@ -455,6 +455,9 @@ class AppStore extends ChangeNotifier {
   /// returned THAT job instead of minting a duplicate — the app should tell
   /// the sender to finish the payment they already have, not book twice.
   bool lastBookingDeduped = false;
+  /// Pickup-strike count on the sender for this booking — kept visible as a
+  /// warning only. Bookings are allowed regardless (owner 2026-11-20).
+  int? lastBookingStrikes;
   /// The rider the dispatch algorithm picked for the last booking (server
   /// response). Replaces the old hard-coded "Owner" default.
   String? lastBookingAutoRiderName;
@@ -709,6 +712,7 @@ class AppStore extends ChangeNotifier {
     final promoDiscount = (response.body['promo_discount_zmw'] as num?)?.toDouble();
     // Expose the server's plan decision so the booking screen knows whether to
     // prompt for payment ('pack' = rider fee already inside the subscription).
+    lastBookingStrikes = (response.body['strikes'] as num?)?.toInt();
     lastBookingPlanInclusion = response.body['plan_inclusion'] as String?;
     lastBookingWindowRolled = response.body['window_rolled_from'] as String?;
     lastBookingDueZmw = (response.body['prompt_total_zmw'] as num?)?.toDouble();
@@ -1046,6 +1050,7 @@ class AppStore extends ChangeNotifier {
       id: 'srv-${j['id']}',
       reference: '${j['ref']}',
       service: '${j['service'] ?? 'standard'}',
+      collectionReceiptUrl: '${j['collection_receipt_url'] ?? ''}',
       createdAt: _parseDbDate('${j['created_at'] ?? ''}'),
       senderName: '${j['sender_name'] ?? 'You'}',
       senderPhone: '${j['sender_phone'] ?? ''}',

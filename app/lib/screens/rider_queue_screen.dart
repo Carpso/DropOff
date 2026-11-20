@@ -432,7 +432,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // the rider inside the DropOff navigator.
     final query = isCollection
         ? (picked
-            ? '${s['dest_address'] ?? ''}'.trim()
+            ? (('${s['dest_address'] ?? ''}'.trim().isEmpty)
+                ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
+                : '${s['dest_address']}'.trim())
             : '$depotName depot ${s['from_city'] ?? ''}'.trim())
         : (picked
             ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
@@ -463,6 +465,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           otherLat: otherLat,
           otherLng: otherLng,
           otherIsDepot: isCollection ? picked : !picked,
+        ),
+      ));
+      return;
+    }
+    // For a collection, we can still open the map even when the typed door
+    // address missed — fall back to the other pin on the job (the depot).
+    final fbLatD = (otherLat as num?)?.toDouble();
+    final fbLngD = (otherLng as num?)?.toDouble();
+    if (isCollection && fbLatD != null && fbLngD != null && (fbLatD.abs() + fbLngD.abs()) > 0) {
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => InAppNavigatorScreen(
+          destLat: fbLatD, destLng: fbLngD, label: label,
+          destIsDepot: picked, otherLat: lat, otherLng: lng, otherIsDepot: !picked,
         ),
       ));
       return;
@@ -1721,7 +1736,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       ? ('${s['service'] ?? ''}' == 'collection'
                           ? 'ARRIVED at the depot — tap ✓ to collect the parcel'
                           : 'ARRIVED — tap ✓ to file the pickup')
-                      : 'Sender: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${'${s['status']}'.replaceAll('_', ' ')}',
+                      : '${'${s['service'] ?? ''}' == 'collection' ? 'Receiver' : 'Seller'}: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${'${s['status']}'.replaceAll('_', ' ')}',
               style: TextStyle(color: picked ? AppColors.forest : arrived ? AppColors.ink : AppColors.muted,
                   fontSize: 11.5, fontWeight: picked || arrived ? FontWeight.w800 : FontWeight.w400),
             ),
@@ -1757,7 +1772,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   : 'To ${_depotShort(s)}')
               : ('${s['service'] ?? ''}' == 'collection'
                   ? 'To ${_depotShort(s)}'
-                  : 'To ${'${s['seller'] ?? 'Sender'}'.trim().isEmpty ? 'Sender' : '${s['seller']}'.trim()}'),
+                  : 'To ${'${s['seller'] ?? 'Receiver'}'.trim().isEmpty ? 'Receiver' : '${s['seller']}'.trim()}'),
           picked ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to ${s['seller'] ?? 'the sender'} in the DropOff map',
           picked ? AppColors.forest : AppColors.forestLight,
           Icons.navigation_rounded,

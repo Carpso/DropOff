@@ -724,7 +724,6 @@ class _BookingScreenState extends State<BookingScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       final msg = switch (store.lastBookingError) {
-        'booking_on_hold' => 'Recent missed pickups put new bookings on hold. Contact DropOff support to review your account.',
         'slot_required' || 'pickup_window_required' => 'Every parcel must be booked onto a Sweep slot (no untimed pickups).',
         _ => store.lastBookingErrorDetail?.isNotEmpty == true
             ? store.lastBookingErrorDetail!
@@ -733,7 +732,11 @@ class _BookingScreenState extends State<BookingScreen> {
       _message(msg);
       return;
     }
-    if (store.lastBookingDeduped) {
+    // Bookings are allowed even with pickup strikes (owner 2026-11-20:
+    // "allow to do both collection and pick up no matter what"). Warn instead.
+    if ((store.lastBookingStrikes ?? 0) > 0) {
+      _message('Booking saved (recent missed pickups — please pay promptly so your next pickup stays reliable).');
+    } else if (store.lastBookingDeduped) {
       _message('This trip is already booked and waiting for payment — finish paying it below. No duplicate booking was created.');
     } else if (store.lastBookingWindowRolled != null) {
       _message('That window closed — your booking moved to the next open slot.');
@@ -1347,6 +1350,8 @@ class _BookingScreenState extends State<BookingScreen> {
                       _slotClosed(entry.key)
                           ? '${slotCopy[entry.key]!.title} — closed'
                           : slotCopy[entry.key]!.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: _slotClosed(entry.key) ? AppColors.muted : AppColors.ink),
                     ),
                     const SizedBox(height: 2),
@@ -1355,6 +1360,8 @@ class _BookingScreenState extends State<BookingScreen> {
                           ? 'Book by ${slotCopy[entry.key]!.cutoff} passed — next window still available'
                           : '${slotCopy[entry.key]!.benefit} · Book by ${slotCopy[entry.key]!.cutoff}',
                       style: AppType.caption,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ])),
                   if (_pickupWindow == entry.key && !_slotClosed(entry.key))

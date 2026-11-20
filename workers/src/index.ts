@@ -1978,19 +1978,17 @@ app.post('/jobs', async (c) => {
     }
     if (!b.courier_id || !b.dest_city) return c.json({ error: 'courier_id and dest_city required' }, 400);
 
-    // No no-show: senders with 3+ pickup strikes in 14 days are parked for
-    // ops — ghost bookings (false parcels) are the platform's #1 fraud pattern.
+    // Owner directive 2026-11-20: bookings are NOT refused when the sender has
+    // pickup strikes — "allow to do both collection and pick up no matter
+    // what". The strike ledger stays (auto-cancel, SMS nudges, ops review) but
+    // the sender is always allowed to book. She paid for whatever she books;
+    // there is no ghost-fraud benefit in blocking the NEXT booking.
+    let senderStrikes: number | null = null;
     if (c.get('role') !== 'ops') {
-      const strikes = (await c.env.DB.prepare(
+      senderStrikes = (await c.env.DB.prepare(
         `SELECT COUNT(*) AS n FROM booking_strikes
           WHERE phone = ?1 AND created_at > datetime('now', '-14 days')`,
       ).bind(senderPhone).first<any>())?.n ?? 0;
-      if (strikes >= 3) {
-        return c.json({
-          error: 'booking_on_hold',
-          detail: 'Recent missed pickups put booking on hold — contact DropOff support (or have ops clear the strikes).',
-        }, 403);
-      }
     }
 
     // PREPAID POLICY (owner directive): every parcel is paid IN ADVANCE at
@@ -2527,6 +2525,7 @@ app.post('/jobs', async (c) => {
 
     const payload = {
       ok: true, ref, job_id: meta.last_row_id, total_zmw: total,
+      strikes: senderStrikes,
       dropoff_leg_zmw: dropOffLeg,
       promo_code: promoCode, promo_discount_zmw: promoDiscount,
       // Strip rider payout — driver earnings are never shown to sellers.
@@ -8483,7 +8482,7 @@ app.post('/subscriptions/upgrade', async (c) => {
   if (!phone) return c.json({ error: 'identity_required' }, 401);
   const packs = await plans(c.env.DB);
   const newPlan = packs[tier];
-  if (!newPlan || newPlan.fee_zmw <= 0) return c.json({ error: `tier must be one of ${Object.keys(packs).join(', ')}` }, 400);
+  if (!newPlan) return c.json({ error: `tier must be one of ${Object.keys(packs).join(', ')}` }, 400);
   const sub = await c.env.DB.prepare(
     `SELECT id, phone, tier, status, period_start, period_end FROM subscriptions WHERE phone = ?1 ORDER BY id DESC LIMIT 1`,
   ).bind(phone).first<any>();
@@ -11221,8 +11220,7 @@ async function billExpiringSubscriptions(env: Env): Promise<{ billed: number; fa
   // lapse packs past their 30-day cycle (overage keeps them selling until renewal)
   const lapse = await env.DB.prepare(
     `UPDATE subscriptions SET status = 'expired'
-      WHERE status = 'active' AND period_end IS NOT NULL AND period_end < datetime('now', '-7 days')
-        AND NOT EXISTS (SELECT 1 FROM payments WHERE subscription_id = subscriptions.id AND status = 'pending')`,
+      WHERE status = 'active' AND period_end IS NOT NULL AND period_end < datetime('now', '-7 days')        AND NOT EXISTS (SELECT 1 FROM payments WHERE subscription_id = subscriptions.id AND status = 'pending')`,
   ).run();
   return { billed, failed, expired: lapse.meta.changes ?? 0 };
 }

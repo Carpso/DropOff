@@ -168,6 +168,30 @@ class _BookingsScreenState extends State<BookingsScreen> {
   }
 }
 
+/// Full-screen viewer for a Collection's proof-of-payment receipt — the rider
+/// shows it at the courier counter, and the sender can re-check it here.
+Future<void> _showReceipt(BuildContext context, String url) async {
+  if (url.isEmpty) return;
+  await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+    fullscreenDialog: true,
+    builder: (_) => Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: AppColors.ink,
+        title: const Text('Receipt — the rider shows this at the depot counter'),
+      ),
+      body: Center(child: Image.network(
+        '${DropOffApi.baseUrl}$url',
+        headers: DropOffApi.authHeaders,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const Text('Receipt could not load — check your connection.',
+            style: TextStyle(color: AppColors.muted, fontSize: 12)),
+      )),
+    ),
+  ));
+}
+
 class BookingCard extends StatelessWidget {
   final Booking booking;
   final VoidCallback onTap;
@@ -211,6 +235,19 @@ class BookingCard extends StatelessWidget {
               ])),
               const Icon(Icons.chevron_right, color: AppColors.muted),
             ]),
+            // COLLECTION (owner 2026-11-20): the sender can see the rider's
+            // proof-of-payment receipt — what the rider will show at the depot.
+            if (booking.isCollection) ...[
+              const SizedBox(height: 6),
+              OutlinedButton.icon(
+                onPressed: () => _showReceipt(context, booking.collectionReceiptUrl),
+                icon: const Icon(Icons.receipt_long_outlined, size: 16, color: AppColors.forest),
+                label: Text(
+                  booking.hasCollectionReceipt ? 'View receipt photo (rider has it)' : 'Receipt — none uploaded yet',
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             // UNPAID / HELD booking — the one thing a sender must not miss.
             // It shows the exact state their money is in and the way to pay,

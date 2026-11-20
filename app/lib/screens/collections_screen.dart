@@ -102,10 +102,38 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   /// Capture the receipt proving the goods are paid for. The rider shows this
-  /// full-screen at the depot counter before collecting the parcel.
+  /// full-screen at the depot counter before collecting the parcel. Offers
+  /// Camera or Gallery — customers re-photograph the sender's receipt.
   Future<void> _pickReceipt() async {
     if (_receiptBusy) return;
-    final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Receipt for the goods to collect', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+          const SizedBox(height: 4),
+          const Text('Photograph the payment receipt from the sender — the rider shows it in full at the courier counter.', style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+          const SizedBox(height: 14),
+          ...[
+            (ImageSource.camera, const Icon(Icons.camera_alt_outlined), 'Camera'),
+            (ImageSource.gallery, const Icon(Icons.photo_library_outlined), 'Gallery'),
+          ].map((s) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            ListTile(
+              leading: s.$2,
+              title: Text(s.$3, style: const TextStyle(fontWeight: FontWeight.w800)),
+              onTap: () => Navigator.of(context).pop(s.$1),
+            ),
+          ])),
+          const SizedBox(height: 4),
+          OutlinedButton(onPressed: () => Navigator.of(context).pop(null), child: const Text('Cancel')),
+        ]),
+      ),
+    );
+    if (source == null || !mounted) return;
+    final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 82);
     if (picked == null || !mounted) return;
     setState(() => _receiptBusy = true);
     final bytes = await picked.readAsBytes();
@@ -330,7 +358,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
             ]),
             const SizedBox(height: 5),
-            const Text('Photograph the payment receipt from the seller. The rider shows it at the courier counter before collecting your parcel.',
+            const Text('Photograph the payment receipt from the sender. The rider shows it at the courier counter before collecting your parcel.',
                 style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
             const SizedBox(height: 10),
             if (_receiptUrl != null) ...[

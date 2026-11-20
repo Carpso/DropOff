@@ -150,11 +150,18 @@ class Booking {
   /// 'standard' | 'collection' — a Collection job is rider-to-courier → door.
   final String service;
 
+  /// The proof-of-payment receipt the SENDER uploaded for a Collection job —
+  /// shown in the rider's screen at the courier counter, then again to this
+  /// sender here. null/empty when there is nothing to show.
+  final String collectionReceiptUrl;
+
   /// DropOff-fulfilled leg only: rider fee + last-mile door delivery.
   /// The courier counter fare is partner money and is NEVER collected by DropOff.
   double get dropoffLeg => riderFee + lastMileFee;
 
   bool get isCollection => service == 'collection';
+
+  bool get hasCollectionReceipt => isCollection && collectionReceiptUrl.isNotEmpty;
 
   /// Stage timeline for this booking.
   List<String> get timeline => isCollection
@@ -229,6 +236,7 @@ class Booking {
   const Booking({
     required this.id,
     this.service = 'standard',
+    this.collectionReceiptUrl = '',
     required this.reference,
     required this.createdAt,
     required this.senderName,
