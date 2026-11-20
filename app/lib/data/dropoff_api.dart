@@ -914,6 +914,12 @@ class DropOffApi {
   static Future<ApiResponse> supportReply(int threadId, String body) =>
       post('/chat/support/$threadId/reply', {'body': body}, admin: true);
 
+  /// Refund / settlement payout ledger (guarded retry engine).
+  static Future<Map<String, dynamic>?> adminPayouts() => getAdmin('/admin/payouts');
+
+  static Future<ApiResponse> retryPayout(int id) =>
+      post('/admin/payouts/$id/retry', const {}, admin: true);
+
   /// Close a parcel chat: read-only history preserved for everyone.
   static Future<ApiResponse> closeChatThread(int threadId) =>
       post('/chat/threads/$threadId/close', const {});

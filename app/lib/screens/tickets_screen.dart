@@ -80,7 +80,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Text(
-            'One place for every question. We reply in the ticket — no parcel chats.',
+            'Private between you and the DropOff support team. Senders, recipients and riders never see each other\'s tickets.',
             style: AppType.body,
           ),
         ),

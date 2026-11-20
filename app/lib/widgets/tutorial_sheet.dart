@@ -2,22 +2,25 @@ import 'package:flutter/material.dart';
 
 import '../ui/app_theme.dart';
 
-/// In-app tutorial for both sides of a parcel (owner 2026-11-18).
-/// Opens as a tabbed bottom sheet — no network, works offline.
+/// In-app tutorial (owner 2026-11-20: sender accounts see ONLY the sender
+/// tutorial). Opens as a single-purpose bottom sheet — no network, works
+/// offline. [senderOnly] hides the rider steps; [rider] hides the sender steps.
+/// With neither set, both tabs remain for backwards compatibility.
 class TutorialSheet extends StatelessWidget {
-  const TutorialSheet({super.key, this.rider = false});
+  const TutorialSheet({super.key, this.rider = false, this.senderOnly = false});
 
-  static Future<void> show(BuildContext context, {bool rider = false}) =>
+  static Future<void> show(BuildContext context, {bool rider = false, bool senderOnly = false}) =>
       showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
         showDragHandle: true,
         backgroundColor: AppColors.canvas,
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-        builder: (_) => TutorialSheet(rider: rider),
+        builder: (_) => TutorialSheet(rider: rider, senderOnly: senderOnly),
       );
 
   final bool rider;
+  final bool senderOnly;
 
   static const _senderSteps = [
     (Icons.person_add_alt_1, '1. Set up your account',
@@ -51,34 +54,40 @@ class TutorialSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      initialIndex: rider ? 1 : 0,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Row(children: [
-              Icon(Icons.menu_book, color: AppColors.forest),
-              SizedBox(width: 8),
-              Text('How DropOff works', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
-            ]),
-            const SizedBox(height: 4),
-            const Text('A quick guide for every parcel — keep it handy, it works offline.', style: AppType.caption),
-            const SizedBox(height: 10),
-            const TabBar(tabs: [
-              Tab(text: 'SENDERS'),
-              Tab(text: 'RIDERS'),
-            ], labelColor: AppColors.forest),
-            SizedBox(
-              height: MediaQuery.of(context).size.height * 0.58,
-              child: TabBarView(children: [
-                _steps(_senderSteps),
-                _steps(_riderSteps),
+    final singleKind = senderOnly || rider;
+    final steps = senderOnly ? _senderSteps : rider ? _riderSteps : null;
+    final height = MediaQuery.of(context).size.height * 0.58;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Row(children: [
+            Icon(Icons.menu_book, color: AppColors.forest),
+            SizedBox(width: 8),
+            Text('How DropOff works', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19)),
+          ]),
+          const SizedBox(height: 4),
+          Text(
+            senderOnly
+                ? '6 quick steps to send a parcel — keep it handy, it works offline.'
+                : rider
+                    ? '6 quick steps for DropOff riders — keep it handy, it works offline.'
+                    : 'A quick guide for every parcel — keep it handy, it works offline.',
+            style: AppType.caption,
+          ),
+          const SizedBox(height: 10),
+          if (singleKind)
+            SizedBox(height: height, child: _steps(steps!))
+          else
+            DefaultTabController(
+              length: 2,
+              initialIndex: 0,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const TabBar(tabs: [Tab(text: 'SENDERS'), Tab(text: 'RIDERS')], labelColor: AppColors.forest),
+                SizedBox(height: height, child: TabBarView(children: [_steps(_senderSteps), _steps(_riderSteps)])),
               ]),
             ),
-          ]),
-        ),
+        ]),
       ),
     );
   }

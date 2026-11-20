@@ -6432,6 +6432,131 @@ async function reconcilePayments(env: Env): Promise<void> {  try {
   } catch { /* reconciliation is best-effort */ }
 }
 
+/* ---------------- payout engine (refunds / settlements) -------------------- */
+// Adapted from Chisomo's guarded auto-disburse: a durable payout ledger with
+// idempotent references, atomic claims, bounded retries (30-min backoff) and
+// webhook/status reconciliation. NO per-parcel rider payout — riders stay
+// salaried. The source payment is only marked refunded AFTER Lipila confirms.
+function moneyRef(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${randomCode(8)}`;
+}
+
+async function logLipila(env: Env, kind: string, reference: string, phone: string | null, amount: number, status: string, message: string | null): Promise<void> {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO lipila_logs (kind, reference, phone, amount_zmw, status, message) VALUES (?1,?2,?3,?4,?5,?6)`,
+    ).bind(kind, reference, phone, amount, status, message?.slice(0, 300) ?? null).run();
+  } catch { /* audit must never block money movement */ }
+}
+
+async function notifyPayout(env: Env, title: string, body: string): Promise<void> {
+  try {
+    const owner = ownerPhone(env);
+    if (owner) await sendToPhone(env, owner, { title, body, data: { kind: 'payout' } });
+  } catch { /* notification best-effort */ }
+}
+
+async function settlePayoutSuccess(env: Env, id: number, identifier?: string | null): Promise<void> {
+  const p = await env.DB.prepare('SELECT * FROM payouts WHERE id = ?1').bind(id).first<any>();
+  if (!p || p.status === 'success') return; // webhook replay / cron race is a no-op
+  await env.DB.prepare(
+    `UPDATE payouts SET status = 'success', lipila_identifier = COALESCE(?2, lipila_identifier),
+       settled_at = datetime('now'), updated_at = datetime('now') WHERE id = ?1 AND status <> 'success'`,
+  ).bind(id, identifier ?? null).run();
+  if (p.payment_id) {
+    await env.DB.prepare(
+      `UPDATE payments SET status = 'refunded', refunded_at = datetime('now') WHERE id = ?1 AND status <> 'refunded'`,
+    ).bind(p.payment_id).run();
+    if (p.job_id) {
+      await env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'refunded', ?2)`,
+      ).bind(p.job_id, `Refund ${p.reference} confirmed by Lipila — K${Number(p.amount_zmw).toFixed(2)} sent to momo.`).run();
+    }
+  }
+  await logLipila(env, 'disbursement', p.reference, p.phone, Number(p.amount_zmw), 'success', 'confirmed');
+  await notifyPayout(env, 'Payout sent', `Payout ${p.reference} for K${Number(p.amount_zmw).toFixed(2)} completed.`);
+}
+
+async function failPayout(env: Env, id: number, reason: string): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE payouts SET status = 'failed', last_error = ?2,
+       next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
+     WHERE id = ?1 AND status IN ('pending', 'processing')`,
+  ).bind(id, String(reason ?? 'Lipila reported failure').slice(0, 300)).run();
+}
+
+async function enqueuePayout(env: Env, input: {
+  kind: string; paymentId?: number | null; jobId?: number | null;
+  phone: string; amount: number; note?: string;
+}): Promise<{ id: number; reference: string; duplicate: boolean }> {
+  // One payout per source payment — a refund webhook replay or a double tap on
+  // the admin button can never queue a second transfer.
+  if (input.paymentId) {
+    const existing = await env.DB.prepare(
+      `SELECT id, reference FROM payouts WHERE payment_id = ?1 AND kind = ?2 LIMIT 1`,
+    ).bind(input.paymentId, input.kind).first<any>();
+    if (existing) return { id: existing.id, reference: existing.reference, duplicate: true };
+  }
+  const prefix = input.kind === 'refund' ? 'REF' : input.kind === 'fee_sweep' ? 'SWEEP' : 'SET';
+  const reference = moneyRef(prefix);
+  const { meta } = await env.DB.prepare(
+    `INSERT INTO payouts (kind, payment_id, job_id, phone, amount_zmw, reference, status, next_attempt_at)
+     VALUES (?1,?2,?3,?4,?5,?6,'queued',datetime('now'))`,
+  ).bind(input.kind, input.paymentId ?? null, input.jobId ?? null, input.phone, input.amount, reference).run();
+  await logLipila(env, 'disbursement', reference, input.phone, input.amount, 'pending', 'queued');
+  return { id: meta.last_row_id as number, reference, duplicate: false };
+}
+
+async function runPayoutQueue(env: Env): Promise<void> {
+  try {
+    // 1) Reconcile transfers already handed to Lipila — the webhook can be lost.
+    const pending = await env.DB.prepare(
+      `SELECT id, reference FROM payouts WHERE status = 'pending'
+         AND updated_at < datetime('now', '-2 minutes') ORDER BY id LIMIT 20`,
+    ).all<any>();
+    for (const p of pending.results ?? []) {
+      const d = await lipilaDisburseStatusDetail(env, p.reference);
+      if (d.status === 'pending') continue;
+      if (d.status === 'success') await settlePayoutSuccess(env, p.id);
+      else await failPayout(env, p.id, d.reason ?? 'Lipila reported failed');
+    }
+    // 2) Attempt queued payouts and retry failed ones after their backoff.
+    const due = await env.DB.prepare(
+      `SELECT * FROM payouts WHERE status IN ('queued', 'failed')
+         AND next_attempt_at <= datetime('now') AND attempts < max_attempts
+       ORDER BY id LIMIT 20`,
+    ).all<any>();
+    for (const p of due.results ?? []) {
+      // Atomic claim: cron + webhook + admin retry can never act twice.
+      const claim = await env.DB.prepare(
+        `UPDATE payouts SET status = 'processing', attempts = attempts + 1, updated_at = datetime('now')
+          WHERE id = ?1 AND status IN ('queued', 'failed') AND next_attempt_at <= datetime('now')`,
+      ).bind(p.id).run();
+      if (!claim.meta.changes) continue;
+      const note = p.kind === 'refund' ? `DropOff refund ${p.reference}` : `DropOff settlement ${p.reference}`;
+      const disb = await lipilaDisburse(env, p.phone, Number(p.amount_zmw), p.reference, note);
+      await logLipila(env, 'disbursement', p.reference, p.phone, Number(p.amount_zmw),
+        disb.ok ? 'pending' : 'failed', String(disb.raw ?? '').slice(0, 300));
+      if (disb.ok) {
+        await env.DB.prepare(
+          `UPDATE payouts SET status = 'pending', lipila_identifier = COALESCE(?2, lipila_identifier),
+             last_error = NULL, next_attempt_at = datetime('now', '+2 minutes'), updated_at = datetime('now')
+           WHERE id = ?1`,
+        ).bind(p.id, disb.lipilaReference ?? null).run();
+      } else {
+        await env.DB.prepare(
+          `UPDATE payouts SET status = 'failed', last_error = ?2,
+             next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
+           WHERE id = ?1`,
+        ).bind(p.id, String(disb.raw ?? 'lipila disbursement failed').slice(0, 300)).run();
+        await notifyPayout(env, 'Payout retry scheduled', `Payout ${p.reference} failed — retrying in 30 minutes. Check Lipila float/keys.`);
+      }
+    }
+  } catch (e) {
+    await captureError(env, e, { method: 'CRON', url: 'https://cron/payouts' });
+  }
+}
+
 app.get('/payments/:id/status', async (c) => {
   const id = Number(c.req.param('id'));
   const pay = await c.env.DB.prepare(
@@ -6569,6 +6694,21 @@ app.post('/webhooks/lipila', async (c) => {
   if (!b) return c.json({ ok: true });
   const ref = b.reference ?? b.data?.reference;
   if (!ref) return c.json({ ok: true });
+
+  // Our own payouts (REF-/SET-/SWEEP-): never trust the body. Ask Lipila for
+  // the authoritative disbursement status, then settle idempotently.
+  const payout = await c.env.DB.prepare(
+    'SELECT id, status FROM payouts WHERE reference = ?1',
+  ).bind(String(ref)).first<any>();
+  if (payout) {
+    if (payout.status === 'pending' || payout.status === 'processing') {
+      const d = await lipilaDisburseStatusDetail(c.env, String(ref));
+      if (d.status === 'success') await settlePayoutSuccess(c.env, payout.id);
+      else if (d.status === 'failed') await failPayout(c.env, payout.id, d.reason ?? 'Lipila reported failed');
+    }
+    return c.json({ ok: true });
+  }
+
   const pay = await c.env.DB.prepare(
     'SELECT id, status, kind, lipila_reference FROM payments WHERE lipila_reference = ?1 ORDER BY id DESC LIMIT 1',
   ).bind(String(ref)).first<any>();
@@ -10851,23 +10991,52 @@ app.post('/admin/payments/:id/refund', async (c) => {
   if (pay.status !== 'success') return c.json({ error: 'only settled payments can be refunded' }, 409);
   const amount = Math.round(Number(pay.amount_zmw) * 100) / 100;
   if (!(amount > 0)) return c.json({ error: 'nothing to refund' }, 409);
-  const ref = `refund-${pay.id}-${Date.now().toString(36)}`;
-  const disb = await lipilaDisburse(c.env, pay.phone, amount, ref, `DropOff refund payment ${pay.id}`);
-  if (!disb.ok) return c.json({ error: 'lipila refund failed', detail: disb.raw ?? null }, 502);
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-         lipila_fee_zmw, lipila_reference, status, channel, kind, refund_of_payment_id, refunded_at)
-       VALUES (?1,?2,?3,?4,0,0,0,?5,'pending','merchant','refund',?6,datetime('now'))`,
-    ).bind(pay.job_id, pay.phone, pay.provider, amount, disb.lipilaReference ?? ref, pay.id),
-    c.env.DB.prepare(`UPDATE payments SET status = 'refunded', refunded_at = datetime('now') WHERE id = ?1`).bind(pay.id),
-  ]);
+  // Queue the refund instead of firing Lipila inline (Chisomo pattern). A
+  // failed/401 payout stays in the ledger and retries every 30 minutes; the
+  // source payment is marked 'refunded' only once Lipila confirms. Nothing is
+  // lost if the admin request drops or the worker restarts mid-transfer.
+  const payout = await enqueuePayout(c.env, {
+    kind: 'refund', paymentId: pay.id, jobId: pay.job_id,
+    phone: pay.phone, amount, note: `DropOff refund payment ${pay.id}`,
+  });
   if (pay.job_id) {
     await c.env.DB.prepare(
-      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'refunded', ?2)`,
-    ).bind(pay.job_id, `Payment ${pay.id} refunded K${amount} via momo`).run();
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'refund_queued', ?2)`,
+    ).bind(pay.job_id, `Refund K${amount} queued for momo payout (${payout.reference}).`).run();
   }
-  return c.json({ ok: true, refund_reference: disb.lipilaReference ?? ref, amount_zmw: amount });
+  if (!payout.duplicate) c.executionCtx.waitUntil(runPayoutQueue(c.env));
+  return c.json({
+    ok: true, queued: true, payout_id: payout.id, refund_reference: payout.reference,
+    amount_zmw: amount, duplicate: payout.duplicate,
+    hint: 'Refund queued. Lipila confirms within minutes; the owner is notified on success or each retry.',
+  }, 202);
+});
+
+// Payout ledger + manual retry (superadmin only — this moves real money).
+app.get('/admin/payouts', async (c) => {
+  if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
+  const limit = pageLimit(c.req.query('limit'));
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.*, pay.ref AS job_ref FROM payouts p
+       LEFT JOIN payments pay ON pay.id = p.payment_id
+       LEFT JOIN jobs j ON j.id = p.job_id
+      ORDER BY p.id DESC LIMIT ?1`,
+  ).bind(limit).all();
+  return c.json({ payouts: results });
+});
+
+app.post('/admin/payouts/:id/retry', async (c) => {
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const id = Number(c.req.param('id'));
+  const p = await c.env.DB.prepare('SELECT id, status, attempts FROM payouts WHERE id = ?1').bind(id).first<any>();
+  if (!p) return c.json({ error: 'not found' }, 404);
+  if (p.status === 'success') return c.json({ error: 'already settled' }, 409);
+  await c.env.DB.prepare(
+    `UPDATE payouts SET status = 'queued', attempts = 0, next_attempt_at = datetime('now'),
+       last_error = NULL, updated_at = datetime('now') WHERE id = ?1`,
+  ).bind(id).run();
+  c.executionCtx.waitUntil(runPayoutQueue(c.env));
+  return c.json({ ok: true, payout_id: id, status: 'queued' });
 });
 
 // Growth dashboard: tiers, paygo regulars (target: 100 paying sellers/mo)
@@ -11854,6 +12023,9 @@ export default {
           await healMissingTrackingSms(env);
           await notifyCapNudges(env);
           await notifyExpiryNudges(env);
+          try { await runPayoutQueue(env); } catch (e) {
+            await captureError(env, e, { method: 'CRON', url: 'https://cron/payout-queue' });
+          }
           return;
         }
         // Daily chain — each task isolated so one failure (e.g. a Lipila

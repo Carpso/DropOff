@@ -616,8 +616,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.menu_book_outlined, color: AppColors.forest),
                   title: const Text('How DropOff works — tutorial', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  subtitle: const Text('6 quick steps for senders and riders.', style: TextStyle(fontSize: 11.5)),
-                  onTap: () => TutorialSheet.show(context),
+                  subtitle: const Text('6 quick steps for senders.', style: TextStyle(fontSize: 11.5)),
+                  onTap: () => TutorialSheet.show(context, senderOnly: !store.isRider, rider: store.isRider),
                 ),
                 const SizedBox(height: 6),
                 ListTile(

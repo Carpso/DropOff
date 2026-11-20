@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../data/analytics_service.dart';
 import '../data/catalog.dart';
+import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
@@ -53,6 +54,31 @@ class HomeScreen extends StatelessWidget {
 
   Future<void> _refresh(BuildContext context) => AppScope.of(context).syncJobsFromServer();
 
+  /// The signed-in sender's own profile photo in the home header — the same
+  /// auth-gated `/media` image the Account screen and rider queue already use.
+  /// Falls back to the account icon when signed out or no photo uploaded.
+  Widget _accountAvatar(BuildContext context) {
+    final store = AppScope.of(context);
+    final url = store.photoUrl ?? '';
+    if (store.linked && url.isNotEmpty) {
+      return ClipOval(
+        child: Image.network(
+          '${DropOffApi.baseUrl}$url',
+          headers: DropOffApi.authHeaders,
+          width: 32,
+          height: 32,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.account_circle, color: AppColors.forest, size: 30),
+        ),
+      );
+    }
+    return Icon(
+      (store.linked && store.email != null) ? Icons.account_circle : Icons.account_circle_outlined,
+      color: (store.linked && store.email != null) ? AppColors.forest : AppColors.muted,
+      size: 30,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     AnalyticsService.instance.trackScreenView('home');
@@ -73,11 +99,7 @@ class HomeScreen extends StatelessWidget {
             IconButton(
               tooltip: 'Account',
               onPressed: () => _openAccount(context),
-              icon: Icon(
-                (store.linked && store.email != null) ? Icons.account_circle : Icons.account_circle_outlined,
-                color: (store.linked && store.email != null) ? AppColors.forest : AppColors.muted,
-                size: 30,
-              ),
+              icon: _accountAvatar(context),
             ),
             const SizedBox(width: 4),
             Container(

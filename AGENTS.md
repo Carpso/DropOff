@@ -61,9 +61,44 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   could never pick them. It now pings with an empty queue and refreshes at
   least every 60 s even when stationary. Never restore that empty-queue guard.
 
+## 2026-11-20 — Sender photo, sender-only tutorial, private tickets, payout engine
+
+### Homepage + tutorial + ticket privacy
+- `HomeScreen` header Account button now shows the signed-in sender's actual
+  profile photo (`store.photoUrl` → auth-gated `${baseUrl}/media/...`, initials
+  icon fallback). Riders already had this in the queue app bar.
+- `TutorialSheet` gained `senderOnly` / `rider`: account entry shows ONLY the
+  six sender steps; the rider queue entry shows ONLY rider steps. The old
+  two-tab sheet only remains for a caller that passes neither flag.
+- Ticket copy now states conversations are private to the sender + DropOff
+  support/admin — recipients and riders never see another account's tickets.
+  Server scoping was already enforced (`ticket.phone === caller` or staff).
+
+### Chisomo-style refund/settlement payout engine
+- Modeled on `chisomo` / `chisomo_flutter` (Kingdom Sponsor): Chisomo does NOT
+  pay per contribution; it confirms asynchronously and runs a guarded
+  auto-disburse. DropOff's version is for REFUNDS/SETTLEMENTS only — **never**
+  per-parcel rider payouts (riders stay salaried, depot fares paid at counter).
+- Migration `0073_payout_engine.sql`: `payouts` (durable ledger with UNIQUE
+  random-suffix reference, status queued/processing/pending/success/failed,
+  attempts, max_attempts 8, next_attempt_at, last_error) + `lipila_logs`
+  gateway audit.
+- `POST /admin/payments/:id/refund` now ENQUEUES and returns 202 (superadmin
+  only) instead of calling Lipila inline. The source payment flips to
+  `refunded` only after Lipila confirms.
+- Atomic `rider_id`-style guards: `status IN ('queued','failed')` claim before
+  each attempt; one payout per source payment; 30-minute backoff; webhook
+  (`REF-`/`SET-`/`SWEEP-`) and per-minute status reconciliation; owner push on
+  success and each retry; admin ledger + superadmin retry endpoint.
+- App: Admin console "Payout queue" card with status, attempt count, last
+  error and a Retry button.
+
 ### Release
-- Version bumped to `0.5.52+62` (57/58/59/60/61 are consumed or superseded on
-  Play). Worker deployed with migration 0072 applied.
+- Version bumped to `0.5.53+63` (57–62 are consumed or superseded on Play).
+- **Pending network:** migration 0073/apply, worker deploy, git push and the
+  release build could not complete while pub.dev/Cloudflare DNS was down —
+  retry once connectivity returns. Do NOT change `tools/build_release.ps1`
+  (owner directive 2026-11-20); the failure was the network, not the script.
 
 ## Repo conventions
 

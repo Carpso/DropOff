@@ -252,6 +252,8 @@ class _AdminScreenState extends State<AdminScreen> {
             if (!_financeOnly) ...[
               const _SupportInboxCard(),
               const SizedBox(height: 18),
+              const _PayoutQueueCard(),
+              const SizedBox(height: 18),
               const _ClientCrashesCard(),
               const SizedBox(height: 18),
               const _UsersCard(),
@@ -3518,6 +3520,101 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
         child: Text(text,
             style: TextStyle(fontSize: header ? 10 : 11, fontWeight: header ? FontWeight.w800 : FontWeight.w700,
                 color: header ? AppColors.ink : AppColors.forest)),
+      ),
+    );
+  }
+}
+
+/// Refund / settlement payout ledger — the Chisomo-style guarded retry engine.
+/// Shows attempt count, last gateway error and a superadmin retry button.
+class _PayoutQueueCard extends StatefulWidget {
+  const _PayoutQueueCard();
+  @override
+  State<_PayoutQueueCard> createState() => _PayoutQueueCardState();
+}
+
+class _PayoutQueueCardState extends State<_PayoutQueueCard> {
+  List<Map<String, dynamic>> _rows = const [];
+  bool _loading = true;
+  int? _busyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final data = await DropOffApi.adminPayouts();
+    if (!mounted) return;
+    setState(() {
+      _rows = ((data?['payouts'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _loading = false;
+    });
+  }
+
+  Future<void> _retry(int id) async {
+    setState(() => _busyId = id);
+    final res = await DropOffApi.retryPayout(id);
+    if (!mounted) return;
+    setState(() => _busyId = null);
+    AppToast.show(context, res.ok ? 'Payout requeued for immediate retry.' : 'Retry failed: ${res.error}');
+    _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.payments_outlined, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Payout queue', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 4),
+          const Text('Refunds retry every 30 minutes until Lipila confirms. Only you and staff see this ledger.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator()))
+          else if (_rows.isEmpty)
+            const Text('No payouts queued.', style: TextStyle(fontSize: 12.5))
+          else
+            ..._rows.take(10).map((p) {
+              final id = (p['id'] as num?)?.toInt() ?? 0;
+              final status = '${p['status'] ?? 'queued'}';
+              final retryable = status == 'failed' || status == 'queued';
+              final error = '${p['last_error'] ?? ''}';
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(10)),
+                  child: Row(children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('K${(p['amount_zmw'] as num?)?.toStringAsFixed(2) ?? '0.00'} · ${p['kind']} · #${p['id']}',
+                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                      Text('${p['reference'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+                      Text('$status · attempt ${p['attempts'] ?? 0}${error.isNotEmpty ? ' · $error' : ''}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 10, color: status == 'success' ? AppColors.success : AppColors.warning)),
+                    ])),
+                    if (retryable)
+                      IconButton(
+                        tooltip: 'Retry now (superadmin)',
+                        onPressed: _busyId != null ? null : () => _retry(id),
+                        icon: _busyId == id
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.replay, size: 19),
+                      ),
+                  ]),
+                ),
+              );
+            }),
+        ]),
       ),
     );
   }
