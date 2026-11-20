@@ -111,9 +111,12 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   `jobs.collection_receipt_url`. The collection form (after Deliver to) uploads
   a proof-of-payment receipt; the rider shows it FULL-SCREEN at the depot
   counter, then photographs every collected item on pickup.
-- **Depot counter fare enforced:** the sender pays the DEPOT directly — the
-  Bookings counter-fare card no longer takes a DropOff momo payment and the
-  receipt is shown unblurred as proof. DropOff never collects the depot fare.
+- **Depot counter-fare gate RESTORED (owner correction 2026-11-20):** the rider
+  fronts the depot fare, files the receipt, and the sender is PROMPTED to pay
+  via DropOff momo; the receipt stays blurred/locked until that payment lands.
+  This gate protects riders from senders who delay payment. Do NOT remove it
+  again based on the "fare paid at counter" rule — the counter fare is never
+  a DropOff *charge*, but this reimbursement gate is required.
 - **Rider plan purchase:** `/subscriptions` used the JWT phone only for
   `role==='customer'`, so rider/admin accounts 500'd ("internal error" →
   "Could not start the plan"). Any signed-in role now buys for its own phone;
@@ -124,7 +127,7 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   against Lipila before settling, so the un-removable plain URL is harmless.
 
 ### Release
-- Version bumped to `0.5.54+64` (57–63 are consumed or superseded on Play).
+- Version bumped to `0.5.55+65` (57–64 are consumed or superseded on Play).
 - **Pending network:** migration 0073/apply, worker deploy, git push and the
   release build could not complete while pub.dev/Cloudflare DNS was down —
   retry once connectivity returns. Do NOT change `tools/build_release.ps1`

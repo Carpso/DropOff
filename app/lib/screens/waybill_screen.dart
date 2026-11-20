@@ -223,7 +223,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
       dropoffDue: '${kwacha(booking.dropoffLeg)} + processing — DropOff charge, never partner money',
       courierFare: _counterReceipt() != null
           ? (_counterReceipt()!.$2
-              ? '${kwacha(_counterReceipt()!.$1)} — paid at the depot counter (receipt in Bookings)'
+              ? '${kwacha(_counterReceipt()!.$1)} — paid via DropOff (depot receipt in Bookings)'
               : '${kwacha(_counterReceipt()!.$1)} — depot receipt submitted; pay in Bookings to unlock it')
           : (booking.courierFare != null ? '${kwacha(booking.courierFare!)} — pay at the counter' : 'Confirmed at depot — pay at the counter'),
       paymentMethod: booking.paymentMethod,
@@ -607,7 +607,7 @@ class _ReceiptCard extends StatelessWidget {
                     _row('DropOff due', '${kwacha(dropoffLeg)} + processing — DropOff charge, never partner money'),
                     if (counterReceipt != null)
                       _row('Courier fare', counterReceipt.$2
-                          ? '${kwacha(counterReceipt.$1)} — paid at the depot counter (receipt in Bookings)'
+                          ? '${kwacha(counterReceipt.$1)} — paid via DropOff (depot receipt in Bookings)'
                           : '${kwacha(counterReceipt.$1)} — depot receipt submitted; pay in Bookings to unlock it')
                     else
                       _row('Courier fare', booking.courierFare != null ? '${kwacha(booking.courierFare)} — pay at the counter' : 'Confirmed at depot — pay at the counter'),
