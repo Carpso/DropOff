@@ -89,6 +89,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   static const double _arrivalMetres = 80;
   final Set<String> _arrivedRefs = {};
   StreamSubscription<Position>? _posSub;
+  String? _gpsIssue; // 'permission' | 'service' — drives the recovery banner
   Position? _riderPos;
 
   // AUTOMATIC LIVE-LOCATION SHARING (owner directive 2026-11-17: "make rider
@@ -140,7 +141,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) _load();
+    if (state == AppLifecycleState.resumed && mounted) {
+      _load();
+      // The rider may have granted location in Settings while the app was in
+      // the background — restart the watch instead of staying silent forever.
+      unawaited(_startArrivalWatch());
+    }
   }
 
   Future<void> _load() async {
@@ -282,17 +288,32 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
 
   Future<void> _startArrivalWatch() async {
     try {
+      // Re-entrant on resume: cancel the old stream first so fixes to GPS
+      // permission actually take effect and we never double-subscribe.
+      await _posSub?.cancel();
+      _posSub = null;
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         permission = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return;
-      if (!await Geolocator.isLocationServiceEnabled()) return;
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        setState(() => _gpsIssue = 'permission');
+        return;
+      }
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        if (!mounted) return;
+        setState(() => _gpsIssue = 'service');
+        return;
+      }
+      if (mounted && _gpsIssue != null) setState(() => _gpsIssue = null);
       _posSub = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 12),
       ).listen(_onPosition);
     } catch (_) {
-      // Arrival detection is a bonus — the rider can always tap arrived.
+      // Arrival detection is a bonus — the rider can always tap arrived, but
+      // surface a recoverable banner rather than failing silently.
+      if (mounted) setState(() => _gpsIssue = 'service');
     }
   }
 
@@ -752,7 +773,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               // RESEND (owner 2026-11-18): the sender's booking SMS may never
               // have landed — without the 4-digit code the pickup can never be
               // verified. One tap re-fires a FRESH code to both phones.
-              if (!picked)
+              if (!picked && !isCollection)
                 ListTile(
                   enabled: _busyRef == null,
                   leading: const Icon(Icons.sms_outlined),
@@ -830,6 +851,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final parcels = (s['parcels'] as num?)?.toInt() ?? 1;
     final senderName = '${s['seller'] ?? ''}'.trim();
     final senderPhone = '${s['seller_phone'] ?? ''}'.trim();
+    // COLLECTIONS (owner audit 2026-11-21): the parcel is already at the
+    // depot. No sender and NO sender pickup PIN exist — the worker only mints
+    // a door code for collections. Demanding a 4-digit sender code here was
+    // a hard dead end at the depot counter.
+    final isCollection = '${s['service'] ?? ''}' == 'collection';
     final otpCtrl = TextEditingController();
     final photos = <String>[];
     String? inlineError;
@@ -841,9 +867,18 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       barrierDismissible: false,
       builder: (dctx) => StatefulBuilder(
         builder: (dctx, setDialog) => AlertDialog(
-          title: Text(_handoverTitle(s, 'PICKUP'), style: AppType.subhead),
+          title: Text(_handoverTitle(s, isCollection ? 'COLLECT' : 'PICKUP'), style: AppType.subhead),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (isCollection) ...[
+                const Row(children: [
+                  Icon(Icons.warehouse_outlined, size: 18, color: AppColors.forest),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Collect at the depot counter. Show the sender\'s payment receipt, then photograph every item you collect — no PIN is needed.',
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35))),
+                ]),
+                const SizedBox(height: 12),
+              ] else ...[
               // WHO holds the PIN (owner 2026-11-18): the rider must never
               // wonder whose code to ask for.
               Text('Get the 4-digit PICKUP PIN from: ${senderName.isEmpty ? 'the sender' : senderName}${senderPhone.isNotEmpty ? ' · $senderPhone' : ''}',
@@ -863,6 +898,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   border: OutlineInputBorder(),
                 ),
               ),
+              ],
               const SizedBox(height: 12),
               Text('PARCEL PHOTOS — capture each of the $parcels parcel${parcels == 1 ? '' : 's'} ONCE',
                   style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
@@ -905,7 +941,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 // The stuck moment (owner 2026-11-18): the sender never got
                 // a booking SMS, so no code exists to show. One tap re-fires
                 // a fresh code to their phone — no dead-end pickup.
-                if (!resending && (lastErrCode == 'otp_required' || lastErrCode == 'otp_locked'))
+                if (!isCollection && !resending && (lastErrCode == 'otp_required' || lastErrCode == 'otp_locked'))
                   TextButton.icon(
                     icon: const Icon(Icons.sms_outlined, size: 16),
                     label: const Text('Sender never got the SMS? Resend a fresh code',
@@ -930,7 +966,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             FilledButton(
               onPressed: submitting ? null : () async {
                 final code = otpCtrl.text.trim();
-                if (code.length != 4) {
+                if (!isCollection && code.length != 4) {
                   setDialog(() => inlineError = 'Enter the sender\'s 4-digit pickup code.');
                   return;
                 }
@@ -941,7 +977,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 submitting = true;
                 setDialog(() {});
                 final r = await DropOffApi.jobEvent(
-                  jobRef: ref, status: 'picked_up', otp: code,
+                  jobRef: ref, status: 'picked_up',
+                  otp: isCollection || code.length != 4 ? null : code,
                   photoUrl: photos.first, stage: 'pickup',
                   parcelPhotos: photos,
                   lat: _riderPos?.latitude, lng: _riderPos?.longitude,
@@ -1471,6 +1508,39 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               SizedBox(width: 8),
               Expanded(child: Text('Offline — showing your last synced queue. It refreshes automatically when you reconnect.',
                   style: TextStyle(fontSize: 11.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
+            ]),
+          ),
+        // RECOVERY BANNERS (owner audit 2026-11-21): both of these used to fail
+        // silently and leave the rider with no orders and no way to fix it.
+        if (store.linked && !store.shareLocationOn)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            color: AppColors.amber.withValues(alpha: 0.24),
+            child: Row(children: [
+              const Icon(Icons.location_off, size: 16, color: AppColors.ink),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Location sharing is OFF — dispatch cannot see you, so new orders will not arrive.',
+                  style: TextStyle(fontSize: 11.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
+              TextButton(onPressed: () => store.setShareLocationOn(true), child: const Text('Turn on')),
+            ]),
+          ),
+        if (store.linked && _gpsIssue != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            color: AppColors.danger.withValues(alpha: 0.12),
+            child: Row(children: [
+              const Icon(Icons.gps_off, size: 16, color: AppColors.danger),
+              const SizedBox(width: 8),
+              Expanded(child: Text(_gpsIssue == 'service'
+                  ? 'Location services are off — ARRIVED and presence updates are paused.'
+                  : 'Location permission was denied — ARRIVED and presence updates are paused.',
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
+              TextButton(
+                onPressed: () => _gpsIssue == 'service'
+                    ? Geolocator.openLocationSettings()
+                    : Geolocator.openAppSettings(),
+                child: const Text('Open settings'),
+              ),
             ]),
           ),
         Expanded(

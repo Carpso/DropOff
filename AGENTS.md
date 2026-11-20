@@ -27,6 +27,42 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 — UX audit P0 fixes (riders + senders)
+
+Owner asked for a seamlessness audit; 50+ faults were found across three
+parallel reviews. The 11 journey-breaking ones are fixed here:
+
+- **Collection pickup no longer asks for a sender PIN.** `/collections` only
+  mints a door code; the rider dialog now says "collect at the depot counter,
+  show the receipt" and sends `otp: null`. Resend-PIN tiles are hidden for
+  collections. Never restore a 4-digit requirement at collection pickup.
+- **Dispatch presence is recoverable.** `shareLocationOn` is re-enabled when
+  `/me` resolves role=`rider` after sign-in, and a "Location sharing is OFF —
+  tap to turn on" banner sits on the Task Queue. GPS denial/services-off now
+  shows a persistent banner with "Open settings" and the position stream
+  restarts on app resume (old subscription cancelled first).
+- **New-order pushes route riders to `AppShell` (Task Queue index 0)**, not
+  sender Bookings.
+- **Mojibake (`ΓÇö`, `ΓÇª`) removed** from all counter-fare copy in
+  `bookings_screen.dart` (12 + 1 occurrences, verified at byte level).
+- **Collection prepayment:** `pending` is no longer reported as "failed / tap
+  Pay now"; the retry control stays reachable, stays on screen, and now polls
+  `paymentStatus(payment_id)` so approval is actually detected. Internal
+  courier IDs no longer leak into the success toast.
+- **Waybill tracking links** use the worker's URL directly in print/share
+  (no double `…/t/https://` prefix).
+- **No green "booked" with a deposit owed** — `paymentOutcome` starts `held`
+  whenever `depositRequired || depositInitFailed`.
+- **`/auth/link` deep links open in the in-app browser** so the worker's
+  single-use verify/reset tokens are consumed (Android App Links claim `/auth`).
+- **Cold-start deep links and push taps queue** until `initFuture` completes
+  and the navigator is mounted; the old silent `return` is gone.
+- **Push taps / links no longer bypass the biometric lock** — `_isLocked()`
+  gates the deferred queue and unlock calls flush it.
+
+Remaining P1/P2 findings from the audit are documented in the session report
+(voice mute, `_busyRef` lock, gallery policy, 401 handling, copy contradictions).
+
 ## 2026-11-20 (final) — step sounds, faster photos, named milestone copy
 
 Owner directives: quicken photo uploads; add a sound on every completed step

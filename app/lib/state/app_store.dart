@@ -227,6 +227,7 @@ class AppStore extends ChangeNotifier {
     if (me == null) return;
     final next = '${me['role'] ?? ''}';
     final role = next.isEmpty ? null : next;
+    final previousRole = _role;
     final sa = me['superadmin'] == true;
     final photo = me['photo_url'] as String?;
     final name = me['full_name'] as String?;
@@ -242,6 +243,12 @@ class AppStore extends ChangeNotifier {
         await preferences.setString(_emailKey, email);
       }
       notifyListeners();
+    }
+    // A rider who just linked this phone MUST be dispatchable. unlink() clears
+    // the flag for privacy; re-enable it when the role changes to rider so the
+    // presence pings resume and orders keep flowing (owner audit 2026-11-21).
+    if (role == 'rider' && previousRole != 'rider' && !_shareLocationOn) {
+      await setShareLocationOn(true);
     }
   }
 

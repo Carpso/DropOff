@@ -764,7 +764,9 @@ class _BookingScreenState extends State<BookingScreen> {
     // 'free' = nothing to pay (plan pack / offline-covered); 'paid' = prepayment confirmed;
     // 'held' = prepayment due and NOT confirmed — booking saved but held, no rider.
     // A booking that never reached the server counts as held: no green check without money.
-    String paymentOutcome = booking.dispatched ? 'free' : 'held';
+    String paymentOutcome = (depositRequired || depositInitFailed)
+        ? 'held'
+        : (booking.dispatched ? 'free' : 'held');
     if (booking.dispatched && !depositRequired && !depositInitFailed) {
       // Nothing to collect: plan-covered, staff/ops booking or a zero-fee leg.
       if (mounted) {

@@ -1,4 +1,4 @@
-﻿// ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // DROPOFF — ownership stamp (do not remove)
 // :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
 // © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
@@ -1591,7 +1591,7 @@ class _PrepayCardState extends State<_PrepayCard> {
   }
 }
 
-/// DEPOT COUNTER FLOW ΓÇö due card: the rider fronted the depot's counter fare
+/// DEPOT COUNTER FLOW — due card: the rider fronted the depot's counter fare
 /// and submitted the written receipt; the sender repays the exact amount +
 /// processing to DropOff by momo. The receipt photo is server-locked until
 /// this payment lands, then it unlocks here and the rider is reimbursed.
@@ -1618,8 +1618,8 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
     if (!res.ok) {
       setState(() => _busy = false);
       AppToast.show(context, switch (res.error) {
-        'counter_fare_already_paid' => 'This counter fare is already paid ΓÇö the receipt is revealed in Bookings.',
-        _ => 'Payment could not start (${res.error ?? 'network'}) ΓÇö verify your momo balance and connection, then retry.',
+        'counter_fare_already_paid' => 'This counter fare is already paid — the receipt is revealed in Bookings.',
+        _ => 'Payment could not start (${res.error ?? 'network'}) — verify your momo balance and connection, then retry.',
       });
       return;
     }
@@ -1636,13 +1636,13 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
     if (!mounted) return;
     setState(() => _busy = false);
     AppToast.show(context, switch (status) {
-      'success' => 'Counter fare paid ΓÇö your depot receipt is revealed below.',
+      'success' => 'Counter fare paid — your depot receipt is revealed below.',
       'failed' => (failReason == null || failReason.isEmpty)
           ? 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.'
-          : 'Payment failed: $failReason ΓÇö top up your momo wallet, then tap Pay now again.',
+          : 'Payment failed: $failReason — top up your momo wallet, then tap Pay now again.',
       _ => total != null
-          ? 'Prompt sent for K${total.toStringAsFixed(2)} ΓÇö approve it on your phone to reveal the receipt.'
-          : 'Prompt sent ΓÇö approve it on your phone to reveal the receipt.',
+          ? 'Prompt sent for K${total.toStringAsFixed(2)} — approve it on your phone to reveal the receipt.'
+          : 'Prompt sent — approve it on your phone to reveal the receipt.',
     });
     unawaited(store.syncJobsFromServer());
   }
@@ -1664,12 +1664,12 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
           ]),
           const SizedBox(height: 4),
-          Text('Your rider paid the depot counter out of their own pocket. The receipts below are YOURS ΓÇö revealed when you pay ΓÇö and the rider gets reimbursed.'
+          Text('Your rider paid the depot counter out of their own pocket. The receipts below are YOURS — revealed when you pay — and the rider gets reimbursed.'
               '${(widget.booking.counterReceipts.length > 1) ? ' The depot split the batch into ${widget.booking.counterReceipts.length} receipts; you repay the exact total DropOff computed from them.' : ''}',
               style: AppType.caption),
           // REAL receipt photo (owner directive): the rider's actual depot
           // receipt is served to the sender, but rendered blurred behind a
-          // lock until the depot bill is cleared ΓÇö never a placeholder.
+          // lock until the depot bill is cleared — never a placeholder.
           if (url != null && url.isNotEmpty) ...[
             const SizedBox(height: 10),
             ClipRRect(
@@ -1691,7 +1691,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
                       child: const Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(Icons.lock_outline, size: 14, color: Colors.white),
                         SizedBox(width: 6),
-                        Text('Depot receipt ΓÇö revealed after payment',
+                        Text('Depot receipt — revealed after payment',
                             style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
                       ]),
                     ),
@@ -1706,7 +1706,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
             icon: _busy
                 ? const AppLogoSpinner(size: 15)
                 : const Icon(Icons.lock_open_outlined),
-            label: Text(_busy ? 'Starting promptΓÇª' : 'Pay now ΓÇö reveal receipt'),
+            label: Text(_busy ? 'Starting prompt…' : 'Pay now — reveal receipt'),
           ),
         ]),
       ),

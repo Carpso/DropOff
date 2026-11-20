@@ -31,15 +31,59 @@ import 'data/push_service.dart';
 import 'services/device_lock.dart';
 import 'widgets/common.dart';
 import 'ui/app_spinner.dart';
+import 'ui/in_app_browser.dart';
 
 /// Root navigator so push-notification taps and deep links can open the right screen from anywhere.
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+// COLD START + BIOMETRIC GATE (owner audit 2026-11-21): a push or SMS link
+// tapped before `initFuture` completes, or while the lock screen is showing,
+// used to be dropped — or, worse, pushed ABOVE the lock screen and expose
+// parcel/ticket content. All navigations now queue here and replay only once
+// the store is loaded AND the app is unlocked.
+bool _appReady = false;
+bool _appUnlocked = false;
+AppStore? _rootStore;
+bool _isLocked() => _rootStore != null &&
+    _rootStore!.ready &&
+    _rootStore!.biometricEnabled &&
+    _rootStore!.linked &&
+    !_appUnlocked;
+final List<VoidCallback> _deferredNavigations = <VoidCallback>[];
+int _flushTries = 0;
+
+void _flushDeferred() {
+  if (!_appReady || _isLocked()) return;
+  final ctx = navigatorKey.currentContext;
+  if (ctx == null || !ctx.mounted) {
+    if (_flushTries++ < 60) Timer(const Duration(milliseconds: 250), _flushDeferred);
+    return;
+  }
+  _flushTries = 0;
+  final pending = List<VoidCallback>.from(_deferredNavigations);
+  _deferredNavigations.clear();
+  for (final action in pending) {
+    action();
+  }
+}
+
+void _runWhenReady(VoidCallback action) {
+  final ctx = navigatorKey.currentContext;
+  if (_appReady && !_isLocked() && ctx != null && ctx.mounted) {
+    action();
+    return;
+  }
+  _deferredNavigations.add(action);
+}
+
 /// Handle `dropoff.app/...` deep links coming from the OS (URI stream from app_links
 /// or `getInitialLink()` on a cold start). Known paths are routed; unknown are shell.
-void _handleDeepLink(AppStore store, Uri uri) {
+void _handleDeepLink(AppStore store, Uri uri) =>
+    _runWhenReady(() => _performDeepLink(store, uri));
+
+void _performDeepLink(AppStore store, Uri uri) {
   final ctx = navigatorKey.currentContext;
-  if (ctx == null) return;
+  if (ctx == null || !ctx.mounted) return;
   if (uri.scheme == 'geo') {
     // Another app asked Android to navigate here — answer with OUR map.
     final bits = uri.path.split(',');
@@ -121,9 +165,11 @@ void _handleDeepLink(AppStore store, Uri uri) {
     Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => CourierDetailScreen(courier: courier)));
     return;
   }
-  // /auth/link?k=...&t=... — open account screen
+  // /auth/link?k=...&t=... — MUST be consumed by the Worker's verify/reset
+  // pages. Android App Links claim /auth, so opening Account here killed the
+  // single-use token and left email unverified / password unchanged.
   if (seg.length >= 2 && seg[0] == 'auth' && seg[1] == 'link') {
-    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
+    unawaited(openInApp(uri.toString()));
     return;
   }
   // Fallback: shell
@@ -134,58 +180,16 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   CrashReporting.init();
   final store = AppStore();
+  _rootStore = store;
   // Initialize analytics outbox (offline-first) on a background future so the
   // splash screen shows immediately; events are flushed with the booking
   // outbox and on a timer.
   final initFuture = Future.wait([store.initialize(), AnalyticsService.instance.init()]);
   PushService.init();
   void handleTap(Map<String, dynamic>? data) {
-    // If the navigator isn't mounted yet (cold start), retry every 300 ms —
-    // a tapped notification from a killed app must never be silently dropped.
-    final ctx = navigatorKey.currentContext;
-    if (ctx == null || !ctx.mounted) {
-      var tries = 0;
-      Timer.periodic(const Duration(milliseconds: 300), (t) {
-        tries++;
-        final c = navigatorKey.currentContext;
-        if (c != null && c.mounted) {
-          t.cancel();
-          handleTap(data);
-        } else if (tries > 25) {
-          t.cancel();
-        }
-      });
-      return;
-    }
-    final jobRef = data?['job_ref']?.toString();
-    final kind = '${data?['kind'] ?? ''}'.toLowerCase();
-    AnalyticsService.instance.track(feature: 'push', action: 'tap', context: kind.isEmpty ? 'unknown' : kind);
-
-    Widget? routeTo;
-    if (kind == 'chat' || kind.startsWith('chat')) {
-      routeTo = const TicketsScreen();
-    } else if (kind == 'support_reply' || kind == 'support' || kind == 'ticket') {
-      routeTo = const TicketsScreen();
-    } else if (kind == 'job_assigned' || kind == 'rider_assigned' || kind == 'deposit_paid' || kind == 'pickup_reminder' || kind == 'job_delivered' || kind == 'payment_received') {
-      if (jobRef != null && jobRef.isNotEmpty) {
-        final match = store.bookings.where((b) => b.serverRef == jobRef).firstOrNull;
-        routeTo = match != null
-            ? BookingDetailScreen(bookingId: match.id)
-            : const BookingsScreen();
-      } else {
-        routeTo = const BookingsScreen();
-      }
-    } else if (kind == 'plan_renewed' || kind == 'subscription_active' || kind == 'promo_issued' || kind == 'marketing') {
-      routeTo = const AccountScreen(focusPlans: true);
-    } else if (kind.contains('security') || kind.contains('fraud') || kind.contains('alert')) {
-      routeTo = const AccountScreen();
-    }
-
-    if (routeTo != null) {
-      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => routeTo!));
-      return;
-    }
-    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingsScreen()));
+    // Cold start / lock screen: queue the tap instead of dropping it or
+    // navigating above the biometric gate.
+    _runWhenReady(() => _performTap(store, data));
   }
   PushService.onPayloadTap.stream.listen(handleTap);
   final appLinks = AppLinks();
@@ -194,6 +198,47 @@ Future<void> main() async {
     if (uri != null) _handleDeepLink(store, uri);
   });
   runApp(DropOffApp(store: store, navigatorKey: navigatorKey, initFuture: initFuture));
+  // Replay any deep link / push that arrived before the store finished loading.
+  unawaited(initFuture.whenComplete(() {
+    _appReady = true;
+    _flushDeferred();
+  }));
+}
+
+/// Resolve a notification tap to a screen. Runs only after the store is ready
+/// and the biometric lock is cleared (see [_runWhenReady]).
+void _performTap(AppStore store, Map<String, dynamic>? data) {
+  final ctx = navigatorKey.currentContext;
+  if (ctx == null || !ctx.mounted) return;
+  final jobRef = data?['job_ref']?.toString();
+  final kind = '${data?['kind'] ?? ''}'.toLowerCase();
+  AnalyticsService.instance.track(feature: 'push', action: 'tap', context: kind.isEmpty ? 'unknown' : kind);
+
+  Widget? routeTo;
+  if (kind == 'chat' || kind.startsWith('chat')) {
+    routeTo = const TicketsScreen();
+  } else if (kind == 'support_reply' || kind == 'support' || kind == 'ticket') {
+    routeTo = const TicketsScreen();
+  } else if (kind == 'job_assigned' || kind == 'rider_assigned' || kind == 'deposit_paid' || kind == 'pickup_reminder' || kind == 'job_delivered' || kind == 'payment_received') {
+    // RIDER ROUTING (owner audit 2026-11-21): these pushes are for the rider's
+    // job — a sender Bookings screen is useless to them. AppShell index 0 IS
+    // the rider's Task Queue, so opening the shell lands on the right screen.
+    if (store.isRider) {
+      routeTo = const AppShell();
+    } else if (jobRef != null && jobRef.isNotEmpty) {
+      final match = store.bookings.where((b) => b.serverRef == jobRef).firstOrNull;
+      routeTo = match != null ? BookingDetailScreen(bookingId: match.id) : const BookingsScreen();
+    } else {
+      routeTo = const BookingsScreen();
+    }
+  } else if (kind == 'plan_renewed' || kind == 'subscription_active' || kind == 'promo_issued' || kind == 'marketing') {
+    routeTo = const AccountScreen(focusPlans: true);
+  } else if (kind.contains('security') || kind.contains('fraud') || kind.contains('alert')) {
+    routeTo = const AccountScreen();
+  }
+
+  routeTo ??= store.isRider ? const AppShell() : const BookingsScreen();
+  Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => routeTo!));
 }
 
 class AppScope extends InheritedNotifier<AppStore> {
@@ -285,7 +330,8 @@ class _SplashScreenState extends State<_SplashScreen> {
     setState(() { _authing = true; _lockError = null; });
     final ok = await DeviceLock.authenticate('Unlock DropOff');
     if (!mounted) return;
-    setState(() { _authing = false; if (ok) { _unlocked = true; } else { _lockError = 'Not recognized — try again.'; } });
+    setState(() { _authing = false; if (ok) { _unlocked = true; _appUnlocked = true; } else { _lockError = 'Not recognized — try again.'; } });
+    if (ok) _flushDeferred();
   }
 
   /// Password door: verify password inline and unlock — the session is KEPT.
@@ -296,10 +342,12 @@ class _SplashScreenState extends State<_SplashScreen> {
       if (!mounted) return;
       if (ok) {
         _unlocked = true;
+        _appUnlocked = true;
       } else {
         _reauthError = widget.store.lastAuthError ?? 'Wrong email or password — try again.';
       }
       setState(() { _reauthBusy = false; });
+      if (ok) _flushDeferred();
       return;
     }
     setState(() {
@@ -314,6 +362,8 @@ class _SplashScreenState extends State<_SplashScreen> {
     await widget.store.unlink();
     if (!mounted) return;
     setState(() => _unlocked = true);
+    _appUnlocked = true;
+    _flushDeferred();
   }
 
   @override

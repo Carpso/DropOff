@@ -199,6 +199,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
     final ref = '${res.body['ref'] ?? ''}';
     final due = ((res.body['total_zmw'] as num?) ?? 0).toDouble();
+    final courierName = couriers.firstWhere((c) => c.id == _courierId, orElse: () => couriers.first).name;
     if (!mounted) return;
     setState(() => _saving = false);
     if (_payment == 'Mobile money' && DropOffApi.enabled && store.linked && due > 0) {
@@ -215,10 +216,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         }
         if (!mounted) return;
         _message(switch (status) {
-          'success' => 'Paid — a rider will collect from $_courierId point.',
-          _ => 'Payment failed — tap Pay now below to retry the prompt.',
+          'success' => 'Paid — a rider will collect from $courierName point.',
+          'failed' => 'Payment failed — tap Pay now below to retry the prompt.',
+          _ => 'Prompt still pending — approve it on your phone, or tap Pay now below.',
         });
-        if (status == 'failed' && mounted) {
+        // A pending prompt is NORMAL — keep the retry control reachable and
+        // stay on this screen instead of telling the rider to tap a button
+        // that doesn't exist (owner audit 2026-11-21).
+        if (status != 'success' && mounted) {
           setState(() { _payRetryRef = ref; _payRetryDue = due; });
         }
       } else {
@@ -526,11 +531,26 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               if (!mounted) return;
               setState(() => _saving = false);
               if (!pay.ok) return _message('Pay now failed — check your momo balance and try again.');
-              final status = pay.body['status'] as String? ?? 'pending';
-              _message(status == 'success'
-                  ? 'Paid — a rider will collect from the depot.'
-                  : 'Payment sent — approve the prompt. The rider sweep dispatches when the money lands.');
-              if (status == 'success') setState(() => _payRetryRef = null);
+              // The POST returns a payment_id, not a status — poll the worker
+              // like the first-submit path does or approval is never seen.
+              final paymentId = '${pay.body['payment_id'] ?? ''}';
+              var retryStatus = 'pending';
+              if (paymentId.isNotEmpty) {
+                for (var attempt = 0; attempt < 20 && retryStatus == 'pending'; attempt++) {
+                  await Future<void>.delayed(const Duration(seconds: 2));
+                  if (!mounted) return;
+                  final st = await DropOffApi.paymentStatus(paymentId);
+                  retryStatus = st.$1 ?? 'pending';
+                }
+              }
+              if (!mounted) return;
+              final retryCourier = couriers.firstWhere((c) => c.id == _courierId, orElse: () => couriers.first).name;
+              _message(retryStatus == 'success'
+                  ? 'Paid — a rider will collect from $retryCourier point.'
+                  : retryStatus == 'failed'
+                      ? 'Payment failed — check your momo balance and try again.'
+                      : 'Prompt sent — approve it on your phone. The rider sweep dispatches when the money lands.');
+              if (retryStatus == 'success') setState(() => _payRetryRef = null);
             },
             icon: const Icon(Icons.payments_outlined),
             label: Text(_payRetryDue != null
