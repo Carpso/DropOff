@@ -88,7 +88,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: AppColors.canvas,
+        backgroundColor: Colors.white,
         elevation: 0,
         title: const Text('Rider live', style: TextStyle(fontWeight: FontWeight.w900)),
         actions: [IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _refresh)],

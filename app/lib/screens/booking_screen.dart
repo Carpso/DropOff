@@ -838,6 +838,7 @@ class _BookingScreenState extends State<BookingScreen> {
       // Booking requires an identity (pricing, plan deduction and payment all
       // hang off the account) — show the sign-up door instead of the form.
       return Scaffold(
+        backgroundColor: Colors.white,
         appBar: AppBar(title: const Text('Book a pickup', style: TextStyle(fontWeight: FontWeight.w900))),
         body: Center(
           child: Padding(
@@ -861,6 +862,7 @@ class _BookingScreenState extends State<BookingScreen> {
     }
     final courier = courierById(_courierId);
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text('Book a pickup', style: TextStyle(fontWeight: FontWeight.w900)),
         leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),

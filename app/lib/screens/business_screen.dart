@@ -273,6 +273,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
     final retention = _retentionCard();
     final staffGlance = _staffGlance();
     return Scaffold(
+      backgroundColor: Colors.white,
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(

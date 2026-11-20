@@ -59,7 +59,10 @@ class _AppShellState extends State<AppShell> {
       // each tab in SizedBox.expand gives it tight constraints so the list
       // always fills the viewport (owner bug 2026-11-20).
       body: IndexedStack(index: safeIndex, children: [
-        for (final screen in screens) SizedBox.expand(child: screen),
+        // White behind EVERY tab: a short list must never show the canvas
+        // grey band below its last card (owner bug 2026-11-20).
+        for (final screen in screens)
+          SizedBox.expand(child: ColoredBox(color: Colors.white, child: screen)),
       ]),
       // Universal text-scale clamp: EVERY screen in the app lives below this
       // clamp (MaterialApp.builder), so rows can't crush into a vertical

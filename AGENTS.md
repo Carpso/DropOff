@@ -126,8 +126,17 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   match. Plain (no-secret) callbacks are accepted but always re-checked
   against Lipila before settling, so the un-removable plain URL is harmless.
 
+- **Grey screen on detail/bookings scroll (owner 2026-11-20, second pass):**
+  the real cause was the global theme `scaffoldBackgroundColor: AppColors.canvas`.
+  `BookingDetailScreen`, Account, Track, Waybill etc. never overrode it, so
+  scrolling past the last card exposed grey. Theme default is now **white**;
+  AppBars that forced canvas (Navigate, Rider live) are white too. Bottom
+  sheets with `backgroundColor: AppColors.canvas` are intentional and kept.
+  Every tab in `AppShell` is also wrapped in `SizedBox.expand` +
+  `ColoredBox(white)` so a short list can never show a grey band.
+
 ### Release
-- Version bumped to `0.5.55+65` (57–64 are consumed or superseded on Play).
+- Version bumped to `0.5.56+66` (57–65 are consumed or superseded on Play).
 - **Pending network:** migration 0073/apply, worker deploy, git push and the
   release build could not complete while pub.dev/Cloudflare DNS was down —
   retry once connectivity returns. Do NOT change `tools/build_release.ps1`

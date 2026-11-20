@@ -327,7 +327,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: AppColors.canvas,
+        backgroundColor: Colors.white,
         elevation: 0,
         title: const Text('Navigate', style: TextStyle(fontWeight: FontWeight.w900)),
         actions: [

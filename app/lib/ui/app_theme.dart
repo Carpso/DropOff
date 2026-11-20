@@ -49,10 +49,13 @@ ThemeData buildAppTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    scaffoldBackgroundColor: AppColors.canvas,
+    // WHITE default: a grey canvas background showed through whenever a
+    // detail/list screen (BookingDetail, Account, Track, Waybill, …) was
+    // scrolled past its last card. Screens that want canvas set it explicitly.
+    scaffoldBackgroundColor: Colors.white,
     fontFamily: 'Roboto',
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.canvas,
+      backgroundColor: Colors.white,
       foregroundColor: AppColors.ink,
       elevation: 0,
       centerTitle: false,

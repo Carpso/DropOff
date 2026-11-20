@@ -249,6 +249,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     final courier = couriers.firstWhere((c) => c.id == _courierId, orElse: () => couriers.first);
     final points = courier.branchesNear('Lusaka').map((b) => b.name).toList();
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(title: const Text('Book a collection', style: TextStyle(fontWeight: FontWeight.w900))),
       body: RefreshIndicator(
         onRefresh: () async {
