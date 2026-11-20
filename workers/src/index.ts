@@ -5797,7 +5797,8 @@ app.post('/payments', async (c) => {
     if (!['ops', 'admin'].includes(c.get('role') as string)) {
       return c.json({ error: 'ride float is rider/ops only — customers prepay per parcel' }, 403);
     }
-    phone = c.get('role') === 'ops' && b.phone ? normalizeZmPhone(b.phone) : c.get('phone')!;
+    // Admin key has no JWT phone — honour the explicit phone just like ops.
+    phone = (c.get('role') === 'ops' || isAdmin(c)) && b.phone ? normalizeZmPhone(b.phone) : c.get('phone')!;
     if (!phone) return c.json({ error: 'missing phone' }, 400);
     creditZmw = Math.round(Number(b.amount_zmw) || 0);
     if (creditZmw < 10 || creditZmw > WALLET_TOPUP_CAP_ZMW) {
