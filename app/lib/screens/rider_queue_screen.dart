@@ -66,6 +66,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   bool _loading = true;
   String? _busyRef;
   Timer? _pollTimer;
+  Timer? _claimTimer;
 
   // CLAIM BOARD — jobs auto-assign could not place (no online rider in range,
   // rider at a depot, everyone at capacity). Every verified rider sees the
@@ -104,6 +105,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     _load();
     // Keep the queue synced with new assignments without a manual refresh.
     _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) => _load());
+    // Claim board: poll every 5 s so a rider who just came online (or just
+    // freed up) sees claimable jobs quickly — other riders claiming them
+    // removes them from this list almost immediately.
+    _claimTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadAvailable());
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       final batches = ((_data?['batches'] as List?) ?? const []);
@@ -116,6 +121,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    _claimTimer?.cancel();
     _tickTimer?.cancel();
     _posSub?.cancel();
     _radar.dispose();

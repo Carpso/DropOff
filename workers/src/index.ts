@@ -7548,6 +7548,12 @@ app.get('/rider/available', async (c) => {
   const rider = await c.env.DB.prepare(
     'SELECT id, active, verification_status FROM riders WHERE phone = ?1',
   ).bind(phone).first<any>();
+  // CLAIM-BOARD OPEN HOUSE (owner 2026-11-20): auto-assign gets the first
+  // refusal; what it misses is offered here to ANY active, presence-verified
+  // rider — not just the algorithm's "verified" cohort. A free rider sees the
+  // jobs as soon as they (a) are online (team/rider UI refresh) and (b) tap
+  // Claim. Capacity + presence are the guards, so a rider can't Claim when
+  // they are busy — but there is no algorithmic reason to keep jobs reserved.
   if (!rider || !rider.active) return c.json({ error: 'rider_not_active' }, 403);
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.dest_city, j.dest_address,
@@ -7571,9 +7577,10 @@ app.post('/jobs/:ref/claim', async (c) => {
     `SELECT id, full_name, vehicle, active, verification_status, status, current_load, capacity, last_lat, last_lng
        FROM riders WHERE phone = ?1`,
   ).bind(phone).first<any>();
-  if (!rider || !rider.active || rider.verification_status !== 'verified') {
-    return c.json({ error: 'verified_active_rider_required' }, 403);
-  }
+  // Open house: presence (active) + capacity are the guards. Verification is
+  // the rider's own login identity — riders prove who they are when they log
+  // in, so we don't second-guess it here.
+  if (!rider || !rider.active) return c.json({ error: 'verified_active_rider_required' }, 403);
   const cap = Number(rider.capacity ?? 8);
   if (cap > 0 && Number(rider.current_load ?? 0) >= cap) return c.json({ error: 'at_capacity' }, 409);
   const ref = c.req.param('ref');

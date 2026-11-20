@@ -142,8 +142,21 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   "nothing is charged until you approve with your PIN", with Not now /
   Send momo prompt. Redeeming an already-paid pack CODE needs no confirmation.
 
+- **Claim board is an open house (owner 2026-11-20):** `/rider/available` and
+  `POST /jobs/:ref/claim` no longer require `verification_status='verified'` —
+  the guard is presence (`active`) + capacity only. Unverified-but-online
+  riders can now claim leftovers. Note: this slightly weakens the
+  ghost-buyer safety net; booking is still paid in advance, so the rider only
+  moves money they were promised.
+- **Claim board polls every 5 s** (`_claimTimer` in RiderQueueScreen) so a
+  rider who comes online/free-up sees claimable jobs quickly.
+- **Booking strike hold removed (owner 2026-11-20):** senders with 3+
+  `booking_strikes` can book again ("allow both collection and pickup no
+  matter what"); strikes now only produce warnings in the app. The
+  no-show-based auto-cancel for riders still runs.
+
 ### Release
-- Version bumped to `0.5.57+67` (57–66 are consumed or superseded on Play).
+- Version bumped to `0.5.58+68` (57–67 are consumed or superseded on Play).
 - **Pending network:** migration 0073/apply, worker deploy, git push and the
   release build could not complete while pub.dev/Cloudflare DNS was down —
   retry once connectivity returns. Do NOT change `tools/build_release.ps1`
