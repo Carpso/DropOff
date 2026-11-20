@@ -135,8 +135,15 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   Every tab in `AppShell` is also wrapped in `SizedBox.expand` +
   `ColoredBox(white)` so a short list can never show a grey band.
 
+- **Plan purchase confirmation (owner 2026-11-20):** choosing/renewing/
+  switching a plan must never fire a momo prompt without warning. Added
+  `_confirmPlanPrompt` in `account_screen.dart` (`_TiersCardState`) and
+  `business_screen.dart` (`_renew`, `_switchToPlan`): shows plan price and
+  "nothing is charged until you approve with your PIN", with Not now /
+  Send momo prompt. Redeeming an already-paid pack CODE needs no confirmation.
+
 ### Release
-- Version bumped to `0.5.56+66` (57–65 are consumed or superseded on Play).
+- Version bumped to `0.5.57+67` (57–66 are consumed or superseded on Play).
 - **Pending network:** migration 0073/apply, worker deploy, git push and the
   release build could not complete while pub.dev/Cloudflare DNS was down —
   retry once connectivity returns. Do NOT change `tools/build_release.ps1`

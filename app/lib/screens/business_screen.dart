@@ -142,6 +142,39 @@ class _BusinessScreenState extends State<BusinessScreen> {
   Map<String, dynamic>? _planOf(String tier) =>
       (_packs?['plans'] as Map<String, dynamic>?)?[tier] as Map<String, dynamic>?;
 
+  /// Confirm BEFORE any plan purchase sends a momo prompt. Shows the plan price
+  /// and the standard "nothing charged until you approve" copy — the same
+  /// expectation set on the Account tier cards.
+  Future<bool> _confirmPlanPrompt(String tier, String label, {bool renewal = false}) async {
+    final plan = _planOf(tier);
+    final fee = plan?['fee_zmw'];
+    final days = (plan?['cycle_days'] as num?)?.toInt() ?? 30;
+    final unit = days == 7 ? '/wk' : days == 1 ? '/day' : '/mo';
+    final price = fee == null ? 'the plan price' : 'K$fee$unit';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(renewal ? 'Renew $label?' : 'Switch to $label?',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('This plan costs $price.', style: AppType.bodyStrong),
+          const SizedBox(height: 10),
+          const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.',
+              style: TextStyle(fontSize: 12.5, height: 1.4)),
+          const SizedBox(height: 8),
+          const Text('A small processing fee and the momo collection fee are added to the prompt. Your plan starts only when the payment is confirmed.',
+              style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Not now')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Send momo prompt')),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
   Map<String, dynamic>? get _sub2 => _sub?['subscription'] as Map<String, dynamic>?;
   Map<String, dynamic>? get _plan => _sub?['plan'] as Map<String, dynamic>?;
 
@@ -152,6 +185,8 @@ class _BusinessScreenState extends State<BusinessScreen> {
     if (sub == null) return;
     final tier = '${sub['tier'] ?? ''}';
     if (tier.isEmpty) return;
+    if (!await _confirmPlanPrompt(tier, tier.toUpperCase(), renewal: true)) return;
+    if (!mounted) return;
     FocusScope.of(context).unfocus();
     final res = await DropOffApi.subscribe(
       tier: tier,
@@ -327,6 +362,8 @@ class _BusinessScreenState extends State<BusinessScreen> {
 
   /// One-tap switch to the recommended plan — subscribe + fire the Lipila prompt.
   Future<void> _switchToPlan(String tier, String label) async {
+    if (!await _confirmPlanPrompt(tier, label)) return;
+    if (!mounted) return;
     FocusScope.of(context).unfocus();
     final sub = _sub2;
     final res = await DropOffApi.subscribe(

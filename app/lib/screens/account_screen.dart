@@ -1139,6 +1139,41 @@ class _TiersCardState extends State<_TiersCard> {
   /// provider-side or server-side rejection.
   String _moneyErrorText(ApiResponse r, String fallback) => moneyErrorText(r, fallback);
 
+  /// Standard "you are about to be prompted" confirmation. Choosing a plan
+  /// must never fire a momo prompt with no warning — the rider-facing apps
+  /// always show what will happen, the amount and that no money moves until
+  /// the user approves it. Returns false when the user cancels.
+  Future<bool> _confirmPlanPrompt(String tier, {required bool upgrade}) async {
+    final snap = await DropOffApi.plans();
+    if (!mounted) return false;
+    final models = snap?['plans'] as Map<String, dynamic>?;
+    final plan = models?[tier] as Map<String, dynamic>?;
+    final fee = plan?['fee_zmw'];
+    final price = fee == null ? 'the plan price' : 'K$fee${_cycleUnit(plan)}';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(upgrade ? 'Upgrade to ${tier.toUpperCase()}?' : 'Start ${tier.toUpperCase()}?',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('This plan costs $price.', style: AppType.bodyStrong),
+          const SizedBox(height: 10),
+          const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.',
+              style: TextStyle(fontSize: 12.5, height: 1.4)),
+          const SizedBox(height: 8),
+          const Text('A small processing fee and the momo collection fee are added to the prompt. Your plan starts only when the payment is confirmed.',
+              style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Not now')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Send momo prompt')),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
   Future<void> _chooseTier(String tier) async {
     final store = AppScope.of(context);
     if (!store.linked) {
@@ -1155,6 +1190,8 @@ class _TiersCardState extends State<_TiersCard> {
         return;
       }
       if (newRank > curRank) {
+        if (!await _confirmPlanPrompt(tier, upgrade: true)) return;
+        if (!mounted) return;
         setState(() => _busyTier = tier);
         final up = await DropOffApi.upgradeSubscription(tier);
         if (!mounted) return;
@@ -1176,6 +1213,8 @@ class _TiersCardState extends State<_TiersCard> {
         return;
       }
     }
+    if (!await _confirmPlanPrompt(tier, upgrade: false)) return;
+    if (!mounted) return;
     setState(() => _busyTier = tier);
     final res = await DropOffApi.subscribe(tier: tier);
     if (!res.ok) {
