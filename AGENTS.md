@@ -15,6 +15,18 @@ Every upload to Google Play **must** use a **strictly higher `versionCode`** tha
 - **Clean `dist/` on each build**: delete superseded `DropOff-<version>-release.*` so only the newest pair + aliases remain.
 - Release artifacts only: `dist/` never carries debug or profile builds.
 
+## Standing delivery checklist (owner directive 2026-11-20 — do EVERY time, no asking)
+
+After every change session, without asking the owner:
+1. Apply any new `workers/migrations/*.sql` to live D1:
+   `npx wrangler d1 execute dropoff-db --remote --file=./migrations/<n>_<name>.sql --yes`
+   (run from `workers/`). Re-running an already-applied migration is harmless if
+   it is `IF NOT EXISTS`; a duplicate-column error means it is already live.
+2. Deploy the worker: `npx wrangler deploy` (from `workers/`).
+3. Verify `flutter analyze` (app/) and `npx tsc --noEmit` (workers/) are clean.
+4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
+   **Never leave work uncommitted or report these steps as "pending"** — just do them.
+
 ## 2026-11-20 (final) — step sounds, faster photos, named milestone copy
 
 Owner directives: quicken photo uploads; add a sound on every completed step
