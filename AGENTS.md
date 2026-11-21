@@ -27,6 +27,23 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (fourth pass) — rider package value, courier receipt download, target-linked pay
+
+- **Rider waybill package value:** `/jobs/:ref/waybill` now selects and returns
+  `declared_value_zmw` inside the waybill map (it was returned only by the
+  evidence endpoint, so the rider sheet always showed nothing). The sheet
+  always renders a **Package value** row (`Not declared by the sender` when
+  absent). The sender side already had it — `waybill_screen.dart:599` and the
+  thermal waybill both show **Declared value**.
+- **Post-journey "Download courier receipt"** button in booking detail, just
+  before "Get help with this delivery". If the courier bill is unpaid it is
+  greyed/locked and tapping it prompts the momo payment for the exact amount
+  written on the receipt (`counter_receipt_zmw`); when paid it downloads the
+  real photographed receipt image.
+- **"Your pay" card removed** from the rider view. Pay is now stated with the
+  targets it depends on: full K3,000 monthly salary only when the month target
+  is reached; below target, pay is calculated from rides actually completed.
+
 ## 2026-11-21 (third pass) — picked-up item photo rule for normal bookings
 
 - A **standard sender pickup** now enforces the same evidence as a collection:

@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 
 import '../data/analytics_service.dart';
@@ -448,6 +449,13 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         ],
         if (!store.isStaff && booking.stage >= booking.timeline.length - 1)
           const InfoPill(icon: Icons.check_circle, label: 'Journey complete'),
+        // COURIER RECEIPT (owner 2026-11-21): after the journey, the sender gets
+        // one clear "Download courier receipt" action. Locked until the exact
+        // courier bill written on the photographed receipt is repaid.
+        if (booking.dispatched &&
+            complete &&
+            (booking.counterReceiptUrl?.isNotEmpty == true || booking.counterFareDue))
+          _CourierReceiptButton(booking: booking),
         if (booking.dispatched && DropOffApi.enabled && store.linked) ...[
           const SizedBox(height: 20),
           Row(children: [
@@ -1587,6 +1595,122 @@ class _PrepayCardState extends State<_PrepayCard> {
           ),
         ]),
       ),
+    );
+  }
+}
+
+/// Post-journey receipt action (owner 2026-11-21). Locked = greyed out with a
+/// lock icon; tapping it starts the momo prompt for the EXACT amount the rider
+/// photographed on the courier's receipt. Once settled, the same button saves
+/// the real receipt image to the phone.
+class _CourierReceiptButton extends StatefulWidget {
+  final Booking booking;
+  const _CourierReceiptButton({required this.booking});
+
+  @override
+  State<_CourierReceiptButton> createState() => _CourierReceiptButtonState();
+}
+
+class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
+  bool _busy = false;
+
+  Future<void> _payReceiptBill() async {
+    final store = AppScope.of(context);
+    setState(() => _busy = true);
+    final res = await DropOffApi.payCounterFare(
+      jobRef: widget.booking.serverRef!,
+      phone: widget.booking.senderPhone,
+      idempotencyKey: 'cfare-${widget.booking.serverRef}-receipt-${DateTime.now().millisecondsSinceEpoch}',
+    );
+    if (!mounted) return;
+    if (!res.ok) {
+      setState(() => _busy = false);
+      AppToast.show(context, res.error == 'counter_fare_already_paid'
+          ? 'Already paid — your receipt is unlocked.'
+          : 'Could not start the prompt (${res.error ?? 'network'}) — check your connection and balance, then try again.');
+      return;
+    }
+    final paymentId = '${res.body['payment_id']}';
+    var status = 'pending';
+    for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      final st = await DropOffApi.paymentStatus(paymentId);
+      status = st.$1 ?? 'pending';
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppToast.show(context, switch (status) {
+      'success' => 'Courier bill paid — the receipt is unlocked. Tap Download again.',
+      'failed' => 'The momo prompt was rejected. Top up and tap the locked receipt button again.',
+      _ => 'Prompt sent — approve it on your phone to unlock the receipt.',
+    });
+    unawaited(store.syncJobsFromServer());
+  }
+
+  Future<void> _download(String url) async {
+    setState(() => _busy = true);
+    try {
+      final uri = url.startsWith('http') ? Uri.parse(url) : Uri.parse('${DropOffApi.baseUrl}$url');
+      final res = await http.get(uri, headers: DropOffApi.authHeaders).timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) throw StateError('http_${res.statusCode}');
+      final isPng = uri.path.toLowerCase().endsWith('.png');
+      await Share.shareXFiles(
+        [XFile.fromData(
+          res.bodyBytes,
+          mimeType: isPng ? 'image/png' : 'image/jpeg',
+          name: 'dropoff-courier-receipt-${widget.booking.serverRef ?? widget.booking.reference}.${isPng ? 'png' : 'jpg'}',
+        )],
+        subject: 'DropOff courier receipt',
+      );
+    } catch (_) {
+      if (mounted) AppToast.error(context, 'Could not download the receipt — check your connection and try again.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = widget.booking.counterReceiptUrl ?? '';
+    final paid = widget.booking.counterReceiptPaid;
+    final amount = widget.booking.counterReceiptZmw;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
+            foregroundColor: paid ? AppColors.forest : AppColors.muted,
+            backgroundColor: paid ? null : AppColors.line.withValues(alpha: 0.16),
+          ),
+          onPressed: _busy || url.isEmpty ? null : () async {
+            if (paid) {
+              await _download(url);
+            } else {
+              await _payReceiptBill();
+            }
+          },
+          icon: _busy
+              ? const AppLogoSpinner(size: 16)
+              : Icon(paid ? Icons.download_outlined : Icons.lock_outlined, size: 17),
+          label: Text(
+            paid ? 'Download courier receipt' : 'Download courier receipt — locked',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5),
+          ),
+        ),
+        if (!paid)
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Text(
+              amount != null && amount > 0
+                  ? 'Pay the K${amount.toStringAsFixed(2)} courier bill written on the receipt to unlock the photo and download it.'
+                  : 'Pay the courier bill written on the receipt to unlock the photo and download it.',
+              style: AppType.caption,
+            ),
+          ),
+      ]),
     );
   }
 }

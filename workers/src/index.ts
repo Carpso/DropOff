@@ -2980,11 +2980,13 @@ app.get('/jobs/:ref/live', async (c) => {
 // (owner directive 2026-11-18).
 
 // The rider's waybill: everything needed to act (contacts, both addresses,
-// depot/branch, parcels) — never any money field.
+// depot/branch, parcels, declared package VALUE) — never a charge, rate or
+// rider payout. The value is needed at the depot counter (owner 2026-11-21).
 app.get('/jobs/:ref/waybill', async (c) => {
   const job = await c.env.DB.prepare(
     `SELECT j.ref, j.created_at, j.pickup_at, j.pickup_window, j.eta_minutes, j.status,
             j.parcels, j.last_mile, j.description, j.weight_class, j.rider_id,
+            j.declared_value_zmw,
             j.pickup_address, j.dest_address, j.from_city, j.dest_city, j.branch,
             j.sender_name, j.sender_phone, j.recipient_name, j.recipient_phone,
             co.name AS courier_name, co.depot_name
@@ -3014,6 +3016,9 @@ app.get('/jobs/:ref/waybill', async (c) => {
     last_mile: job.last_mile,
     description: job.description,
     weight_class: job.weight_class,
+    // Package VALUE is not a charge, rate or rider payout — the rider needs it
+    // for the depot counter receipt (owner 2026-11-21).
+    declared_value_zmw: job.declared_value_zmw,
     pickup_address: job.pickup_address,
     dest_address: job.dest_address,
     from_city: job.from_city,

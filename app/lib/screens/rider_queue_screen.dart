@@ -2027,7 +2027,13 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
     final data = await DropOffApi.riderWaybill(widget.ref);
     if (!mounted) return;
     setState(() {
-      _wb = data?['waybill'] as Map<String, dynamic>?;
+      final wb = data?['waybill'] as Map<String, dynamic>?;
+      // Older workers returned the value at the top level, not inside waybill.
+      if (wb != null && wb['declared_value_zmw'] == null && data?['declared_value_zmw'] != null) {
+        _wb = Map<String, dynamic>.from(wb)..['declared_value_zmw'] = data!['declared_value_zmw'];
+      } else {
+        _wb = wb;
+      }
       _error = _wb == null ? 'Waybill not available — refresh the queue and try again.' : null;
     });
   }
@@ -2174,11 +2180,14 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
           _row('Parcels', '${w['parcels'] ?? 1}'),
           _row('Contents', '${w['description'] ?? ''}'),
           _row('Size', '${w['weight_class'] ?? ''}'),
-          // Declared parcel VALUE (owner request): for the counter receipt.
+          // Declared parcel VALUE (owner request): needed at the depot counter.
           // No fees, rates or rider payouts are ever shown on this sheet.
-          if ((w['declared_value_zmw'] as num?)?.toDouble() != null &&
-              (w['declared_value_zmw'] as num).toDouble() > 0)
-            _row('Declared value', 'K${(w['declared_value_zmw'] as num).toStringAsFixed(2)}'),
+          _row(
+            'Package value',
+            ((w['declared_value_zmw'] as num?)?.toDouble() ?? 0) > 0
+                ? 'K${(w['declared_value_zmw'] as num).toDouble().toStringAsFixed(2)}'
+                : 'Not declared by the sender',
+          ),
         ]),
         const Divider(height: 12),
         Text('Depot fare is paid at the counter — DropOff never collects partner money. Money fields are never shown on the rider sheet.',

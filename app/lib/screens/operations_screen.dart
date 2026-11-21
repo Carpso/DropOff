@@ -355,8 +355,6 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 12),
           const _RiderReviewsCard(),
           const SizedBox(height: 12),
-          const _RiderPayCard(),
-          const SizedBox(height: 12),
           const _RiderTargetsCard(),
           const SizedBox(height: 12),
           _riderLocationCard(context),
@@ -1010,28 +1008,10 @@ class _RevenueRow extends StatelessWidget {
 
 
 
-/// Flat driver pay + daily expectation. Shown ONLY on the rider view (never in
-/// seller-facing copy); staff see the full economics in the revenue card.
-class _RiderPayCard extends StatelessWidget {
-  const _RiderPayCard();
-
-  @override
-  Widget build(BuildContext context) => const Card(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Icon(Icons.payments_outlined, color: AppColors.forest),
-              SizedBox(width: 10),
-              Expanded(child: Text('Your pay', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
-            ]),
-            SizedBox(height: 6),
-            Text('Your salary: K3,000/month inclusive of K300/week fuel. Paid weekly on Sundays (16:00 CAT) or monthly on the 1st. Pace target: 30 trips/day. No per-parcel or per-trip payment — your salary does not change with rides taken.',
-                style: AppType.caption),
-          ]),
-        ),
-      );
-}
+/// PAY DEPENDS ON TARGET REACH (owner 2026-11-21): the standalone "Your pay"
+/// card is gone. The rule lives with the targets it depends on.
+/// (Full salary only when the month target is met; pro-rated by rides done if
+/// the target is missed.) Split out so rider economics stay out of seller copy.
 
 /// Driver's daily 30-parcel target, with the month pace line so a missed day
 /// is caught up inside the month instead of silently sliding.
@@ -1140,6 +1120,15 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
                   ? 'On pace: $pace expected by day $day of the month.'
                   : '$behind behind pace - clear the daily $daily first, then use the rest of the month to catch up.',
               style: TextStyle(color: onTrack ? AppColors.forest : AppColors.warning, fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 10),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            const Text(
+              'Pay follows the target: the K3,000 monthly salary (K300/week fuel included) is paid in full when the month target is reached. '
+              'If you finish below target, pay is calculated from the rides you actually completed. '
+              'Paid weekly on Sundays (16:00 CAT) or monthly on the 1st.',
+              style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.45),
             ),
             if (targetBonus != null) ...[
               const SizedBox(height: 12),
