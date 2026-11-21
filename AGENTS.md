@@ -27,6 +27,18 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (third pass) — picked-up item photo rule for normal bookings
+
+- A **standard sender pickup** now enforces the same evidence as a collection:
+  one **camera-only, watermarked, CAT-timestamped** photo for **every picked-up
+  item** (the app capture path was already camera-only and `PhotoStamp` burns
+  the stamp into every upload). The worker now rejects a `picked_up` event with
+  `photo_required` unless the unique photo set covers `jobs.parcels` —
+  ops/admin may still reconcile without the batch.
+- All pickup copy says **"picked-up items"**, never "collected items".
+- The booking screen tells senders the rider will photograph every picked-up
+  item with a time-stamped DropOff camera photo.
+
 ## 2026-11-21 (second pass) — P1 fixes + collection pickup security
 
 ### Why collection pickup needs NO sender PIN

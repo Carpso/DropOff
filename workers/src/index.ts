@@ -3293,7 +3293,7 @@ app.post('/jobs/:ref/events', async (c) => {
             j.courier_id, j.from_city, j.dest_city, j.weight_class, j.service,
             j.dropoff_photo_url, j.pod_pickup_url, j.pod_delivery_url,
             j.status AS job_status, j.collection_receipt_url,
-            j.description, j.branch, co.depot_name,
+            j.description, j.branch, j.parcels, co.depot_name,
             r.phone AS rider_phone
        FROM jobs j
        LEFT JOIN riders r ON r.id = j.rider_id
@@ -3681,8 +3681,31 @@ app.post('/jobs/:ref/events', async (c) => {
     dbStatements.push(c.env.DB.prepare(
       `UPDATE jobs SET ${sets.join(', ')} WHERE id = ?1`).bind(...vals));
   }
+  // EVERY PICKED-UP ITEM PHOTOGRAPHED (owner 2026-11-21): a normal sender
+  // pickup needs the same camera evidence as a collection — one stamped photo
+  // per item, never a single photo for a multi-parcel batch. Ops/admin may
+  // reconcile a job without the batch.
+  if (status === 'picked_up' && !isAdminKey && !isOpsKey) {
+    const wantItems = Math.max(1, Number(job.parcels ?? 1) || 1);
+    const filedPhotos = new Set<string>();
+    const primaryPhoto = String(b.photo_url ?? '').trim();
+    if (primaryPhoto) filedPhotos.add(primaryPhoto);
+    if (Array.isArray(b.parcel_photos)) {
+      for (const url of b.parcel_photos as any[]) {
+        const value = String(url ?? '').trim();
+        if (value) filedPhotos.add(value);
+      }
+    }
+    if (filedPhotos.size < wantItems) {
+      return c.json({
+        error: 'photo_required',
+        detail: `Photograph every picked-up item — ${wantItems} camera photo${wantItems === 1 ? '' : 's'} required, ${filedPhotos.size} filed.`,
+      }, 400);
+    }
+  }
+
   // PICKUP PHOTO BATCH (owner directive 2026-11-17): a stop with N parcels
-  // files N photos — one per parcel, no repeats. The first photo is the
+  // files N photos — one per item, no repeats. The first photo is the
   // locked pod_pickup_url evidence; the whole batch is recorded on the job's
   // event log so ops can compare every collected parcel against the seller's
   // booking photo at the depot drop.
@@ -3691,7 +3714,7 @@ app.post('/jobs/:ref/events', async (c) => {
     if (pickupPhotos.length > 0) {
       dbStatements.push(c.env.DB.prepare(
         `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'pickup_photos_filed', ?2)`,
-      ).bind(job.id, `Pickup evidence: ${pickupPhotos.length} parcel photo${pickupPhotos.length > 1 ? 's' : ''} filed at collection (${pickupPhotos.join(' ')}).`));
+      ).bind(job.id, `Pickup evidence: ${pickupPhotos.length} item photo${pickupPhotos.length > 1 ? 's' : ''} filed at ${String(job.service ?? '') === 'collection' ? 'collection' : 'pickup'} (${pickupPhotos.join(' ')}).`));
     }
   }
   if (dbStatements.length) await c.env.DB.batch(dbStatements);

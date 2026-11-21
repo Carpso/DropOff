@@ -1039,7 +1039,7 @@ class _BookingScreenState extends State<BookingScreen> {
               }),
             ),
             const SizedBox(width: 10),
-            const Expanded(child: Text('This is the photo the rider sees at pickup — check it before you book.', style: AppType.caption)),
+            const Expanded(child: Text('This is the photo the rider sees at pickup - check it before you book. At pickup the rider also photographs every picked-up item with a time-stamped DropOff camera photo.', style: AppType.caption)),
           ]),
         ],
         const Padding(

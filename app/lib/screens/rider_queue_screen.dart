@@ -382,7 +382,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
 
   /// CAMERA-ONLY capture for pickup parcel photos (owner directive
   /// 2026-11-17: "no repeat capture" — a gallery pick could re-file an old
-  /// photo, so collection evidence is captured live, one photo per parcel).
+  /// photo, so collection evidence is captured live, one photo per picked-up item).
   Future<String?> _captureParcelPhoto() async {
     final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return null;
@@ -667,7 +667,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 style: TextStyle(fontSize: 11.5, color: AppColors.muted))),
               // COLLECTION: the sender's proof-of-payment receipt is shown
               // full-screen at the depot counter before the items are handed
-              // over. Then the rider photographs every collected parcel.
+              // over. Then the rider photographs every picked-up item.
               if ('${s['service'] ?? ''}' == 'collection' && '${s['collection_receipt_url'] ?? ''}'.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Padding(
@@ -688,8 +688,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 subtitle: picked
                     ? 'Filed ✓'
                     : isCollection
-                        ? 'Show the payment receipt, then photograph every collected item ($parcels)'
-                        : 'Sender\'s 4-digit code + one photo per parcel ($parcels)',
+                        ? 'Show the payment receipt, then photograph every picked-up item ($parcels)'
+                        : 'Sender\'s 4-digit code + one camera photo per picked-up item ($parcels)',
                 onTap: () async {
                   final res = await _pickUpFromSender(s);
                   if (!mounted) return;
@@ -871,7 +871,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 const Row(children: [
                   Icon(Icons.warehouse_outlined, size: 18, color: AppColors.forest),
                   SizedBox(width: 8),
-                  Expanded(child: Text('Collect at the depot counter. Show the sender\'s payment receipt, then photograph every item you collect — no PIN is needed.',
+                  Expanded(child: Text('Collect at the depot counter. Show the sender\'s payment receipt, then photograph every item you pick up — no PIN is needed.',
                       style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35))),
                 ]),
                 const SizedBox(height: 12),
@@ -897,7 +897,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               ),
               ],
               const SizedBox(height: 12),
-              Text('PARCEL PHOTOS — capture each of the $parcels parcel${parcels == 1 ? '' : 's'} ONCE',
+              Text('PICKED UP ITEMS — photograph each of the $parcels item${parcels == 1 ? '' : 's'} ONCE (camera only, time-stamped)',
                   style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
               const SizedBox(height: 6),
               if (photos.isNotEmpty)
@@ -918,7 +918,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               if (photos.length < parcels)
                 TextButton.icon(
                   icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                  label: Text('Capture parcel ${photos.length + 1} of $parcels (camera)',
+                  label: Text('Capture picked-up item ${photos.length + 1} of $parcels (camera)',
                       style: const TextStyle(fontSize: 12.5)),
                   onPressed: submitting ? null : () async {
                     final url = await _captureParcelPhoto();
@@ -929,7 +929,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 Row(children: [
                   const Icon(Icons.check_circle, size: 16, color: AppColors.forest),
                   const SizedBox(width: 6),
-                  Expanded(child: Text('All $parcels captured — locked (one photo per parcel).',
+                  Expanded(child: Text('All $parcels picked-up items photographed — locked (one per item).',
                       style: const TextStyle(fontSize: 12, color: AppColors.forest, fontWeight: FontWeight.w700))),
                 ]),
               if (inlineError != null) ...[
@@ -968,7 +968,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   return;
                 }
                 if (photos.length < parcels) {
-                  setDialog(() => inlineError = 'Capture each parcel once — ${parcels - photos.length} more photo${parcels - photos.length == 1 ? '' : 's'} to take.');
+                  setDialog(() => inlineError = 'Photograph each picked-up item once — ${parcels - photos.length} more photo${parcels - photos.length == 1 ? '' : 's'} to take.');
                   return;
                 }
                 submitting = true;
@@ -996,6 +996,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   inlineError = switch (err) {
                     'otp_required' => 'Code rejected. ${detail.isEmpty ? 'The code is in the sender\'s booking SMS.' : detail}',
                     'otp_locked' => 'Too many wrong codes — DropOff support has been notified.',
+                    'photo_required' => detail.isEmpty ? 'Photograph every picked-up item before filing.' : detail,
                     'photo_locked' => 'Pickup photo already on file for $ref — the evidence is locked. Ask ops to correct a genuine mis-submission.',
                     _ => 'Could not file the pickup ($err).',
                   };
