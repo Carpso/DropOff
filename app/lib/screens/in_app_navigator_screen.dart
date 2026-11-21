@@ -33,6 +33,10 @@ class InAppNavigatorScreen extends StatefulWidget {
   final bool otherIsDepot;
   final String? otherLabel;
 
+  /// Server-decided vehicle class so the rider navigator shows the same
+  /// branded bike/car the sender sees on the tracking map.
+  final String vehicleClass;
+
   const InAppNavigatorScreen({
     super.key,
     required this.destLat,
@@ -43,6 +47,7 @@ class InAppNavigatorScreen extends StatefulWidget {
     this.otherLng,
     this.otherIsDepot = false,
     this.otherLabel,
+    this.vehicleClass = 'motorcycle',
   });
 
   @override
@@ -408,6 +413,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           rider: me,
           route: displayLine,
           routeIsStraightLine: isStraight,
+          vehicleClass: widget.vehicleClass,
           // The other half of the job as context: depot gets the full
           // warehouse pin, a sender stop gets the small storefront badge.
           depot: (widget.otherLat != null && widget.otherIsDepot)

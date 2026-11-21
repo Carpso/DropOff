@@ -139,7 +139,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     if (picked == null || !mounted) return;
     setState(() => _receiptBusy = true);
     final bytes = await picked.readAsBytes();
-    final up = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'receipt.jpg', kind: 'receipt');
+    DateTime? capturedAt;
+    try { capturedAt = await picked.lastModified(); } catch (_) {}
+    final up = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'receipt.jpg', kind: 'receipt', capturedAt: capturedAt);
     if (!mounted) return;
     setState(() => _receiptBusy = false);
     if (!up.ok) return AppToast.error(context, 'Could not upload the receipt. Try again.');
@@ -377,12 +379,16 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             if (_receiptUrl != null) ...[
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: Image.network('${DropOffApi.baseUrl}$_receiptUrl',
-                    headers: DropOffApi.authHeaders,
-                    height: 120, width: double.infinity, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox(
-                        height: 120,
-                        child: Center(child: Icon(Icons.broken_image_outlined, color: AppColors.muted)))),
+                // CONTAIN keeps the burned-in DropOff timestamp visible.
+                child: ColoredBox(
+                  color: AppColors.line.withValues(alpha: 0.18),
+                  child: Image.network('${DropOffApi.baseUrl}$_receiptUrl',
+                      headers: DropOffApi.authHeaders,
+                      height: 120, width: double.infinity, fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const SizedBox(
+                          height: 120,
+                          child: Center(child: Icon(Icons.broken_image_outlined, color: AppColors.muted)))),
+                ),
               ),
               const SizedBox(height: 8),
             ],

@@ -12,6 +12,7 @@ import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
 import '../ui/saved_place_pin.dart';
+import '../ui/map_vehicle_marker.dart';
 
 /// Live in-app map on the DropOff basemap (Protomaps Zambia/Zimbabwe/Malawi/
 /// Mozambique archive on our R2 bucket — no Google, no MapTiler, no external
@@ -44,6 +45,11 @@ class RiderMap extends StatefulWidget {
   final Set<String> frequentSavedLabels;
   final ValueChanged<String>? onSavedTap;
 
+  /// Vehicle class for the rider marker: 'motorcycle' (default) or 'car'.
+  /// Server decides this for large/over-cap parcels; the sender, recipient and
+  /// rider all see the SAME branded marker.
+  final String vehicleClass;
+
   const RiderMap({
     super.key,
     required this.pickup,
@@ -56,6 +62,7 @@ class RiderMap extends StatefulWidget {
     this.selectedSavedLabel,
     this.frequentSavedLabels = const {},
     this.onSavedTap,
+    this.vehicleClass = 'motorcycle',
   });
 
   static const String tileUrl =
@@ -266,9 +273,10 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                   BoxShadow(color: Color(0x2EE8A020), blurRadius: 14, spreadRadius: 2),
                 ],
               ),
-              child: Transform.rotate(
-                angle: (_routeHeading - _mapRotationDeg) * math.pi / 180,
-                child: const Icon(Icons.two_wheeler, size: 25, color: AppColors.forest),
+              child: MapVehicleMarker(
+                heading: _routeHeading - _mapRotationDeg,
+                vehicle: widget.vehicleClass,
+                size: 30,
               ),
             ),
           ]),

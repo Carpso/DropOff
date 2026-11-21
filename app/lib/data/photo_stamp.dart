@@ -81,7 +81,7 @@ class PhotoStamp {
         color: img.ColorRgba8(255, 193, 7, 230),
       );
 
-      final when = _stampTime(at ?? catNow());
+      final when = at != null ? _stampTime(at) : _stampTime(catNow());
       const left = 'DropOff';
       final right = '$when CAT${tag.trim().isEmpty ? '' : ' · ${tag.trim().toUpperCase()}'}';
       final baseline = top + barH ~/ 2 + (wide ? 10 : 5);

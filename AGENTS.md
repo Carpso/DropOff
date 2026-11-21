@@ -27,6 +27,35 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (sixteenth pass) — evidence stamps, fare-receipt unlock, order ring, vehicle markers
+
+- Photo evidence: `uploadImage` now takes `capturedAt` and every camera/gallery
+  call site passes `XFile.lastModified()`, so the burned-in CAT timestamp is
+  the REAL capture time (it used to be upload time, making a batch look
+  identical). All evidence thumbnails switched from `BoxFit.cover` to
+  `BoxFit.contain` on a neutral background — cover was cropping the bottom
+  DropOff stamp strip and making photos look zoomed.
+- Counter fare / blurred receipt: the Bookings list now carries a clear
+  "Counter fare due — receipt locked" banner with the exact amount and a
+  FARE DUE pill, so a missed momo prompt is never a dead end. The locked and
+  paid receipt images use `AuthedImage` (a plain `Image.network` was 401ing on
+  `/media`), the pay button uses a stable idempotency key, and error copy is
+  plain-language with no raw codes.
+- New-order alarm: dedicated max-importance `dropoff_orders` notification
+  channel, `USE_FULL_SCREEN_INTENT`/`WAKE_LOCK`/`VIBRATE` permissions,
+  full-screen heads-up + vibration for assignment pushes, an audible
+  `StepSounds.orderAlert()` in the rider queue, and cold-start priming so the
+  first queue load adopts existing jobs without ringing.
+- Map vehicle marker: new `MapVehicleMarker` draws the branded top-down bike/
+  car and automatically upgrades to `map_bike_3d.png` / `map_car_3d.png` when
+  those sprites are present. `/jobs/:ref/live` now returns `vehicle_class`
+  (server-decided car upgrade), and the rider navigator + sender tracking map
+  show the same marker.
+- **3D art still blocked:** both sprite generation jobs failed again with
+  "Insufficient balance" (pay-as-you-go image credits). Git confirms no
+  `map_bike_3d.png` / `map_car_3d.png` were ever committed. The hand-drawn
+  branded marker is the shipping fallback.
+
 ## 2026-11-21 (fifteenth pass) — premium navigation voice + smart saved pins
 
 - Voice guidance: 1-second GPS stream replaces the 10 s one-shot (the "turn

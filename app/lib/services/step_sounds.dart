@@ -79,6 +79,23 @@ class StepSounds {
   /// A step was rejected / failed (wrong code, upload error, …).
   static Future<void> stepError() => _play('sounds/step_error.wav');
 
+  /// NEW-ORDER ALERT (owner 2026-11-21): a louder, repeating cue that rides on
+  /// top of the FCM ring so a rider with the app open hears an assignment even
+  /// when media volume is low. Deliberately NOT gated by the step-sound toggle:
+  /// missing a live order is worse than an unwanted chime.
+  static Future<void> orderAlert() async {
+    if (!_loaded) await load();
+    try {
+      await _player.stop();
+      await _player.setVolume(1.0);
+      for (var i = 0; i < 3; i++) {
+        await _player.play(AssetSource('sounds/step_done.wav'));
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        await _player.stop();
+      }
+    } catch (_) {/* never let audio block the queue */}
+  }
+
   static Future<void> _play(String asset) async {
     if (!_loaded) await load();
     if (!_enabled) return;

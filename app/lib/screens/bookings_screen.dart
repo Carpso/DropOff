@@ -264,6 +264,42 @@ class BookingCard extends StatelessWidget {
                 ),
               ),
             ],
+            // COUNTER FARE DUE (owner 2026-11-21): a missed momo prompt must never
+            // be a dead end. This banner on the BOOKING CARD itself points the
+            // sender straight to the exact booking, where the receipt unlocks
+            // after payment — so they can show it to their recipient.
+            if (booking.counterFareDue) ...[
+              const SizedBox(height: 12),
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: onTap,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF1D2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0x66B3261E)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.lock_clock_outlined, size: 20, color: Color(0xFF7B5710)),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Text('Counter fare due — receipt locked',
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: Color(0xFF7B5710))),
+                      const SizedBox(height: 2),
+                      Text(
+                        booking.counterReceiptZmw != null && booking.counterReceiptZmw! > 0
+                            ? 'Pay K${booking.counterReceiptZmw!.toStringAsFixed(2)} to reveal the depot receipt and reimburse your rider.'
+                            : 'Pay the depot fare to reveal the receipt and reimburse your rider.',
+                        style: const TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.35),
+                      ),
+                    ])),
+                    const Icon(Icons.chevron_right, color: Color(0xFF7B5710)),
+                  ]),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             // UNPAID / HELD booking — the one thing a sender must not miss.
             // It shows the exact state their money is in and the way to pay,
@@ -304,6 +340,14 @@ class BookingCard extends StatelessWidget {
                   decoration: BoxDecoration(color: complete ? const Color(0xFFE3EFE6) : const Color(0xFFFFF1D2), borderRadius: BorderRadius.circular(20)),
                   child: Text(booking.timeline[booking.stage], style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: complete ? AppColors.forest : const Color(0xFF7B5710))),
                 ),
+              if (booking.counterFareDue) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.24), borderRadius: BorderRadius.circular(20)),
+                  child: const Text('FARE DUE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Color(0xFF7B5710))),
+                ),
+              ],
             ]),
           ]),
         ),
@@ -816,8 +860,13 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
                       child: const Text('None yet', style: TextStyle(color: AppColors.muted, fontSize: 11)),
                     )
                   : ClipRRect(
+                      // CONTAIN (owner audit 2026-11-21): cover crops the bottom
+                      // stamp strip off every piece of evidence.
                       borderRadius: BorderRadius.circular(10),
-                      child: AuthedImage(path, fit: BoxFit.cover, width: double.infinity, height: 104),
+                      child: ColoredBox(
+                        color: AppColors.line.withValues(alpha: 0.18),
+                        child: AuthedImage(path, fit: BoxFit.contain, width: double.infinity, height: 104),
+                      ),
                     ),
             ),
             const SizedBox(height: 4),
@@ -1753,14 +1802,16 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
     final res = await DropOffApi.payCounterFare(
       jobRef: widget.booking.serverRef!,
       phone: widget.booking.senderPhone,
-      idempotencyKey: 'cfare-${widget.booking.serverRef}-${DateTime.now().millisecondsSinceEpoch}',
+      // Stable key: a retry after a dropped prompt must not open a second
+      // momo prompt for the same booking.
+      idempotencyKey: 'cfare-${widget.booking.serverRef}',
     );
     if (!mounted) return;
     if (!res.ok) {
       setState(() => _busy = false);
       AppToast.show(context, switch (res.error) {
         'counter_fare_already_paid' => 'This counter fare is already paid — the receipt is revealed in Bookings.',
-        _ => 'Payment could not start (${res.error ?? 'network'}) — verify your momo balance and connection, then retry.',
+        _ => 'Payment could not start — check your momo balance and connection, then tap Pay now again.',
       });
       return;
     }
@@ -1798,16 +1849,26 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Row(children: [
-            Icon(Icons.receipt_long_outlined, size: 18, color: Color(0xFF7B5710)),
-            SizedBox(width: 8),
-            Expanded(child: Text('Depot counter fare due',
+          Row(children: [
+            const Icon(Icons.receipt_long_outlined, size: 18, color: Color(0xFF7B5710)),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Depot counter fare due',
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
+            if (widget.booking.counterReceiptZmw != null && widget.booking.counterReceiptZmw! > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.28), borderRadius: BorderRadius.circular(20)),
+                child: Text('K${widget.booking.counterReceiptZmw!.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11.5, color: Color(0xFF7B5710))),
+              ),
           ]),
           const SizedBox(height: 4),
-          Text('Your rider paid the depot counter out of their own pocket. The receipts below are YOURS — revealed when you pay — and the rider gets reimbursed.'
+          Text('Your rider paid the depot counter out of their own pocket. Pay the exact receipt below and the photo unlocks instantly — your rider is reimbursed fee-free.'
               '${(widget.booking.counterReceipts.length > 1) ? ' The depot split the batch into ${widget.booking.counterReceipts.length} receipts; you repay the exact total DropOff computed from them.' : ''}',
               style: AppType.caption),
+          const SizedBox(height: 6),
+          const Text('1 · Pay the exact amount  2 · Receipt unlocks  3 · Show it to your recipient',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF7B5710))),
           // REAL receipt photo (owner directive): the rider's actual depot
           // receipt is served to the sender, but rendered blurred behind a
           // lock until the depot bill is cleared — never a placeholder.
@@ -1820,10 +1881,9 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
                 child: Stack(fit: StackFit.expand, children: [
                   ImageFiltered(
                     imageFilter: ui.ImageFilter.blur(sigmaX: 9, sigmaY: 9),
-                    child: Image.network(url, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const ColoredBox(
-                            color: Color(0x11800000),
-                            child: Center(child: Icon(Icons.lock_outline, size: 34, color: Color(0xFF7B5710))))),
+                    // AUTH-GATED media: a plain Image.network 401s on /media,
+                    // so the locked receipt used to render as a broken image.
+                    child: AuthedImage(url, fit: BoxFit.cover),
                   ),
                   Center(
                     child: Container(
@@ -1900,13 +1960,9 @@ class _CounterReceiptPaidCard extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 260),
                 child: Stack(alignment: Alignment.topRight, children: [
-                  Image.network(
+                  AuthedImage(
                     receipts[i].$2,
                     fit: BoxFit.contain,
-                    loadingBuilder: (_, child, progress) =>
-                        progress == null ? child : const Padding(padding: EdgeInsets.all(18), child: Center(child: AppLogoSpinner(size: 22))),
-                    errorBuilder: (_, __, ___) => const Text('Receipt photo could not load — it is stored safely on the server.',
-                        style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
                   ),
                   if (receipts.length > 1)
                     Container(

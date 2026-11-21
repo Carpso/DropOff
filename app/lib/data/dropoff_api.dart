@@ -1451,7 +1451,7 @@ class DropOffApi {
   ///              (senders see the rider collecting their parcel);
   ///   'kyc'    → uploads/kyc/<phone>/<uuid> — staff or the uploading rider only.
   /// Defaults to the PRIVATE one.
-  static Future<ApiResponse> uploadImage(List<int> bytes, String filename, {String kind = 'kyc'}) async {
+  static Future<ApiResponse> uploadImage(List<int> bytes, String filename, {String kind = 'kyc', DateTime? capturedAt}) async {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
       // EVIDENCE STAMP (owner directive 2026-11-20): every sender/rider photo
@@ -1474,7 +1474,7 @@ class DropOffApi {
       final Uint8List source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
       final Uint8List? stamped = DropOffApi.featureFlags['photo_stamp_enabled'] == false
           ? null
-          : await compute(_stampInIsolate, _StampJob(source, tag));
+          : await compute(_stampInIsolate, _StampJob(source, tag, capturedAt));
       if (stamped != null) {
         payload = stamped;
         final dot = filename.lastIndexOf('.');
@@ -1558,10 +1558,11 @@ class ApiResponse {
 class _StampJob {
   final Uint8List bytes;
   final String tag;
-  const _StampJob(this.bytes, this.tag);
+  final DateTime? capturedAt;
+  const _StampJob(this.bytes, this.tag, this.capturedAt);
 }
 
 /// Top-level so `compute` can spawn it; returns null when the bytes are not a
 /// decodable image (the caller uploads the original unchanged).
-Uint8List? _stampInIsolate(_StampJob job) => PhotoStamp.tryApply(job.bytes, tag: job.tag);
+Uint8List? _stampInIsolate(_StampJob job) => PhotoStamp.tryApply(job.bytes, tag: job.tag, at: job.capturedAt);
 

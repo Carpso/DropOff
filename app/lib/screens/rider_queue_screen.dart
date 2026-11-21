@@ -84,6 +84,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   // even with the phone idle. Pings the user to notice a new order.
   static const Duration _alarmWindow = Duration(seconds: 45);
   final Set<String> _alarmSeenRefs = <String>{};
+  // First queue load only PRIMES the seen set — a rider opening the app must
+  // not get an alarm for every job already assigned to them.
+  bool _alarmPrimed = false;
 
   // LIVE ARRIVAL WATCH (owner directive 2026-11-17): a GPS position stream
   // marks stops ARRIVED within [_arrivalMetres]; a manual tap marks too.
@@ -436,11 +439,16 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       }
     }
     refs.remove('');
-    if (refs.isEmpty) return;
     final newRefs = refs.where((r) => !_alarmSeenRefs.contains(r)).toList();
     _alarmSeenRefs.addAll(refs);
+    // Cold start: adopt the current queue silently; only genuinely NEW refs ring.
+    if (!_alarmPrimed) {
+      _alarmPrimed = true;
+      return;
+    }
     if (newRefs.isEmpty) return;
     HapticFeedback.heavyImpact();
+    unawaited(StepSounds.orderAlert());
     await WakelockPlus.enable();
     Future<void>.delayed(_alarmWindow, () async => await WakelockPlus.disable());
   }
@@ -618,7 +626,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return null;
     final bytes = await picked.readAsBytes();
-    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'pickup.jpg', kind: 'kyc');
+    DateTime? capturedAt;
+    try { capturedAt = await picked.lastModified(); } catch (_) {}
+    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'pickup.jpg', kind: 'kyc', capturedAt: capturedAt);
     if (!mounted) return null;
     if (!res.ok) {
       AppToast.show(context, 'Photo upload failed (${res.error ?? 'network'}) — try the capture again.');
@@ -634,7 +644,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return null;
     final bytes = await picked.readAsBytes();
-    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc');
+    DateTime? capturedAt;
+    try { capturedAt = await picked.lastModified(); } catch (_) {}
+    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc', capturedAt: capturedAt);
     if (!mounted) return null;
     if (!res.ok) {
       AppToast.show(context, 'Proof photo did not upload - check your connection and retake it.');
@@ -718,6 +730,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           otherLat: otherLat,
           otherLng: otherLng,
           otherIsDepot: isCollection ? picked : !picked,
+          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}' == 'car' ? 'car' : 'motorcycle',
         ),
       ));
       return;
@@ -759,6 +772,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           otherLat: otherLat,
           otherLng: otherLng,
           otherIsDepot: isCollection ? picked : !picked,
+          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}' == 'car' ? 'car' : 'motorcycle',
         ),
       ));
       return;
@@ -774,6 +788,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         builder: (_) => InAppNavigatorScreen(
           destLat: fbLatD, destLng: fbLngD, label: label,
           destIsDepot: true, otherLat: null, otherLng: null, otherIsDepot: false,
+          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}' == 'car' ? 'car' : 'motorcycle',
         ),
       ));
       return;
@@ -1154,7 +1169,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     // cancel and start the pickup file again.
                     itemBuilder: (_, i) => ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: AuthedImage(photos[i], fit: BoxFit.cover, width: 84, height: 84),
+                      // CONTAIN keeps the burned-in DropOff timestamp visible.
+                      child: ColoredBox(
+                        color: AppColors.line.withValues(alpha: 0.18),
+                        child: AuthedImage(photos[i], fit: BoxFit.contain, width: 84, height: 84),
+                      ),
                     ),
                   ),
                 ),
@@ -1306,7 +1325,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 const SizedBox(height: 4),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: AuthedImage(sellerPhoto, fit: BoxFit.cover, width: double.infinity, height: 140),
+                  // CONTAIN so the sender's burned-in evidence stamp stays visible.
+                  child: ColoredBox(
+                    color: AppColors.line.withValues(alpha: 0.18),
+                    child: AuthedImage(sellerPhoto, fit: BoxFit.contain, width: double.infinity, height: 140),
+                  ),
                 ),
                 const SizedBox(height: 4),
                 const Text('Compare this with the item photos you file below.',
@@ -1326,7 +1349,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     itemBuilder: (_, i) => Stack(children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: AuthedImage(parcelPhotos[i], fit: BoxFit.cover, width: 96, height: 96),
+                        // CONTAIN keeps the burned-in DropOff timestamp visible.
+                        child: ColoredBox(
+                          color: AppColors.line.withValues(alpha: 0.18),
+                          child: AuthedImage(parcelPhotos[i], fit: BoxFit.contain, width: 96, height: 96),
+                        ),
                       ),
                       Positioned(
                         top: 2,

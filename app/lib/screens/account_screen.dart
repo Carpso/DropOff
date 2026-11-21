@@ -397,8 +397,10 @@ class _AccountScreenState extends State<AccountScreen> {
     if (picked == null) return;
     setState(() => _photoBusy = true);
     final bytes = await picked.readAsBytes();
+    DateTime? capturedAt;
+    try { capturedAt = await picked.lastModified(); } catch (_) {}
     final name = picked.name.isNotEmpty ? picked.name : 'me.jpg';
-    final up = await DropOffApi.uploadImage(bytes, name, kind: 'selfie');
+    final up = await DropOffApi.uploadImage(bytes, name, kind: 'selfie', capturedAt: capturedAt);
     if (!mounted) return;
     if (!up.ok) {
       setState(() => _photoBusy = false);

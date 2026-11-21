@@ -423,7 +423,9 @@ class _BookingScreenState extends State<BookingScreen> {
     setState(() => _parcelPhotoPath = picked.path);
     setState(() => _parcelPhotoUploading = true);
     final bytes = await picked.readAsBytes();
-    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'parcel.jpg', kind: 'kyc');
+    DateTime? capturedAt;
+    try { capturedAt = await picked.lastModified(); } catch (_) {}
+    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'parcel.jpg', kind: 'kyc', capturedAt: capturedAt);
     if (!mounted) return;
     setState(() {
       _parcelPhotoUploading = false;

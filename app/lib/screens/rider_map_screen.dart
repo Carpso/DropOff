@@ -110,6 +110,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
             route: _route?.points ??
                 ((_rider != null && _pickup != null) ? [_rider!, _pickup!] : null),
             routeIsStraightLine: _route == null,
+            vehicleClass: '${_live?['vehicle_class'] ?? 'motorcycle'}' == 'car' ? 'car' : 'motorcycle',
           ),
           if (_live == null || _live!['lat'] == null)
             Positioned(

@@ -55,6 +55,13 @@ class PushService {
           _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
       // Wipe stale generic channel from earlier builds so Android doesn't keep
       // the legacy importance/priority mix.
+      // NEW-ORDER ALARM CHANNEL (owner 2026-11-21): max importance, loud sound
+      // and vibration — the closest a store build gets to a phone ringing for a
+      // fresh delivery. Ordinary status pushes stay on the quieter jobs channel.
+      await androidImpl?.createNotificationChannel(
+        const AndroidNotificationChannel('dropoff_orders', 'DropOff — New orders',
+            description: 'A new delivery is waiting — opens straight to your Task Queue.',
+            importance: Importance.max));
       await androidImpl?.createNotificationChannel(
         const AndroidNotificationChannel('dropoff_jobs', 'DropOff — Parcels & riders',
             description: 'Booking, dispatch, rider assignment and delivery updates.',
@@ -126,6 +133,13 @@ class PushService {
   static String _kindOf(Map<String, dynamic> data) => '${data['kind'] ?? ''}'.toLowerCase();
 
   static AndroidNotificationChannel _channelFor(String kind) {
+    // A new order must RING like an incoming call — max importance channel,
+    // full-screen intent and heads-up. Everything else keeps the quiet channels.
+    if (kind.contains('assign') || kind == 'claim_available' || kind == 'new_order' || kind == 'trip_transferred') {
+      return const AndroidNotificationChannel('dropoff_orders', 'DropOff — New orders',
+          description: 'A new delivery is waiting — opens straight to your Task Queue.',
+          importance: Importance.max);
+    }
     if (kind.startsWith('chat') || kind.contains('support')) {
       return const AndroidNotificationChannel('dropoff_chat', 'DropOff — Support tickets',
           description: 'Replies to your support tickets and DropOff updates.',
@@ -159,21 +173,24 @@ class PushService {
     final b = body ?? '';
     final kind = _kindOf(data);
     final channel = _channelFor(kind);
+    final isOrderAlert = channel.id == 'dropoff_orders';
     final android = AndroidNotificationDetails(
       channel.id,
       channel.name,
       channelDescription: channel.description,
       importance: channel.importance,
-      priority: (channel.importance == Importance.defaultImportance) ? Priority.defaultPriority : Priority.high,
+      priority: isOrderAlert
+          ? Priority.max
+          : (channel.importance == Importance.defaultImportance ? Priority.defaultPriority : Priority.high),
       playSound: true,
-      enableVibration: channel.importance != Importance.defaultImportance,
+      enableVibration: true,
       largeIcon: const DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
       icon: '@drawable/ic_stat_dropoff',
       ticker: t,
       category: (kind.contains('job') || kind.contains('assign') || kind.contains('status'))
           ? AndroidNotificationCategory.alarm
           : AndroidNotificationCategory.message,
-      fullScreenIntent: kind.contains('job') || kind.contains('assign'),
+      fullScreenIntent: isOrderAlert || kind.contains('job') || kind.contains('assign'),
       visibility: NotificationVisibility.public,
       styleInformation: BigTextStyleInformation(b, contentTitle: t, htmlFormatBigText: false),
       groupKey: 'dropoff',

@@ -1299,8 +1299,10 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
     if (picked == null) return;
     setState(() => _busyField = field);
     final bytes = await picked.readAsBytes();
+    DateTime? capturedAt;
+    try { capturedAt = await picked.lastModified(); } catch (_) {}
     final name = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
-    final res = await DropOffApi.uploadImage(bytes, name, kind: field == 'selfie' ? 'selfie' : 'kyc');
+    final res = await DropOffApi.uploadImage(bytes, name, kind: field == 'selfie' ? 'selfie' : 'kyc', capturedAt: capturedAt);
     if (!mounted) return;
     setState(() => _busyField = null);
     if (!res.ok) {
@@ -1376,13 +1378,20 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
     if (busy) {
       preview = const Center(child: AppLogoSpinner(size: 18));
     } else if (local != null) {
-      preview = Image.file(File(local), fit: BoxFit.cover);
+      // CONTAIN keeps the burned-in DropOff timestamp visible on KYC photos.
+      preview = ColoredBox(
+        color: AppColors.line.withValues(alpha: 0.18),
+        child: Image.file(File(local), fit: BoxFit.contain),
+      );
     } else if (url != null && url.isNotEmpty) {
-      preview = Image.network(
-        '${DropOffApi.baseUrl}$url',
-        headers: DropOffApi.authHeaders,
-        fit: BoxFit.cover,
+      preview = ColoredBox(
+        color: AppColors.line.withValues(alpha: 0.18),
+        child: Image.network(
+          '${DropOffApi.baseUrl}$url',
+          headers: DropOffApi.authHeaders,
+          fit: BoxFit.contain,
         errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: AppColors.muted),
+        ),
       );
     } else {
       preview = const Icon(Icons.add_a_photo_outlined, color: AppColors.muted);
@@ -1651,8 +1660,10 @@ class _SelfieBannerState extends State<_SelfieBanner> {
     if (picked == null) return;
     setState(() => _busy = true);
     final bytes = await picked.readAsBytes();
+    DateTime? capturedAt;
+    try { capturedAt = await picked.lastModified(); } catch (_) {}
     final name = picked.name.isNotEmpty ? picked.name : 'selfie.jpg';
-    final up = await DropOffApi.uploadImage(bytes, name, kind: 'selfie');
+    final up = await DropOffApi.uploadImage(bytes, name, kind: 'selfie', capturedAt: capturedAt);
     if (!mounted) return;
     if (!up.ok) {
       setState(() => _busy = false);
