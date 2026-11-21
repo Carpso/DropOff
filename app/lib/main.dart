@@ -8,6 +8,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import 'ui/keys.dart';
 import 'data/catalog.dart' as cat;
@@ -29,7 +30,7 @@ import 'services/crash_reporting.dart';
 import 'ui/app_theme.dart';
 import 'data/push_service.dart';
 import 'services/device_lock.dart';
-import 'widgets/common.dart';
+
 import 'ui/app_spinner.dart';
 import 'ui/in_app_browser.dart';
 
@@ -397,15 +398,15 @@ class _SplashScreenState extends State<_SplashScreen> {
       }
       return const AppShell();
     }
-    return const Scaffold(
+    return Scaffold(
       backgroundColor: AppColors.forest,
       body: Center(
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          DropOffLogo(size: 46),
-          SizedBox(height: 16),
-          AppLogoSpinner(size: 28, color: AppColors.amber),
-          SizedBox(height: 12),
-          Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
+          SvgPicture.asset('assets/brand/dropoff-logo.svg', height: 56),
+          const SizedBox(height: 16),
+          const AppLogoSpinner(size: 28, color: AppColors.amber),
+          const SizedBox(height: 12),
+          const Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
         ]),
       ),
     );

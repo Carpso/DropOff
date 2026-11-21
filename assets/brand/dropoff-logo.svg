@@ -1,41 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120" width="320" height="120" role="img" aria-label="DropOff logo">
-  <defs>
-    <style>
-      .rider { fill: #0B1F3A; }
-      .droplet { fill: #FF6A00; }
-      .accent { fill: #FFC400; }
-      .word-drop { fill: #FF6A00; }
-      .word-off { fill: #0B1F3A; }
-      text { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-weight: 800; font-size: 34px; letter-spacing: -0.5px; }
-    </style>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="560" viewBox="0 0 1600 560" role="img" aria-labelledby="title desc">
+  <title id="title">DropOff logo</title>
+  <desc id="desc">DropOff wordmark beside an orange location pin holding a parcel. The tagline reads: We collect. You relax.</desc>
+  <rect width="1600" height="560" rx="48" fill="#FFFFFF"/>
 
-  <!-- ===== Icon: parcel + downward drop arrow / location pin ===== -->
-  <g transform="translate(8,8)">
-    <!-- location pin outer (subtle, behind parcel) -->
-    <path class="droplet" opacity="0.25"
-          d="M31 76 C 14 58, 8 46, 8 34 a 23 23 0 0 1 46 0 c 0 12 -6 24 -23 42 z"/>
-    <!-- parcel box -->
-    <g transform="translate(6,10)">
-      <rect x="6" y="4" width="34" height="30" rx="5" class="rider"/>
-      <!-- tape line -->
-      <rect x="20.5" y="4" width="5" height="30" fill="#FFFFFF" opacity="0.9"/>
-      <!-- flap line -->
-      <line x1="6" y1="14" x2="40" y2="14" stroke="#FFFFFF" stroke-width="2.4" opacity="0.9"/>
-      <!-- knock-out location pin on face -->
-      <path class="droplet"
-            d="M23 40 a 9.5 9.5 0 0 1 9.5 9.5 c 0 6.5 -9.5 15 -9.5 15 s -9.5 -8.5 -9.5 -15 A 9.5 9.5 0 0 1 23 40 z"/>
-      <circle cx="23" cy="50" r="3.4" fill="#FFFFFF"/>
-    </g>
-    <!-- drop swoosh arrow curving down into the box -->
-    <path d="M52 6 C 66 10, 70 22, 62 32 L 54 40"
-          fill="none" stroke="#FF6A00" stroke-width="6" stroke-linecap="round"/>
-    <path d="M46 32 L 55 50 L 64 31 Z" class="droplet"/>
+  <g transform="translate(54 48) scale(.453125)">
+    <rect x="32" y="32" width="960" height="960" rx="224" fill="#102A43"/>
+    <path d="M185 404h105M154 480h105M185 556h72" fill="none" stroke="#FF7A1A" stroke-width="30" stroke-linecap="round" opacity=".9"/>
+    <path d="M512 151c-180 0-326 139-326 310 0 229 326 421 326 421s326-192 326-421c0-171-146-310-326-310Z" fill="#FF7A1A"/>
+    <circle cx="512" cy="433" r="221" fill="#FFFFFF"/>
+    <path d="m334 390 178-99 178 99-178 101Z" fill="#DCE8F2"/>
+    <path d="m334 390 178 101v178l-178-99Z" fill="#FFFFFF"/>
+    <path d="m512 491 178-101v180l-178 99Z" fill="#C4D6E4"/>
+    <path d="m451 326 61-35 178 99-61 35Z" fill="#FFB27D"/>
+    <path d="m512 491 61-35v178l-61 35Z" fill="#FF9650"/>
+    <path d="m334 390 178 101 178-101" fill="none" stroke="#102A43" stroke-width="12" stroke-linejoin="round" opacity=".16"/>
+    <circle cx="727" cy="710" r="119" fill="#102A43"/>
+    <circle cx="727" cy="710" r="98" fill="#20C997"/>
+    <path d="m680 711 31 32 67-72" fill="none" stroke="#FFFFFF" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 
-  <!-- ===== Wordmark ===== -->
-  <text x="132" y="72"><tspan class="word-drop">Drop</tspan><tspan class="word-off">Off</tspan></text>
-
-  <!-- tagline -->
-  <text x="134" y="98" style="font-size:13px; font-weight:600; letter-spacing:2.2px;" class="word-off" opacity="0.75">DROP IT. WE TAKE IT FROM THERE.</text>
+  <text x="555" y="287" font-family="Inter, Nunito, 'Arial Rounded MT Bold', Arial, sans-serif" font-size="172" font-weight="800" letter-spacing="-8"><tspan fill="#102A43">Drop</tspan><tspan fill="#FF7A1A">Off</tspan></text>
+  <text x="565" y="373" fill="#486581" font-family="Inter, Nunito, Arial, sans-serif" font-size="35" font-weight="600" letter-spacing="2">WE COLLECT. YOU RELAX.</text>
+  <rect x="565" y="412" width="690" height="10" rx="5" fill="#20C997"/>
 </svg>
