@@ -206,6 +206,35 @@ function isIntercity(fromCity: string | null | undefined, destCity: string | nul
   return a.length > 0 && b.length > 0 && a !== b;
 }
 const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
+
+// RIDER SHIFTS (owner 2026-11-21): sweep windows are 06:00, 10:00 and 14:00
+// CAT, each a 2h30 shift. Between shifts riders may do other work — DropOff
+// simply does not dispatch or offer claims outside an ACTIVE committed shift.
+const RIDER_SHIFTS: Record<string, { start: number; end: number; label: string }> = {
+  '06:00': { start: 360, end: 510, label: '06:00–08:30' },
+  '10:00': { start: 600, end: 750, label: '10:00–12:30' },
+  '14:00': { start: 840, end: 990, label: '14:00–16:30' },
+};
+const nowCatMinute = (): number => {
+  const cat = new Date(Date.now() + 2 * 3600_000);
+  return cat.getUTCHours() * 60 + cat.getUTCMinutes();
+};
+function parseRiderShifts(raw: unknown): string[] {
+  try {
+    const list = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(list)) return ['06:00', '10:00', '14:00'];
+    const valid = list.filter((s) => Object.prototype.hasOwnProperty.call(RIDER_SHIFTS, String(s))).map(String);
+    return valid.length ? valid : ['06:00', '10:00', '14:00'];
+  } catch { return ['06:00', '10:00', '14:00']; }
+}
+function activeShiftFor(rider: any, nowMin = nowCatMinute()): string | null {
+  if (Number(rider?.on_shift ?? 1) !== 1) return null;
+  for (const shift of parseRiderShifts(rider?.shifts)) {
+    const w = RIDER_SHIFTS[shift];
+    if (nowMin >= w.start && nowMin < w.end) return shift;
+  }
+  return null;
+}
 // Business day = Central Africa Time (UTC+2). D1's 'localtime' is UTC, so every
 // daily-cap / sweep query must use this explicit offset or the day rolls over
 // at 02:00 CAT instead of midnight.
@@ -7775,7 +7804,7 @@ async function nearestAvailableRider(
 ): Promise<{ rider: any; km: number } | null> {
   const atDepot = await ridersAtDepot(env);
   const riders = await env.DB.prepare(
-    `SELECT id, phone, full_name, vehicle, vehicle_class, last_lat, last_lng, last_seen_at, status, active, capacity, current_load, photo_url
+    `SELECT id, phone, full_name, vehicle, vehicle_class, shifts, on_shift, last_lat, last_lng, last_seen_at, status, active, capacity, current_load, photo_url
        FROM riders WHERE active = 1 AND status IN ('available', 'on_route')
          AND verification_status = 'verified'
          AND last_seen_at > datetime('now', '-15 minutes')`
@@ -7801,6 +7830,9 @@ async function nearestAvailableRider(
     let bestLoad = Infinity;
     for (const r of (riders.results ?? [])) {
       const riderId = Number(r.id);
+      // SHIFT GATE: a rider is only dispatchable inside one of their committed
+      // 2h30 sweeps (and only while opted on-shift).
+      if (!activeShiftFor(r)) continue;
       if (!allowed(String(r.vehicle_class ?? 'motorcycle').toLowerCase())) continue;
       if (atDepot.has(riderId)) {
         if (collectExcluded) collectExcluded.push({ name: String(r.full_name ?? 'A rider'), depot: atDepot.get(riderId)! });
@@ -7866,12 +7898,52 @@ app.post('/jobs/:ref/auto-assign', async (c) => {
 // `rider_id IS NULL` guard makes claiming exclusive: the first rider to claim
 // owns the job and it vanishes from every other rider's board and queue.
 
+// Rider shifts: GET current state; POST { on_shift?, shifts? } (all three by
+// default). Terms must be accepted once before going on shift.
+app.get('/rider/shifts', async (c) => {
+  const phone = c.get('phone');
+  if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT shifts, on_shift, shift_terms_accepted FROM riders WHERE phone = ?1',
+  ).bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  return c.json({
+    shifts: parseRiderShifts(rider.shifts),
+    on_shift: Number(rider.on_shift ?? 1) === 1,
+    terms_accepted: Number(rider.shift_terms_accepted ?? 0) === 1,
+    active_shift: activeShiftFor(rider),
+    windows: RIDER_SHIFTS,
+  });
+});
+
+app.post('/rider/shifts', async (c) => {
+  const phone = c.get('phone');
+  if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const rider = await c.env.DB.prepare(
+    'SELECT id, shifts, on_shift, shift_terms_accepted FROM riders WHERE phone = ?1',
+  ).bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_not_found' }, 404);
+  const shifts = b?.shifts === undefined ? parseRiderShifts(rider.shifts)
+    : (Array.isArray(b.shifts)
+        ? b.shifts.map(String).filter((s: string) => Object.prototype.hasOwnProperty.call(RIDER_SHIFTS, s))
+        : parseRiderShifts(rider.shifts));
+  if (!shifts.length) return c.json({ error: 'select_at_least_one_shift' }, 400);
+  const accepted = b?.terms_accepted === true || Number(rider.shift_terms_accepted ?? 0) === 1;
+  const onShift = b?.on_shift === undefined ? Number(rider.on_shift ?? 1) === 1 : b.on_shift === true;
+  if (onShift && !accepted) return c.json({ error: 'terms_required', detail: 'Accept the rider sweep-shift terms before going on shift.' }, 403);
+  await c.env.DB.prepare(
+    'UPDATE riders SET shifts = ?2, on_shift = ?3, shift_terms_accepted = ?4 WHERE id = ?1',
+  ).bind(rider.id, JSON.stringify(shifts), onShift ? 1 : 0, accepted ? 1 : 0).run();
+  return c.json({ ok: true, shifts, on_shift: onShift, active_shift: activeShiftFor({ shifts: JSON.stringify(shifts), on_shift: onShift ? 1 : 0 }) });
+});
+
 app.get('/rider/available', async (c) => {
   if (!await featureOn(c.env, 'claim_board_enabled')) return c.json({ jobs: [] });
   const phone = c.get('phone');
   if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
   const rider = await c.env.DB.prepare(
-    'SELECT id, active, verification_status FROM riders WHERE phone = ?1',
+    'SELECT id, active, shifts, on_shift FROM riders WHERE phone = ?1',
   ).bind(phone).first<any>();
   // CLAIM-BOARD OPEN HOUSE (owner 2026-11-20): auto-assign gets the first
   // refusal; what it misses is offered here to ANY active, presence-verified
@@ -7880,6 +7952,16 @@ app.get('/rider/available', async (c) => {
   // Claim. Capacity + presence are the guards, so a rider can't Claim when
   // they are busy — but there is no algorithmic reason to keep jobs reserved.
   if (!rider || !rider.active) return c.json({ error: 'rider_not_active' }, 403);
+  const active = activeShiftFor(rider);
+  if (!active) {
+    return c.json({
+      jobs: [],
+      off_shift: true,
+      active_shift: null,
+      shifts: parseRiderShifts(rider.shifts),
+      hint: 'You are outside your committed DropOff sweeps. Between shifts you may do other rides — DropOff assignments return at your next shift.',
+    });
+  }
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.dest_city, j.dest_address,
             j.parcels, j.vehicle_class, j.needs_car, j.description, j.weight_class, j.pickup_window, j.pickup_at,
@@ -7892,7 +7974,7 @@ app.get('/rider/available', async (c) => {
       ORDER BY j.created_at DESC
       LIMIT 50`,
   ).all();
-  return c.json({ jobs: results, rider_id: rider.id });
+  return c.json({ jobs: results, rider_id: rider.id, active_shift: active });
 });
 
 app.post('/jobs/:ref/claim', async (c) => {
@@ -7900,13 +7982,16 @@ app.post('/jobs/:ref/claim', async (c) => {
   const phone = c.get('phone');
   if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
   const rider = await c.env.DB.prepare(
-    `SELECT id, full_name, vehicle, active, verification_status, status, current_load, capacity, last_lat, last_lng
+    `SELECT id, full_name, vehicle, active, shifts, on_shift, verification_status, status, current_load, capacity, last_lat, last_lng
        FROM riders WHERE phone = ?1`,
   ).bind(phone).first<any>();
   // Open house: presence (active) + capacity are the guards. Verification is
   // the rider's own login identity — riders prove who they are when they log
   // in, so we don't second-guess it here.
   if (!rider || !rider.active) return c.json({ error: 'verified_active_rider_required' }, 403);
+  if (!activeShiftFor(rider)) {
+    return c.json({ error: 'off_shift', detail: 'You are outside your committed DropOff sweeps — assignments return at your next shift.' }, 403);
+  }
   const cap = Number(rider.capacity ?? 8);
   if (cap > 0 && Number(rider.current_load ?? 0) >= cap) return c.json({ error: 'at_capacity' }, 409);
   const ref = c.req.param('ref');

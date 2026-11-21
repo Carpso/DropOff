@@ -92,6 +92,17 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   String? _gpsIssue; // 'permission' | 'service' — drives the recovery banner
   Position? _riderPos;
 
+  // SWEEP SHIFTS (owner 2026-11-21): all riders commit to 06:00–08:30,
+  // 10:00–12:30 and 14:00–16:30 CAT. Between shifts they can do other rides.
+  static const Map<String, String> _shiftLabels = {
+    '06:00': '06:00–08:30',
+    '10:00': '10:00–12:30',
+    '14:00': '14:00–16:30',
+  };
+  Map<String, dynamic>? _shifts;
+  Set<String> _selectedShifts = {'06:00', '10:00', '14:00'};
+  bool _shiftBusy = false;
+
   // AUTOMATIC LIVE-LOCATION SHARING (owner directive 2026-11-17: "make rider
   // share live location automatically to seller/sender"): while the Team-screen
   // share toggle is on, the GPS stream feeds POST /rider/ping even with an
@@ -126,6 +137,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       if (batches.isNotEmpty) setState(() {});
     });
     _startArrivalWatch();
+    _loadShifts();
   }
 
   @override
@@ -239,6 +251,120 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     } finally {
       if (mounted) setState(() => _busyRef = null);
     }
+  }
+
+  Future<void> _loadShifts() async {
+    final data = await DropOffApi.riderShifts();
+    if (!mounted) return;
+    setState(() {
+      _shifts = data;
+      final raw = ((data?['shifts'] as List?) ?? const <dynamic>[])
+          .whereType<String>()
+          .toList();
+      if (raw.isNotEmpty) _selectedShifts = raw.toSet();
+    });
+  }
+
+  Future<void> _setShift(bool on) async {
+    if (!mounted || _shiftBusy) return;
+    setState(() => _shiftBusy = true);
+    bool accepted = _shifts?['terms_accepted'] == true;
+    if (on && !accepted) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Rider sweep-shift terms', style: TextStyle(fontWeight: FontWeight.w900)),
+          content: const SingleChildScrollView(child: Text(
+            'By going ON SHIFT you agree to work the three DropOff sweeps: 06:00–08:30, 10:00–12:30 and 14:00–16:30 CAT. '
+            'DropOff assignments stop outside these windows, when you switch OFF SHIFT, or between shifts — so you are free to do other rides then. '
+            'You agree to meet the daily target of 30 parcels, or the monthly target across the month if the daily target is missed; pay and bonuses follow the payroll rules. '
+            'You also agree to hand over every parcel only against the correct proof (code/photo) and to keep the app\'s location sharing on while on shift.',
+            style: TextStyle(fontSize: 12.5, height: 1.4),
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('I agree')),
+          ],
+        ),
+      );
+      if (ok != true) {
+        if (mounted) setState(() => _shiftBusy = false);
+        return;
+      }
+      accepted = true;
+    }
+    final res = await DropOffApi.setRiderShifts(
+      onShift: on,
+      shifts: _selectedShifts.toList(),
+      termsAccepted: accepted,
+    );
+    if (!mounted) return;
+    setState(() => _shiftBusy = false);
+    if (res.ok) {
+      await _loadShifts();
+      if (!mounted) return;
+      AppToast.show(context, on ? 'You are ON SHIFT — DropOff jobs will flow in your sweeps.' : 'You are OFF SHIFT — other ride work is unrestricted.');
+    } else {
+      AppToast.show(context, 'Could not update shift (${res.error ?? 'network'}).');
+    }
+  }
+
+  Widget _shiftCard() {
+    final data = _shifts;
+    final on = data?['on_shift'] == true;
+    final active = data?['active_shift'] as String?;
+    return Card(
+      color: on ? AppColors.forest.withValues(alpha: 0.08) : AppColors.line.withValues(alpha: 0.12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.schedule, size: 18, color: on ? AppColors.forest : AppColors.muted),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Sweep shifts', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14))),
+            if (active != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(12)),
+                child: Text('ACTIVE · ${_shiftLabels[active] ?? active}',
+                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900)),
+              ),
+          ]),
+          const SizedBox(height: 6),
+          const Text('Committed windows (CAT). Between them you are free to do other rides.',
+              style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, children: [
+            for (final entry in _shiftLabels.entries)
+              FilterChip(
+                label: Text(entry.value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                selected: _selectedShifts.contains(entry.key),
+                onSelected: _shiftBusy ? null : (v) => setState(() {
+                  if (v) { _selectedShifts.add(entry.key); } else { _selectedShifts.remove(entry.key); }
+                }),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _shiftBusy ? null : () => _setShift(!on),
+                icon: _shiftBusy
+                    ? const AppLogoSpinner(size: 15)
+                    : Icon(on ? Icons.pause_circle_outline : Icons.play_circle_outline),
+                label: Text(_shiftBusy ? 'Saving…' : (on ? 'ON SHIFT — tap to go off' : 'OFF SHIFT — tap to go on')),
+              ),
+            ),
+          ]),
+          if (data == null)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text('Shift settings unavailable offline — showing your last known choice.',
+                  style: TextStyle(fontSize: 10.5, color: AppColors.muted)),
+            ),
+        ]),
+      ),
+    );
   }
 
   /// RING + WAKE (owner 2026-11-20): when NEW jobs appear in the queue,
@@ -1606,6 +1732,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 child: const Text('Open settings'),
               ),
             ]),
+          ),
+        // SHIFT CONTROL (owner 2026-11-21) — rider commits to the three
+        // sweeps; between them they may do other ride work.
+        if (store.linked)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+            child: _shiftCard(),
           ),
         Expanded(
           child: _loading

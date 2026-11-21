@@ -1130,6 +1130,15 @@ class DropOffApi {
   static Future<ApiResponse> setDoorPin(String pin) => post('/me/door-pin', {'pin': pin});
   static Future<ApiResponse> clearDoorPin() => delete('/me/door-pin');
 
+  /// Rider sweep shifts — committed 06:00/10:00/14:00 CAT windows.
+  static Future<Map<String, dynamic>?> riderShifts() => get('/rider/shifts');
+  static Future<ApiResponse> setRiderShifts({required bool onShift, List<String>? shifts, bool termsAccepted = false}) =>
+      post('/rider/shifts', {
+        'on_shift': onShift,
+        if (shifts != null) 'shifts': shifts,
+        'terms_accepted': termsAccepted,
+      });
+
   /// The rider's order waybill — full sheet (contacts, both addresses, depot,
   /// parcels) with every money field stripped server-side.
   static Future<Map<String, dynamic>?> riderWaybill(String ref) =>

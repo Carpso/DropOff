@@ -27,6 +27,19 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (tenth pass) — rider sweep shifts (06:00/10:00/14:00 CAT)
+
+- Migration `0077_rider_shifts.sql`: `riders.shifts` (default ALL THREE),
+  `riders.on_shift` (default 1), `riders.shift_terms_accepted`.
+- Shifts are 06:00–08:30, 10:00–12:30, 14:00–16:30 CAT. Between shifts riders
+  are free to do other ride jobs; dispatch (`nearestAvailableRider`) skips them
+  outside an active shift and the claim board returns no jobs (`off_shift`).
+- New endpoints `GET/POST /rider/shifts`: rider can toggle ON/OFF and edit the
+  selected windows; going ON requires accepting the sweep-shift terms (daily
+  30-parcel target OR monthly target, proof-handover and location rules).
+- Rider Task Queue shows a shift card with the active window badge and an
+  ON/OFF SHIFT button. Presence pings are unaffected (still run while signed in).
+
 ## 2026-11-21 (ninth pass) — money-flow confirmation + promo pricing disclosure
 
 CONFIRMED from the fee engine (`workers/src/fees.ts`) and worker:
