@@ -80,7 +80,8 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     rows: [
       (heading: 'One momo prompt per cycle', body: 'A 7-day Weekly Sprint, or a monthly Silver (10) / Gold (25) / Platinum (50). Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.'),
       (heading: 'Held ≠ lost', body: 'Plans never hold a booking. If you book without prepayment, the job is saved and waits for the plan\'s momo prompt to land. No money moves until you approve it.'),
-      (heading: 'Pricing truth', body: 'Packs deduct automated at approval. Inside your pack — the trip leg is free; past your pack, it is PAYG at full rate. The momo prompt always shows the exact figure before you approve it.'),
+      (heading: 'Pricing truth', body: 'Packs deduct automated at approval. Inside your pack — the trip leg is free; past your pack, it is PAYG at full rate. The momo prompt adds our processing fee (platform cut) plus the mobile-money collection fee — you cover the transaction cost. Introductory promo prices increase at review (within 3–6 months, no later than 1 year); your current cycle keeps its rate.'),
+      (heading: 'Where the money goes', body: 'Senders prepay DropOff for every leg. Riders are salaried and never receive per-parcel money, so the rider fee and processing fee stay with DropOff. The courier counter fare is a separate reimbursement you pay through DropOff when the rider fronts it.'),
     ],
   ),
   HelpTopic.depotReceipts: (

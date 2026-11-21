@@ -27,6 +27,24 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (ninth pass) — money-flow confirmation + promo pricing disclosure
+
+CONFIRMED from the fee engine (`workers/src/fees.ts`) and worker:
+- EVERY momo transaction includes BOTH the Lipila collection leg (K2.50, paid
+  by the customer) AND our platform cut (`platformFee()` = 1% + K0.98, min K4,
+  goes to DropOff). It is NOT just Lipila's fee.
+- PAYG rider fees stay with DropOff — riders are salaried (K3,000/mo) and are
+  NEVER paid per parcel/plan. `RIDER_TAKE_PCT` machinery is dormant.
+- Plan purchases charge `platformFee(plan.price) + MOMO_COLLECTION_FEE` on top
+  of the plan price — the sender covers the transaction cost, and our cut is
+  included. Counter-fare reimbursements do the same (subscribers exempt from
+  the processing fee only there).
+- UI now states this plainly at plan purchase (Account + Business dialogs) and
+  in the plans help sheet.
+- Plan prices are labelled INTRODUCTORY PROMO pricing with explicit notice that
+  they rise within 3–6 months (no later than 1 year); existing cycles keep their
+  rate. Do not remove this disclosure.
+
 ## 2026-11-21 (eighth pass) — feature switches, server-decided vehicle, transfers, PAYG promos, branding, release
 
 - **Migration 0076:** `jobs.needs_car`, `promo_codes.kind`, and 7 new app_settings

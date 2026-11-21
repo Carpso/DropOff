@@ -1229,11 +1229,14 @@ class _TiersCardState extends State<_TiersCard> {
             style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
         content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('This plan costs $price.', style: AppType.bodyStrong),
+          const SizedBox(height: 6),
+          const Text('Introductory promo price — it will increase within 3–6 months (no later than 1 year). This cycle keeps the current rate.',
+              style: TextStyle(fontSize: 11, color: AppColors.danger, fontWeight: FontWeight.w700, height: 1.35)),
           const SizedBox(height: 10),
           const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.',
               style: TextStyle(fontSize: 12.5, height: 1.4)),
           const SizedBox(height: 8),
-          const Text('A small processing fee and the momo collection fee are added to the prompt. Your plan starts only when the payment is confirmed.',
+          const Text('The prompt adds our processing fee (platform cut) plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-parcel money.',
               style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
         ]),
         actions: [
@@ -1349,7 +1352,10 @@ class _TiersCardState extends State<_TiersCard> {
                 Expanded(child: Text('7-Day Weekly Sprint or Silver / Gold / Platinum — one momo prompt.', style: AppType.bodyStrong)),
                 HelpIconButton(topic: HelpTopic.plansBlurb),
               ]),
-              const SizedBox(height: 12),
+              const SizedBox(height: 6),
+              const Text('PROMO PRICING — these are introductory rates. Prices will increase at the next review (within 3–6 months, no later than 1 year). Your current cycle keeps this rate.',
+                  style: TextStyle(fontSize: 10.5, color: AppColors.danger, fontWeight: FontWeight.w800, height: 1.35)),
+              const SizedBox(height: 8),
               _PlanUsageMeter(key: ValueKey(_usageCycle)),
               FutureBuilder<Map<String, dynamic>?>(
                 future: _plansFuture,
