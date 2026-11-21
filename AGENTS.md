@@ -27,24 +27,26 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
-## 2026-11-21 (eleventh pass) — advance claiming of tomorrow's 06:00 sweep
+## 2026-11-21 (eleventh pass) — correct pickup windows + next-slot advance claim
 
-- The **06:00 shift now opens at 05:30 CAT** (early-pick window) and closes at
-  08:30. Label in the rider app: `05:30–08:30 (06:00)`.
-- Riders **off shift can still claim tomorrow's 06:00 sweep jobs** at any time:
-  `/rider/available` returns only those advance jobs with `off_shift: true`
-  and a clear hint; `POST /claim` allows them via `isTomorrowSweepJob()`. All
-  other jobs remain shift-gated.
-- The claim board sorts by `pickup_at` so tomorrow's sweep is first; the rider
-  card shows the advance-claim hint. Shift terms updated to state this.
+- The **06:00 pickup window opens at 05:30 CAT** and closes at **07:30**
+  (Platinum's first trip); the sweep target for depot drop-off is 08:30.
+  Windows: 05:30–07:30 (06:00), 10:00–11:30, 14:00–15:30.
+- Riders **off shift can claim the NEXT sweep's jobs (06:00 / 10:00 / 14:00)
+  at any time**: `/rider/available` returns those advance jobs with an
+  `off_shift` hint; `POST /claim` allows them via `isUpcomingSweepJob()`.
+  Collection starts at 05:30 for the 06:00 sweep, or at 10:00 / 14:00.
+  All other jobs remain shift-gated.
 
 ## 2026-11-21 (tenth pass) — rider sweep shifts (06:00/10:00/14:00 CAT)
 
 - Migration `0077_rider_shifts.sql`: `riders.shifts` (default ALL THREE),
   `riders.on_shift` (default 1), `riders.shift_terms_accepted`.
-- Shifts are 06:00–08:30, 10:00–12:30, 14:00–16:30 CAT. Between shifts riders
-  are free to do other ride jobs; dispatch (`nearestAvailableRider`) skips them
-  outside an active shift and the claim board returns no jobs (`off_shift`).
+- Pickup windows are 05:30–07:30 (06:00 opens early), 10:00–11:30 and
+  14:00–15:30 CAT (see SWEEP_SLOTS; the 08:30/12:30/16:30 figures are
+  depot drop-off TARGETS, not shift ends). Between windows riders may do other
+  work; dispatch (`nearestAvailableRider`) skips them outside an active window
+  and the claim board returns only advance next-slot jobs (`off_shift`).
 - New endpoints `GET/POST /rider/shifts`: rider can toggle ON/OFF and edit the
   selected windows; going ON requires accepting the sweep-shift terms (daily
   30-parcel target OR monthly target, proof-handover and location rules).

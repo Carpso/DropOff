@@ -96,9 +96,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   // SWEEP SHIFTS (owner 2026-11-21): all riders commit to 06:00–08:30,
   // 10:00–12:30 and 14:00–16:30 CAT. Between shifts they can do other rides.
   static const Map<String, String> _shiftLabels = {
-    '06:00': '05:30–08:30 (06:00)',
-    '10:00': '10:00–12:30',
-    '14:00': '14:00–16:30',
+    '06:00': '05:30–07:30 (06:00 pickup)',
+    '10:00': '10:00–11:30',
+    '14:00': '14:00–15:30',
   };
   Map<String, dynamic>? _shifts;
   Set<String> _selectedShifts = {'06:00', '10:00', '14:00'};
@@ -276,8 +276,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         builder: (ctx) => AlertDialog(
           title: const Text('Rider sweep-shift terms', style: TextStyle(fontWeight: FontWeight.w900)),
           content: const SingleChildScrollView(child: Text(
-            'By going ON SHIFT you agree to work the three DropOff sweeps: 05:30–08:30 (06:00 sweep), 10:00–12:30 and 14:00–16:30 CAT. '
-            'Tomorrow’s 06:00 sweep orders may be claimed at any time, even off shift; collection starts at 05:30 CAT. '
+            'By going ON SHIFT you agree to work the three pickup windows: 05:30–07:30 (06:00), 10:00–11:30 and 14:00–15:30 CAT. '
+            'The next sweep’s orders (06:00 / 10:00 / 14:00) may be claimed at any time, even off shift; collection starts at 05:30 for the 06:00 sweep, or at 10:00 / 14:00. '
             'DropOff assignments stop outside these windows, when you switch OFF SHIFT, or between shifts — so you are free to do other rides then. '
             'You agree to meet the daily target of 30 parcels, or the monthly target across the month if the daily target is missed; pay and bonuses follow the payroll rules. '
             'You also agree to hand over every parcel only against the correct proof (code/photo) and to keep the app\'s location sharing on while on shift.',
@@ -333,7 +333,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               ),
           ]),
           const SizedBox(height: 6),
-          const Text('Committed windows (CAT). 06:00 opens at 05:30. Between them you are free to do other rides.',
+          const Text('Pickup windows (CAT). 06:00 opens at 05:30. Between them you are free to do other rides.',
               style: TextStyle(fontSize: 11, color: AppColors.muted)),
           const SizedBox(height: 8),
           Wrap(spacing: 6, children: [

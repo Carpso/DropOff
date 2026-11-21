@@ -210,12 +210,12 @@ const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
 // RIDER SHIFTS (owner 2026-11-21): sweep windows are 06:00, 10:00 and 14:00
 // CAT, each a 2h30 shift. Between shifts riders may do other work — DropOff
 // simply does not dispatch or offer claims outside an ACTIVE committed shift.
+// Pickup windows — NOT the target depot drop-off times (08:30/12:30/16:30).
+// The 06:00 window opens 30 min early (05:30) for tomorrow's pre-booked jobs.
 const RIDER_SHIFTS: Record<string, { start: number; end: number; label: string }> = {
-  // The 06:00 sweep opens 30 min early (05:30) so tomorrow's early pickups can
-  // be started before the window; other sweeps start at their posted time.
-  '06:00': { start: 330, end: 510, label: '05:30–08:30 (06:00 sweep)' },
-  '10:00': { start: 600, end: 750, label: '10:00–12:30' },
-  '14:00': { start: 840, end: 990, label: '14:00–16:30' },
+  '06:00': { start: 330, end: 450, label: '05:30–07:30 (06:00 pickup)' },
+  '10:00': { start: 600, end: 690, label: '10:00–11:30' },
+  '14:00': { start: 840, end: 930, label: '14:00–15:30' },
 };
 const nowCatMinute = (): number => {
   const cat = new Date(Date.now() + 2 * 3600_000);
@@ -229,15 +229,19 @@ function parseRiderShifts(raw: unknown): string[] {
     return valid.length ? valid : ['06:00', '10:00', '14:00'];
   } catch { return ['06:00', '10:00', '14:00']; }
 }
-/** Is this an unclaimed job for the NEXT 06:00 sweep? Those are booked in
- *  advance and may be claimed by ANY rider even outside their shift (owner
- *  2026-11-21: "tomorrow 6am orders claimable after the last shift"). */
-function isTomorrowSweepJob(job: any): boolean {
-  if (!job || String(job.pickup_window ?? '') !== '06:00' || job.rider_id) return false;
-  const at = Date.parse(String(job.pickup_at ?? '').replace(' ', 'T') + (String(job.pickup_at ?? '').endsWith('Z') ? '' : 'Z'));
+/** Is this an unclaimed job for an UPCOMING sweep (06:00 / 10:00 / 14:00)?
+ *  Advance-booked jobs may be claimed by ANY rider even outside their shift
+ *  (owner 2026-11-21: "not only tomorrow 06:00 — the next slot too"). They are
+ *  only collected from the slot's start (06:00 opens early at 05:30). */
+function isUpcomingSweepJob(job: any): boolean {
+  if (!job || job.rider_id) return false;
+  const window = String(job.pickup_window ?? '');
+  if (!Object.prototype.hasOwnProperty.call(SWEEP_SLOTS, window)) return false;
+  const raw = String(job.pickup_at ?? '');
+  const at = Date.parse(raw.replace(' ', 'T') + (raw.endsWith('Z') ? '' : 'Z'));
   if (!Number.isFinite(at)) return false;
   const hoursAhead = (at - Date.now()) / 3_600_000;
-  return hoursAhead > 0 && hoursAhead <= 30; // next 06:00 CAT (today or tomorrow)
+  return hoursAhead > 0 && hoursAhead <= 30;
 }
 
 function activeShiftFor(rider: any, nowMin = nowCatMinute()): string | null {
@@ -7966,10 +7970,11 @@ app.get('/rider/available', async (c) => {
   // they are busy — but there is no algorithmic reason to keep jobs reserved.
   if (!rider || !rider.active) return c.json({ error: 'rider_not_active' }, 403);
   const active = activeShiftFor(rider);
-  // OFF-SHIFT EXCEPTION (owner 2026-11-21): tomorrow's 06:00 sweep jobs are
-  // booked in advance and may be claimed by ANY rider at ANY time — they are
-  // only picked up from 05:30 CAT when the early 06:00 shift opens.
-  const extra = active ? '' : ` AND j.pickup_window = '06:00'
+  // OFF-SHIFT EXCEPTION (owner 2026-11-21): the NEXT sweep's jobs (06:00,
+  // 10:00 or 14:00) are booked in advance and may be claimed by ANY rider at
+  // ANY time. Collection starts at the slot time (06:00 opens at 05:30).
+  const extra = active ? '' : `
+      AND j.pickup_window IN ('06:00', '10:00', '14:00')
       AND j.pickup_at > datetime('now') AND j.pickup_at <= datetime('now', '+30 hours')`;
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.dest_city, j.dest_address,
@@ -7989,7 +7994,7 @@ app.get('/rider/available', async (c) => {
     active_shift: active,
     off_shift: !active,
     tomorrow_claim: !active,
-    hint: active ? null : 'Off shift — only tomorrow’s 06:00 sweep orders are listed. Claim them now; pick up from 05:30 CAT.',
+    hint: active ? null : 'Off shift — only the next sweep’s orders (06:00 / 10:00 / 14:00) are listed. Claim now; collect from 05:30 for 06:00, or 10:00 / 14:00.',
   });
 });
 
@@ -8013,10 +8018,11 @@ app.post('/jobs/:ref/claim', async (c) => {
        FROM jobs WHERE ref = ?1`,
   ).bind(ref).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
-  // A rider off-shift may STILL claim tomorrow's 06:00 sweep job; they only
-  // collect it from 05:30 CAT. Everything else is shift-gated.
-  if (!activeShiftFor(rider) && !isTomorrowSweepJob(job)) {
-    return c.json({ error: 'off_shift', detail: 'Outside your sweeps you may only claim tomorrow’s 06:00 orders.' }, 403);
+  // Off-shift riders may STILL claim the next sweep's job (06:00/10:00/14:00)
+  // in advance; they only collect from the slot time (05:30 for the 06:00 one).
+  // Everything else is shift-gated.
+  if (!activeShiftFor(rider) && !isUpcomingSweepJob(job)) {
+    return c.json({ error: 'off_shift', detail: 'Outside your sweeps you may only claim the next sweep’s advance orders.' }, 403);
   }
   if (job.rider_id) return c.json({ error: 'already_claimed', rider_id: job.rider_id }, 409);
   if (job.status !== 'created') return c.json({ error: 'not_claimable', status: job.status }, 409);

@@ -12,8 +12,8 @@ A small marked **DropOff Fast Lane Desk** in your depot — a table, corner or o
 staff member — where DropOff riders drop parcels and collect counter receipts
 separately from your walk-in customers.
 
-**Sweeps (CAT):** 06:00–08:30 · 10:00–12:30 · 14:00–16:30.
-Riders are only dispatched in these windows; between them they do other work.
+**Pickup windows (CAT):** 05:30–07:30 (06:00) · 10:00–11:30 · 14:00–15:30.
+Riders collect only in these windows; between them they do other ride jobs.
 
 ## What your depot gets
 
@@ -60,7 +60,7 @@ then gets three surfaces:
 
 ## The 2-week pilot
 
-- **Week 1:** one desk, all three sweeps, 2–4 real drops per sweep. Both sides
+- **Week 1:** one desk, all three pickup windows, 2–4 real drops per window. Both sides
   log queue times and any receipt disputes.
 - **Week 2:** increase volume as subscriber numbers grow; test one Friday
   review with actual numbers.
@@ -90,7 +90,7 @@ two weeks?"
 **Objection handling:**
 - *"We don't have space"* — a marked table or one corner is enough; the point is
   separating our batches from your walk-in queue, not a new building.
-- *"We don't have time"* — three fixed 2h30 windows, prepaid, waybills pre-made;
+- *"We don't have time"* — three fixed pickup windows (each 1h30), prepaid, waybills pre-made;
   the desk usually **reduces** total counter time.
 - *"We don't want your system"* — they don't need to install anything; the
   console is a web page, and stamp-and-send works with a phone and paper.
