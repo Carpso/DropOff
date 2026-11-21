@@ -27,6 +27,37 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (eighth pass) — feature switches, server-decided vehicle, transfers, PAYG promos, branding, release
+
+- **Migration 0076:** `jobs.needs_car`, `promo_codes.kind`, and 7 new app_settings
+  switches. All 10 switches are now generated from one `FLAG_KEYS` list in the
+  worker and shown in the admin console (bookings kill switch, auto-assign,
+  claim board, rider transfer, photo stamp, step sounds, voice, etc.).
+- **Vehicle chosen by the server:** sender UI no longer has a vehicle dropdown
+  (booking, collection, fare checker). A "Does it need a car? yes/no" question
+  feeds `vehicleClassForParcel()`; large parcels → car, small/medium → motorcycle,
+  over-cap → car. Dispatch tries motorcycles first, then cars; car-preferred jobs
+  only target car/van riders and show a "Sender prefers a CAR" claim-board badge.
+- **Rider transfer:** `POST /jobs/:ref/transfer` atomically moves a pre-pickup
+  job to another active rider (loads, assigned_at, ETA, event, route reset,
+  pushes). Rider Task Queue has a "Transfer this ride" tile. Everything else
+  derives from `jobs.rider_id` and updates automatically.
+- **Promo scoping:** FRIEND codes are marked `kind='referral'`, rejected for
+  riders/staff, PAYG-only, and work on both pickup bookings and collections.
+  `/refer/claim` rejects riders; `/promo/check` needs sender identity.
+- **Branding:** forest + logo native splash, "DropOff · " prefix on every push
+  title, branded waybill title.
+- **Release:** version bumped to `0.5.60+70`.
+- **Destination consolidation:** merged the public Zambia town/city list
+  (Wikipedia "List of populated places in Zambia", fetched 2026-11-21) into
+  `catalog.dart cities` for the counter-receipt destination picker. Courier-
+  specific coverage is not published by the couriers online, so no fare is
+  claimed — every counter fare stays "quoted at counter".
+- **Transfers at any stage:** the transfer endpoint now accepts every active
+  delivery stage (assigned → picked_up → at_depot → departed → arrived →
+  ready_for_collection), so a rider stuck in a depot queue can hand the live
+  trip to another rider. The rider sheet shows the action until completion.
+
 ## 2026-11-21 (seventh pass) — delete requests, tickets crash, parked release, SMS, referrals
 
 - **Delete requests:** `/admin/support/threads/deletion-requests` lists open

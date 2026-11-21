@@ -41,6 +41,17 @@ const cities = [
   'Kasempa', 'Kalabo', 'Sesheke', 'Kazungula', 'Shangombo', 'Namwala',
   'Itezhi-Tezhi', 'Kalomo', 'Zimba', 'Milenge', 'Nchelenge', 'Mwense',
   'Chembe', 'Lufwanyama', 'Chingambwe',
+  // Consolidated public town/city list (Wikipedia "List of populated places in
+  // Zambia", fetched 2026-11-21) merged for COUNTER-RECEIPT destination pickers.
+  // Courier coverage per town is not published; the depot always quotes the fare.
+  'Chama', 'Chambishi', 'Chavuma', 'Chibombo', 'Chiengi', 'Chilonga', 'Chilubi',
+  'Chinyingi', 'Chirundu', 'Chisamba', 'Chozi', 'Gwembe', 'Imwambo', 'Kabompo',
+  'Kafulwe', 'Kalene Hill', 'Kanyembo', 'Kaoma', 'Kashikishi', 'Kataba',
+  'Kawambwa', 'Kazembe', 'Lilundu', 'Luangwa', 'Lukulu', 'Lundazi', 'Maamba',
+  'Macha Mission', 'Makono', 'Mbereshi', 'Mfuwe', 'Mporokoso', 'Mpulungu',
+  'Mulumbo', 'Muyombe', 'Mwandi', 'Mwinilunga', 'Namayula', 'Nandopu',
+  'Nanikelako', 'Ngoma', 'Nseluka', 'Pemba', 'Senanga', 'Shiwa Ngandu',
+  'Siavonga', 'Sikalongo', 'Sinazeze', 'Sinazongwe', 'Sioma',
 ];
 
 const couriers = <CourierInfo>[

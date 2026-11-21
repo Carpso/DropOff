@@ -330,7 +330,7 @@ class _WaybillScreenState extends State<WaybillScreen> {
     final courier = courierById(booking.courierId);
 
     return Scaffold(
-      appBar: AppBar(title: Text('${courier.name} counter waybill', style: const TextStyle(fontWeight: FontWeight.w800))),
+      appBar: AppBar(title: Text('DropOff · ${courier.name} waybill', style: const TextStyle(fontWeight: FontWeight.w800))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
         children: [

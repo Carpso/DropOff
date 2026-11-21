@@ -51,6 +51,25 @@ export function parcelCapFor(vehicleClass: VehicleClass, parcelSize?: string): n
 }
 export const TRUCK_MIN_FEE_ZMW = 100;
 
+/**
+ * SERVER-DECIDED vehicle class (owner 2026-11-21). Senders never pick a
+ * vehicle: small/medium parcels ride the motorcycle fast lane; LARGE parcels
+ * fit a car; a sender who answers "yes, needs a car" gets a car. If the parcel
+ * count exceeds the motorcycle cap we bump to a car rather than cram it in.
+ */
+export function vehicleClassForParcel(
+  parcelSizeOrWeight: string | undefined,
+  parcels: number,
+  needsCar: boolean,
+): VehicleClass {
+  if (needsCar) return 'car';
+  const size = String(parcelSizeOrWeight ?? '').toLowerCase().trim();
+  const isLarge = size === 'large' || size === '15kg+' || size === '15kg';
+  if (isLarge) return 'car';
+  const cap = parcelCapFor('motorcycle', size);
+  return Math.max(1, Number(parcels) || 1) > cap ? 'car' : 'motorcycle';
+}
+
 const depotLat = -15.4255;
 const depotLng = 28.2805; // Platinum Chibolya anchor
 

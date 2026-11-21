@@ -336,14 +336,12 @@ class _FareChecker extends StatefulWidget {
 /// card can never contradict the prompt.
 class _FareCheckerState extends State<_FareChecker> {
   String _courierId = 'platinum';
-  String _vehicle = 'motorcycle';
   double? _lat;
   double? _lng;
   bool _locating = false;
   bool _feeChecked = false;
   final _place = TextEditingController(text: 'Home');
 
-  static const Map<String, double> _multiplier = {'motorcycle': 1.0, 'car': 1.2, 'van': 1.4, 'truck': 2.0};
 
   // The one authoritative anchor for every price in this app: matches the
   // Worker's baseRiderFee (workers/src/pricing.ts) distance bands exactly.
@@ -359,14 +357,9 @@ class _FareCheckerState extends State<_FareChecker> {
     return 2 * R * math.asin(math.sqrt(h));
   }
 
-  /// MUST match the server's baseRiderFee (K55 ≤ 5 km · K75 ≤ 12 km · K95 beyond,
-  /// × vehicle multiplier; trucks K100 minimum).
-  double _fee(double km) {
-    var base = km <= 5 ? 55.0 : km <= 12 ? 75.0 : 95.0;
-    base = base * (_multiplier[_vehicle] ?? 1.0);
-    if (_vehicle == 'truck') base = base < 100 ? 100 : base;
-    return base;
-  }
+  /// Matches the server's motorcycle walk-up fee (K55 ≤ 5 km · K75 ≤ 12 km ·
+  /// K95 beyond). Cars are assigned by the system when the parcel needs one.
+  double _fee(double km) => km <= 5 ? 55.0 : km <= 12 ? 75.0 : 95.0;
 
   Future<void> _locate() async {
     setState(() => _locating = true);
@@ -418,7 +411,6 @@ class _FareCheckerState extends State<_FareChecker> {
       'from': 'Lusaka',
       'pickup': _place.text.trim().isEmpty ? 'Home' : _place.text.trim(),
       'courier': _courierId,
-      'vehicle_class': _vehicle,
       if (_lat != null) 'pickup_lat': _lat,
       if (_lng != null) 'pickup_lng': _lng,
     };
@@ -468,19 +460,6 @@ class _FareCheckerState extends State<_FareChecker> {
               onChanged: (v) => setState(() { _courierId = v ?? _courierId; _feeChecked = false; }),
             )),
           ]),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            initialValue: _vehicle,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Vehicle class', isDense: true),
-            items: const [
-              DropdownMenuItem(value: 'motorcycle', child: Text('Motorcycle')),
-              DropdownMenuItem(value: 'car', child: Text('Car')),
-              DropdownMenuItem(value: 'van', child: Text('Van')),
-              DropdownMenuItem(value: 'truck', child: Text('Truck (large cargo)')),
-            ],
-            onChanged: (v) => setState(() { _vehicle = v ?? _vehicle; _feeChecked = false; }),
-          ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _locating ? null : _locate,

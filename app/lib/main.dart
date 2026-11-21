@@ -230,7 +230,7 @@ void _performTap(AppStore store, Map<String, dynamic>? data) {
     routeTo = const TicketsScreen();
   } else if (kind == 'support_reply' || kind == 'support' || kind == 'ticket') {
     routeTo = const TicketsScreen();
-  } else if (kind == 'job_assigned' || kind == 'rider_assigned' || kind == 'deposit_paid' || kind == 'pickup_reminder' || kind == 'job_delivered' || kind == 'payment_received') {
+  } else if (kind == 'job_assigned' || kind == 'rider_assigned' || kind == 'trip_transferred' || kind == 'deposit_paid' || kind == 'pickup_reminder' || kind == 'job_delivered' || kind == 'payment_received') {
     // RIDER ROUTING (owner audit 2026-11-21): these pushes are for the rider's
     // job — a sender Bookings screen is useless to them. AppShell index 0 IS
     // the rider's Task Queue, so opening the shell lands on the right screen.

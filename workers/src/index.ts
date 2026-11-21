@@ -18,7 +18,7 @@ import {
 } from './auth';
 import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
 import { PRIVACY_MD, PRIVACY_TITLE, TERMS_MD, TERMS_TITLE, mdToHtml } from './legal';
-import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor } from './pricing';
+import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor, vehicleClassForParcel } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { sendSms } from './sms';
 import { sendToPhone } from './push';
@@ -143,6 +143,25 @@ async function setSetting(db: D1Database, key: string, value: string, by: string
   ).bind(key, value, by).run();
 }
 const flagOn = (v: string | null) => v === '1' || v === 'true' || v === 'on';
+
+// ALL owner-flippable switches in one place — the admin UI, /plans and
+// /admin/settings all read from this list so they can never drift apart.
+const FLAG_KEYS = [
+  'door_to_door_enabled', 'overage_discount_enabled', 'referral_bonus_enabled',
+  'auto_assign_enabled', 'claim_board_enabled', 'bookings_enabled',
+  'rider_transfer_enabled', 'photo_stamp_enabled', 'step_sounds_enabled',
+  'voice_guidance_enabled',
+] as const;
+async function readFlags(db: D1Database): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  for (const key of FLAG_KEYS) out[key] = flagOn(await getSetting(db, key));
+  return out;
+}
+async function featureOn(env: Env, key: string, defaultOn = true): Promise<boolean> {
+  const v = await getSetting(env.DB, key);
+  return v === null ? defaultOn : flagOn(v);
+}
+
 const PLATFORM_TAKE = 0.10;           // of the rider fee, on pay-as-you-go
 // Sweep riders are salaried, not per-parcel: K3,000/month INCLUSIVE of a
 // weekly fuel allowance of K300/week (4 weeks = K1,200), so the base wage is
@@ -457,7 +476,7 @@ app.use('*', async (c, next) => {
 //   ops       X-Api-Key - rider-device service + ops console
 //   admin     X-Admin-Key - superadmin pricebook / partner management (below)
 // Public without auth: /health, /auth/*, /webhooks/*, /plans, courier profiles, //console pages.
-const PUBLIC_GETS = new Set(['/health', '/couriers', '/cities', '/plans', '/console', '/partner/console', '/promo/check']);
+const PUBLIC_GETS = new Set(['/health', '/couriers', '/cities', '/plans', '/console', '/partner/console']);
 app.use('*', async (c, next) => {
   const p = c.req.path;
   if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/') || p.startsWith('/.well-known/') || p.startsWith('/delete-data')) return next();
@@ -1963,6 +1982,8 @@ app.get('/cities', async (c) => {
 // Identity: a customer JWT ALWAYS books as its own phone — the client cannot
 // spoof a sender number. Ops key may specify any phone (rider device/ops console).
 app.post('/jobs', async (c) => {
+  if (c.get('role') === 'rider') return c.json({ error: 'forbidden', detail: 'Promos and bookings are for senders.' }, 403);
+  if (!await featureOn(c.env, 'bookings_enabled')) return c.json({ error: 'bookings_paused', detail: 'New pickups are temporarily paused by the owner.' }, 503);
   if (await rateLimited(c, 'job_create', 60)) return c.json({ error: 'too_many_requests' }, 429);
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ error: 'invalid JSON body' }, 400);
@@ -2086,8 +2107,14 @@ app.post('/jobs', async (c) => {
     // one trip to the same receiver = two parcels. Cycle = 30 days from
     // activation. A trip is bundled (K0 rider fee) only if all of its parcels
     // still fit under the cap; otherwise the whole trip pays the tier overage.
-    const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class)
-      ? b.vehicle_class : 'motorcycle';
+    // VEHICLE IS SERVER-DECIDED (owner 2026-11-21): senders answer only
+    // "does it need a car?"; size/parcel count choose motorcycle vs car.
+    // Ops/admin may still force a class for a manual job.
+    const needsCar = b.needs_car === 1 || b.needs_car === true;
+    const vehicleClass: VehicleClass = isAdmin(c) && VEHICLE_CLASSES.includes(b.vehicle_class)
+      ? b.vehicle_class
+      : vehicleClassForParcel((b.parcel_size ?? b.weight_class) as string | undefined,
+          Number(b.parcels ?? 1) || 1, needsCar);
     const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, (b.parcel_size ?? b.weight_class) as string | undefined)));
     // ROUND TRIP = TWO BILLABLE RIDES (owner 2026-11-18): out to the depot and
     // back to the sender. Physical `parcels` count stays 1.
@@ -2339,9 +2366,9 @@ app.post('/jobs', async (c) => {
          promo_code, promo_discount_zmw,
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile, billable_rides,
-         parcels, vehicle_class, branch, from_city, parcel_photo_url,
+          parcels, vehicle_class, needs_car, branch, from_city, parcel_photo_url,
           declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44)`,
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45)`,
     ).bind(
       ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -2350,7 +2377,7 @@ app.post('/jobs', async (c) => {
       b.pickup_time ?? pickupWindow, pickupWindow, payMethod,
       isRoundTrip ? 1 : 0, b.return_city ?? null, b.return_address ?? null, returnLegFee,
       pickupAt, lastMile, billableRides,
-      parcels, vehicleClass,
+      parcels, vehicleClass, needsCar ? 1 : 0,
       b.branch ? String(b.branch).trim().slice(0, 80) : null,
       fromCity,
       parcelUrl,
@@ -2550,7 +2577,7 @@ app.post('/jobs', async (c) => {
       pack_inclusion: packInclusion, pay_method: payMethod,
       auto_assigned: autoAssigned,
       tracking_token: trackingToken, tracking_url: trackingToken ? trackUrl : null,
-      parcels, vehicle_class: vehicleClass,
+      parcels, vehicle_class: vehicleClass, needs_car: needsCar,
       plan_used: activeSub ? planUsed + (packInclusion === 'pack' ? parcels : 0) : null,
       plan_cap: activeSub ? planCap : null,
       plan_inclusion: packInclusion,
@@ -2579,6 +2606,7 @@ app.post('/jobs', async (c) => {
 // collects from the nominated point. Pricing = last-mile zone fare + its
 // processing fee (same model as the door-delivery add-on).
 app.post('/collections', async (c) => {
+  if (!await featureOn(c.env, 'bookings_enabled')) return c.json({ error: 'bookings_paused', detail: 'New collections are temporarily paused by the owner.' }, 503);
   const phone = c.get('phone');
   const role = c.get('role');
   if (!phone) return c.json({ error: 'sign_in_required' }, 401);
@@ -2609,12 +2637,17 @@ app.post('/collections', async (c) => {
     const n = new Date();
     pickupAt = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1, 4, 0)).toISOString();
   }
-  const vehicleClass: VehicleClass = VEHICLE_CLASSES.includes(b.vehicle_class) ? b.vehicle_class : 'motorcycle';
+  // VEHICLE IS SERVER-DECIDED (owner 2026-11-21).
+  const staffEyes = c.get('role') === 'ops' || isAdmin(c);
+  const needsCar = b.needs_car === 1 || b.needs_car === true;
+  const vehicleClass: VehicleClass = staffEyes && VEHICLE_CLASSES.includes(b.vehicle_class)
+    ? b.vehicle_class
+    : vehicleClassForParcel((b.parcel_size ?? b.weight_class) as string | undefined,
+        Number(b.parcels ?? 1) || 1, needsCar);
   const parcels = Math.max(1, Math.min(Number(b.parcels ?? 1) || 1, parcelCapFor(vehicleClass, (b.parcel_size ?? b.weight_class) as string | undefined)));
   // PREPAID POLICY (owner directive): no cash — everything is paid in advance
   // at booking by momo; plans ride prepaid via their subscription.
   const payMethod = b.pay_method === 'cash' ? 'cash' : 'mobile_money';
-  const staffEyes = c.get('role') === 'ops' || isAdmin(c);
   if (payMethod === 'cash' && !staffEyes) {
     return c.json({
       error: 'prepaid_required',
@@ -2671,7 +2704,30 @@ app.post('/collections', async (c) => {
   // PLAN-COVERED BOOKINGS ARE FULLY INCLUDED IN THE SUBSCRIPTION — no per-parcel
   // processing fee on top (owner directive 2026-11-19: plan covers the parcel).
   const processing = planInclusion === 'pack' ? 0 : round2(platformFee(riderFee));
-  const total = round2(riderFee + processing);
+  // PROMO (owner 2026-11-21): referral FRIEND codes work only here or at
+  // pickup booking, only for PAYG sends, never at signup/rider joining.
+  let promoDiscount = 0;
+  let promoCode: string | null = null;
+  const rawPromo = String(b.promo_code ?? '').trim().toUpperCase();
+  if (rawPromo && planInclusion === 'pack') {
+    return c.json({ error: 'promo_plan_covered', detail: 'Promos apply to pay-as-you-go orders only — this collection is covered by your plan.' }, 409);
+  }
+  if (rawPromo && c.get('role') !== 'rider') {
+    const promo = await c.env.DB.prepare(
+      'SELECT code, discount_pct, uses_left, expires_at, active, kind, note FROM promo_codes WHERE code = ?1',
+    ).bind(rawPromo).first<any>();
+    if (!promo || !promo.active || (promo.uses_left != null && Number(promo.uses_left) <= 0) ||
+        (promo.expires_at && promo.expires_at <= new Date().toISOString().slice(0, 10))) {
+      return c.json({ error: 'promo_not_found' }, 404);
+    }
+    promoDiscount = round2((riderFee + processing) * (Number(promo.discount_pct) || 0) / 100);
+    promoCode = rawPromo;
+    await c.env.DB.batch([
+      c.env.DB.prepare('UPDATE promo_codes SET uses_left = uses_left - 1 WHERE code = ?1').bind(rawPromo),
+      c.env.DB.prepare('INSERT INTO promo_uses (code, phone, job_id) VALUES (?1, ?2, NULL)').bind(rawPromo, phone),
+    ]);
+  }
+  const total = round2(riderFee + processing - promoDiscount);
   const ref = `DRO-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${randomCode(5)}`;
   const senderName = String(b.sender_name ?? '').trim() || phoneName || 'DropOff customer';
   // Seller parcel capture at booking (same evidence chain as /jobs bookings).
@@ -2710,8 +2766,8 @@ app.post('/collections', async (c) => {
        recipient_name, recipient_phone, dest_city, dest_address, description, weight_class,
        counter_price_zmw, rider_fee_zmw, leg2_processing_fee_zmw, total_zmw,
        pickup_time, pickup_window, pickup_at, pay_method, last_mile, parcels, vehicle_class, from_city, service, delivery_otp_hash, parcel_photo_url,
-       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered, collection_receipt_url)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka','collection',?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29)`,
+       declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered, collection_receipt_url, needs_car, promo_code, promo_discount_zmw)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'Lusaka',?8,?9,?10,0,?11,?12,?13,?14,?14,?15,?16,1,?17,?18,'Lusaka','collection',?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)`,
   ).bind(
     ref, phone, senderName, point, courierId,
     recipientName, recipientPhone, destAddress,
@@ -2720,11 +2776,16 @@ app.post('/collections', async (c) => {
     deliveryOtpHash, parcelUrl,
     declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
     coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt, packCovered, typeof b.collection_receipt_url === 'string' ? b.collection_receipt_url.slice(0, 500) : null,
+    needsCar ? 1 : 0,
+    promoCode, promoDiscount,
   ).run();
 
   await c.env.DB.prepare(
     `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'created', ?2)`,
   ).bind(meta.last_row_id, `Collection booked from ${courier.name} (${point}) - rider delivers to ${recipientName}'s door`).run();
+  if (!depositRequired) {
+    await rewardReferralOnBooking(c.env, Number(meta.last_row_id), phone).catch(() => {});
+  }
 
   if (pickupTomorrow) {
     await c.env.DB.prepare(
@@ -2791,6 +2852,7 @@ app.post('/collections', async (c) => {
     deposit_init_failed: depositInitFailed,
     parcels,
     vehicle_class: vehicleClass,
+    needs_car: needsCar,
     pay_method: payMethod,
     plan_inclusion: planInclusion,
     plan_used: activeSub ? planUsed + (planInclusion === 'pack' ? parcels : 0) : null,
@@ -2800,13 +2862,20 @@ app.post('/collections', async (c) => {
 
 // Sellers can test a promo code before booking (public, read-only)
 app.get('/promo/check', async (c) => {
+  // Referral codes are for SENDERS booking pickup/collection only — never for
+  // a user joining or a rider signing in. Anonymous checks are rejected too.
+  const role = c.get('role');
+  if (role === 'rider' || role === 'ops' || role === 'admin') {
+    return c.json({ error: 'promo_not_allowed' }, 403);
+  }
+  if (!c.get('phone')) return c.json({ error: 'identity_required' }, 401);
   const code = String(c.req.query('code') ?? '').trim().toUpperCase();
   if (!code) return c.json({ error: 'missing code' }, 400);
-  const promo = await c.env.DB.prepare('SELECT code, discount_pct, note, applies_tier, uses_left, expires_at, active FROM promo_codes WHERE code = ?1').bind(code).first<any>();
+  const promo = await c.env.DB.prepare('SELECT code, discount_pct, note, applies_tier, uses_left, expires_at, active, kind FROM promo_codes WHERE code = ?1').bind(code).first<any>();
   if (!promo || !promo.active) return c.json({ error: 'promo_not_found' }, 404);
   if (promo.expires_at && promo.expires_at <= new Date().toISOString().slice(0, 10)) return c.json({ error: 'promo_expired' }, 410);
   if (promo.uses_left != null && Number(promo.uses_left) <= 0) return c.json({ error: 'promo_exhausted' }, 409);
-  return c.json({ ok: true, code: promo.code, discount_pct: promo.discount_pct, note: promo.note, applies_tier: promo.applies_tier });
+  return c.json({ ok: true, code: promo.code, discount_pct: promo.discount_pct, note: promo.note, applies_tier: promo.applies_tier, payg_only: isReferralPromo(promo) });
 });
 
 app.get('/jobs', async (c) => {
@@ -2926,7 +2995,7 @@ app.get('/jobs/:ref', async (c) => {
   ).bind(job.id).all();
   const safeEvents = (events as any[])
     .filter((e) => ['created', 'rider_assigned', 'picked_up', 'at_depot', 'departed',
-      'arrived', 'delivered', 'ready_for_collection', 'partner_confirmed'].includes(e.status))
+      'arrived', 'delivered', 'ready_for_collection', 'partner_confirmed', 'rider_transferred'].includes(e.status))
     .map((e) => (!isStaff ? { status: e.status, created_at: e.created_at } : e));
   return c.json({ job: payload, events: safeEvents });
 });
@@ -6241,6 +6310,13 @@ async function refundSettledPayment(
 // booking is real. Held bookings earn theirs at settlement (this helper is
 // also called from settlePaymentSuccess); a booking that never pays earns
 // nothing.
+// Referral promos are PAYG, sender-only, booking/collection-only. Admin promos
+// remain general. `kind` is set on the FRIEND insert below.
+const isReferralPromo = (p: any): boolean =>
+  String(p?.kind ?? '') === 'referral' ||
+  String(p?.code ?? '').toUpperCase().startsWith('FRIEND') ||
+  String(p?.note ?? '').startsWith('Referral reward');
+
 async function rewardReferralOnBooking(env: Env, jobId: number, senderPhone: string): Promise<void> {
   // OWNER TOGGLE (2026-11-21): the admin can switch the bonus off without a
   // deploy. Pending referrals stay pending and are rewarded if it is re-enabled.
@@ -6261,8 +6337,8 @@ async function rewardReferralOnBooking(env: Env, jobId: number, senderPhone: str
         WHERE id = ?1 AND status = 'pending'`,
     ).bind(refRow.id, jobId, rewardCode),
     env.DB.prepare(
-      `INSERT INTO promo_codes (code, discount_pct, note, uses_left, active)
-       VALUES (?1, ?2, ?3, 1, 1)`,
+      `INSERT INTO promo_codes (code, discount_pct, note, uses_left, active, kind)
+       VALUES (?1, ?2, ?3, 1, 1, 'referral')`,
     ).bind(rewardCode, pct, `Referral reward — ${senderPhone} joined via your code`),
     env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'referral_rewarded', ?2)`)
       .bind(jobId, `Referrer ${refRow.referrer_phone} gets ${rewardCode} (${pct}% off, single-use)`),
@@ -7026,11 +7102,7 @@ app.get('/plans', async (c) => {
   const privileged = c.get('role') === 'ops' || isAdmin(c);
   return c.json({
     plans: await plans(c.env.DB),
-    feature_flags: {
-      overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
-      door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
-      referral_bonus_enabled: flagOn(await getSetting(c.env.DB, 'referral_bonus_enabled')),
-    },
+    feature_flags: await readFlags(c.env.DB),
     ...(privileged ? { driver_monthly_pay_zmw: DRIVER_MONTHLY_PAY_ZMW, driver_daily_target: DRIVER_DAILY_TARGET, platform_take: PLATFORM_TAKE } : {}),
   });
 });
@@ -7244,15 +7316,11 @@ app.get('/admin/tiers', async (c) => {
 
 // Platform feature flags, owner-flippable WITHOUT a deploy. Keys are
 // whitelisted; every value is a '0'/'1' string. Read-only for staff.
-const SETTING_KEYS = new Set(['door_to_door_enabled', 'overage_discount_enabled', 'referral_bonus_enabled']);
+const SETTING_KEYS = new Set<string>(FLAG_KEYS);
 app.get('/admin/settings', async (c) => {
   if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   return c.json({
-    settings: {
-      door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
-      overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
-      referral_bonus_enabled: flagOn(await getSetting(c.env.DB, 'referral_bonus_enabled')),
-    },
+    settings: await readFlags(c.env.DB),
   });
 });
 app.post('/admin/settings', async (c) => {
@@ -7628,13 +7696,16 @@ async function dispatchToNearestRider(
   collectExcluded?: Array<{ name: string; depot: string }>,
 ): Promise<{ rider: any; eta_minutes: number; km: number; fallback: boolean; excludedAtDepot: Array<{ name: string; depot: string }> } | null> {
   try {
+    if (!await featureOn(env, 'auto_assign_enabled')) return null;
     const job = await env.DB.prepare(
-      'SELECT id, ref, service, sender_phone, pickup_address, pickup_lat, pickup_lng FROM jobs WHERE ref = ?1').bind(ref).first<any>();
+      'SELECT id, ref, service, sender_phone, pickup_address, pickup_lat, pickup_lng, vehicle_class, needs_car FROM jobs WHERE ref = ?1').bind(ref).first<any>();
     if (!job) return null;
     const fallback = !(Number.isFinite(Number(job.pickup_lat)) && Number.isFinite(Number(job.pickup_lng)));
     const lat = fallback ? -15.4255 : Number(job.pickup_lat);
     const lng = fallback ? 28.2805 : Number(job.pickup_lng);
-    const pick = await nearestAvailableRider(env, lat, lng, collectExcluded);
+    const preferred: 'motorcycle' | 'car' | undefined = Number(job.needs_car) === 1 || String(job.vehicle_class ?? '') === 'car'
+      ? 'car' : undefined;
+    const pick = await nearestAvailableRider(env, lat, lng, collectExcluded, preferred);
     if (!pick) return null;
     const etaMin = Math.round((pick.km / 22) * 60 + 4);
     // Idempotency guard (webhook double-fire or stale dispatch): only claim
@@ -7700,10 +7771,11 @@ async function nearestAvailableRider(
   lat: number,
   lng: number,
   collectExcluded?: Array<{ name: string; depot: string }>,
+  requiredClass?: 'motorcycle' | 'car',
 ): Promise<{ rider: any; km: number } | null> {
   const atDepot = await ridersAtDepot(env);
   const riders = await env.DB.prepare(
-    `SELECT id, phone, full_name, vehicle, last_lat, last_lng, last_seen_at, status, active, capacity, current_load, photo_url
+    `SELECT id, phone, full_name, vehicle, vehicle_class, last_lat, last_lng, last_seen_at, status, active, capacity, current_load, photo_url
        FROM riders WHERE active = 1 AND status IN ('available', 'on_route')
          AND verification_status = 'verified'
          AND last_seen_at > datetime('now', '-15 minutes')`
@@ -7723,33 +7795,36 @@ async function nearestAvailableRider(
     if (mins <= 60) return Math.min(50, 12 + ((mins - 10) / 50) * 38);
     return 60;
   };
-  let best: { rider: any; km: number } | null = null;
-  let bestScore = Infinity;
-  let bestLoad = Infinity;
-  for (const r of (riders.results ?? [])) {
-    const riderId = Number(r.id);
-    if (atDepot.has(riderId)) {
-      if (collectExcluded) collectExcluded.push({ name: String(r.full_name ?? 'A rider'), depot: atDepot.get(riderId)! });
-      continue;
+  const pickBest = (allowed: (v: string) => boolean): { rider: any; km: number } | null => {
+    let best: { rider: any; km: number } | null = null;
+    let bestScore = Infinity;
+    let bestLoad = Infinity;
+    for (const r of (riders.results ?? [])) {
+      const riderId = Number(r.id);
+      if (!allowed(String(r.vehicle_class ?? 'motorcycle').toLowerCase())) continue;
+      if (atDepot.has(riderId)) {
+        if (collectExcluded) collectExcluded.push({ name: String(r.full_name ?? 'A rider'), depot: atDepot.get(riderId)! });
+        continue;
+      }
+      const load = Number(r.current_load ?? 0), cap = Number(r.capacity ?? 8);
+      if (load >= cap) continue;
+      const penalty = freshnessPenalty(r.last_seen_at);
+      const km = haversine(lat, lng, Number(r.last_lat ?? -15.4255), Number(r.last_lng ?? 28.2805));
+      const score = km + penalty; // nearest-first; load only breaks ties
+      if (!best || score < bestScore - 0.001 ||
+          (Math.abs(score - bestScore) <= 0.001 && load < bestLoad)) {
+        best = { rider: r, km };
+        bestScore = score;
+        bestLoad = load;
+      }
     }
-    const load = Number(r.current_load ?? 0), cap = Number(r.capacity ?? 8);
-    if (load >= cap) continue;
-    const penalty = freshnessPenalty(r.last_seen_at);
-    const km = haversine(lat, lng, Number(r.last_lat ?? -15.4255), Number(r.last_lng ?? 28.2805));
-    // NEAREST-FIRST (owner directive 2026-11-20): distance is the priority.
-    // The old score added load * 0.5 km, which could hand a job to a rider
-    // 10 km further away just because they were idle. Load now only breaks
-    // near-exact distance ties, so the closest available rider always wins.
-    const score = km + penalty;
-    const nearer = score < bestScore - 0.001;
-    const tie = Math.abs(score - bestScore) <= 0.001 && load < bestLoad;
-    if (!best || nearer || tie) {
-      best = { rider: r, km };
-      bestScore = score;
-      bestLoad = load;
-    }
-  }
-  return best;
+    return best;
+  };
+  // MOTORCYCLE FIRST (owner 2026-11-21): the bike is the fast lane. A car owner
+  // is the fallback when no bike is available (or when the sender needs a car).
+  if (requiredClass === 'car') return pickBest((v) => v === 'car' || v === 'van');
+  if (requiredClass === 'motorcycle') return pickBest((v) => v === 'motorcycle');
+  return pickBest((v) => v === 'motorcycle') ?? pickBest((v) => v === 'car' || v === 'van');
 }
 
 app.post('/jobs/:ref/auto-assign', async (c) => {
@@ -7792,6 +7867,7 @@ app.post('/jobs/:ref/auto-assign', async (c) => {
 // owns the job and it vanishes from every other rider's board and queue.
 
 app.get('/rider/available', async (c) => {
+  if (!await featureOn(c.env, 'claim_board_enabled')) return c.json({ jobs: [] });
   const phone = c.get('phone');
   if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
   const rider = await c.env.DB.prepare(
@@ -7806,7 +7882,7 @@ app.get('/rider/available', async (c) => {
   if (!rider || !rider.active) return c.json({ error: 'rider_not_active' }, 403);
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.dest_city, j.dest_address,
-            j.parcels, j.vehicle_class, j.description, j.weight_class, j.pickup_window, j.pickup_at,
+            j.parcels, j.vehicle_class, j.needs_car, j.description, j.weight_class, j.pickup_window, j.pickup_at,
             j.sender_name, j.recipient_name, j.rider_fee_zmw, j.total_zmw, j.created_at, j.from_city,
             co.name AS courier_name, co.depot_name
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
@@ -7820,6 +7896,7 @@ app.get('/rider/available', async (c) => {
 });
 
 app.post('/jobs/:ref/claim', async (c) => {
+  if (!await featureOn(c.env, 'claim_board_enabled')) return c.json({ error: 'claim_board_closed' }, 403);
   const phone = c.get('phone');
   if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
   const rider = await c.env.DB.prepare(
@@ -7869,6 +7946,76 @@ app.post('/jobs/:ref/claim', async (c) => {
     }).catch(() => {}),
   );
   return c.json({ ok: true, ref, rider_id: rider.id, rider: rider.full_name, eta_minutes: etaMin, km: round2(km) });
+});
+
+// RIDER TRIP TRANSFER (owner 2026-11-21): at ANY active stage (including stuck
+// in a depot queue), an assigned rider (or staff) can hand the job to another
+// active rider. Everything that shows the rider reads jobs.rider_id at request
+// time, so one atomic update propagates to waybills, tracking, queues, chats,
+// stats and targets.
+app.post('/jobs/:ref/transfer', async (c) => {
+  if (!await featureOn(c.env, 'rider_transfer_enabled')) {
+    return c.json({ error: 'transfers_disabled', detail: 'Trip transfers are switched off by the owner.' }, 403);
+  }
+  const ref = String(c.req.param('ref') ?? '').trim().replace(/^#/, '').toUpperCase();
+  const b: any = await c.req.json().catch(() => null);
+  const toRiderId = Number(b?.to_rider_id ?? 0);
+  if (!ref || !toRiderId) return c.json({ error: 'ref and to_rider_id required' }, 400);
+  const job = await c.env.DB.prepare(
+    'SELECT id, ref, rider_id, status, pickup_lat, pickup_lng, sender_phone FROM jobs WHERE UPPER(ref) = ?1',
+  ).bind(ref).first<any>();
+  if (!job) return c.json({ error: 'booking_not_found', detail: `No booking with reference ${ref}.` }, 404);
+  const staff = isAdmin(c) || c.get('role') === 'ops';
+  if (!staff && !(c.get('role') === 'rider' && c.get('riderId') === job.rider_id)) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+  if (!job.rider_id) return c.json({ error: 'transfer_not_allowed', detail: 'This job has no assigned rider.' }, 409);
+  // ANY ACTIVE STAGE (owner 2026-11-21): a rider stuck in a depot queue can
+  // hand the live trip to another rider — not just before pickup.
+  const ACTIVE_TRANSFER_STATES = ['rider_assigned', 'picked_up', 'at_depot', 'departed', 'arrived', 'ready_for_collection'];
+  if (!ACTIVE_TRANSFER_STATES.includes(String(job.status))) {
+    return c.json({ error: 'transfer_not_allowed', detail: 'This trip is already finished or canceled.' }, 409);
+  }
+  if (toRiderId === job.rider_id) return c.json({ error: 'cannot_transfer_to_self' }, 400);
+  const [target, from] = await Promise.all([
+    c.env.DB.prepare('SELECT id, full_name, phone, vehicle, current_load, capacity, last_lat, last_lng FROM riders WHERE id = ?1 AND active = 1').bind(toRiderId).first<any>(),
+    c.env.DB.prepare('SELECT id, full_name, phone, vehicle FROM riders WHERE id = ?1').bind(job.rider_id).first<any>(),
+  ]);
+  if (!target) return c.json({ error: 'rider_not_found' }, 404);
+  if (Number(target.current_load ?? 0) >= Number(target.capacity ?? 8)) return c.json({ error: 'at_capacity' }, 409);
+  const km = haversine(Number(job.pickup_lat ?? -15.4255), Number(job.pickup_lng ?? 28.2805),
+    Number(target.last_lat ?? -15.4255), Number(target.last_lng ?? 28.2805));
+  const etaMin = Math.round((km / 22) * 60 + 4);
+  const batch = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `UPDATE jobs SET rider_id = ?2, assigned_at = datetime('now'), eta_minutes = ?3
+        WHERE id = ?1 AND rider_id = ?4`,
+    ).bind(job.id, target.id, etaMin, job.rider_id),
+    c.env.DB.prepare(`UPDATE riders SET current_load = MAX(0, current_load - 1), status = 'available', route_updated_at = datetime('now') WHERE id = ?1`).bind(job.rider_id),
+    c.env.DB.prepare(`UPDATE riders SET current_load = current_load + 1, status = 'on_route', route_updated_at = datetime('now') WHERE id = ?1`).bind(target.id),
+    c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rider_transferred', ?2)`)
+      .bind(job.id, `${from?.full_name ?? 'Previous rider'} transferred ${job.ref} to ${target.full_name}.`),
+    c.env.DB.prepare('UPDATE riders SET route_json = NULL WHERE id IN (?1, ?2)').bind(job.rider_id, target.id),
+  ]);
+  if (!batch?.[0]?.meta?.changes) return c.json({ error: 'already_transferred' }, 409);
+  c.executionCtx.waitUntil((async () => {
+    await sendToPhone(c.env, target.phone, {
+      title: 'Trip transferred to you',
+      body: `${job.ref} has been transferred to you. Open the Task Queue for the waybill and navigate.`,
+      data: { job_ref: job.ref, kind: 'rider_assigned' },
+    }).catch(() => {});
+    if (from?.phone) await sendToPhone(c.env, from.phone, {
+      title: 'Trip transferred away',
+      body: `${job.ref} was transferred to ${target.full_name}. Your load has been updated.`,
+      data: { job_ref: job.ref, kind: 'trip_transferred' },
+    }).catch(() => {});
+    await sendToPhone(c.env, job.sender_phone, {
+      title: 'Rider updated',
+      body: `Your rider for ${job.ref} is now ${target.full_name} (${target.vehicle ?? 'rider'}).`,
+      data: { job_ref: job.ref, kind: 'status' },
+    }).catch(() => {});
+  })());
+  return c.json({ ok: true, ref: job.ref, from_rider_id: job.rider_id, to_rider_id: target.id, to_rider: target.full_name, eta_minutes: etaMin });
 });
 
 // Re-optimize ONE rider's route from their live location, optionally inserting
@@ -8215,6 +8362,8 @@ app.post('/refer/claim', async (c) => {
   if (!code) return c.json({ error: 'missing code' }, 400);
   const phone = c.get('phone');
   if (!phone) return c.json({ error: 'identity_required' }, 401);
+  // Only senders can be referred — a rider joining is not a referral.
+  if (c.get('role') === 'rider') return c.json({ error: 'forbidden' }, 403);
   const referrer = await c.env.DB.prepare('SELECT phone FROM auth_users WHERE referral_code = ?1').bind(code).first<any>();
   if (!referrer) return c.json({ error: 'referral_code_not_found' }, 404);
   if (referrer.phone === phone) return c.json({ error: 'cannot_refer_yourself' }, 400);
@@ -8628,11 +8777,7 @@ app.get('/subscriptions/:phone?', async (c) => {
     remaining_this_period: plan ? Math.max(0, effectiveCap - usedThisPeriod) : null,
     effective_cap: plan ? effectiveCap : null,
     rollover_parcels: rollover,
-    feature_flags: {
-      overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
-      door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
-      referral_bonus_enabled: flagOn(await getSetting(c.env.DB, 'referral_bonus_enabled')),
-    },
+    feature_flags: await readFlags(c.env.DB),
   });
 });
 

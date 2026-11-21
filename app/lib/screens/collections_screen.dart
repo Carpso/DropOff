@@ -34,7 +34,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   final _promoCode = TextEditingController();
   String _window = '10:00';
   final String _payment = 'Mobile money';
-  String _vehicleClass = 'motorcycle';
+  // Vehicle is SERVER-DECIDED from parcel size + this one preference.
+  bool _needsCar = false;
+  String get _vehicleClass => _needsCar || _size == 'large' ? 'car' : 'motorcycle';
   String _size = 'medium'; // drives the server's size-aware motorcycle cap
   int _parcels = 1;
   bool _saving = false;
@@ -79,7 +81,6 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     'medium': 'Medium (5–15kg)',
     'large': 'Large (15kg+)',
   };
-  static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
   @override
   void dispose() {
@@ -168,7 +169,10 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     // Plan code entry: pre-redeem before the collection so the plan covers the
     // rider fee for this booking without a separate step.
     final promo = _promoCode.text.trim().toUpperCase();
-    if (promo.isNotEmpty) {
+    // FRIEND referral codes are PAYG promos for pickup/collection bookings.
+    // Anything else is treated as a subscription pack code as before.
+    final String? promoCode = promo.startsWith('FRIEND') ? promo : null;
+    if (promo.isNotEmpty && promoCode == null) {
       try {
         final red = await DropOffApi.redeemPackCode(promo);
         if (!red.ok) {
@@ -188,6 +192,8 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       description: _description.text.trim().isEmpty ? null : _description.text.trim(),
       parcels: _parcels,
       vehicleClass: _vehicleClass,
+      needsCar: _needsCar,
+      promoCode: promoCode,
       payMethod: 'mobile_money',
       parcelSize: _size,
       collectionReceiptUrl: _receiptUrl,
@@ -394,14 +400,18 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           ]),
         ),
         const SizedBox(height: 16),
-        // VEHICLE FIELD (owner 2026-11-18): full width, no truncated labels.
-        DropdownButtonFormField<String>(
-          initialValue: _vehicleClass,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Vehicle', prefixIcon: Icon(Icons.directions)),
-          items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
-          onChanged: (v) { if (v != null) { _vehicleClass = v; final cap = _parcelCapFor(v, _size); if (_parcels > cap) _parcels = cap; setState(() {}); } },
+        // VEHICLE IS SERVER-DECIDED (owner 2026-11-21).
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: false, label: Text('No — motorcycle'), icon: Icon(Icons.two_wheeler)),
+            ButtonSegment(value: true, label: Text('Yes — car'), icon: Icon(Icons.directions_car)),
+          ],
+          selected: {_needsCar},
+          onSelectionChanged: (v) => setState(() => _needsCar = v.first),
         ),
+        const SizedBox(height: 8),
+        const Text('Motorcycles are the fast lane. Choose "car" for bulky items — we assign the rider automatically.',
+            style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.3)),
         const SizedBox(height: 10),
         _vehicleClass == 'motorcycle'
             ? DropdownButtonFormField<int>(

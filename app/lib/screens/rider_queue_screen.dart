@@ -195,6 +195,52 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (t != null) setState(() => _targets = t);
   }
 
+  /// RIDER TRIP TRANSFER (owner 2026-11-21): hand a LIVE stop to another active
+  /// rider at any stage — e.g. stuck in a depot queue. The worker updates
+  /// rider_id everywhere.
+  Future<void> _transferStop(Map<String, dynamic> s) async {
+    final ref = '${s['ref']}';
+    setState(() => _busyRef = ref);
+    try {
+      final data = await DropOffApi.teamRoster();
+      if (!mounted) return;
+      final riders = ((data?['riders'] as List?) ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+      if (riders.isEmpty) {
+        AppToast.show(context, 'No other riders available to transfer to.');
+        return;
+      }
+      final target = await showDialog<int>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('Transfer this trip to'),
+          children: [
+            for (final r in riders)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(ctx).pop((r['id'] as num?)?.toInt() ?? 0),
+                child: Text('${r['full_name'] ?? r['phone']} · ${r['vehicle'] ?? ''}',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+              ),
+          ],
+        ),
+      );
+      if (target == null || target == 0 || !mounted) return;
+      final res = await DropOffApi.transferJob(ref, target);
+      if (!mounted) return;
+      AppToast.show(context, res.ok
+          ? '$ref transferred — the waybill and rider list are updated.'
+          : 'Could not transfer (${res.body['detail'] ?? res.error ?? 'try again'})');
+      if (res.ok) {
+        Navigator.of(context).pop();
+        _load();
+      }
+    } finally {
+      if (mounted) setState(() => _busyRef = null);
+    }
+  }
+
   /// RING + WAKE (owner 2026-11-20): when NEW jobs appear in the queue,
   /// vibrate the phone and keep the screen awake so the rider sees a new
   /// order even with the phone idle — the worker's FCM push is the loudest
@@ -763,6 +809,18 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   builder: (_) => OrderWaybillSheet(ref: ref),
                 ),
               ),
+              // TRANSFER (owner 2026-11-21): hand this stop to another rider
+              // before pickup. The worker updates every rider-facing surface.
+              if (!dropped && st != 'ready_for_collection')
+                ListTile(
+                  enabled: _busyRef == null,
+                  leading: const Icon(Icons.swap_horiz_outlined, color: AppColors.forest),
+                  title: const Text('Transfer this ride',
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                  subtitle: const Text('Stuck in a queue? Hand this live trip to another rider',
+                      style: TextStyle(fontSize: 12)),
+                  onTap: () => _transferStop(s),
+                ),
               // RESEND (owner 2026-11-18): the sender's booking SMS may never
               // have landed — without the 4-digit code the pickup can never be
               // verified. One tap re-fires a FRESH code to both phones.
@@ -1423,6 +1481,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   const SizedBox(height: 2),
                   Text('${j['sender_name'] ?? ''} → ${j['dest_city'] ?? ''} · ${j['parcels'] ?? 1} parcel(s) · ${j['pickup_window'] ?? ''}',
                       maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+                  if ('${j['needs_car']}' == '1')
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2),
+                      child: Text('Sender prefers a CAR — a car rider is free to claim',
+                          style: TextStyle(fontSize: 10, color: AppColors.forest, fontWeight: FontWeight.w800)),
+                    ),
                 ])),
                 const SizedBox(width: 8),
                 FilledButton(

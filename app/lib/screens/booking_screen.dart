@@ -112,9 +112,19 @@ class _BookingScreenState extends State<BookingScreen> {
   double? _promoPct;
   String _promoNote = '';
 
-  /// Vehicle class for this trip. Trucks are for large cargo (fridges, sofas);
-  /// cars/vans cover most everyday parcels.
-  String _vehicleClass = 'motorcycle';
+  /// The system decides the vehicle from parcel size + the car preference —
+  /// senders no longer pick one (owner 2026-11-21).
+  bool _needsCar = false;
+  String get _vehicleClass {
+    if (_needsCar) return 'car';
+    if (_size == ParcelSize.large) return 'car';
+    final cap = switch (_size) {
+      ParcelSize.small => 10,
+      ParcelSize.medium => 5,
+      ParcelSize.large => 1,
+    };
+    return _parcels > cap ? 'car' : 'motorcycle';
+  }
   List<SavedPlace> _saved = const [];
   int _parcels = 1;
   /// Mirrors [_parcels] so the free-typed parcels field always shows the real
@@ -141,7 +151,6 @@ class _BookingScreenState extends State<BookingScreen> {
       case ParcelSize.large: return 1;
     }
   }
-  static const Map<String, String> _vehicleLabels = {'motorcycle': 'Motorcycle', 'car': 'Car', 'van': 'Van', 'truck': 'Truck (large cargo)'};
 
   /// Live plan snapshot ({subscription, plan, remaining_this_period}) — the
   /// estimate mirrors the server's pack-inclusion math so plan members see the
@@ -200,8 +209,7 @@ class _BookingScreenState extends State<BookingScreen> {
           _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
         }
       }
-      final vehicle = '${pre['vehicle_class'] ?? ''}';
-      if (_vehicleLabels.containsKey(vehicle)) _vehicleClass = vehicle;
+      _needsCar = pre['needs_car'] == true || '${pre['needs_car'] ?? ''}' == '1' || '${pre['vehicle_class'] ?? ''}' == 'car';
       final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
       if (parcels > 0 && parcels <= _parcelCapFor(_vehicleClass)) {
         _parcels = parcels;
@@ -716,6 +724,7 @@ class _BookingScreenState extends State<BookingScreen> {
       pickupAt: null,
       parcels: _parcels,
       vehicleClass: _vehicleClass,
+      needsCar: _needsCar,
       pickupLat: _pickupLat,
       pickupLng: _pickupLng,
       parcelPhotoUrl: _parcelPhotoUrl,
@@ -1065,16 +1074,21 @@ class _BookingScreenState extends State<BookingScreen> {
           child: Text('Optional — printed on the depot counter receipt so the depot knows what it is carrying.', style: AppType.caption),
         ),
         const SizedBox(height: 10),
-        // VEHICLE FIELD (owner 2026-11-18): the half-width dropdown clipped
-        // "Truck (large cargo)" to "Motor..."-style fragments. Both fields go
-        // full width now — nothing is ever cut off.
-        DropdownButtonFormField<String>(
-          initialValue: _vehicleClass,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Vehicle', hintText: 'Motorcycle', prefixIcon: Icon(Icons.directions)),
-          items: _vehicleLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
-          onChanged: (v) { if (v != null) { _vehicleClass = v; if (_parcels > _parcelCapFor(v)) { _parcels = _parcelCapFor(v); _parcelsCtl.text = '$_parcels'; } setState(() {}); } },
+        // VEHICLE IS SERVER-DECIDED (owner 2026-11-21): the only sender input
+        // is "does it need a car?". Motorcycles stay first priority (fast lane).
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: false, label: Text('No — motorcycle'), icon: Icon(Icons.two_wheeler)),
+            ButtonSegment(value: true, label: Text('Yes — car'), icon: Icon(Icons.directions_car)),
+          ],
+          selected: {_needsCar},
+          onSelectionChanged: (v) {
+            setState(() => _needsCar = v.first);
+          },
         ),
+        const SizedBox(height: 8),
+        const Text('Motorcycles are our fast lane. Choose "car" for bulky items — we assign the right rider automatically.',
+            style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.3)),
         const SizedBox(height: 10),
         _vehicleClass == 'motorcycle'
             ? DropdownButtonFormField<int>(
@@ -1097,25 +1111,10 @@ class _BookingScreenState extends State<BookingScreen> {
                   setState(() => _parcels = (n == null || n < 1) ? 1 : n);
                 },
               ),
-        if (_vehicleClass == 'motorcycle') ...[
+        if (_vehicleClass == 'car') ...[
           const SizedBox(height: 6),
-          Text(_size == ParcelSize.large
-                  ? 'A motorbike carries ONE large parcel. For more, switch to a Car.'
-                  : 'Motorcycle: up to $_parcelCap ${_size.label.toLowerCase()} parcels — beyond that, bump vehicle.',
-              style: const TextStyle(fontSize: 10.5, color: AppColors.amber, height: 1.3)),
-        ],
-        if (_vehicleClass == 'motorcycle') ...[
-          const SizedBox(height: 6),
-          ActionChip(
-            avatar: const Icon(Icons.directions_car, size: 15, color: AppColors.forest),
-            label: Text(_parcels >= _parcelCap
-                ? 'Need more than $_parcelCap? Switch to Car (no limit)'
-                : 'Got lots? Switch to Car (no limit)',
-                style: const TextStyle(fontSize: 11.5, color: AppColors.forest, fontWeight: FontWeight.w700)),
-            onPressed: () => setState(() => _vehicleClass = 'car'),
-            backgroundColor: AppColors.forest.withValues(alpha: 0.08),
-            side: BorderSide(color: AppColors.forest.withValues(alpha: 0.4)),
-          ),
+          const Text('A car has been assigned automatically for this parcel size — no vehicle choice needed.',
+              style: TextStyle(fontSize: 10.5, color: AppColors.forest, height: 1.3)),
         ],
         const SizedBox(height: 6),
         const Text('Each parcel counts as one plan parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),

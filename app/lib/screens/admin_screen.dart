@@ -2414,6 +2414,13 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
   bool _doorToDoor = false;
   bool _overageDiscount = false;
   bool _referralBonus = true;
+  bool _autoAssign = true;
+  bool _claimBoard = true;
+  bool _bookings = true;
+  bool _riderTransfer = true;
+  bool _photoStamp = true;
+  bool _stepSounds = true;
+  bool _voiceGuidance = true;
   bool _flagBusy = false;
 
   static const _tierLabels = {
@@ -2443,6 +2450,13 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
       _doorToDoor = flags['door_to_door_enabled'] == true;
       _overageDiscount = flags['overage_discount_enabled'] == true;
       _referralBonus = flags['referral_bonus_enabled'] != false;
+      _autoAssign = flags['auto_assign_enabled'] != false;
+      _claimBoard = flags['claim_board_enabled'] != false;
+      _bookings = flags['bookings_enabled'] != false;
+      _riderTransfer = flags['rider_transfer_enabled'] != false;
+      _photoStamp = flags['photo_stamp_enabled'] != false;
+      _stepSounds = flags['step_sounds_enabled'] != false;
+      _voiceGuidance = flags['voice_guidance_enabled'] != false;
       _error = tiers == null ? 'Plans/courier catalogue needs an admin sign-in on this device.' : null;
       _loading = false;
     });
@@ -2458,7 +2472,9 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             ? (on ? 'Door-to-door drop-off ON — senders see the option.' : 'Door-to-door OFF — collection points only.')
             : key == 'referral_bonus_enabled'
                 ? (on ? 'Referral bonus ON — invitees earn a 20% code.' : 'Referral bonus OFF — no new rewards.')
-                : (on ? 'Overage discount ON — tiers apply on PAYG overage.' : 'Overage discount OFF — overage bills at full PAYG.'))
+                : key == 'overage_discount_enabled'
+                    ? (on ? 'Overage discount ON — tiers apply on PAYG overage.' : 'Overage discount OFF — overage bills at full PAYG.')
+                    : (on ? '$key ON.' : '$key OFF.'))
         : 'Could not flip the switch (${res.error ?? 'admins only'})');
     unawaited(Future.delayed(const Duration(milliseconds: 400), _load));
   }
@@ -2623,6 +2639,20 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             _referralBonus,
             (v) => _toggleFlag('referral_bonus_enabled', v),
           ),
+          const SizedBox(height: 6),
+          _flagRow('New pickup & collection bookings', 'Owner kill switch — turn OFF to pause all new sender bookings with a clear message.', _bookings, (v) => _toggleFlag('bookings_enabled', v)),
+          const SizedBox(height: 6),
+          _flagRow('Automatic nearest-rider dispatch', 'When OFF, new paid orders wait on the claim board instead of being auto-assigned.', _autoAssign, (v) => _toggleFlag('auto_assign_enabled', v)),
+          const SizedBox(height: 6),
+          _flagRow('Rider claim board', 'When OFF, riders cannot browse or claim leftover orders.', _claimBoard, (v) => _toggleFlag('claim_board_enabled', v)),
+          const SizedBox(height: 6),
+          _flagRow('Rider trip transfers', 'Allow an assigned rider to hand a not-yet-collected trip to another rider.', _riderTransfer, (v) => _toggleFlag('rider_transfer_enabled', v)),
+          const SizedBox(height: 6),
+          _flagRow('Timestamped photo evidence', 'Burn the DropOff watermark and CAT capture time into every uploaded photo.', _photoStamp, (v) => _toggleFlag('photo_stamp_enabled', v)),
+          const SizedBox(height: 6),
+          _flagRow('Step completion sounds', 'Allow the optional rider/sender step chimes.', _stepSounds, (v) => _toggleFlag('step_sounds_enabled', v)),
+          const SizedBox(height: 6),
+          _flagRow('Turn-by-turn voice', 'Allow spoken navigation cues in the rider navigator.', _voiceGuidance, (v) => _toggleFlag('voice_guidance_enabled', v)),
           const Divider(height: 18),
           if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 11.5))),
           const SizedBox(height: 10),

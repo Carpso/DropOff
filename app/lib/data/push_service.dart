@@ -152,7 +152,10 @@ class PushService {
   }
 
   static Future<void> _show(Map<String, dynamic> data, String? title, String? body) async {
-    final t = title ?? _titleFor(data);
+    // Brand in the shade: every notification reads "DropOff · …" even when the
+    // worker sends a generic title (owner 2026-11-21).
+    final rawTitle = title ?? _titleFor(data);
+    final t = rawTitle.toLowerCase().startsWith('dropoff') ? rawTitle : 'DropOff · $rawTitle';
     final b = body ?? '';
     final kind = _kindOf(data);
     final channel = _channelFor(kind);

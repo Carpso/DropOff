@@ -1113,6 +1113,10 @@ class DropOffApi {
   /// Claim one available-order. 409 already_claimed when another rider won.
   static Future<ApiResponse> claimJob(String ref) => post('/jobs/$ref/claim', const {});
 
+  /// Transfer an assigned-but-not-collected trip to another rider.
+  static Future<ApiResponse> transferJob(String ref, int toRiderId) =>
+      post('/jobs/${Uri.encodeComponent(ref)}/transfer', {'to_rider_id': toRiderId});
+
   /// Live daily stats for the task-queue card: {stats: {total, waiting,
   /// picked, delivered, parcels, earned_zmw}} for the rider's CAT day.
   static Future<Map<String, dynamic>?> riderStats(String? phone) {
@@ -1197,7 +1201,15 @@ class DropOffApi {
   /// Silver K250 / Gold K500 / Platinum K750, Weekly Sprint K399.
   /// Cycle length comes from the plan (1 / 7 / 30 days); every parcel counts
   /// as one — even several in the same trip.
-  static Future<Map<String, dynamic>?> plans() => get('/plans');
+  static Future<Map<String, dynamic>?> plans() async {
+    final data = await get('/plans');
+    final flags = data?['feature_flags'];
+    if (flags is Map) featureFlags = Map<String, dynamic>.from(flags);
+    return data;
+  }
+
+  /// Live owner switches from /plans; default ON until the server says otherwise.
+  static Map<String, dynamic> featureFlags = const {};
 
   static Future<ApiResponse> subscribe({
     required String tier,
@@ -1283,6 +1295,8 @@ class DropOffApi {
     String? description,
     int parcels = 1,
     String vehicleClass = 'motorcycle',
+    bool needsCar = false,
+    String? promoCode,
     String payMethod = 'mobile_money',
     String? parcelSize,
     String? collectionReceiptUrl,
@@ -1298,6 +1312,8 @@ class DropOffApi {
         if (description != null && description.isNotEmpty) 'description': description,
         'parcels': parcels,
         'vehicle_class': vehicleClass,
+        'needs_car': needsCar,
+        if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
         'pay_method': payMethod,
         if (collectionReceiptUrl != null && collectionReceiptUrl.isNotEmpty)
           'collection_receipt_url': collectionReceiptUrl,
@@ -1447,7 +1463,9 @@ class DropOffApi {
         _ => 'EVIDENCE',
       };
       final Uint8List source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
-      final Uint8List? stamped = await compute(_stampInIsolate, _StampJob(source, tag));
+      final Uint8List? stamped = DropOffApi.featureFlags['photo_stamp_enabled'] == false
+          ? null
+          : await compute(_stampInIsolate, _StampJob(source, tag));
       if (stamped != null) {
         payload = stamped;
         final dot = filename.lastIndexOf('.');

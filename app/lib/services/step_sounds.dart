@@ -20,6 +20,8 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/dropoff_api.dart';
+
 class StepSounds {
   const StepSounds._();
 
@@ -44,6 +46,9 @@ class StepSounds {
       final prefs = await SharedPreferences.getInstance();
       _enabled = prefs.getBool(_prefKey) ?? true;
       _voiceGuidance = prefs.getBool(_voicePrefKey) ?? true;
+      final flags = DropOffApi.featureFlags;
+      if (flags['step_sounds_enabled'] == false) _enabled = false;
+      if (flags['voice_guidance_enabled'] == false) _voiceGuidance = false;
     } catch (_) {
       // Fail open: default to on.
     }

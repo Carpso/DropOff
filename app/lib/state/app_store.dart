@@ -681,6 +681,7 @@ class AppStore extends ChangeNotifier {
     required String? pickupAt,
     int parcels = 1,
     String vehicleClass = 'motorcycle',
+    bool needsCar = false,
     String? branch,
     String? parcelPhotoUrl,
     double? pickupLat,
@@ -712,6 +713,7 @@ class AppStore extends ChangeNotifier {
       'dest_leg2': lastMileFee > 0,
       'description': description,
       'parcels': parcels,
+      'needs_car': needsCar,
       'vehicle_class': vehicleClass,
       // No cash path — every parcel is prepaid via mobile money at booking,
       // in-line with the worker's prepaid gate (cash is rejected server-side).
