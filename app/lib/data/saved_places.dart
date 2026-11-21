@@ -75,7 +75,14 @@ class SavedPlaces {
         };
         for (final r in rows) {
           final sp = SavedPlace.fromJson(r as Map<String, dynamic>);
-          if (sp.label.isNotEmpty) merged[sp.label.toLowerCase()] = sp;
+          if (sp.label.isNotEmpty) {
+            final existing = merged[sp.label.toLowerCase()];
+            // Never let a pinless server row erase a good local pin (or vice
+            // versa) — a saved place without coordinates is search-only.
+            final hasPin = sp.lat != null && sp.lng != null;
+            final keepExisting = existing != null && existing.lat != null && existing.lng != null && !hasPin;
+            merged[sp.label.toLowerCase()] = keepExisting ? existing : sp;
+          }
         }
         _cache = merged.values.toList()
           ..sort((a, b) => b.usedAt.compareTo(a.usedAt));
@@ -95,7 +102,10 @@ class SavedPlaces {
     try {
       final places = await load();
       final kept = places.where((p) => p.label.toLowerCase() != text.toLowerCase()).toList();
-      kept.insert(0, SavedPlace(text, lat: lat, lng: lng, usedAt: DateTime.now().millisecondsSinceEpoch));
+      final existing = places.where((p) => p.label.toLowerCase() == text.toLowerCase()).firstOrNull;
+      final keepLat = lat ?? existing?.lat;
+      final keepLng = lng ?? existing?.lng;
+      kept.insert(0, SavedPlace(text, lat: keepLat, lng: keepLng, usedAt: DateTime.now().millisecondsSinceEpoch));
       _cache = kept.take(_cap).toList();
       await _persist();
       // Server write is best-effort; the local book is already updated.

@@ -11,6 +11,7 @@ import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
+import '../ui/saved_place_pin.dart';
 
 /// Live in-app map on the DropOff basemap (Protomaps Zambia/Zimbabwe/Malawi/
 /// Mozambique archive on our R2 bucket — no Google, no MapTiler, no external
@@ -37,6 +38,12 @@ class RiderMap extends StatefulWidget {
   /// Extra labelled pins (e.g. batched pickup stops 1..n).
   final List<Map<String, dynamic>>? stops;
 
+  /// Smart saved-place pins: the selected label gets a name bubble, frequently
+  /// used places an amber star. Tapping a pin routes to it.
+  final String? selectedSavedLabel;
+  final Set<String> frequentSavedLabels;
+  final ValueChanged<String>? onSavedTap;
+
   const RiderMap({
     super.key,
     required this.pickup,
@@ -46,6 +53,9 @@ class RiderMap extends StatefulWidget {
     this.route,
     this.routeIsStraightLine = false,
     this.stops,
+    this.selectedSavedLabel,
+    this.frequentSavedLabels = const {},
+    this.onSavedTap,
   });
 
   static const String tileUrl =
@@ -58,7 +68,9 @@ class RiderMap extends StatefulWidget {
         if (rider != null) rider!,
         if (depot != null) depot!,
         ...?route,
-        ...?stops?.map((s) => LatLng((s['lat'] as num).toDouble(), (s['lng'] as num).toDouble())),
+        // Saved places are deliberately NOT in the camera fit: a city-wide
+        // address book would zoom the route and rider down to specks.
+        ...?stops?.where((s) => s['kind'] != 'saved').map((s) => LatLng((s['lat'] as num).toDouble(), (s['lng'] as num).toDouble())),
       ];
 
   @override
@@ -386,15 +398,22 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                     Marker(
                       point: LatLng((widget.stops![i]['lat'] as num).toDouble(),
                           (widget.stops![i]['lng'] as num).toDouble()),
-                      width: 34,
-                      height: 34,
+                      width: '${widget.stops![i]['kind']}' == 'saved' ? 56 : 34,
+                      height: '${widget.stops![i]['kind']}' == 'saved' ? 68 : 34,
                       // Context pins carry a kind → a small icon badge (the
                       // "other half" of the job the rider isn't heading to
                       // right now); unkinded stops stay numbered (batch stops).
                       child: switch (widget.stops![i]['kind']) {
                         'pickup' => const Icon(Icons.storefront, size: 24, color: AppColors.forestLight),
                         'depot' => const Icon(Icons.warehouse_outlined, size: 24, color: AppColors.forest),
-                        'saved' => const Icon(Icons.bookmark, size: 22, color: Color(0xFF7B5710)),
+                        'saved' => SavedPlacePin(
+                            label: '${widget.stops![i]['label'] ?? 'Saved place'}',
+                            selected: '${widget.stops![i]['label'] ?? ''}' == widget.selectedSavedLabel,
+                            frequent: widget.frequentSavedLabels.contains('${widget.stops![i]['label'] ?? ''}'),
+                            onTap: widget.onSavedTap == null
+                                ? null
+                                : () => widget.onSavedTap!('${widget.stops![i]['label'] ?? ''}'),
+                          ),
                         _ => CircleAvatar(
                             backgroundColor: const Color(0xFFF6B73C),
                             radius: 17,

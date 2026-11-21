@@ -68,21 +68,23 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   int _cueIndex = 0;
   final Set<int> _spokenDistanceBands = {};
   DateTime? _lastSpokeAt;
+  String? _spokenSignature; // maneuver identity — survives a re-route
+  double _cueDistance = 0; // drives the live visual cue banner
   final _searchFocus = FocusNode();
   bool _searchBusy = false;
   List<MapSearchResult> _results = const [];
   List<SavedPlace> _saved = const [];
 
+  StreamSubscription<Position>? _guidanceSub;
   @override
   void initState() {
     super.initState();
-    _tts.setLanguage('en-US');
-    _tts.setSpeechRate(0.95);
-    _tts.setVolume(1.0);
+    unawaited(_setupTts());
     _destPos = LatLng(widget.destLat, widget.destLng);
     _destLabel = widget.label;
     _fix();
-    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _fix());
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) { if (_me == null) _fix(); });
+    _startGuidance();
     StepSounds.load().then((_) {
       if (mounted) setState(() => _voiceOn = StepSounds.voiceGuidance);
     });
@@ -92,11 +94,39 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _guidanceSub?.cancel();
     _searchDebounce?.cancel();
     unawaited(_tts.stop());
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  Future<void> _setupTts() async {
+    try {
+      final languages = await _tts.getLanguages;
+      final voice = languages.contains('en-GB') ? 'en-GB' : 'en-US';
+      await _tts.setLanguage(voice);
+      await _tts.setSpeechRate(1.0);
+      await _tts.setVolume(1.0);
+      await _tts.awaitSpeakCompletion(true);
+    } catch (_) {/* guidance still works visually */}
+  }
+
+  /// 1-second GPS stream — the old 10 s one-shot fix skipped the "turn now"
+  /// cue entirely at riding speed (a rider covered ~110 m between samples).
+  void _startGuidance() {
+    _guidanceSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5),
+    ).listen((pos) {
+      if (!mounted) return;
+      final me = LatLng(pos.latitude, pos.longitude);
+      setState(() => _me = me);
+      final moved = _lastRouteFix == null ||
+          const Distance().as(LengthUnit.Meter, _lastRouteFix!, me) > 150;
+      if (_route == null || moved) unawaited(_refreshRoute());
+      unawaited(_speakNextCue());
+    }, onError: (_) {/* the 10 s watchdog and displayed error handle this */});
   }
 
   LatLng get _dest => _destPos;
@@ -140,17 +170,24 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   /// route is (re)built. A re-route every 150 m must not restart the narration.
   void _syncCues(RouteResult? route, LatLng me) {
     final steps = route?.steps ?? const <RouteStep>[];
-    _cueIndex = 0;
-    _spokenDistanceBands.clear();
+    final previousSig = _spokenSignature;
+    var next = 0;
     var best = double.infinity;
     for (var i = 0; i < steps.length; i++) {
       final loc = steps[i].location;
       if (loc == null) continue;
       final d = const Distance().as(LengthUnit.Meter, me, loc);
-      if (d < best) {
-        best = d;
-        _cueIndex = i;
-      }
+      if (d < best) { best = d; next = i; }
+    }
+    _cueIndex = next;
+    final loc = steps.isEmpty ? null : steps[next.clamp(0, steps.length - 1)].location;
+    final sig = loc == null ? '' : '${steps[next.clamp(0, steps.length - 1)].instruction}|${loc.latitude}|${loc.longitude}';
+    // Only re-arm narration for a genuinely different maneuver; the frequent
+    // 150 m re-routes must not re-speak a cue the rider already heard.
+    if (sig != previousSig) {
+      _spokenDistanceBands.clear();
+      _lastSpokeAt = null;
+      _spokenSignature = sig;
     }
   }
 
@@ -184,21 +221,27 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     if (loc == null) return;
     final metres = d.as(LengthUnit.Meter, me, loc);
     if (metres > 400) return; // not yet — no long-range "read everything"
+    if (mounted) setState(() => _cueDistance = metres);
 
-    // Distance bands (400/250/100/30 m) say each cue at most four times, so
-    // the 10 s GPS tick never repeats the same instruction.
-    final band = metres <= 30 ? 0 : metres <= 100 ? 1 : metres <= 250 ? 2 : 3;
-    if (!_spokenDistanceBands.add(band)) return;
+    // THROTTLE FIRST: a consumed band must never be marked "spoken" when the
+    // time guard drops the cue (manual Refresh made cues disappear entirely).
     final now = DateTime.now();
     if (_lastSpokeAt != null && now.difference(_lastSpokeAt!).inSeconds < 6) return;
+
+    final band = metres <= 30 ? 0 : metres <= 100 ? 1 : metres <= 250 ? 2 : 3;
+    if (!_spokenDistanceBands.add(band)) return;
     _lastSpokeAt = now;
 
-    final quantum = band == 3 ? 100.0 : band == 2 ? 50.0 : 10.0;
-    final rounded = (metres / quantum).round() * quantum;
-    final say = metres <= 30
-        ? steps[_cueIndex].instruction
-        : 'In ${rounded.round()} metres, ${steps[_cueIndex].instruction}';
-    await _tts.stop();
+    final instruction = steps[_cueIndex].instruction.trim();
+    final lowering = instruction.isEmpty
+        ? instruction
+        : '${instruction[0].toLowerCase()}${instruction.substring(1)}';
+    final isArrival = lowering.startsWith('arrive') || lowering.contains('destination');
+    final say = band == 0
+        ? (isArrival ? "You've arrived at $_destLabel." : '$lowering now.')
+        : band == 1
+            ? '$lowering ahead.'
+            : 'In ${(metres / 50).floor() * 50} metres, $lowering';
     await _tts.speak(say).catchError((_) => 0);
   }
 
@@ -241,7 +284,9 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
   void _pickResult(MapSearchResult r) {
     // Every place used gets remembered automatically — the book grows.
-    unawaited(SavedPlaces.remember(r.label, lat: r.point.latitude, lng: r.point.longitude));
+    unawaited(SavedPlaces.remember(r.label, lat: r.point.latitude, lng: r.point.longitude).then((_) => SavedPlaces.load()).then((list) {
+      if (mounted) setState(() => _saved = list);
+    }));
     setState(() {
       _destPos = r.point;
       _destLabel = r.label;
@@ -256,12 +301,12 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
   IconData _stepIcon(String instruction) {
     final t = instruction.toLowerCase();
+    if (t.contains('roundabout')) return Icons.roundabout_left;
     if (t.contains('u-turn') || t.contains('uturn')) return Icons.u_turn_left;
+    if (t.contains('merge') || t.contains('ramp')) return Icons.merge;
+    if (t.startsWith('arrive') || t.contains('destination')) return Icons.flag;
     if (t.contains('left')) return Icons.turn_left;
     if (t.contains('right')) return Icons.turn_right;
-    if (t.contains('roundabout')) return Icons.roundabout_left;
-    if (t.contains('merge') || t.contains('ramp')) return Icons.merge;
-    if (t.startsWith('arrive')) return Icons.flag;
     if (t.startsWith('head') || t.startsWith('depart')) return Icons.navigation;
     return Icons.straight;
   }
@@ -347,11 +392,10 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
               if (!mounted) return;
               setState(() => _voiceOn = !_voiceOn);
               await _tts.stop();
-              if (_voiceOn) {
-                // Re-anchor so the next cue is spoken from the rider's current
-                // position instead of a stale band from before the mute.
-                _cueIndex = 0;
-                _spokenDistanceBands.clear();
+              if (_voiceOn && _me != null) {
+                _syncCues(_route, _me!);
+                _lastSpokeAt = null;
+                unawaited(_speakNextCue());
               }
             },
           ),
@@ -383,6 +427,15 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
               if (p.lat != null && p.lng != null)
                 {'lat': p.lat, 'lng': p.lng, 'kind': 'saved', 'label': p.label},
           ],
+          selectedSavedLabel: _destLabel,
+          frequentSavedLabels: {
+            for (final p in _saved.take(6)) p.label,
+          },
+          onSavedTap: (label) {
+            final place = _saved.where((p) => p.label == label).firstOrNull;
+            if (place?.lat == null || place?.lng == null) return;
+            _pickResult(MapSearchResult(label, LatLng(place!.lat!, place.lng!)));
+          },
         ),
         // Floating search — our own geocoder, biased to Lusaka.
         Positioned(
@@ -446,7 +499,10 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                           dense: true,
                           leading: const Icon(Icons.bookmark_border, color: AppColors.forest),
                           title: Text(p.label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                          onTap: () => _pickResult(MapSearchResult(p.label, LatLng(p.lat ?? _destPos.latitude, p.lng ?? _destPos.longitude))),
+                          onTap: p.lat == null || p.lng == null
+                              ? null
+                              : () => _pickResult(MapSearchResult(p.label, LatLng(p.lat!, p.lng!))),
+                          subtitle: p.lat == null ? const Text('No pin — search-only address', style: TextStyle(fontSize: 10.5, color: AppColors.muted)) : null,
                         );
                       }
                       final r = _results[i - savedCount];
@@ -462,6 +518,36 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
               ),
           ]),
         ),
+          // LIVE CUE BANNER — mirrors the spoken instruction (Waze/Google
+          // pattern): riders see the next turn even if audio is missed.
+          if (_route != null && _cueIndex < _route!.steps.length)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: IgnorePointer(
+                child: Card(
+                  color: AppColors.forest,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    child: Row(children: [
+                      Icon(_stepIcon(_route!.steps[_cueIndex].instruction), color: AppColors.amber, size: 26),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(
+                        _route!.steps[_cueIndex].instruction,
+                        maxLines: 2, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14, height: 1.3),
+                      )),
+                      const SizedBox(width: 10),
+                      Text(_cueDistance >= 1000
+                          ? '${(_cueDistance / 1000).toStringAsFixed(1)} km'
+                          : '${(_cueDistance / 10).round() * 10} m',
+                          style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 15)),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
       ]),
       // Destination bar
       bottomNavigationBar: SafeArea(

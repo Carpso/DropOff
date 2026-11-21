@@ -27,6 +27,22 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (fifteenth pass) — premium navigation voice + smart saved pins
+
+- Voice guidance: 1-second GPS stream replaces the 10 s one-shot (the "turn
+  now" cue was skipped at speed); throttle now runs BEFORE a band is consumed;
+  maneuver identity (not index) survives re-routes so cues are not re-spoken;
+  unmute re-anchors and clears throttle; distinct far/near/now phrasing,
+  lowercase TTS prosody, arrival cue, en-GB voice fallback, awaited setup and
+  a live visual next-turn banner. Roundabout exit count now uses OSRM `exit`.
+- Saved places: new `SavedPlacePin` — DropOff logo on an amber-rimmed forest
+  teardrop, selected label bubble, frequent star, tap-to-route. Saved pins no
+  longer distort the camera fit. Fixed pin-erasure on null-coordinate merges,
+  preserved coordinates on pinless re-booking, live reload after saving, and
+  no-pin places are now search-only instead of routing to the current spot.
+- **Blocked:** 3D motorcycle/car sprite generation failed — OpenCode image
+  credits exhausted (pay-as-you-go). No new art shipped this pass.
+
 ## 2026-11-21 (fourteenth pass) — Business promo banner vertical-text fix
 
 - `_banner()` in `business_screen.dart` (used by the Silver/Gold/Platinum promo

@@ -921,7 +921,7 @@ app.get('/maps/route', async (c) => {
           const man = s?.maneuver ?? {};
           const instruction = typeof man.instruction === 'string' && man.instruction
             ? man.instruction
-            : osrmInstruction(String(man.type ?? ''), String(man.modifier ?? ''), String(s?.name ?? ''));
+            : osrmInstruction(String(man.type ?? ''), String(man.modifier ?? ''), String(s?.name ?? ''), Number(man.exit ?? 0));
           const loc = Array.isArray(man.location) ? man.location : null;
           return {
             instruction,
@@ -992,7 +992,7 @@ app.get('/maps/route', async (c) => {
 });
 
 /** OSRM maneuver → human instruction, used when OSRM ships no text step. */
-function osrmInstruction(type: string, modifier: string, street: string): string {
+function osrmInstruction(type: string, modifier: string, street: string, exitNo = 0): string {
   const dir = (() => {
     switch (modifier) {
       case 'left': return 'left';
@@ -1019,7 +1019,11 @@ function osrmInstruction(type: string, modifier: string, street: string): string
     case 'off ramp': return `Take the exit${onto}`;
     case 'new name': return `Continue${onto}`;
     case 'continue': return `Continue straight${onto}`;
-    case 'roundabout': case 'rotary': return modifier ? `Enter the roundabout (exit ${modifier})${onto}` : `Enter the roundabout${onto}`;
+    case 'roundabout': case 'rotary': {
+      const exits = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
+      const exitText = exitNo > 0 && exitNo < exits.length ? `${exits[exitNo]} exit` : (modifier ? `${modifier} exit` : 'exit');
+      return `At the roundabout, take the ${exitText}${onto}`;
+    }
     case 'exit roundabout': return `Exit the roundabout${onto}`;
     case 'roundabout turn': return dir ? `Take the ${dir} exit at the roundabout${onto}` : `Turn at the roundabout${onto}`;
     case 'notification': return `Continue${onto}`;
