@@ -27,6 +27,16 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (fourteenth pass) — Business promo banner vertical-text fix
+
+- `_banner()` in `business_screen.dart` (used by the Silver/Gold/Platinum promo
+  banner and the "outgrew your plan" banner) put a long body Text in an
+  `Expanded` beside a `FilledButton`; on 360 px screens the button squeezed the
+  text into a 1-character column. The icon now sits in a fixed 40×40 rail, the
+  text is a full-width `Expanded` with `softWrap: true`, and the CTA button moved
+  to its own row below. Text content unchanged. Other known vertical-text fixes
+  (toast, plan tier cards) remain intact.
+
 ## 2026-11-21 (thirteenth pass) — premium sender UI/UX copy pass
 
 - Truthfulness: counter fare now says rider pays at the counter and sender
