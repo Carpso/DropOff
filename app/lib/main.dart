@@ -137,8 +137,19 @@ void _performDeepLink(AppStore store, Uri uri) {
     Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const BookingsScreen()));
     return;
   }
-  // /promo/:ref, /promo?code=..., /r/:code — referral prefill/claim
-  if (seg.length >= 2 && (seg[0] == 'promo' || seg[0] == 'r')) {
+  // /r/:code — a REFERRAL claim, never a promo code.
+  if (seg.length >= 2 && seg[0] == 'r') {
+    final code = seg[1].trim().toUpperCase();
+    AnalyticsService.instance.track(feature: 'deeplink', action: 'open_referral', context: code);
+    AccountScreen.prefillReferral = code;
+    if (store.linked) {
+      unawaited(DropOffApi.claimReferral(code).catchError((_) => const ApiResponse()));
+    }
+    Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
+    return;
+  }
+  // /promo/:ref and /promo?code=... — real promo prefill at booking.
+  if (seg.length >= 2 && seg[0] == 'promo') {
     final code = seg[1].trim().toUpperCase();
     AnalyticsService.instance.track(feature: 'deeplink', action: 'open_referral_or_promo', context: code);
     BookingScreen.prefill = {'promo_code': code};

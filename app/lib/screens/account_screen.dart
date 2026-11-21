@@ -1073,7 +1073,7 @@ class _ReferralCardState extends State<_ReferralCard> {
     if (code.isEmpty) return;
     // Include human context: what the code is for and how to use it.
     final text = 'My DropOff referral code: $code\n'
-        'Sign up in the app → enter this code and get home pickup to your courier — both of us get a 20% promo on a DropOff leg.';
+        'Sign up in the app → enter this code and get home pickup to your courier. I earn a 20% promo when your first booking is confirmed.';
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) setState(() => _copied = true);
     await Future<void>.delayed(const Duration(seconds: 2));
@@ -1095,6 +1095,11 @@ class _ReferralCardState extends State<_ReferralCard> {
     final stats = _data?['stats'] as Map<String, dynamic>?;
     final rewarded = (stats?['rewarded'] as num?)?.toInt() ?? 0;
     final pending = (stats?['pending'] as num?)?.toInt() ?? 0;
+    final rewards = ((_data?['rewards'] as List?) ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
+    final earned = rewards.where((r) => '${r['status']}' == 'rewarded' && '${r['reward_code'] ?? ''}'.isNotEmpty).toList();
     return Card(
       margin: const EdgeInsets.only(top: 18, bottom: 4),
       child: Padding(
@@ -1122,6 +1127,27 @@ class _ReferralCardState extends State<_ReferralCard> {
           ]),
           const SizedBox(height: 6),
           Text('$rewarded rewarded · $pending waiting (first booking)', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          if (earned.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text('Your earned codes — use at booking', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+            for (final r in earned)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(8)),
+                    child: Text('${r['reward_code']} · 20% off',
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: AppColors.forest)),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy reward code',
+                    icon: const Icon(Icons.copy, size: 16, color: AppColors.forest),
+                    onPressed: () => Clipboard.setData(ClipboardData(text: '${r['reward_code']}')),
+                  ),
+                ]),
+              ),
+          ],
         ]),
       ),
     );

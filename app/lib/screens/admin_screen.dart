@@ -1119,7 +1119,8 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
           .toList();
       setState(() {
         _messages = rows;
-        _ticket = (data['ticket'] as Map?)?.cast<String, dynamic>();
+        _ticket = (data['thread'] as Map?)?.cast<String, dynamic>() ??
+            (data['ticket'] as Map?)?.cast<String, dynamic>();
         _error = null;
         _loading = false;
       });
@@ -1617,6 +1618,39 @@ class _BookingDeleteCard extends StatefulWidget {
 class _BookingDeleteCardState extends State<_BookingDeleteCard> {
   final _ref = TextEditingController();
   bool _busy = false;
+  List<Map<String, dynamic>> _requests = const [];
+  bool _loadingRequests = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRequests();
+  }
+
+  Future<void> _loadRequests() async {
+    try {
+      final data = await DropOffApi.adminDeletionRequests();
+      final rows = ((data?['threads'] as List?) ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+      if (!mounted) return;
+      setState(() { _requests = rows; _loadingRequests = false; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingRequests = false);
+    }
+  }
+
+  Future<void> _unpark(String ref) async {
+    setState(() => _busy = true);
+    final res = await DropOffApi.unparkJob(ref);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppToast.show(context, res.ok
+        ? '$ref released to ${res.body['window'] ?? 'the next'} sweep and the claim board.'
+        : 'Could not release $ref — ${res.body['detail'] ?? res.error ?? 'try again'}');
+  }
 
   Future<void> _delete() async {
     final ref = _ref.text.trim().toUpperCase();
@@ -1624,6 +1658,10 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
       AppToast.show(context, 'Enter the job ref (e.g. DRO-2026-000123).');
       return;
     }
+    await _deleteRef(ref, clearField: true);
+  }
+
+  Future<void> _deleteRef(String ref, {bool clearField = false}) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1645,12 +1683,13 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (res.ok) {
-      _ref.clear();
+      if (clearField) _ref.clear();
       AppToast.show(context, 'Booking $ref deleted from all lists.');
       AnalyticsService.instance.track(
         feature: 'admin_jobs', action: 'delete_booking', context: 'admin_delete_booking',
         meta: {'ref': ref},
       );
+      unawaited(_loadRequests());
     } else {
       final detail = '${res.body['detail'] ?? ''}'.trim();
       AppToast.show(context, res.error == 'admin_required'
@@ -1682,6 +1721,47 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
           const Text('Only admins can delete a booking. Customers see a request-delete button that messages support — their data stays unless staff act on it. Deleting keeps payments and audit events for the books.',
               style: AppType.caption),
           const SizedBox(height: 10),
+          // REQUESTED DELETIONS (owner 2026-11-21): every open "please delete"
+          // support ticket, with its DRO- ref, ready for one-tap action.
+          if (_loadingRequests)
+            const Padding(padding: EdgeInsets.all(8), child: Center(child: AppLogoSpinner(size: 18)))
+          else if (_requests.isNotEmpty) ...[
+            const Text('Requested deletions', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
+            const SizedBox(height: 6),
+            for (final req in _requests)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.line.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${req['ref']} · ${req['phone'] ?? ''}',
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
+                  Text('${req['created_at'] ?? ''} · ${req['status'] ?? 'open'}',
+                      style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                  const SizedBox(height: 4),
+                  Text('${req['last_message'] ?? req['first_message'] ?? ''}',
+                      maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5)),
+                  Row(children: [
+                    TextButton.icon(
+                      onPressed: _busy ? null : () => _unpark('${req['ref']}'),
+                      icon: const Icon(Icons.restore_from_trash_outlined, size: 16),
+                      label: const Text('Release instead'),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: _busy ? null : () => _deleteRef('${req['ref']}'),
+                      icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.danger),
+                      label: const Text('Delete', style: TextStyle(color: AppColors.danger)),
+                    ),
+                  ]),
+                ]),
+              ),
+            const Divider(height: 8),
+          ],
           Row(children: [
             Expanded(
               child: TextField(
@@ -2333,6 +2413,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
   // Platform switches — an admin flips live, admin-key-gated server-side.
   bool _doorToDoor = false;
   bool _overageDiscount = false;
+  bool _referralBonus = true;
   bool _flagBusy = false;
 
   static const _tierLabels = {
@@ -2361,6 +2442,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
       final flags = (settings?['settings'] as Map?) ?? const {};
       _doorToDoor = flags['door_to_door_enabled'] == true;
       _overageDiscount = flags['overage_discount_enabled'] == true;
+      _referralBonus = flags['referral_bonus_enabled'] != false;
       _error = tiers == null ? 'Plans/courier catalogue needs an admin sign-in on this device.' : null;
       _loading = false;
     });
@@ -2374,7 +2456,9 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
     _snack(res.ok
         ? (key == 'door_to_door_enabled'
             ? (on ? 'Door-to-door drop-off ON — senders see the option.' : 'Door-to-door OFF — collection points only.')
-            : (on ? 'Overage discount ON — tiers apply on PAYG overage.' : 'Overage discount OFF — overage bills at full PAYG.'))
+            : key == 'referral_bonus_enabled'
+                ? (on ? 'Referral bonus ON — invitees earn a 20% code.' : 'Referral bonus OFF — no new rewards.')
+                : (on ? 'Overage discount ON — tiers apply on PAYG overage.' : 'Overage discount OFF — overage bills at full PAYG.'))
         : 'Could not flip the switch (${res.error ?? 'admins only'})');
     unawaited(Future.delayed(const Duration(milliseconds: 400), _load));
   }
@@ -2532,6 +2616,13 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             _overageDiscount,
             (v) => _toggleFlag('overage_discount_enabled', v),
           ),
+          const SizedBox(height: 6),
+          _flagRow(
+            'Referral bonus',
+            'When ON, a sender invited by a friend earns a single-use 20% promo after the friend\'s first booking is confirmed. Turning it OFF stops new rewards; existing codes stay valid.',
+            _referralBonus,
+            (v) => _toggleFlag('referral_bonus_enabled', v),
+          ),
           const Divider(height: 18),
           if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 11.5))),
           const SizedBox(height: 10),
@@ -2585,9 +2676,9 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
   }
 }
 
-/// No-show guard (owner directive): senders with 3+ missed pickups in 14 days
-/// are parked from new bookings. Ops reviews the job refs behind the strikes
-/// and clears them — that IS the unblock button.
+/// No-show / OTP-abuse strike LEDGER (strike hold REMOVED 2026-11-20): these
+/// rows are audit-only warnings now — nobody is blocked from booking. Ops can
+/// clear the ledger, and release legacy canceled bookings from the card above.
 class _BookingStrikesCard extends StatefulWidget {
   const _BookingStrikesCard();
 
@@ -2625,7 +2716,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Clear booking strikes?'),
-        content: Text('Wipe ALL booking strikes for $phone${fullName.isNotEmpty ? ' ($fullName)' : ''}?\n\nJobs: ${row['job_refs'] ?? '—'}\n\nThey can book immediately after this.'),
+        content: Text('Wipe ALL booking strikes for $phone${fullName.isNotEmpty ? ' ($fullName)' : ''}?\n\nJobs: ${row['job_refs'] ?? '—'}\n\nStrikes are audit-only now — this removes the warnings, not a booking block.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Clear & unblock')),
@@ -2636,7 +2727,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
     final res = await DropOffApi.clearBookingStrikes(phone);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.ok ? 'Strikes cleared — $phone can book again.' : 'Could not clear strikes (${res.error})'),
+      content: Text(res.ok ? 'Strikes cleared — audit warnings removed.' : 'Could not clear strikes (${res.error})'),
     ));
     await _load();
   }
@@ -2650,7 +2741,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
           Row(children: [
             const Icon(Icons.warning_amber_outlined, size: 19, color: AppColors.warning),
             const SizedBox(width: 8),
-            const Expanded(child: Text('No-show strikes — parked bookers',
+            const Expanded(child: Text('Strike ledger — repeat no-shows / OTP abuse',
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             IconButton(
               tooltip: 'Refresh',
@@ -2661,11 +2752,11 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
             ),
           ]),
           const SizedBox(height: 2),
-          const Text('3 strikes in 14 days parks new bookings. Clear one or all from this list.',
+          const Text('Audit-only warnings — strikes no longer block bookings. Clear a phone here; release old canceled bookings with Delete a booking above.',
               style: AppType.caption),
           const SizedBox(height: 10),
           if (_rows.isEmpty && !_loading)
-            const Text('No strikes on file — nobody is parked right now.',
+            const Text('No strikes on file — clean ledger.',
                 style: TextStyle(color: AppColors.muted, fontSize: 12)),
           for (final row in _rows)
             Container(
@@ -2694,7 +2785,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     margin: const EdgeInsets.only(right: 4),
                     decoration: BoxDecoration(color: AppColors.danger.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
-                    child: const Text('PARKED', style: TextStyle(color: AppColors.danger, fontSize: 9, fontWeight: FontWeight.w900)),
+                    child: const Text('WARNING', style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w900)),
                   ),
                 TextButton(onPressed: () => _clear(row), child: const Text('Clear')),
               ]),

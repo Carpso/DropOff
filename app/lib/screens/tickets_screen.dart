@@ -38,16 +38,28 @@ class _TicketsScreenState extends State<TicketsScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final data = await DropOffApi.tickets();
-    if (!mounted) return;
-    setState(() {
-      _tickets = ((data?['tickets'] as List?) ?? const [])
-          .cast<Map<String, dynamic>>()
-          .where((t) => _filter == 'all' || '${t['status'] ?? 'open'}' == _filter)
+    try {
+      final data = await DropOffApi.tickets();
+      if (!mounted) return;
+      // Tolerate malformed/cached rows — a strict cast here used to crash the
+      // whole screen with "type 'String' is not a subtype of Map".
+      final rows = ((data?['tickets'] as List?) ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
           .toList();
-      _loading = false;
-      _error = data == null ? 'Could not load tickets — check your connection.' : null;
-    });
+      setState(() {
+        _tickets = rows.where((t) => _filter == 'all' || '${t['status'] ?? 'open'}' == _filter).toList();
+        _loading = false;
+        _error = data == null ? 'Could not load tickets — check your connection.' : null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _tickets = const [];
+        _error = 'Could not open tickets — ${e.toString().split('\n').first.substring(0, e.toString().split('\n').first.length.clamp(0, 160))}';
+      });
+    }
   }
 
   Future<void> _openNewTicket({String? prefill}) async {
@@ -130,7 +142,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
   Widget _ticketCard(Map<String, dynamic> t) {
     final id = '${t['id'] ?? ''}';
     final status = '${t['status'] ?? 'open'}';
-    final unread = (t['unread'] as num?) ?? 0;
+    final unread = (t['unread'] is num ? t['unread'] as num : num.tryParse('${t['unread'] ?? 0}') ?? 0).toInt();
     final color = switch (status) {
       'closed' => AppColors.muted,
       'pending' => AppColors.warning,
@@ -263,6 +275,7 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
   final _reply = TextEditingController();
   bool _loading = true;
   bool _sending = false;
+  String? _error;
 
   @override
   void initState() {
@@ -277,13 +290,26 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
   }
 
   Future<void> _load() async {
-    final data = await DropOffApi.ticket(widget.id);
-    if (!mounted) return;
-    setState(() {
-      _ticket = (data?['ticket'] as Map<String, dynamic>?) ?? data;
-      _messages = ((data?['messages'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _loading = false;
-    });
+    try {
+      final data = await DropOffApi.ticket(widget.id);
+      if (!mounted) return;
+      setState(() {
+        _ticket = (data?['ticket'] as Map?)?.cast<String, dynamic>() ?? data;
+        _messages = ((data?['messages'] as List?) ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((m) => Map<String, dynamic>.from(m))
+            .toList();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _ticket = null;
+        _messages = const [];
+        _error = 'Could not open this ticket — ${e.toString().split('\n').first.substring(0, e.toString().split('\n').first.length.clamp(0, 160))}';
+      });
+    }
   }
 
   Future<void> _send() async {
@@ -330,6 +356,11 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
               const Spacer(),
               Text(status.toUpperCase(), style: AppType.bodyStrong.copyWith(color: status == 'closed' ? AppColors.muted : AppColors.success)),
             ]),
+          ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
           ),
         Expanded(
           child: _loading

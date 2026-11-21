@@ -1279,7 +1279,7 @@ class _BookingScreenState extends State<BookingScreen> {
           child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Icon(Icons.warning_amber_rounded, color: Color(0xFF7B5710)),
             SizedBox(width: 10),
-            Expanded(child: Text('If you miss your rider or don\'t hand over the parcel in time, the booking may be auto-canceled and a no-show strike recorded. 3 strikes in 14 days can pause new bookings.', style: TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
+            Expanded(child: Text('Repeated missed handovers are logged as warnings. Bookings are still allowed — no strike hold applies.', style: TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
           ]),
         ),
         const SizedBox(height: 10),

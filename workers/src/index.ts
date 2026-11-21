@@ -659,7 +659,7 @@ async function issueTrackingToken(env: Env, jobId: number, jobRef: string, phone
 /** User-facing link base (PWA domain). APP_URL remains the API base for the
  * uptime probe and other server-to-server calls — never flip that one. */
 const publicLinkBase = (env: Env) =>
-  String(env.APP_PUBLIC_URL ?? env.APP_URL ?? '').replace(/\/$/, '');
+  String(env.APP_PUBLIC_URL ?? 'https://dropoff.carpsosolutions.store').replace(/\/$/, '');
 
 const trackingUrl = (env: Env, token: string) =>
   `${publicLinkBase(env)}/track/${token}`;
@@ -2509,15 +2509,15 @@ app.post('/jobs', async (c) => {
         await handoverOtpHash(c.env, ref, pickupOtp)).run();
       c.executionCtx.waitUntil(
         sendSms(c.env, recipientPhone, intercity
-          ? `DropOff: parcel ${ref}. Track: ${trackUrl}. Code ${doorOtp} - never share before handover.`
-          : `DropOff: parcel ${ref}. Track: ${trackUrl} - follow it live in the DropOff app and confirm receipt when it lands.`,
+          ? `DropOff: item ${ref}. Track: ${trackUrl}. Code ${doorOtp} - never share before handover.`
+          : `DropOff: item ${ref}. Track: ${trackUrl} - follow it live in the DropOff app and confirm receipt when it lands.`,
           { transactional: true }).catch(() => {}),
       );
       // PICKUP CODE FOR THE SENDER (owner directive 2026-11-17): the rider
       // confirms the collection with the SENDER's own code.
       c.executionCtx.waitUntil(
         sendSms(c.env, senderPhone,
-        `DropOff: parcel ${ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {}),
+        `DropOff: item ${ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {}),
       );
     }
 
@@ -2739,7 +2739,7 @@ app.post('/collections', async (c) => {
   if (!depositRequired) {
     c.executionCtx.waitUntil(
       sendSms(c.env, recipientPhone,
-      `DropOff: collection booked at ${courier.name}. Show code ${deliveryOtp} to your rider at handover - never share it before the parcel is in your hands.`, { transactional: true }).catch(() => {}),
+      `DropOff: collection booked at ${courier.name}. Follow your item live in the DropOff app and confirm receipt at your door.`, { transactional: true }).catch(() => {}),
     );
   }
 
@@ -2954,7 +2954,7 @@ app.get('/jobs/:ref/live', async (c) => {
   // and ENDS at the depot drop ('delivered') or when the parcel waits at the
   // destination depot for collection ('ready_for_collection').
   if (['delivered', 'ready_for_collection'].includes(String(job.status ?? ''))) {
-    return c.json({ has_rider: true, location: null, ended: true, note: 'Tracking ended — the parcel is at the depot.' });
+    return c.json({ has_rider: true, location: null, ended: true, note: `Tracking ended — your item is ${String(job.service ?? '') === 'collection' ? 'with the recipient' : 'at the depot'}.` });
   }
   if (job.last_lat == null) {
     return c.json({ has_rider: true, location: null, note: 'rider has not shared location yet' });
@@ -3096,12 +3096,12 @@ app.post('/jobs/:ref/resend-pin', async (c) => {
   const sends: Promise<{ sent: boolean }>[] = [];
   if (job.sender_phone) {
     sends.push(sendSms(c.env, job.sender_phone,
-      `DropOff: parcel ${job.ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`,
+      `DropOff: item ${job.ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`,
       { transactional: true }));
   }
   if (doorOtp && job.recipient_phone && job.recipient_phone !== job.sender_phone) {
     sends.push(sendSms(c.env, job.recipient_phone,
-      `DropOff: parcel ${job.ref}. Code ${doorOtp} - never share before handover.`,
+      `DropOff: item ${job.ref}. Code ${doorOtp} - never share before handover.`,
       { transactional: true }));
   }
   const results = await Promise.allSettled(sends);
@@ -3237,15 +3237,15 @@ app.post('/admin/jobs/seed-sweep', async (c) => {
     if (!dry) {
       if (!inHand && job.sender_phone) {
         const r = await sendSms(c.env, job.sender_phone,
-          `DropOff: parcel ${job.ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`,
+          `DropOff: item ${job.ref}. Pickup code ${pickupOtp} - show it to your rider when they collect.`,
           { transactional: true });
         out.sender_sms = r.sent ? 'sent' : `failed:${r.error ?? '?'}`;
       }
       if (job.recipient_phone) {
         const r = await sendSms(c.env, job.recipient_phone,
           intercity
-            ? `DropOff: parcel ${job.ref}.${trackUrl ? ` Track: ${trackUrl}.` : ''} Code ${doorOtp} - never share before handover.`
-            : `DropOff: parcel ${job.ref}.${trackUrl ? ` Track: ${trackUrl}.` : ''} Follow it live in the DropOff app and confirm receipt when it lands.`,
+            ? `DropOff: item ${job.ref}.${trackUrl ? ` Track: ${trackUrl}.` : ''} Code ${doorOtp} - never share before handover.`
+            : `DropOff: item ${job.ref}.${trackUrl ? ` Track: ${trackUrl}.` : ''} Follow it live in the DropOff app and confirm receipt when it lands.`,
           { transactional: true });
         out.recipient_sms = r.sent ? 'sent' : `failed:${r.error ?? '?'}`;
       }
@@ -3757,7 +3757,7 @@ app.post('/jobs/:ref/events', async (c) => {
       case 'departed':
         return `SYSTEM: ${itemName} dispatched from ${originCity ?? 'the depot'} to ${destCity ?? legDest}.`;
       case 'arrived':
-        return `SYSTEM: ${itemName} arrived at ${destCity ?? routeCity ?? legDest} — awaiting collection.`;
+        return `SYSTEM: ${isCollectionJob ? `${itemName} arrived at the recipient's door — ready for handover.` : `${itemName} arrived at ${destCity ?? routeCity ?? legDest} — awaiting collection.`}`;
       case 'delivered':      return `SYSTEM: ${itemName} delivered — journey complete.`;
       case 'ready_for_collection':
         return `SYSTEM: ${itemName} ready for collection at ${legDest}.`;
@@ -3802,12 +3802,12 @@ app.post('/jobs/:ref/events', async (c) => {
     try {
       await sendSms(c.env, job.sender_phone,
         cfare.planWaived
-          ? `DropOff: parcel ${job.ref} is at the depot counter. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your depot receipt photo (no processing - plan active).`
-          : `DropOff: parcel ${job.ref} is at the depot. Counter fare K${counterReceiptDue.toFixed(2)} + K${fee.toFixed(2)} processing = K${cfare.total.toFixed(2)}. Pay in Bookings to reveal the depot receipt photo.`, { transactional: true });
+          ? `DropOff: your item ${job.ref} is at the depot. Your rider paid the counter fare. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your receipt photo and reimburse them (no processing - plan active).`
+          : `DropOff: your item ${job.ref} is at the depot. Your rider paid the K${counterReceiptDue.toFixed(2)} counter fare; repay K${counterReceiptDue.toFixed(2)} + K${fee.toFixed(2)} processing = K${cfare.total.toFixed(2)} in Bookings to reveal the receipt photo.`, { transactional: true });
     } catch { /* notification must never break the event */ }
     c.executionCtx.waitUntil(sendToPhone(c.env, job.sender_phone, {
       title: 'Counter fare due',
-      body: `Parcel ${job.ref} reached the depot. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your depot receipt photo and release the rider's reimbursement.`,
+      body: `Item ${job.ref} is at the depot. Your rider paid the counter fare - pay K${cfare.total.toFixed(2)} in Bookings to reveal the receipt photo and reimburse them.`,
       data: { job_ref: job.ref ?? '', kind: 'counter_fare_due' },
     }));
   }
@@ -3842,7 +3842,7 @@ app.post('/jobs/:ref/events', async (c) => {
       },
       at_depot: { title: 'At the depot', body: `Your ${itemName} reached ${legDest}. You can follow the journey live.` },
       departed: { title: 'On the way', body: isCollectionJob ? `Left the depot — heading to ${legDest}.` : `Left ${legDest} on the DropOff leg.` },
-      arrived: { title: 'Arrived', body: `Your ${itemName} arrived at the destination city.` },
+      arrived: { title: 'Arrived', body: isCollectionJob ? `Your ${itemName} is at the recipient's door.` : `Your ${itemName} arrived in ${destCity ?? legDest}.` },
       ready_for_collection: { title: 'Ready for collection', body: `Your ${itemName} is waiting at ${legDest} for collection.` },
       delivered: {
         title: 'Delivered',
@@ -4003,7 +4003,7 @@ app.post('/jobs/:ref/confirm-receipt', async (c) => {
       .run();
     if (job.sender_phone) {
       await sendToPhone(c.env, job.sender_phone, {
-        title: 'Parcel received ✓',
+        title: 'Item received',
         body: `The recipient confirmed receipt of ${job.ref}.`,
         data: { kind: 'receipt_confirmed', ref: job.ref },
       }).catch(() => {});
@@ -4163,9 +4163,9 @@ app.get('/track/:token', async (c) => {
     return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DropOff</title></head>
 <body style="font-family:system-ui;margin:0;background:#123C32;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px">
 <div style="max-width:420px"><h1 style="margin:0 0 8px">Open in DropOff</h1>
-<p style="opacity:.9">Tap below to open this link in the DropOff app. Tracking requires an account: sign in (or create one) with the phone this parcel was addressed to.</p>
+<p style="opacity:.9">Tap below to open this link in the DropOff app. Tracking requires an account: sign in (or create one) with the phone this item was addressed to.</p>
 <a href="dropoff://track/${encodeURIComponent(token)}" style="display:inline-block;margin-top:18px;background:#F6B73C;color:#123C32;font-weight:800;text-decoration:none;padding:14px 28px;border-radius:12px">Open in DropOff</a>
-<p style="margin-top:16px;font-size:12px;opacity:.7">No account, no parcel details — the link only works signed-in with the sender's or recipient's number.</p>
+<p style="margin-top:16px;font-size:12px;opacity:.7">No account, no item details — the link only works signed-in with the sender's or recipient's number.</p>
 </div></body></html>`);
   }
   const access = await trackAccess(c, token);
@@ -4794,7 +4794,7 @@ async function notifyChatParticipants(env: Env, thread: any, job: any, fromPhone
   }
   targets.delete(fromPhone);
   for (const t of targets) {
-    await sendToPhone(env, t, { title: 'New DropOff message', body: preview, data: { kind: 'chat', thread_id: String(thread?.id ?? '') } });
+    await sendToPhone(env, t, { title: 'New DropOff support reply', body: preview, data: { kind: 'chat', thread_id: String(thread?.id ?? '') } });
   }
 }
 
@@ -5227,7 +5227,7 @@ app.post('/admin/booking-strikes/:phone/clear', async (c) => {
   try {
     await c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note)
-       SELECT s.job_id, 'strikes_cleared', 'Booking strikes cleared by ops — sender unparked.'
+       SELECT s.job_id, 'strikes_cleared', 'Booking strikes cleared by ops - no booking restriction applied.'
        FROM booking_strikes s WHERE s.phone = ?1`,
     ).bind(phone).run();
   } catch { /* audit copy must never block the clear */ }
@@ -5377,6 +5377,30 @@ app.get('/admin/support/threads', async (c) => {
       LIMIT 100`,
   ).all();
   return c.json({ threads: results });
+});
+
+// Deletion REQUESTS only (owner 2026-11-21): open support threads whose body
+// asks to delete a booking, with the DRO-… ref extracted once here so the
+// admin console can show a clean list and act in one tap. The delete endpoint
+// itself closes these threads, so this stays correct after replies.
+app.get('/admin/support/threads/deletion-requests', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.id, t.phone, t.subject, t.status, t.created_at, t.updated_at,
+            (SELECT m.body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id ASC LIMIT 1) AS first_message,
+            (SELECT m.body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_message
+       FROM chat_threads t
+      WHERE t.kind = 'support' AND t.status IN ('open', 'pending')
+        AND EXISTS (SELECT 1 FROM chat_messages m WHERE m.thread_id = t.id
+                     AND (LOWER(m.body) LIKE '%delete booking%' OR m.body LIKE '%DRO-%'))
+      ORDER BY COALESCE(t.updated_at, t.created_at) DESC LIMIT 100`,
+  ).all<any>();
+  const threads = ((results ?? []) as any[]).map((r) => {
+    const text = `${r.first_message ?? ''} ${r.last_message ?? ''} ${r.subject ?? ''}`;
+    const match = text.match(/#?(DRO-[0-9A-Za-z-]+)/i);
+    return { ...r, ref: match ? match[1].toUpperCase() : null };
+  }).filter((r) => r.ref);
+  return c.json({ threads });
 });
 
 app.get('/admin/support/threads/:id', async (c) => {
@@ -6128,17 +6152,17 @@ async function sendRecipientTrackingSms(env: Env, jobId: number): Promise<void> 
   const trackUrl = trackingUrl(env, token);
   if (doorOtp) {
     await sendSms(env, job.recipient_phone,
-      `DropOff: parcel ${job.ref} paid. Track: ${trackUrl}. Code ${doorOtp} - never share before handover.`, { transactional: true }).catch(() => {});
+      `DropOff: item ${job.ref} paid. Track: ${trackUrl}. Code ${doorOtp} - never share before handover.`, { transactional: true }).catch(() => {});
   } else if (mintedToken) {
     // Same-city parcel paid: link only — no PIN for Lusaka recipients.
     await sendSms(env, job.recipient_phone,
-      `DropOff: parcel ${job.ref} paid. Track: ${trackUrl} - follow it live in the DropOff app and confirm receipt when it lands.`, { transactional: true }).catch(() => {});
+      `DropOff: item ${job.ref} paid. Track: ${trackUrl} - follow it live in the DropOff app and confirm receipt when it lands.`, { transactional: true }).catch(() => {});
   }
   // Sender's pickup-code copy lands here too (held bookings mint the code at
   // settlement — see /jobs booking comment) — their OWN code, not the door's.
   if (pickupOtp && job.sender_phone) {
     await sendSms(env, job.sender_phone,
-      `DropOff: parcel ${job.ref} paid. Pickup code ${pickupOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {});
+      `DropOff: item ${job.ref} paid. Pickup code ${pickupOtp} - show it to your rider when they collect.`, { transactional: true }).catch(() => {});
   }
 }
 
@@ -6218,28 +6242,43 @@ async function refundSettledPayment(
 // also called from settlePaymentSuccess); a booking that never pays earns
 // nothing.
 async function rewardReferralOnBooking(env: Env, jobId: number, senderPhone: string): Promise<void> {
-  const claimed = await env.DB.prepare(
-    `UPDATE referrals SET status='rewarded', referred_job_id = ?2, rewarded_at = datetime('now')
-      WHERE referred_phone = ?1 AND status = 'pending'`,
-  ).bind(senderPhone, jobId).run();
-  if (claimed.meta.changes === 0) return;
+  // OWNER TOGGLE (2026-11-21): the admin can switch the bonus off without a
+  // deploy. Pending referrals stay pending and are rewarded if it is re-enabled.
+  if (!flagOn(await getSetting(env.DB, 'referral_bonus_enabled'))) return;
   const refRow = await env.DB.prepare(
-    'SELECT id, referrer_phone FROM referrals WHERE referred_phone = ?1',
+    `SELECT id, referrer_phone, reward_code FROM referrals
+      WHERE referred_phone = ?1 AND status = 'pending'`,
   ).bind(senderPhone).first<any>();
-  if (!refRow) return;
-  const rewardCode = `FRIEND${randomCode(5)}`;
+  if (!refRow || refRow.reward_code) return;
+  const rewardCode = `FRIEND${randomCode(6)}`;
   const pct = REF_REWARD_PCT;
-  await env.DB.batch([
+  // ONE atomic batch: status, promo and audit event commit together, so the
+  // referrer can never be left with a 'rewarded' row and no usable code.
+  const result = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE referrals SET status = 'rewarded', referred_job_id = ?2, rewarded_at = datetime('now'),
+              reward_code = ?3, reward_notified_at = datetime('now')
+        WHERE id = ?1 AND status = 'pending'`,
+    ).bind(refRow.id, jobId, rewardCode),
     env.DB.prepare(
       `INSERT INTO promo_codes (code, discount_pct, note, uses_left, active)
        VALUES (?1, ?2, ?3, 1, 1)`,
     ).bind(rewardCode, pct, `Referral reward — ${senderPhone} joined via your code`),
-    env.DB.prepare(
-      `UPDATE referrals SET reward_code = ?2 WHERE id = ?1`,
-    ).bind(refRow.id, rewardCode),
     env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'referral_rewarded', ?2)`)
       .bind(jobId, `Referrer ${refRow.referrer_phone} gets ${rewardCode} (${pct}% off, single-use)`),
   ]);
+  if (!result?.[0]?.meta?.changes) return;
+  // Tell the referrer — the code was previously minted but never surfaced.
+  try {
+    await sendToPhone(env, refRow.referrer_phone, {
+      title: 'Referral reward earned',
+      body: `Your friend's booking is confirmed. Use code ${rewardCode} for ${pct}% off your next DropOff leg.`,
+      data: { kind: 'referral_reward', code: rewardCode },
+    });
+    await sendSms(env, refRow.referrer_phone,
+      `DropOff: thanks for inviting a friend! Your ${pct}% off code is ${rewardCode} - single use, at booking.`,
+      { transactional: true });
+  } catch { /* notification must never block the reward */ }
 }
 
 /* Failure reasons (owner directive 2026-11-17): when a momo prompt fails the
@@ -6317,8 +6356,8 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     await sendToPhone(env, pay.phone, {
       title: sub?.tier ? `${sub.tier} plan renewed` : 'Plan renewed',
       body: cycleDays === 1
-        ? 'Your daily pass is live for today. Book away — unused parcels expire tonight.'
-        : `Renewed for another ${cycleDays} days. Unused parcels do not carry over — book away!`,
+        ? 'Your daily pass is live for today. Book away — unused item slots expire tonight.'
+        : `Renewed for another ${cycleDays} days. Unused item slots do not carry over — book away!`,
       data: { kind: 'subscription_active' },
     });
   } else if (pay.kind === 'upgrade' && pay.subscription_id) {
@@ -6338,7 +6377,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       // The parcel died before the money landed (hold expired / canceled) —
       // never keep the payment: it goes straight back to the sender's momo,
       // and the single-use promo the booking burned is restored.
-      await refundSettledPayment(env, pay, jobRef, 'Parcel canceled before payment landed — refund');
+      await refundSettledPayment(env, pay, jobRef, 'Item canceled before payment landed - refund');
       if (jobRow.promo_code) {
         await env.DB.prepare(
           `UPDATE promo_codes SET uses_left = COALESCE(uses_left, 0) + 1 WHERE code = ?1 AND uses_left IS NOT NULL`,
@@ -6350,7 +6389,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     if (!paidClaim.meta.changes) {
       // Two live prompts for one parcel (rapid double-tap Pay now): the
       // second approval is a DUPLICATE charge — give the money straight back.
-      await refundSettledPayment(env, pay, jobRef, 'Duplicate payment for the same parcel — refund');
+      await refundSettledPayment(env, pay, jobRef, 'Duplicate payment for the same item - refunded to you');
       return;
     }
     // The sender retried a HELD booking (Lipila down at booking time, then
@@ -6362,7 +6401,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     if (jobRef) await rewardReferralOnBooking(env, pay.job_id, pay.phone).catch(() => {});
     await sendToPhone(env, pay.phone, {
       title: 'Payment received',
-      body: 'Confirmed! Your parcel is booked — follow every step in Bookings.',
+      body: 'Confirmed! Your item is booked — follow every step in Bookings.',
       data: { job_ref: jobRef ?? '', kind: 'payment' },
     });
   } else if (pay.kind === 'topup') {
@@ -6385,7 +6424,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     if (job && (job.status === 'canceled' || job.status === 'cancelled')) {
       // Prepayment landed after the parcel was canceled — never keep it:
       // straight back to the sender's momo, promo use restored.
-      await refundSettledPayment(env, pay, job.ref ?? null, 'Parcel canceled before prepayment landed — refund');
+      await refundSettledPayment(env, pay, job.ref ?? null, 'Item canceled before prepayment landed - refund');
       if (job.promo_code) {
         await env.DB.prepare(
           `UPDATE promo_codes SET uses_left = COALESCE(uses_left, 0) + 1 WHERE code = ?1 AND uses_left IS NOT NULL`,
@@ -6398,7 +6437,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     // this approval is then a DUPLICATE, and the money goes straight back.
     const paidClaim = await env.DB.prepare(`UPDATE jobs SET paid = 1 WHERE id = ?1 AND paid = 0`).bind(pay.job_id).run();
     if (!paidClaim.meta.changes) {
-      await refundSettledPayment(env, pay, job?.ref ?? null, 'Duplicate prepayment for the same parcel — refund');
+      await refundSettledPayment(env, pay, job?.ref ?? null, 'Duplicate prepayment for the same item - refunded to you');
       return;
     }
     // DISPATCH FIRST (owner bug 2026-11-17: "booking succeeds, money deducted,
@@ -6990,6 +7029,7 @@ app.get('/plans', async (c) => {
     feature_flags: {
       overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
       door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
+      referral_bonus_enabled: flagOn(await getSetting(c.env.DB, 'referral_bonus_enabled')),
     },
     ...(privileged ? { driver_monthly_pay_zmw: DRIVER_MONTHLY_PAY_ZMW, driver_daily_target: DRIVER_DAILY_TARGET, platform_take: PLATFORM_TAKE } : {}),
   });
@@ -7204,13 +7244,14 @@ app.get('/admin/tiers', async (c) => {
 
 // Platform feature flags, owner-flippable WITHOUT a deploy. Keys are
 // whitelisted; every value is a '0'/'1' string. Read-only for staff.
-const SETTING_KEYS = new Set(['door_to_door_enabled', 'overage_discount_enabled']);
+const SETTING_KEYS = new Set(['door_to_door_enabled', 'overage_discount_enabled', 'referral_bonus_enabled']);
 app.get('/admin/settings', async (c) => {
   if (!isFinanceExec(c)) return c.json({ error: 'forbidden' }, 403);
   return c.json({
     settings: {
       door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
       overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
+      referral_bonus_enabled: flagOn(await getSetting(c.env.DB, 'referral_bonus_enabled')),
     },
   });
 });
@@ -7588,7 +7629,7 @@ async function dispatchToNearestRider(
 ): Promise<{ rider: any; eta_minutes: number; km: number; fallback: boolean; excludedAtDepot: Array<{ name: string; depot: string }> } | null> {
   try {
     const job = await env.DB.prepare(
-      'SELECT id, ref, sender_phone, pickup_address, pickup_lat, pickup_lng FROM jobs WHERE ref = ?1').bind(ref).first<any>();
+      'SELECT id, ref, service, sender_phone, pickup_address, pickup_lat, pickup_lng FROM jobs WHERE ref = ?1').bind(ref).first<any>();
     if (!job) return null;
     const fallback = !(Number.isFinite(Number(job.pickup_lat)) && Number.isFinite(Number(job.pickup_lng)));
     const lat = fallback ? -15.4255 : Number(job.pickup_lat);
@@ -7615,12 +7656,12 @@ async function dispatchToNearestRider(
     ).bind(job.id, `SYSTEM: nearest available rider auto-assigned — ${pick.rider.full_name} (${round2(pick.km)} km away, ETA ~${etaMin} min).`).run();
     await sendToPhone(env, job.sender_phone, {
       title: 'Rider assigned',
-      body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to your pickup — track live in Bookings.`,
+      body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to ${String(job.service ?? '') === 'collection' ? 'the depot to collect your item' : 'your pickup'} — track live in Bookings.`,
       data: { job_ref: job.ref, kind: 'rider_assigned' },
     });
     await sendToPhone(env, pick.rider.phone, {
       title: 'New delivery assigned',
-      body: `Job ${job.ref} — pickup at ${job?.pickup_address ?? 'sender address'}. Open the Team tab for details.`,
+      body: `Job ${job.ref} — ${String(job.service ?? '') === 'collection' ? 'collect at the depot counter' : `pickup at ${job?.pickup_address ?? 'sender address'}`}. Open the Team tab for details.`,
       data: { job_ref: job.ref, kind: 'rider_assigned' },
     });
     return { rider: pick.rider, eta_minutes: etaMin, km: pick.km, fallback, excludedAtDepot: collectExcluded ?? [] };
@@ -7793,7 +7834,7 @@ app.post('/jobs/:ref/claim', async (c) => {
   if (cap > 0 && Number(rider.current_load ?? 0) >= cap) return c.json({ error: 'at_capacity' }, 409);
   const ref = c.req.param('ref');
   const job = await c.env.DB.prepare(
-    `SELECT id, ref, rider_id, status, sender_phone, pickup_address, pickup_lat, pickup_lng
+    `SELECT id, ref, service, rider_id, status, sender_phone, pickup_address, pickup_lat, pickup_lng
        FROM jobs WHERE ref = ?1`,
   ).bind(ref).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
@@ -7823,7 +7864,7 @@ app.post('/jobs/:ref/claim', async (c) => {
   c.executionCtx.waitUntil(
     sendToPhone(c.env, job.sender_phone, {
       title: 'Rider assigned',
-      body: `Rider ${rider.full_name} (${rider.vehicle}) is heading to your pickup — track live in Bookings.`,
+      body: `Rider ${rider.full_name} (${rider.vehicle}) is heading to ${String(job.service ?? '') === 'collection' ? 'the depot to collect your item' : 'your pickup'} — track live in Bookings.`,
       data: { job_ref: ref, kind: 'rider_assigned' },
     }).catch(() => {}),
   );
@@ -8155,10 +8196,16 @@ app.get('/refer/code', async (c) => {
             COUNT(*) AS total
        FROM referrals WHERE referrer_phone = ?1`,
   ).bind(phone).first<any>();
+  const rewards = await c.env.DB.prepare(
+    `SELECT status, reward_code, rewarded_at, referred_job_id FROM referrals
+      WHERE referrer_phone = ?1 ORDER BY id DESC LIMIT 20`,
+  ).bind(phone).all<any>();
   return c.json({
     code,
+    bonus_enabled: flagOn(await getSetting(c.env.DB, 'referral_bonus_enabled')),
     share_text: `Join me on DropOff — senders get home pickup to their courier. Use my link: ${publicLinkBase(c.env)}/r/${code}`,
     stats: { pending: stats?.pending ?? 0, rewarded: stats?.rewarded ?? 0, total: stats?.total ?? 0 },
+    rewards: rewards.results ?? [],
   });
 });
 
@@ -8584,6 +8631,7 @@ app.get('/subscriptions/:phone?', async (c) => {
     feature_flags: {
       overage_discount_enabled: flagOn(await getSetting(c.env.DB, 'overage_discount_enabled')),
       door_to_door_enabled: flagOn(await getSetting(c.env.DB, 'door_to_door_enabled')),
+      referral_bonus_enabled: flagOn(await getSetting(c.env.DB, 'referral_bonus_enabled')),
     },
   });
 });
@@ -9550,19 +9598,19 @@ app.post('/rider/profile', async (c) => {
       ...(owner ? [owner] : []),
       ...((staff.results ?? []) as any[]).map((r) => String(r.phone).trim()).filter((p) => p !== ''),
     ]);
-    const name = String(rider.full_name ?? 'A driver');
+    const name = String(rider.full_name ?? 'A rider');
     for (const p of phones) {
       try {
         await sendToPhone(c.env, p, {
-          title: 'Driver verification waiting',
-          body: `${name} submitted NRC/licence/plate documents — review in Admin → Driver verification & targets.`,
+          title: 'Rider verification waiting',
+          body: `${name} submitted NRC/licence/plate documents — review in Admin → Rider verification & targets.`,
           data: { kind: 'rider_kyc', rider_id: rider.id },
         });
       } catch { /* one dead token must not stop the rest */ }
     }
     if (owner) {
       await sendSms(c.env, owner,
-        `DropOff: driver verification submitted by ${name} (${String(rider.phone ?? '')}). Review it in the admin queue.`, { transactional: true });
+        `DropOff: rider verification submitted by ${name} (${String(rider.phone ?? '')}). Review it in the admin queue.`, { transactional: true });
     }
   } catch { /* best-effort — submission already saved */ }
   return c.json({ ok: true, verification_status: 'pending' });
@@ -9695,6 +9743,37 @@ app.delete('/admin/riders/:id', async (c) => {
   return c.json({ ok: true, deleted: true, id, name: existing.full_name });
 });
 
+// Release a legacy "parked" booking (canceled by the OLD no-show cron) back to
+// the claim board. No new strikes/cancels are created — this only repairs old
+// rows that can otherwise never move (owner 2026-11-21).
+app.post('/admin/jobs/:ref/unpark', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const ref = String(c.req.param('ref') ?? '').trim().replace(/^#/, '').toUpperCase();
+  if (!ref) return c.json({ error: 'ref required' }, 400);
+  const row = await c.env.DB.prepare(
+    'SELECT id, ref, status, rider_id FROM jobs WHERE UPPER(ref) = ?1',
+  ).bind(ref).first<any>();
+  if (!row) return c.json({ error: 'booking_not_found' }, 404);
+  if (String(row.status) !== 'canceled') {
+    return c.json({ error: 'not_canceled', detail: 'Only canceled (parked) bookings can be released.' }, 409);
+  }
+  const next = nextSweepAfterNow();
+  const statements: any[] = [
+    c.env.DB.prepare(
+      `UPDATE jobs SET status = 'created', rider_id = NULL, assigned_at = NULL,
+              pickup_window = ?2, pickup_at = ?3 WHERE id = ?1`,
+    ).bind(row.id, next.window, next.pickupAt),
+    c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'admin_unparked', ?2)`,
+    ).bind(row.id, `Admin released this booking to the ${next.window} sweep and the rider claim board.`),
+  ];
+  if (row.rider_id) statements.push(c.env.DB.prepare(
+    `UPDATE riders SET current_load = MAX(0, current_load - 1), status = 'available', route_updated_at = datetime('now') WHERE id = ?1`,
+  ).bind(row.rider_id));
+  await c.env.DB.batch(statements);
+  return c.json({ ok: true, ref: row.ref, window: next.window });
+});
+
 // Soft-delete a booking: status='deleted' + audit event. Every normal queue /
 // cron / dispatch query filters on status NOT IN (...) so the booking is
 // invisible instantly, with payments & events retained for audit.
@@ -9784,7 +9863,7 @@ app.post('/admin/riders/:id/verify', async (c) => {
   // fix (the note is the same text their app card shows).
   const decision = status === 'verified'
     ? `DropOff: you are VERIFIED. Jobs can now assign you automatically. Welcome to the road${rider.full_name ? `, ${rider.full_name}` : ''}.`
-    : `DropOff: verification not approved. Reason: ${note}. Update your documents in the app (Team tab > Driver verification) and re-submit.`;
+    : `DropOff: verification not approved. Reason: ${note}. Update your documents in the app (Team > Rider verification) and re-submit.`;
   try { await sendSms(c.env, String(rider.phone ?? ''), decision, { transactional: true }); } catch { /* best-effort */ }
   try { await sendToPhone(c.env, String(rider.phone ?? ''), {
     title: status === 'verified' ? 'You are verified' : 'Verification declined',
@@ -11463,7 +11542,8 @@ async function billExpiringSubscriptions(env: Env): Promise<{ billed: number; fa
   // lapse packs past their 30-day cycle (overage keeps them selling until renewal)
   const lapse = await env.DB.prepare(
     `UPDATE subscriptions SET status = 'expired'
-      WHERE status = 'active' AND period_end IS NOT NULL AND period_end < datetime('now', '-7 days')        AND NOT EXISTS (SELECT 1 FROM payments WHERE subscription_id = subscriptions.id AND status = 'pending')`,
+      WHERE status = 'active' AND period_end IS NOT NULL AND period_end < datetime('now', '-7 days')
+        AND NOT EXISTS (SELECT 1 FROM payments WHERE subscription_id = subscriptions.id AND status = 'pending')`,
   ).run();
   return { billed, failed, expired: lapse.meta.changes ?? 0 };
 }
@@ -11494,7 +11574,7 @@ async function notifyExpiryNudges(env: Env): Promise<void> {
       } else {
         if (Number(row.pending ?? 0) > 0) continue; // renewal prompt already on the phone
         await sendSms(env, row.phone,
-          `DropOff: your ${row.tier} pack ends ${end.slice(0, 10)}. Renew in the app to keep your free rider rate (we auto-bill 3 days before - approve the prompt).`);
+          `DropOff: your ${row.tier} pack ends ${end.slice(0, 10)}. Renew in the app to keep your free rider rate (we send the momo prompt 3 days before - nothing is charged until you approve it).`);
       }
       await env.DB.prepare('UPDATE subscriptions SET expiry_nudge_period = ?2 WHERE id = ?1')
         .bind(row.id, want).run().catch(() => {});
@@ -11503,7 +11583,7 @@ async function notifyExpiryNudges(env: Env): Promise<void> {
 }
 
 /* --------------------- cron: 19:00 driver target nudge --------------------- */
-// Daily 19:00 CAT: any verified driver under 30 parcels gets one SMS with the
+// Daily 19:00 CAT: any verified rider under 30 items gets one SMS with the
 // day's remaining, month pace and deficit; the owner gets a compact shortfall
 // list so gaps are caught before month-end rather than after.
 /* ----------------------- cron: weekly ops digest (Mon) ---------------------- */
@@ -11524,10 +11604,10 @@ async function weeklyOpsDigest(env: Env): Promise<void> {
     ]);
     const title = 'DropOff weekly digest';
     const body = 'Week: ' +
-      `${created} parcel${created === 1 ? '' : 's'} booked, ${delivered} delivered. ` +
+      `${created} booking${created === 1 ? '' : 's'} created, ${delivered} delivered. ` +
       `Chargebook: ${learned} counter fare${learned === 1 ? '' : 's'} newly recorded. ` +
       (stale > 0 ? `${stale} rate${stale === 1 ? '' : 's'} stale (>90 days) — reconfirm at the counter.` : 'All rates fresh.') +
-      (pendingKyc > 0 ? ` ${pendingKyc} driver verification${pendingKyc === 1 ? '' : 's'} waiting your review.` : '');
+      (pendingKyc > 0 ? ` ${pendingKyc} rider verification${pendingKyc === 1 ? '' : 's'} waiting your review.` : '');
     // Recipients: owner + every admin/ops/cfo account with a phone on file.
     const owner = ownerPhone(env);
     const staff = await env.DB.prepare(
@@ -11562,14 +11642,14 @@ async function notifyRiderTargets(env: Env): Promise<void> {
     for (const r of (results ?? []) as any[]) {
       const t = stats.get(Number(r.id)) ?? shapeTargets(0, 0);
       if (t.daily_met) continue;
-      short.push({ name: String(r.full_name ?? 'Driver'), t });
+      short.push({ name: String(r.full_name ?? 'Rider'), t });
       await sendSms(env, r.phone,
         `DropOff target: ${t.today}/${t.daily_target} today, ${t.daily_remaining} to go. Month ${t.month}/${t.month_target}${t.on_track ? ' - on track' : ` - ${t.behind_by} behind pace`}. Check your queue.`);
     }
     if (short.length > 0 && env.OWNER_PHONE) {
       const lines = short.slice(0, 5).map((s) => `${s.name} ${s.t.today}/${s.t.daily_target}`).join(', ');
       await sendSms(env, env.OWNER_PHONE,
-        `DropOff targets: ${short.length} driver(s) short today. ${lines}${short.length > 5 ? ` +${short.length - 5} more` : ''}. Full view in Admin > Targets.`, { transactional: true });
+        `DropOff targets: ${short.length} rider(s) short today. ${lines}${short.length > 5 ? ` +${short.length - 5} more` : ''}. Full view in Admin > Targets.`, { transactional: true });
     }
   } catch { /* target nudges are best-effort */ }
 }
@@ -11598,7 +11678,7 @@ async function notifyCapNudges(env: Env): Promise<void> {
       const left = Math.max(0, cap - used);
       const renewDate = String(row.period_end).slice(0, 10);
       await sendSms(env, row.phone,
-        `DropOff: ${left} parcel${left === 1 ? '' : 's'} left on your ${row.tier} pack this cycle (renews ${renewDate}). Renew or upgrade in the app to keep your free rider rate.`);
+        `DropOff: ${left} item slot${left === 1 ? '' : 's'} left on your ${row.tier} pack this cycle (renews ${renewDate}). Renew or upgrade in the app to keep your free rider rate.`);
       await env.DB.prepare('UPDATE subscriptions SET cap_nudge_period = ?2 WHERE id = ?1')
         .bind(row.id, row.period_start).run().catch(() => {});
     }
@@ -11745,7 +11825,7 @@ async function refundUnspentPrepaid(
 /* ------------------- cron: no-show auto-cancel + strikes ------------------ */
 // Ghost bookings die on their own: a pickup that sits past its window (or an
 // assignment that never moved) is auto-canceled, a strike lands on the
-// sender's phone, and 3 strikes inside 14 days park new bookings for ops.
+// sender's phone, and strikes are audit-only warnings; elapsed windows roll forward instead.
 // Prepaid senders get their unspent prepayment returned to their momo
 // automatically — no money of theirs ever stays behind.
 async function addStrike(env: Env, phone: string, jobId: number, reason: string): Promise<void> {

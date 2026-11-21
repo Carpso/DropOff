@@ -851,7 +851,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                   ? null
                   : () => Clipboard.setData(ClipboardData(
                         text: 'DropOff referral code: $code\n'
-                            'Use it when signing up — you and they both get 20% off a DropOff leg.',
+                            'Use it when signing up — you earn a 20% code when their first booking is confirmed.',
                       )),
               icon: const Icon(Icons.copy, size: 18),
             ),

@@ -453,7 +453,7 @@ class _RateSenderCardState extends State<_RateSenderCard> {
     });
     AppToast.show(context, switch (res.error) {
       'cannot_rate_self' => 'You are the sender — only the recipient can rate you.',
-      _ => res.ok ? 'Done — "Thank You" The sender has been rated.' : 'Could not save your rating (${res.error ?? 'network'}).',
+      _ => res.ok ? 'Done — "Thank You" — thank you for rating the sender.' : 'Could not save your rating (${res.error ?? 'network'}).',
     });
   }
 

@@ -27,6 +27,33 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (seventh pass) — delete requests, tickets crash, parked release, SMS, referrals
+
+- **Delete requests:** `/admin/support/threads/deletion-requests` lists open
+  "please delete" tickets with the DRO- ref extracted; the admin Delete card
+  shows them with one-tap **Delete** / **Release instead** actions. The soft
+  delete already closes matching tickets (audit trail kept).
+- **Tickets no longer crash:** defensive `Map` conversion + try/catch in both
+  customer ticket lists/detail (the old strict cast produced the "String is
+  not a subtype of Map" error); admin sheet now reads the worker's `thread`
+  key; `/tickets` added to cache invalidation.
+- **Parked bookings:** `POST /admin/jobs/:ref/unpark` releases legacy canceled
+  jobs to the next sweep + claim board; "PARKED" copy changed to WARNING — the
+  strike hold was removed, strikes are audit-only.
+- **SMS/push wording sweep:** collection recipients get in-app confirmation
+  (no phantom PIN); collection pushes say depot/recipient; counter-fare SMS
+  states the rider fronts the fare and the sender repays; driver→rider,
+  parcel→item, honest plan renewal, support-reply push title, stale comments.
+- **Referrals:** `/r/CODE` now claims the referral (properly persisted on the
+  account screen); reward minting is atomic and the earned FRIEND code is
+  returned by `/refer/code`, shown in Account and sent by push+SMS; new owner
+  toggle `referral_bonus_enabled` (migration 0075) with an admin switch.
+- **Declared package value confirmed:** present in `/jobs/:ref/waybill` and
+  evidence, and shown on rider waybill, sender waybill, thermal print and
+  booking evidence summary.
+- **Roles confirmed:** `customer` covers BOTH sender and recipient — there are
+  no separate roles; jobs are gated by `sender_phone`/`recipient_phone`.
+
 ## 2026-11-21 (sixth pass) — bold rating copy, admin delete, role management
 
 - **Rating success copy:** `Done — "Thank You" Your rating helps Riders,

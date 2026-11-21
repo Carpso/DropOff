@@ -113,7 +113,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     rows: [
       (heading: 'You get a single-use 20% promo', body: 'When someone books through your invite code, you receive a single-use promo on DropOff legs.'),
       (heading: 'Single-use, once', body: 'One promo per friend who completes their first booking through your code. No stacking.'),
-      (heading: 'Where', body: 'Available in Account — shows as "Friend code" or "Invite". Share from there.'),
+      (heading: 'Where', body: 'Your earned FRIEND code appears in Account → Invite senders once your friend\'s first booking is confirmed. Copy it and use it at booking — the admin can switch the bonus on or off.'),
     ],
   ),
   HelpTopic.deviceList: (

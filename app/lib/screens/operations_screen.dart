@@ -1482,7 +1482,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
           Row(children: [
             const Icon(Icons.verified_user_outlined, color: AppColors.forest),
             const SizedBox(width: 10),
-            const Expanded(child: Text('Driver verification', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            const Expanded(child: Text('Rider verification', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(color: chipColor.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),

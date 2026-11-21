@@ -170,6 +170,7 @@ class DropOffApi {
       return ['/jobs', '/wallet', '/route', '/batch', '/ratings', '/refer'];
     }
     if (path.startsWith('/ratings')) return ['/ratings', '/couriers'];
+    if (path.startsWith('/tickets') || path.startsWith('/chat/support')) return ['/tickets', '/admin/support'];
     if (path.startsWith('/payments') || path.startsWith('/wallet')) return ['/wallet', '/jobs'];
     if (path.startsWith('/recurring')) return ['/recurring'];
     if (path.startsWith('/subscriptions')) return ['/subscriptions', '/wallet', '/plans'];
@@ -933,6 +934,8 @@ class DropOffApi {
   /// Admin/ops view of every support ticket ({threads: [{id, phone, last_message, unread, ...}]}).
   /// Sent with admin headers too: an admin-key-only console device works without a JWT.
   static Future<Map<String, dynamic>?> adminSupportThreads() => getAdmin('/admin/support/threads');
+  static Future<Map<String, dynamic>?> adminDeletionRequests() =>
+      getAdmin('/admin/support/threads/deletion-requests');
 
   /// One support ticket with all messages.
   static Future<Map<String, dynamic>?> adminSupportThread(int threadId) =>
@@ -1260,8 +1263,7 @@ class DropOffApi {
         admin: true,
       );
 
-  /// Senders parked by the no-show guard (3 strikes / 14 days) — job refs
-  /// included so ops can eyeball the pattern before clearing.
+  /// Audit-only strike ledger (booking hold removed 2026-11-20) with job refs.
   static Future<Map<String, dynamic>?> adminBookingStrikes() => getAdmin('/admin/booking-strikes');
 
   static Future<ApiResponse> clearBookingStrikes(String phone) =>
@@ -1372,6 +1374,10 @@ class DropOffApi {
   /// but every user-facing listing excludes it; no real delete exists.
   static Future<ApiResponse> deleteJob(String ref) =>
       post('/admin/jobs/$ref/delete', const {}, admin: true);
+
+  /// Admin: release a legacy canceled ("parked") booking to the claim board.
+  static Future<ApiResponse> unparkJob(String ref) =>
+      post('/admin/jobs/${Uri.encodeComponent(ref)}/unpark', const {}, admin: true);
 
   /// Superadmin: remove an auth user (and their device sessions + push tokens).
   /// Owner account is refused server-side.
