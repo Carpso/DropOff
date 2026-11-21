@@ -335,7 +335,7 @@ class OperationsScreen extends StatelessWidget {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Your riding day', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
               const SizedBox(height: 3),
-              Text('Signed in as ${store.linkedPhone} — jobs assigned to you land here automatically.', style: AppType.caption),
+              Text('Rider ${store.linkedPhone} · jobs land here automatically.', style: AppType.caption),
             ])),
           ]),
           const SizedBox(height: 12),
@@ -352,21 +352,12 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 12),
           _TaskQueueCard(),
           const SizedBox(height: 12),
-          const SizedBox(height: 12),
           const _RiderReviewsCard(),
           const SizedBox(height: 12),
           const _RiderTargetsCard(),
           const SizedBox(height: 12),
           _riderLocationCard(context),
-          const SizedBox(height: 22),
-          Card(
-            child: ListTile(
-              leading: Icon(store.linked ? Icons.verified_user : Icons.link_outlined, color: AppColors.forest),
-              title: Text(store.linked ? 'Linked as ${store.linkedPhone}' : 'Device not linked', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-              subtitle: const Text('This number is your rider identity — jobs and COD are keyed to it.', style: AppType.caption),
-              trailing: TextButton(onPressed: () => _linkDevice(context), child: const Text('Manage')),
-            ),
-          ),
+          const SizedBox(height: 12),
         ]),
         ),
       );
@@ -652,8 +643,8 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
           const SizedBox(height: 4),
           Text(
             on
-                ? 'On — automatic while this screen is open. Permission granted = the sender of your active jobs sees your exact pin; nobody presses anything.'
-                : 'Off — senders will see your name, vehicle and ETA only; never your live coordinates.',
+                ? 'On — senders of your active jobs see your live pin.'
+                : 'Off — senders see only your name, vehicle and ETA.',
             style: AppType.caption,
           ),
           if (_lastStatus != null) ...[
@@ -664,7 +655,7 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
           Row(children: [
             Expanded(
               child: Text(
-                on ? 'Syncing automatically — GPS granted, sharing every 12s.' : 'Enable to sync automatically.',
+                on ? 'Auto-sync every 12s.' : 'Enable to auto-sync.',
                 style: const TextStyle(fontSize: 11, color: AppColors.muted),
               ),
             ),
@@ -701,7 +692,7 @@ class _TaskQueueCard extends StatelessWidget {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text("Today's task queue", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
               SizedBox(height: 3),
-              Text('Slot batches with stop times, parcel counts and target depot drop-off.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
+              Text('Slot batches, stops and target times.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
             ])),
             Icon(Icons.chevron_right, color: AppColors.muted),
           ]),
@@ -815,7 +806,7 @@ class _RiderReviewsCardState extends State<_RiderReviewsCard> {
           if (n == 0)
             const Padding(
               padding: EdgeInsets.only(top: 6),
-              child: Text('No ratings yet — senders and recipients rate you after each delivery; they show up here.', style: AppType.caption),
+              child: Text('No ratings yet — they appear here after each delivery.', style: AppType.caption),
             )
           else
             ...reviews.take(2).map((r) => Padding(
@@ -1142,8 +1133,8 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
               const SizedBox(height: 4),
               Text(
                 targetBonus['target_met'] == true
-                    ? 'K200 completion locked ✓  ·  +K${(targetBonus['over_target_bonus_zmw'] ?? 0).toStringAsFixed(0)} over target so far (${targetBonus['counted_extra'] ?? 0} parcels)  ·  K150 stretch at 1.25× target'
-                    : 'Hit the month target ($monthTarget parcels) and you bank K200 + K5 per parcel beyond it (max K675) + K150 stretch at 1.25× target.',
+                    ? 'K200 on target · +K${(targetBonus['over_target_bonus_zmw'] ?? 0).toStringAsFixed(0)} extra (${targetBonus['counted_extra'] ?? 0}) · K150 at 1.25×'
+                    : 'Target $monthTarget · K200 on target · K5/extra (max K675) · K150 at 1.25×.',
                 style: AppType.caption,
               ),
             ],
@@ -1497,7 +1488,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
           ]),
           if (!_collapsed) ...[
           const SizedBox(height: 4),
-          const Text('Your NRC, licence, plate and vehicle photos. An admin verifies these before you can be assigned jobs.',
+          const Text('NRC, licence, plate and vehicle photos. Admin approval unlocks assignments.',
               style: AppType.caption),
           if (rejected && note.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -1704,8 +1695,7 @@ class _SelfieBannerState extends State<_SelfieBanner> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text("Senders can't see you yet", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
               SizedBox(height: 3),
-              Text('Add your photo - the person collecting their parcel should be a face, not an icon.',
-                  style: AppType.caption),
+              Text('Add your photo so senders see who is collecting.', style: AppType.caption),
             ]),
           ),
           const SizedBox(width: 10),

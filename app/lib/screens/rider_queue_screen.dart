@@ -311,6 +311,60 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     }
   }
 
+  /// Compact App Bar control: status dot + ON/OFF. Full controls open in a
+  /// bottom sheet — no vertical space is taken from the stats card.
+  Widget _shiftPill() {
+    final on = _shifts?['on_shift'] == true;
+    final active = _shifts?['active_shift'] as String?;
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.white,
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          builder: (sheetCtx) => Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(sheetCtx).viewInsets.bottom + 20),
+            child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4))),
+              Row(children: [
+                const Icon(Icons.schedule, color: AppColors.forest),
+                const SizedBox(width: 8),
+                const Expanded(child: Text('Sweep shifts', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17))),
+                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(sheetCtx).pop()),
+              ]),
+              const SizedBox(height: 8),
+              _shiftCard(),
+            ])),
+          ),
+        ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: on ? AppColors.forest.withValues(alpha: 0.10) : AppColors.line.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: on ? AppColors.forest.withValues(alpha: 0.35) : AppColors.line),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.circle, size: 8, color: on ? AppColors.success : AppColors.muted),
+            const SizedBox(width: 5),
+            Text(on ? 'ON SHIFT' : 'OFF', style: TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w900,
+                color: on ? AppColors.forest : AppColors.muted)),
+            if (on && active != null) ...[
+              const SizedBox(width: 4),
+              Text('· ${_shiftLabels[active] ?? active}',
+                  style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _shiftCard() {
     final data = _shifts;
     final on = data?['on_shift'] == true;
@@ -1681,6 +1735,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       appBar: AppBar(
         title: const Text('Task Queue', style: TextStyle(fontWeight: FontWeight.w900)),
         actions: [
+          // Compact shift switch — full controls live in a bottom sheet so
+          // the Task Queue body (and the stats card) never gets pushed down.
+          _shiftPill(),
           IconButton(
             tooltip: 'Rider tutorial',
             icon: const Icon(Icons.menu_book_outlined),
@@ -1742,13 +1799,6 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 child: const Text('Open settings'),
               ),
             ]),
-          ),
-        // SHIFT CONTROL (owner 2026-11-21) — rider commits to the three
-        // sweeps; between them they may do other ride work.
-        if (store.linked)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-            child: _shiftCard(),
           ),
         Expanded(
           child: _loading

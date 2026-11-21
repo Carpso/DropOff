@@ -27,6 +27,16 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (twelfth pass) — Task Queue / Team tab UI polish
+
+- Rider sweep-shift control moved OUT of the Task Queue body into a compact
+  ON/OFF pill in the App Bar; full controls open in a bottom sheet. The stats
+  card is again the first item in the scrollable area and is never pushed down
+  or covered.
+- Rider Team tab simplified: removed duplicate link card and empty spacer,
+  shortened the explanatory copy on selfie, verification, task queue, reviews,
+  targets and live-location cards so it reads as a professional dashboard.
+
 ## 2026-11-21 (eleventh pass) — correct pickup windows + next-slot advance claim
 
 - The **06:00 pickup window opens at 05:30 CAT** and closes at **07:30**
