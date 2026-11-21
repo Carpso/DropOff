@@ -127,3 +127,24 @@ migrations_dir = "migrations"
 [[routes]]
 pattern = "api.carpsosolutions.store"
 custom_domain = true
+
+# PWA-domain deep-link bridge (owner 2026-11-21). User-facing links live on
+# dropoff.carpsosolutions.store, but the token-consuming routes and the OS
+# verification assets live on this Worker. Pages `_redirects` proxies were not
+# applied by Pages, so route ONLY these paths here; everything else on the PWA
+# host stays with the Flutter site.
+[[routes]]
+pattern = "dropoff.carpsosolutions.store/track/*"
+zone_name = "carpsosolutions.store"
+
+[[routes]]
+pattern = "dropoff.carpsosolutions.store/t/*"
+zone_name = "carpsosolutions.store"
+
+[[routes]]
+pattern = "dropoff.carpsosolutions.store/auth/*"
+zone_name = "carpsosolutions.store"
+
+[[routes]]
+pattern = "dropoff.carpsosolutions.store/.well-known/*"
+zone_name = "carpsosolutions.store"

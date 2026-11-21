@@ -158,10 +158,12 @@ CONFIRMED from the fee engine (`workers/src/fees.ts`) and worker:
   `publicLinkBase()` now drives tracking SMS/email, `/track/incoming`,
   `authMagicLink()` and referral share text. App-side hardcoded referral /
   tracking strings updated too.
-- `app/web/_redirects` proxies `/track/*`, `/t/*`, `/auth/*` and
-  `/.well-known/*` to the API Worker so the PWA domain can consume single-use
-  auth tokens and serve App Link verification. Do NOT proxy `/r`, `/promo`,
-  `/plans`, `/bookings` — the Flutter app handles those.
+- PWA proxy: `app/web/_redirects` is kept for reference, but Cloudflare Pages
+  did NOT apply its 200 proxies. The working fix is Worker routes in
+  `wrangler.toml` for `dropoff.carpsosolutions.store/{track,t,auth,.well-known}/*`
+  (zone `carpsosolutions.store`). Verified: `/.well-known/assetlinks.json`
+  returns `application/json`, `/track/abc` returns Worker JSON, PWA root is
+  still the Flutter site. Do NOT proxy `/r`, `/promo`, `/plans`, `/bookings`.
 - Android App Links and iOS Associated Domains now include
   `dropoff.carpsosolutions.store` (old hosts retained for sent links).
 - Unchanged on purpose: API `baseUrl`/`fallbackBaseUrl`, `DROPOFF_API_URL`
