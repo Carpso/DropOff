@@ -798,7 +798,7 @@ class _BookingScreenState extends State<BookingScreen> {
             ? 'Your plan cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.'
             : overCap
                 ? 'Your plan cap is reached — this trip is billed pay-as-you-go. Pay K${due.toStringAsFixed(2)} to dispatch.'
-                : 'Approve the prepayment prompt for K${due.toStringAsFixed(2)} sent to ${_senderPhone.text} — your rider dispatches the moment it lands. You pay DropOff only; the courier counter fare stays with the depot.');
+                : 'Approve the prepayment prompt for K${due.toStringAsFixed(2)} sent to ${_senderPhone.text} — your rider dispatches the moment it lands. The rider fronts the depot fare; you repay the exact photographed receipt through DropOff to reimburse them. It is not a DropOff charge.');
       }
       final out = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
       if (!mounted) return;
@@ -811,7 +811,7 @@ class _BookingScreenState extends State<BookingScreen> {
     } else if (booking.dispatched && due != null && due > 0 && mounted) {
       // Deposit required but no live prompt on this device: the sender
       // approves the momo prompt that was sent at booking time.
-      _message('DropOff leg: K${due.toStringAsFixed(2)} — approve the prepayment prompt sent to your momo at booking; your rider dispatches on approval. Courier counter fare is separate.');
+      _message('DropOff leg: K${due.toStringAsFixed(2)} — approve the prepayment prompt sent to your momo at booking; your rider dispatches on approval. The rider fronts the depot fare; you repay the photographed receipt through DropOff to reimburse them.');
       paymentOutcome = 'held';
     }
     // In-flow approval releases the HELD gate at once (share/track cards and
@@ -1457,7 +1457,7 @@ class _BookingScreenState extends State<BookingScreen> {
           }),
           const Divider(height: 24),
           _priceLine('DropOff charge est. now', kwacha(_dropOffDue), bold: true),
-          const Padding(padding: EdgeInsets.only(top: 8), child: Text('The depot counter fare is confirmed and paid at the counter — never collected by DropOff.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
+          const Padding(padding: EdgeInsets.only(top: 8), child: Text('The rider pays the depot fare at the counter. You repay the exact photographed receipt through DropOff to release the photo and reimburse the rider — it is not a DropOff charge.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
         ]))),
         ];
 
@@ -1496,7 +1496,7 @@ class _BookingScreenState extends State<BookingScreen> {
           Text(kwacha(_dropOffDue), maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
           const SizedBox(width: 6),
           const Expanded(
-            child: Text('(depot fare paid separately at the counter)', maxLines: 2, overflow: TextOverflow.ellipsis, softWrap: true, style: TextStyle(fontSize: 11, color: AppColors.muted)),
+            child: Text('(+ depot fare repaid to the rider via the receipt)', maxLines: 2, overflow: TextOverflow.ellipsis, softWrap: true, style: TextStyle(fontSize: 11, color: AppColors.muted)),
           ),
         ]),
       );

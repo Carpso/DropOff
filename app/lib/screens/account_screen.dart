@@ -53,6 +53,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _otpSent = false;
   bool _photoBusy = false;
   bool _stepSounds = true; // step-complete chime — persisted option (owner 2026-11-20)
+  bool _voiceGuidance = true; // spoken turns — persisted option (owner audit 2026-11-21)
   String? _otpMsg;
   String? _error;
   // "Resend verification email" only matters when the error actually mentions
@@ -69,7 +70,12 @@ class _AccountScreenState extends State<AccountScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToPlans());
     }
     StepSounds.load().then((_) {
-      if (mounted) setState(() => _stepSounds = StepSounds.enabled);
+      if (mounted) {
+        setState(() {
+          _stepSounds = StepSounds.enabled;
+          _voiceGuidance = StepSounds.voiceGuidance;
+        });
+      }
     });
   }
 
@@ -630,6 +636,18 @@ class _AccountScreenState extends State<AccountScreen> {
                     if (!mounted) return;
                     setState(() => _stepSounds = v);
                     if (v) await StepSounds.stepDone(); // preview
+                  },
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.navigation_outlined, color: AppColors.forest),
+                  title: const Text('Turn-by-turn voice', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  subtitle: const Text('Speak the next turn while navigating. Mute any time in the navigator.', style: TextStyle(fontSize: 11.5)),
+                  value: _voiceGuidance,
+                  onChanged: (v) async {
+                    await StepSounds.setVoiceGuidance(v);
+                    if (!mounted) return;
+                    setState(() => _voiceGuidance = v);
                   },
                 ),
                 // Recipient door PIN (owner 2026-11-18): your own 4-digit code

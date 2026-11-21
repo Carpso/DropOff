@@ -36,8 +36,8 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     rows: [
       (heading: 'The courier sets their own price', body: 'The fare the courier charges for inter-town freight is quoted at their counter. DropOff never collects partner money — we only front the rider leg to the depot.'),
       (heading: 'The same conversation for every route', body: 'This applies to Lusaka → Ndola, Copperbelt, Southern Province, international — wherever your parcel is going. The depot sets it; we hand it over at cost.'),
-      (heading: 'Our fee is separate', body: 'What you pay DropOff is the rider leg only (pickup → depot). The depot fare is paid/collected by the courier, not recorded by us.'),
-      (heading: 'No invented fares', body: 'We don\'t quote the depot fare in-app. If someone quotes you a number and asks you to pay it to someone else — that\'s not us (fraud alert).'),
+      (heading: 'Our fee is separate', body: 'What you pay DropOff up front is the rider leg only (pickup → depot). The rider fronts the depot fare; the sender repays the exact photographed receipt through DropOff, which releases the photo and reimburses the rider fee-free.'),
+      (heading: 'No invented fares', body: 'We don\'t quote the depot fare in-app. The rider fronts it at the counter and you repay the exact photographed receipt here. If anyone asks you to pay that receipt to a personal account instead, that is not DropOff.'),
     ],
   ),
   HelpTopic.parcelPhoto: (

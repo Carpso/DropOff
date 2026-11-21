@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import '../services/secure_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -10,6 +10,7 @@ import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../data/push_service.dart';
 import '../data/catalog.dart';
+import '../ui/keys.dart';
 import '../models/booking.dart';
 
 class AppStore extends ChangeNotifier {
@@ -187,6 +188,7 @@ class AppStore extends ChangeNotifier {
       unawaited(_secureStorage.write(key: _secureTokenKey, value: _token!));
     }
     DropOffApi.token = _token;
+    DropOffApi.onAuthFailure = handleApiAuthFailure;
     _linkedPhone = preferences.getString(_phoneKey);
     _email = preferences.getString(_emailKey);
     await _reloadAccountCache();
@@ -249,6 +251,37 @@ class AppStore extends ChangeNotifier {
     // presence pings resume and orders keep flowing (owner audit 2026-11-21).
     if (role == 'rider' && previousRole != 'rider' && !_shareLocationOn) {
       await setShareLocationOn(true);
+    }
+  }
+
+  static bool _authFailureBusy = false;
+
+  /// GLOBAL 401 HANDLER (owner audit 2026-11-21): try one JWT refresh, then
+  /// clear the session with an honest message. No stale cache, no zombie
+  /// signed-in state, no silently dropped mutation.
+  Future<void> handleApiAuthFailure() async {
+    if (_authFailureBusy) return;
+    _authFailureBusy = true;
+    try {
+      final out = await DropOffApi.refreshSession();
+      if (out['renewed'] == true && out['token'] is String) {
+        _token = out['token'] as String;
+        DropOffApi.token = _token;
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.getBool(_rememberKey) ?? true) {
+          await _secureStorage.write(key: _secureTokenKey, value: _token!);
+          await prefs.setString(_fallbackTokenKey, _token!);
+        }
+        return;
+      }
+      await unlink();
+      lastAuthError = 'Your session expired — sign in again.';
+      notifyListeners();
+      scaffoldMessengerKey.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Your session expired — sign in again.')));
+    } finally {
+      _authFailureBusy = false;
     }
   }
 

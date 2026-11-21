@@ -9,6 +9,7 @@ import '../data/saved_places.dart';
 import '../ui/app_theme.dart';
 import '../widgets/rider_map.dart';
 import '../ui/app_spinner.dart';
+import '../services/step_sounds.dart';
 
 /// In-app navigator — our own map, our own route. Opens the DropOff map,
 /// drops your live GPS as the moving pin, resolves a ROAD-FOLLOWING route
@@ -60,6 +61,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   Timer? _searchDebounce;
   final _search = TextEditingController();
   final FlutterTts _tts = FlutterTts();
+  bool _voiceOn = true; // one-tap mute, persisted via StepSounds
 
   // GPS-DRIVEN VOICE: one cue at a time, triggered by the rider's distance to
   // the NEXT maneuver point — never a timed read of the whole step list.
@@ -81,6 +83,9 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     _destLabel = widget.label;
     _fix();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) => _fix());
+    StepSounds.load().then((_) {
+      if (mounted) setState(() => _voiceOn = StepSounds.voiceGuidance);
+    });
     SavedPlaces.load().then((list) { if (mounted) setState(() => _saved = list); });
   }
 
@@ -152,6 +157,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   /// Speak ONE upcoming turn, driven by live GPS. Steps without a maneuver
   /// point are skipped silently — better quiet than a paragraph read aloud.
   Future<void> _speakNextCue() async {
+    if (!_voiceOn) return;
     final me = _me;
     final steps = _route?.steps ?? const <RouteStep>[];
     if (me == null || steps.isEmpty || _cueIndex >= steps.length) return;
@@ -333,6 +339,22 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         title: const Text('Navigate', style: TextStyle(fontWeight: FontWeight.w900)),
         actions: [
           IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: () { _fix(); }),
+          IconButton(
+            tooltip: _voiceOn ? 'Mute voice guidance' : 'Turn on voice guidance',
+            icon: Icon(_voiceOn ? Icons.volume_up : Icons.volume_off),
+            onPressed: () async {
+              await StepSounds.setVoiceGuidance(!_voiceOn);
+              if (!mounted) return;
+              setState(() => _voiceOn = !_voiceOn);
+              await _tts.stop();
+              if (_voiceOn) {
+                // Re-anchor so the next cue is spoken from the rider's current
+                // position instead of a stale band from before the mute.
+                _cueIndex = 0;
+                _spokenDistanceBands.clear();
+              }
+            },
+          ),
         ],
       ),
       body: Stack(children: [

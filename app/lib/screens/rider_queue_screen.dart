@@ -397,17 +397,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   }
 
   Future<String?> _pickPodPhoto() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take photo with camera'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
-          ListTile(leading: const Icon(Icons.photo_library), title: const Text('Pick from gallery'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
-        ]),
-      ),
-    );
-    if (source == null) return null;
-    final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 82);
+    // CAMERA-ONLY (owner audit 2026-11-21): handover and depot-receipt proof
+    // must be captured live. A gallery pick could re-file an old photo, which
+    // is exactly what the pickup evidence policy forbids.
+    final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return null;
     final bytes = await picked.readAsBytes();
     final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc');
@@ -848,6 +841,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Future<ApiResponse?> _pickUpFromSender(Map<String, dynamic> s) async {
     if (_busyRef != null) return null;
     final ref = '${s['ref']}';
+    // LOCK THE WHOLE STEP (owner audit 2026-11-21): _busyRef was only ever
+    // cleared, never set, so the spinners and enabled checks were dead and a
+    // double-tap could re-file a step. The sheet handler clears it on return.
+    setState(() => _busyRef = ref);
     final parcels = (s['parcels'] as num?)?.toInt() ?? 1;
     final senderName = '${s['seller'] ?? ''}'.trim();
     final senderPhone = '${s['seller_phone'] ?? ''}'.trim();
@@ -1031,6 +1028,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Future<ApiResponse?> _depotDropWithReceipt(String ref) async {
     if (_busyRef != null) return null;
     if (!mounted) return null;
+    setState(() => _busyRef = ref); // one step at a time — see _pickUpFromSender
     final parcelPhotos = <String>[]; // batch: one or more parcel photos
     final branchCtrl = TextEditingController();
     // Each depot receipt: its own amount field + its own photo. A batch may
@@ -1285,6 +1283,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (_busyRef != null) return null;
     if (!mounted) return null;
     final ref = '${s['ref']}';
+    setState(() => _busyRef = ref); // one step at a time — see _pickUpFromSender
     final recName = '${s['recipient'] ?? ''}'.trim();
     final recPhone = '${s['recipient_phone'] ?? ''}'.trim();
     final otpCtrl = TextEditingController();

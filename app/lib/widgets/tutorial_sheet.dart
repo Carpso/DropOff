@@ -28,7 +28,7 @@ class TutorialSheet extends StatelessWidget {
     (Icons.local_shipping_outlined, '2. Book a pickup',
         'Choose courier depot, pickup address, parcel contents and size. Add a parcel photo — it protects you in disputes. Pick a 06:00 / 10:00 / 14:00 slot; too many parcels for a bike? Switch to a car.'),
     (Icons.payments_outlined, '3. Pay on your phone',
-        'Approve the momo prompt. Plan members use their included parcel slots; pay-as-you-go pays the quoted fee up front. DropOff never collects the courier counter fare.'),
+        'Approve the momo prompt. Plan members use their included parcel slots; pay-as-you-go pays the quoted fee up front. The rider fronts the depot counter fare; repaying the photographed receipt through DropOff releases the photo and reimburses the rider. It is not a DropOff charge.'),
     (Icons.pin_outlined, '4. Show the pickup code',
         'You get a 4-digit PICKUP code by SMS. Give it to your rider when they collect — never share it before they arrive.'),
     (Icons.track_changes, '5. Follow it live',
@@ -47,7 +47,7 @@ class TutorialSheet extends StatelessWidget {
     (Icons.help_outline, '4. Ask for the codes',
         'Ask the SENDER for their 4-digit pickup code. Photograph EVERY parcel once. At a door delivery, ask the recipient for their DropOff door PIN (intercity SMS code or their own PIN).'),
     (Icons.receipt_long_outlined, '5. Depot drop',
-        'Drop at the depot, photograph the parcel and the written receipt, type the EXACT amount on each receipt, then tap Submit drop. The task ticks off immediately. DropOff never collects the counter fare.'),
+        'Drop at the depot, photograph the parcel and the written receipt, type the EXACT amount on each receipt, then tap Submit drop. The task ticks off immediately. The rider fronts the counter fare; the sender repays the photographed receipt through DropOff and the rider is reimbursed fee-free.'),
     (Icons.insights_outlined, '6. Stats & bonuses',
         'Your card shows today, in-hand, done and live earnings. Month-close bonuses need the pace target — keep the streak and the bonuses land automatically.'),
   ];

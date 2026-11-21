@@ -572,7 +572,7 @@ class _QuoteAnswerState extends State<_QuoteAnswer> {
           const SizedBox(height: 8),
           const Text(
             'The courier fare is heard at the counter when your parcel arrives — it is the depot’s charge, never published in this app. '
-            'Your DropOff rider leg is shown before you book, and the counter never touches your money.',
+            'Your DropOff rider leg is shown before you book. The rider fronts the depot fare; you repay the photographed receipt through DropOff to reimburse them.',
             style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.45),
           ),
           if (_serving.isNotEmpty) ...[

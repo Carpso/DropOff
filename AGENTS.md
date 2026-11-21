@@ -27,6 +27,37 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (second pass) — P1 fixes + collection pickup security
+
+### Why collection pickup needs NO sender PIN
+Collections never mint `pickup_otp_hash` (`/collections` inserts only
+`delivery_otp_hash`, the RECIPIENT's door code). The worker used to fall back
+`pickup_otp_hash ?? delivery_otp_hash`, so the rider was told to ask a sender
+who isn't at the depot for a code only the recipient had — impossible, and the
+"security" was theatre (typing any 4 digits failed too). The worker now skips
+the pickup OTP gate entirely for `service='collection'`; STANDARD pickups still
+require the sender's code server-side. Real collection security is:
+prepaid booking + the sender's uploaded proof-of-payment receipt shown at the
+counter + camera-only stamped photos of every collected item + the recipient's
+4-digit code (intercity) / in-app receipt confirmation (same-city) at the door.
+
+### P1 fixes
+- **Voice mute:** `StepSounds.voiceGuidance` (`voice_guidance_enabled`, default
+  on) with an Account switch AND a volume icon in the navigator app bar;
+  `_speakNextCue()` returns early when muted and re-anchors cues on unmute.
+- **One-step lock:** `_busyRef` is now actually SET at the start of pickup,
+  depot-drop and door-handover; step rows disable and the branded spinner shows
+  until the sheet handler clears it. No more double-tap re-filing.
+- **Camera-only proof:** `_pickPodPhoto()` no longer offers a gallery pick —
+  handover and receipt photos are captured live, like pickup evidence.
+- **Global 401:** `DropOffApi.onAuthFailure` is installed by `AppStore`; any
+  non-cacheable 401 triggers one `refreshSession()`, then a real sign-out with
+  an honest "session expired" SnackBar. 401 never serves a stale GET cache.
+- **Counter-fare copy unified:** the rider fronts the depot fare; the sender
+  repays the exact photographed receipt through DropOff to release the photo
+  and reimburse the rider fee-free. It is a REIMBURSEMENT, not a DropOff charge.
+  Updated tutorial, help, booking, couriers, waybill and thermal print.
+
 ## 2026-11-21 — UX audit P0 fixes (riders + senders)
 
 Owner asked for a seamlessness audit; 50+ faults were found across three

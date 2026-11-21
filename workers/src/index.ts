@@ -3399,9 +3399,13 @@ app.post('/jobs/:ref/events', async (c) => {
 
   // PICKUP PROOF (owner directive 2026-11-17): the SENDER holds the 4-digit
   // code for the first leg (seller → depot). The rider confirms it at
-  // collection — same attempt gate as the door handover. Ops/admin keys
-  // bypass; jobs minted before the code existed pass through.
-  if (status === 'picked_up' && !isAdminKey && !isOpsKey) {
+  // collection — same attempt gate as the door handover. Ops/admin keys bypass;
+  // before the code existed pass through.
+  // COLLECTIONS are EXCLUDED (owner audit 2026-11-21): the parcel is already at
+  // the depot and no sender pickup code is ever minted. The old fallback to
+  // delivery_otp_hash made riders demand the RECIPIENT's door code from a
+  // sender who isn't there — an impossible gate, not security.
+  if (status === 'picked_up' && !isAdminKey && !isOpsKey && String(job.service ?? '') !== 'collection') {
     const pickupOtp = await c.env.DB.prepare(
       'SELECT pickup_otp_hash, delivery_otp_hash, pickup_otp_attempts FROM jobs WHERE id = ?1',
     ).bind(job.id).first<any>();

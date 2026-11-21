@@ -658,7 +658,7 @@ class _ReceiptCard extends StatelessWidget {
                   const _DashedLine(),
                   const SizedBox(height: 10),
                   const Text(
-                    'The courier / depot fare is paid directly at the counter — DropOff never collects partner money. Keep this waybill until the parcel is lodged at the depot.',
+                    'The rider pays the depot fare at the counter. The sender repays the exact photographed receipt through DropOff to reimburse the rider — it is not a DropOff charge. Keep this waybill until the parcel is lodged at the depot.',
                     textAlign: TextAlign.center,
                     style: AppType.caption,
                   ),

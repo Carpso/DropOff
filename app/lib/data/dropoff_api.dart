@@ -93,6 +93,20 @@ class DropOffApi {
   /// JWT from phone-OTP login; set by the app store after /auth/verify.
   static String? token;
 
+  /// GLOBAL AUTH GUARD (owner audit 2026-11-21): the Worker answers 401 for an
+  /// expired/revoked JWT. AppStore installs a handler that tries one refresh,
+  /// then clears the session with an honest "sign in again" message. Every
+  /// response path below reports 401 here — no more zombie signed-in state or
+  /// stale cache served after the token died.
+  static Future<void> Function()? onAuthFailure;
+  static bool _authHandling = false;
+
+  static void _noteAuthFailure(int status) {
+    if (status != 401 || onAuthFailure == null || _authHandling) return;
+    _authHandling = true;
+    onAuthFailure!().whenComplete(() => _authHandling = false);
+  }
+
   /// Coalesces identical in-flight GETs so parallel screens share one request.
   static final _inFlight = <String, Future<Map<String, dynamic>?>>{};
   /// Network-first memory cache: a response is only reused for this tiny window
@@ -270,6 +284,11 @@ class DropOffApi {
         _memCache[cacheKey] = (value: decoded, expiry: DateTime.now().add(_freshWindow));
         return decoded;
       }
+      // A dead session must NEVER be masked by a cached response.
+      if (res.statusCode == 401) {
+        _noteAuthFailure(res.statusCode);
+        return null;
+      }
       return _readCache(cacheKey);
     } catch (_) {
       // Other host, one attempt — then fall back to the on-device cache.
@@ -281,6 +300,10 @@ class DropOffApi {
             unawaited(_saveCache(cacheKey, res2.body));
             _memCache[cacheKey] = (value: decoded2, expiry: DateTime.now().add(_freshWindow));
             return decoded2;
+          }
+          if (res2.statusCode == 401) {
+            _noteAuthFailure(res2.statusCode);
+            return null;
           }
         } catch (_) {}
       }
@@ -307,6 +330,7 @@ class DropOffApi {
         return ApiResponse(status: res.statusCode, ok: false, body: const {}, error: 'http_${res.statusCode}');
       }
       decoded ??= const {};
+      _noteAuthFailure(res.statusCode);
       final ok = res.statusCode >= 200 && res.statusCode < 300;
       if (ok) _invalidateAfterMutation(path);
       return ApiResponse(
@@ -369,6 +393,7 @@ class DropOffApi {
         return ApiResponse(status: res.statusCode, ok: false, body: const {}, error: 'http_${res.statusCode}');
       }
       decoded ??= const {};
+      _noteAuthFailure(res.statusCode);
       final ok = res.statusCode >= 200 && res.statusCode < 300;
       if (ok) _invalidateAfterMutation(path);
       return ApiResponse(
@@ -652,6 +677,7 @@ class DropOffApi {
       } catch (_) {
         return ApiResponse(status: res.statusCode, ok: false, body: const {}, error: 'http_${res.statusCode}');
       }
+      _noteAuthFailure(res.statusCode);
       return ApiResponse(status: res.statusCode, ok: res.statusCode >= 200 && res.statusCode < 300, body: data,
           error: res.statusCode >= 400 ? '${data['error'] ?? 'http_${res.statusCode}'}' : null);
     } catch (_) {
@@ -1423,6 +1449,7 @@ class DropOffApi {
       final streamed = await req.send().timeout(const Duration(seconds: 45));
       final res = await http.Response.fromStream(streamed);
       final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
+      _noteAuthFailure(res.statusCode);
       final ok = res.statusCode >= 200 && res.statusCode < 300;
       return ApiResponse(
         status: res.statusCode,

@@ -225,7 +225,7 @@ class ThermalWaybill {
 
     out.addAll(gen.hr());
     for (final line in _wrapWords(
-      'The courier / depot fare is paid directly at the counter. DropOff never collects partner money. Keep this waybill until the parcel is lodged.',
+      'The rider pays the depot fare at the counter. The sender repays the exact photographed receipt through DropOff to reimburse the rider — it is not a DropOff charge. Keep this waybill until the parcel is lodged.',
       40,
     )) {
       out.addAll(gen.text(line,

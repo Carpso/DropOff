@@ -24,20 +24,26 @@ class StepSounds {
   const StepSounds._();
 
   static const String _prefKey = 'step_sounds_enabled';
+  static const String _voicePrefKey = 'voice_guidance_enabled';
 
   static bool _enabled = true;
+  static bool _voiceGuidance = true;
   static bool _loaded = false;
   static final AudioPlayer _player = AudioPlayer();
 
   /// Whether the chime is currently allowed to play.
   static bool get enabled => _enabled;
 
-  /// Reads the persisted preference once per app run.
+  /// Whether spoken turn-by-turn guidance is allowed (separate from chimes).
+  static bool get voiceGuidance => _voiceGuidance;
+
+  /// Reads the persisted preferences once per app run.
   static Future<void> load() async {
     if (_loaded) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       _enabled = prefs.getBool(_prefKey) ?? true;
+      _voiceGuidance = prefs.getBool(_voicePrefKey) ?? true;
     } catch (_) {
       // Fail open: default to on.
     }
@@ -50,6 +56,15 @@ class StepSounds {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefKey, value);
+    } catch (_) {/* preference is a nicety — never break the toggle */}
+  }
+
+  /// Persists the voice-guidance choice (Account toggle + navigator button).
+  static Future<void> setVoiceGuidance(bool value) async {
+    _voiceGuidance = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_voicePrefKey, value);
     } catch (_) {/* preference is a nicety — never break the toggle */}
   }
 
