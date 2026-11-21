@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  
+  <rect width="512" height="512" rx="112" fill="#0F263A" />
+
+  
+  <rect x="82" y="194" width="36" height="14" rx="7" fill="#FF7315" />
+  <rect x="66" y="232" width="48" height="14" rx="7" fill="#FF7315" />
+  <rect x="82" y="270" width="36" height="14" rx="7" fill="#FF7315" />
+
+  
+  <path d="M256 76 C165 76 92 149 92 240 C92 346 256 442 256 442 C256 442 420 346 420 240 C420 149 347 76 256 76 Z" fill="#FF7315" />
+
+  
+  <circle cx="256" cy="232" r="112" fill="#FFFFFF" />
+
+  
+  <g transform="translate(256, 232)">
+    <polygon points="0,-78 72,-36 0,6 -72,-36" fill="#DCE6EE" />
+    <polygon points="-72,-36 0,6 0,88 -72,46" fill="#F4F8FB" />
+    <polygon points="0,6 72,-36 72,46 0,88" fill="#C7D6E2" />
+    
+    <polygon points="-24,-64 0,-78 72,-36 48,-22" fill="#FFAA6B" />
+    <polygon points="0,6 24,-8 24,74 0,88" fill="#FF8C3B" />
+  </g>
+
+  
+  <circle cx="364" cy="356" r="56" fill="#0F263A" />
+  <circle cx="364" cy="356" r="46" fill="#1AC98E" />
+  <path d="M342 356 L357 371 L387 341" fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

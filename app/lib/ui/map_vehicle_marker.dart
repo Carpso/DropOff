@@ -32,7 +32,12 @@ class MapVehicleMarker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isCar = vehicle == 'car';
-    final asset = isCar ? 'assets/brand/map_car_3d.png' : 'assets/brand/map_bike_3d.png';
+    final isTruck = vehicle == 'truck';
+    final asset = isTruck
+        ? 'assets/brand/map_truck_3d.png'
+        : isCar
+            ? 'assets/brand/map_car_3d.png'
+            : 'assets/brand/map_bike_3d.png';
     final vehicleWidget = Image.asset(
       asset,
       width: size,
@@ -42,7 +47,7 @@ class MapVehicleMarker extends StatelessWidget {
       filterQuality: FilterQuality.high,
       errorBuilder: (_, __, ___) => CustomPaint(
         size: Size.square(size),
-        painter: _VehiclePainter(isCar: isCar),
+        painter: _VehiclePainter(isCar: isCar, isTruck: isTruck),
       ),
     );
     return SizedBox(
@@ -64,7 +69,8 @@ class MapVehicleMarker extends StatelessWidget {
 /// headlight — it reads as a vehicle at map scale, never as a generic dot.
 class _VehiclePainter extends CustomPainter {
   final bool isCar;
-  _VehiclePainter({required this.isCar});
+  final bool isTruck;
+  _VehiclePainter({required this.isCar, this.isTruck = false});
 
   static const forest = Color(0xFF0E3B32);
   static const forestLight = Color(0xFF1B5A48);
@@ -85,6 +91,68 @@ class _VehiclePainter extends CustomPainter {
       ),
       shadow,
     );
+
+    if (isTruck) {
+      // Truck: larger body with cab at top, cargo bed below
+      final body = Paint()..color = forest;
+      // Cab
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: center + Offset(0, -s * 0.25), width: s * 0.48, height: s * 0.35),
+          Radius.circular(s * 0.1),
+        ),
+        body,
+      );
+      // Cargo bed
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: center + Offset(0, s * 0.15), width: s * 0.52, height: s * 0.5),
+          Radius.circular(s * 0.06),
+        ),
+        body,
+      );
+      // Wheels
+      final wheel = Paint()..color = dark;
+      for (final dx in [-1.0, 1.0]) {
+        for (final dy in [-0.35, 0.05, 0.35]) {
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                center: center + Offset(dx * s * 0.3, dy * s),
+                width: s * 0.08,
+                height: s * 0.14,
+              ),
+              Radius.circular(s * 0.03),
+            ),
+            wheel,
+          );
+        }
+      }
+      // Windshield
+      final glass = Paint()..color = const Color(0xFFCFE8DF);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: center + Offset(0, -s * 0.28), width: s * 0.38, height: s * 0.12),
+          Radius.circular(s * 0.04),
+        ),
+        glass,
+      );
+      // Amber stripe on cab
+      final stripe = Paint()..color = amber;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: center + Offset(0, -s * 0.18), width: s * 0.38, height: s * 0.06),
+          Radius.circular(s * 0.02),
+        ),
+        stripe,
+      );
+      // Headlights
+      final light = Paint()..color = const Color(0xFFFFE4A0);
+      for (final dx in [-1.0, 1.0]) {
+        canvas.drawCircle(center + Offset(dx * s * 0.16, -s * 0.4), s * 0.05, light);
+      }
+      return;
+    }
 
     if (isCar) {
       // Body
@@ -206,5 +274,5 @@ class _VehiclePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _VehiclePainter old) => old.isCar != isCar;
+  bool shouldRepaint(covariant _VehiclePainter old) => old.isCar != isCar || old.isTruck != isTruck;
 }

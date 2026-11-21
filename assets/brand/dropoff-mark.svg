@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 400" width="320" height="400">
+  <defs>
+    <linearGradient id="pinGradMark" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFC145" />
+      <stop offset="100%" stop-color="#F59E1B" />
+    </linearGradient>
+  </defs>
+
+  
+  <path d="M160 18 C82 18 19 81 19 159 C19 254 160 382 160 382 C160 382 301 254 301 159 C301 81 238 18 160 18 Z" fill="url(#pinGradMark)" />
+
+  
+  <g transform="translate(160, 168)">
+    <polygon points="0,-96 87,-46 0,4 -87,-46" fill="#FFFFFF" />
+    <polygon points="-87,-46 0,4 0,104 -87,54" fill="#F2F6F5" />
+    <polygon points="0,4 87,-46 87,54 0,104" fill="#DCE5E2" />
+    <polygon points="-24,-82 0,-96 0,4 -24,-10" fill="#F9B43A" />
+    <polygon points="0,-96 24,-82 24,-10 0,4" fill="#EE9619" />
+    <polygon points="-24,-10 0,4 0,32 -24,18" fill="#123D33" />
+    <polygon points="0,4 24,-10 24,18 0,32" fill="#0D2E26" />
+  </g>
+</svg>

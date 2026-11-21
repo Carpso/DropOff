@@ -3090,9 +3090,9 @@ app.get('/jobs/:ref/live', async (c) => {
     // (owner directive 2026-11-20: "on collection the depot pin remove it").
     service: job.service ?? 'standard',
     status: job.status ?? null,
-    // Server-decided vehicle class (large/over-cap parcels upgrade to a car).
-    // Sender, recipient and rider maps all show the SAME branded marker.
-    vehicle_class: job.needs_car ? 'car' : 'motorcycle',
+    // Server-decided vehicle class (motorcycle / car / van / truck). Sender,
+    // recipient and rider maps all show the SAME branded marker.
+    vehicle_class: String(job.vehicle_class ?? (job.needs_car ? 'car' : 'motorcycle')),
     // END of the visible leg: the courier's depot branch — real stored
     // coordinates (jobs carry no destination GPS, only an address string),
     // so the tracking map can draw where the journey ends (owner 2026-11-18).

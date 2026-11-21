@@ -730,7 +730,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           otherLat: otherLat,
           otherLng: otherLng,
           otherIsDepot: isCollection ? picked : !picked,
-          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}' == 'car' ? 'car' : 'motorcycle',
+          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}',
         ),
       ));
       return;
@@ -772,7 +772,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           otherLat: otherLat,
           otherLng: otherLng,
           otherIsDepot: isCollection ? picked : !picked,
-          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}' == 'car' ? 'car' : 'motorcycle',
+          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}',
         ),
       ));
       return;
@@ -788,7 +788,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         builder: (_) => InAppNavigatorScreen(
           destLat: fbLatD, destLng: fbLngD, label: label,
           destIsDepot: true, otherLat: null, otherLng: null, otherIsDepot: false,
-          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}' == 'car' ? 'car' : 'motorcycle',
+          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}',
         ),
       ));
       return;
