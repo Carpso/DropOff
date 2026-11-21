@@ -74,7 +74,7 @@ class _AdminScreenState extends State<AdminScreen> {
   Future<void> _load() async {
     final me = await DropOffApi.me();
     final role = '${me?['role'] ?? ''}';
-    if (role != 'admin' && role != 'ops') {
+    if (!['admin', 'ops', 'cfo'].contains(role)) {
       if (mounted) setState(() { _authorized = false; _loading = false; });
       return;
     }
@@ -257,8 +257,10 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _ClientCrashesCard(),
               const SizedBox(height: 18),
-              const _UsersCard(),
-              const SizedBox(height: 18),
+              if (_role == 'admin') ...[
+                const _UsersCard(),
+                const SizedBox(height: 18),
+              ],
               const _PackCodesCard(),
               const SizedBox(height: 18),
               const _PlansAndCouriersCard(),
@@ -1481,11 +1483,39 @@ class _UsersCardState extends State<_UsersCard> {
   Future<void> _setRole(Map<String, dynamic> user, String role) async {
     final email = '${user['email'] ?? ''}';
     if (email.isEmpty || role == '${user['role'] ?? ''}') return;
-    final res = await DropOffApi.adminSetUserRole(email, role);
+    // A partner WITHOUT a depot is a dead account (/partner/* returns 403), so
+    // pick the courier depot here and send it with the role change.
+    int? courierId;
+    if (role == 'partner') {
+      final data = await DropOffApi.adminCouriers();
+      final couriers = ((data?['couriers'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      if (!mounted) return;
+      if (couriers.isEmpty) {
+        AppToast.show(context, 'No courier depots on file — add one under Plans & couriers first.');
+        return;
+      }
+      final picked = await showDialog<int>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('Which depot does this partner run?'),
+          children: [
+            for (final c in couriers)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(ctx).pop((c['id'] as num?)?.toInt() ?? 0),
+                child: Text('${c['name'] ?? c['depot_name'] ?? 'Courier #${c['id']}'}',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+              ),
+          ],
+        ),
+      );
+      if (picked == null || picked == 0) return;
+      courierId = picked;
+    }
+    final res = await DropOffApi.adminSetUserRole(email, role, courierId: courierId);
     if (!mounted) return;
     AppToast.show(context, res.ok
         ? '$email is now $role.'
-        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'that account cannot be demoted' : res.error == 'superadmin_required' || res.error == 'admin_required' ? 'admins only' : res.error}');
+        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'that account cannot be demoted' : res.error == 'superadmin_required' || res.error == 'admin_required' ? 'admins only' : res.error == 'courier_id_required_for_partner' ? 'pick a courier depot for the partner' : res.error}');
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(
@@ -1508,7 +1538,7 @@ class _UsersCardState extends State<_UsersCard> {
             IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
           const SizedBox(height: 4),
-          const Text('Admins decide who is who. Roles you can grant: customer (regular sender), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console), ops (dispatch — fleet-wide tools), admin (full admin console, cannot mint more admins or promote themselves), cfo (finances only — payroll, turnover tax and filings; never moves money on their own).',
+          const Text('Admins decide who is who. Roles you can grant: customer (regular sender), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console — pick its depot below), ops (dispatch — fleet-wide tools), admin (full admin console), cfo (finances only — payroll, turnover tax and filings; never moves money on their own). The superadmin owner identity is never a selectable role.',
               style: AppType.caption),
           const SizedBox(height: 8),
           if (_loading)
@@ -1542,7 +1572,7 @@ class _UsersCardState extends State<_UsersCard> {
                         PopupMenuItem(value: 'rider', child: Text('rider — team member (salary)')),
                         PopupMenuItem(value: 'partner', child: Text('partner — courier depot console')),
                         PopupMenuItem(value: 'ops', child: Text('ops — dispatch tools (fleet-wide)')),
-                        PopupMenuItem(value: 'admin', child: Text('admin — admin console (no role minting)')),
+                        PopupMenuItem(value: 'admin', child: Text('admin — full admin console')),
                         PopupMenuItem(value: 'cfo', child: Text('cfo — finances (payroll, tax, books; no money moves)')),
                       ],
                       child: Chip(
@@ -1622,9 +1652,12 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
         meta: {'ref': ref},
       );
     } else {
+      final detail = '${res.body['detail'] ?? ''}'.trim();
       AppToast.show(context, res.error == 'admin_required'
           ? 'Admins only.'
-          : 'Failed: ${res.error ?? 'try again'}');
+          : detail.isNotEmpty
+              ? detail
+              : 'Failed: ${res.error ?? 'try again'}');
     }
   }
 

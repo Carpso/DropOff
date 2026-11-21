@@ -35,6 +35,9 @@ BUSINESS_PHONE = "260976847775"
 # rejected with "domain was not found").
 MAIL_FROM = "no-reply@carpsosolutions.store"
 APP_URL = "https://api.carpsosolutions.store"
+# PUBLIC links (SMS/email/referrals/waybills) use the PWA domain — never the
+# API host. APP_URL stays the API base for /health and server-to-server calls.
+APP_PUBLIC_URL = "https://dropoff.carpsosolutions.store"
 AUTH_DEV_MODE = "0"                            # "1" = return OTP codes / reset links in responses
 # Router upstream: free public OSRM demo (stopgap chosen by owner 2026-11-17 —
 # same "borrow a free router" pattern ChurchOnApp used; Worker caches 15 min and

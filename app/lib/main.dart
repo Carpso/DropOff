@@ -76,7 +76,7 @@ void _runWhenReady(VoidCallback action) {
   _deferredNavigations.add(action);
 }
 
-/// Handle `dropoff.app/...` deep links coming from the OS (URI stream from app_links
+/// Handle `dropoff.carpsosolutions.store/...` deep links coming from the OS (URI stream from app_links
 /// or `getInitialLink()` on a cold start). Known paths are routed; unknown are shell.
 void _handleDeepLink(AppStore store, Uri uri) =>
     _runWhenReady(() => _performDeepLink(store, uri));

@@ -68,9 +68,9 @@ class AppStore extends ChangeNotifier {
   String? get photoUrl => _photoUrl;
   String? get fullName => _fullName;
 
-  /// Server role for the signed-in identity: customer | partner | admin | ops |
-  /// rider. Admin/ops unlock the Team tab and the admin console; rider unlocks
-  /// a personal rider view (their queue + GPS) via phone-OTP login.
+  /// Server role: customer | partner | admin | ops | rider | cfo.
+  /// Admin/ops/cfo unlock the Team tab; rider unlocks their personal queue.
+  /// `superadmin` is an identity (owner phone / admin key), never a DB role.
   String? get role => _role;
   bool get isStaff => _role == 'admin' || _role == 'ops' || _role == 'cfo';
   bool get isRider => _role == 'rider';

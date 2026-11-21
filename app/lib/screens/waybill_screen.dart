@@ -165,7 +165,10 @@ class _WaybillScreenState extends State<WaybillScreen> {
               color: Colors.white,
               child: SizedBox(
                 width: width,
-                child: _assembleCard(booking, store),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: width),
+                  child: ClipRect(child: _assembleCard(booking, store)),
+                ),
               ),
             ),
           ),
@@ -506,6 +509,8 @@ class _ReceiptCard extends StatelessWidget {
                   Text(
                     waybillDepotTitle(courierId, courierName),
                     textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 21, letterSpacing: 0.6, color: AppColors.ink),
                   ),
                   const SizedBox(height: 2),
@@ -643,14 +648,28 @@ class _ReceiptCard extends StatelessWidget {
                       child: Text('RECIPIENT TRACKING', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 10.5, letterSpacing: 1.1, color: AppColors.muted)),
                     ),
                     const SizedBox(height: 4),
-                    SelectableText(
-                      trackingUrl!,
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5, height: 1.4),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: SelectableText(
+                          trackingUrl!,
+                          style: const TextStyle(fontFamily: 'monospace', fontSize: 11.5, height: 1.4),
+                        ),
+                      ),
                     ),
                     if (trackingToken?.isNotEmpty == true)
-                      SelectableText(
-                        'Token: $trackingToken',
-                        style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: AppColors.muted),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: SelectableText(
+                            'Token: $trackingToken',
+                            style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: AppColors.muted),
+                          ),
+                        ),
                       ),
                     const SizedBox(height: 6),
                   ],
@@ -710,6 +729,8 @@ class _ReceiptCard extends StatelessWidget {
                 value,
                 textAlign: TextAlign.right,
                 softWrap: true,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, height: 1.4, color: AppColors.ink),
               ),
             ),

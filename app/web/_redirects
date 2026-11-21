@@ -1,0 +1,10 @@
+# Deep-link bridge (owner 2026-11-21). User-facing links use the PWA domain
+# dropoff.carpsosolutions.store, but the token-consuming routes and the OS
+# verification assets live on the API Worker. Proxy ONLY those paths so a tap
+# works for both installed-app users and mobile browsers. Everything else is
+# served by the Flutter PWA itself (including /r, /promo, /plans, /bookings).
+/track/*	https://api.carpsosolutions.store/track/:splat	200
+/t/*	https://api.carpsosolutions.store/t/:splat	200
+/auth/*	https://api.carpsosolutions.store/auth/:splat	200
+/.well-known/assetlinks.json	https://api.carpsosolutions.store/.well-known/assetlinks.json	200
+/.well-known/apple-app-site-association	https://api.carpsosolutions.store/.well-known/apple-app-site-association	200

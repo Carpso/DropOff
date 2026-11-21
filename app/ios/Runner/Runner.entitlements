@@ -6,6 +6,7 @@
 	<array>
 		<string>applinks:dropoff-api.godfreymoseskalambo.workers.dev</string>
 		<string>applinks:api.carpsosolutions.store</string>
+		<string>applinks:dropoff.carpsosolutions.store</string>
 	</array>
 </dict>
 </plist>

@@ -462,7 +462,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             Expanded(child: FilledButton.tonalIcon(
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
                 builder: (_) => TicketsScreen(
-                  prefill: 'Issue with booking ${booking.reference}: ',
+                  prefill: 'Issue with booking ${booking.serverRef ?? booking.reference}: ',
                 ),
               )),
               icon: const Icon(Icons.support_agent_outlined),
@@ -579,7 +579,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           child: TextButton(
             onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => TicketsScreen(
-                prefill: 'Please delete booking #${booking.reference} — it is no longer needed. I am the sender.',
+                prefill: 'Please delete booking #${booking.serverRef ?? booking.reference} — it is no longer needed. I am the sender.',
               ),
             )),
             child: const Text('Request deletion of this booking', style: TextStyle(fontSize: 12.5, color: AppColors.muted, decoration: TextDecoration.underline)),
@@ -753,7 +753,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
   final summary = [
     'DropOff evidence — ${data['ref'] ?? ref}',
     line('Status', data['status']),
-    if (track.isNotEmpty) 'Track: https://api.carpsosolutions.store/t/$track',
+    if (track.isNotEmpty) 'Track: https://dropoff.carpsosolutions.store/t/$track',
     line('Booked', bookedAt),
     line('Booking photo', ev['booking_photo']),
     line('Pickup photo', ev['pickup_photo']),
@@ -895,7 +895,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
                   style: const TextStyle(fontSize: 12.5, height: 1.4),
                 ),
                 if (track.isNotEmpty)
-                  Text('Tracking: api.carpsosolutions.store/t/$track', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                  Text('Tracking: dropoff.carpsosolutions.store/t/$track', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
               ]),
             ),
           ),
@@ -1153,6 +1153,7 @@ class _RatingCardState extends State<_RatingCard> {
   final Map<String, int> _saved = {};
   bool _loading = true;
   bool _submitting = false;
+  bool _done = false;
   String? _message;
 
   bool get _canRateSeller =>
@@ -1237,15 +1238,16 @@ class _RatingCardState extends State<_RatingCard> {
     if (!mounted) return;
     setState(() {
       _submitting = false;
-      _message = 'Thanks — your rating keeps senders, drivers and couriers honest.';
+      _done = true;
+      _message = 'Done — "Thank You" Your rating helps Riders, Couriers and Senders build a good name.';
     });
     _load();
   }
 
   String _label(String target) => switch (target) {
-        'driver' => 'driver',
-        'courier' => 'courier',
-        _ => 'seller',
+        'driver' => 'Rider',
+        'courier' => 'Courier',
+        _ => 'Sender',
       };
 
   @override
@@ -1270,7 +1272,7 @@ class _RatingCardState extends State<_RatingCard> {
           ]),
           const SizedBox(height: 4),
           const Text(
-            'Score the driver, the courier and — if you were the recipient — the sender. Comments are optional but help everyone.',
+            'Rate the rider, the courier and — if you received this parcel — the sender. Comments are optional but help everyone.',
             style: AppType.caption,
           ),
           const SizedBox(height: 14),
@@ -1281,7 +1283,7 @@ class _RatingCardState extends State<_RatingCard> {
           if (!_canRateSeller) ...[
             const SizedBox(height: 14),
             const Text(
-              'Senders are rated by recipients — share the tracking link so the buyer can score you here.',
+              'Only the recipient can rate the sender — share the tracking link with them.',
               style: AppType.caption,
             ),
           ],
@@ -1289,20 +1291,31 @@ class _RatingCardState extends State<_RatingCard> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _submitting ? null : _submit,
+              onPressed: _submitting || _done ? null : _submit,
               icon: _submitting
                   ? const AppLogoSpinner(size: 16)
-                  : const Icon(Icons.send_outlined),
-              label: Text(_submitting ? 'Saving…' : 'Submit ratings'),
+                  : Icon(_done ? Icons.check_circle : Icons.send_outlined),
+              label: Text(_done ? 'Done' : (_submitting ? 'Saving…' : 'Submit ratings')),
             ),
           ),
           if (_message != null) ...[
             const SizedBox(height: 10),
-            Text(_message!, style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+            _messageText(_message!),
           ],
         ]),
       ),
     );
+  }
+
+  /// Bold the quoted phrase (e.g. "Thank You") while keeping the rest light.
+  Widget _messageText(String text) {
+    final parts = text.split('"');
+    if (parts.length < 3) return Text(text, style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35));
+    return Text.rich(TextSpan(children: [
+      TextSpan(text: parts[0], style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+      const TextSpan(text: '"Thank You"', style: TextStyle(fontSize: 11.5, color: AppColors.forest, fontWeight: FontWeight.w900, height: 1.35)),
+      TextSpan(text: parts.sublist(2).join('"'), style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+    ]));
   }
 
   Widget _targetRow(String target) {
@@ -1318,7 +1331,7 @@ class _RatingCardState extends State<_RatingCard> {
           ),
         ),
         if (saved != null && saved > 0)
-          Text('Verified $saved/5', style: const TextStyle(fontSize: 10.5, color: AppColors.forest, fontWeight: FontWeight.w700)),
+          Text('Your rating: $saved/5', style: const TextStyle(fontSize: 10.5, color: AppColors.forest, fontWeight: FontWeight.w700)),
         if (summary != null && summary.count > 0) ...[
           const SizedBox(width: 8),
           Text(
@@ -1333,7 +1346,10 @@ class _RatingCardState extends State<_RatingCard> {
             padding: EdgeInsets.zero,
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints(minWidth: 42, minHeight: 42),
-            onPressed: () => setState(() => _stars[target] = i),
+            onPressed: () => setState(() {
+              _stars[target] = i;
+              _done = false;
+            }),
             icon: Icon(
               i <= score ? Icons.star_rounded : Icons.star_border_rounded,
               color: AppColors.amber,
@@ -1346,6 +1362,7 @@ class _RatingCardState extends State<_RatingCard> {
         maxLength: 500,
         minLines: 1,
         maxLines: 2,
+        onChanged: (_) => setState(() => _done = false),
         decoration: InputDecoration(
           labelText: 'Comment for the ${_label(target)} (optional)',
           counterText: '',

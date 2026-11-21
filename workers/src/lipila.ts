@@ -13,7 +13,8 @@ export interface Env {
   LIPILA_API_KEY: string;
   HUGGINGFACE_TOKEN?: string;
   LIPILA_CALLBACK_URL?: string;   // posted as the callbackUrl header on collect/disburse
-  APP_URL?: string;               // links used inside transactional emails
+  APP_URL?: string;               // API base — internal /health + server-to-server
+  APP_PUBLIC_URL?: string;        // user-facing links: dropoff.carpsosolutions.store
   MAIL_FROM?: string;             // e.g. no-reply@dropoffzm.com (domain must be on Email Sending)
   SMS_USERNAME?: string;          // legacy Africas Talking name (fallback)
   SMS_API_KEY?: string;

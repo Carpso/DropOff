@@ -973,9 +973,14 @@ class DropOffApi {
   /// Last client crashes (deduped per device+stack) for the admin console.
   static Future<Map<String, dynamic>?> adminClientCrashes() => getAdmin('/admin/client-crashes');
 
-  /// Promote/demote an account (customer|admin|partner) — superadmin only.
-  static Future<ApiResponse> adminSetUserRole(String email, String role) =>
-      post('/admin/users/role', {'email': email, 'role': role}, admin: true);
+  /// Promote/demote an account. Every non-superadmin role is assignable by an
+  /// admin; a partner must also carry a courier_id (its depot console).
+  static Future<ApiResponse> adminSetUserRole(String email, String role, {int? courierId}) =>
+      post('/admin/users/role', {
+        'email': email,
+        'role': role,
+        if (courierId != null) 'courier_id': courierId,
+      }, admin: true);
 
   /// Delivery IQ: how fast this courier really reaches the depot (p50/p90/avg
   /// minutes from actual pickup→depot times over the last 90 days).

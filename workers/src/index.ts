@@ -33,7 +33,11 @@ import {
 
 export { ChatRoom };
 
-const app = new Hono<{ Bindings: Env; Variables: { phone?: string; email?: string; role?: 'customer' | 'partner' | 'ops' | 'admin' | 'rider'; riderId?: number; courierId?: number; reqId?: string } }>();
+const app = new Hono<{ Bindings: Env; Variables: { phone?: string; email?: string; role?: 'customer' | 'partner' | 'ops' | 'admin' | 'rider' | 'cfo'; riderId?: number; courierId?: number; reqId?: string } }>();
+
+// Roles an admin may assign. `superadmin` is an IDENTITY (owner phone / admin
+// key), never a DB role — deliberately NOT assignable.
+const ASSIGNABLE_ROLES = ['customer', 'rider', 'partner', 'ops', 'admin', 'cfo'] as const;
 
 /* ------------------------- seller subscription packs ----------------------- */
 // MODEL (post-reprice, Daily Dash removed):
@@ -496,7 +500,7 @@ app.use('*', async (c, next) => {
       // OTP-only sign-ins that have no auth_users row, and any user a
       // superadmin has promoted via /admin/users/role ('partner', 'rider',
       // 'ops', 'admin' or 'cfo').
-      let role = ['partner', 'admin', 'rider', 'ops', 'cfo'].includes(user?.role ?? '') ? user.role
+      let role = ASSIGNABLE_ROLES.includes((user?.role ?? '') as any) ? user.role
         : claims.phone === ownerPhone(c.env) ? 'admin' : null;
       // Rider identity: an accepted DB role also binds the rider's roster row if
       // one exists (not required - role='rider' is usable without a roster row).
@@ -652,8 +656,13 @@ async function issueTrackingToken(env: Env, jobId: number, jobRef: string, phone
   return token;
 }
 
+/** User-facing link base (PWA domain). APP_URL remains the API base for the
+ * uptime probe and other server-to-server calls — never flip that one. */
+const publicLinkBase = (env: Env) =>
+  String(env.APP_PUBLIC_URL ?? env.APP_URL ?? '').replace(/\/$/, '');
+
 const trackingUrl = (env: Env, token: string) =>
-  `${(env.APP_URL ?? '').replace(/\/$/, '')}/track/${token}`;
+  `${publicLinkBase(env)}/track/${token}`;
 
 /** Payment-HELD job (owner directive 2026-11-15 — "no tracking while payment
  *  is held"): the prepayment never settled at booking (paid = 0) and the job
@@ -1193,9 +1202,9 @@ app.post('/delete-data/confirm', async (c) => {
 });
 
 // Deep-link well-known assets: let Android/iOS open DropOff links instead of
-// a bare browser tab. Served on the shared API host — the apex
-// carpsosolutions.store belongs to the company site and is untouched.
-const APP_LINK_HOST = 'api.carpsosolutions.store';
+// a bare browser tab. The PWA domain (dropoff.carpsosolutions.store) proxies
+// /.well-known/* to this Worker via app/web/_redirects; the API host serves
+// them directly too. The apex company site is untouched.
 const DROPOFF_PACKAGE = 'zm.dropoff.dropoff';
 const UPLOAD_CERT_SHA256 = 'D0:DB:11:37:43:29:51:04:02:8F:42:3B:AB:B7:89:06:67:68:F0:48:D2:F1:AB:BF:76:21:A4:B8:5A:B0:E9:37';
 app.get('/.well-known/assetlinks.json', (c) => c.json([{
@@ -1546,7 +1555,7 @@ async function createEmailLink(
   // Hono exposes `c.req.url` as a property (Request.url), NOT a function —
   // calling it threw TypeError and 500'd register/forgot/resend.
   const origin = new URL(c.req.url).origin;
-  const base = String(c.env.APP_URL ?? '').replace(/\/$/, '') || origin;
+  const base = publicLinkBase(c.env) || origin;
   return `${base}/auth/link?k=${kind}&t=${encodeURIComponent(token)}`;
 }
 
@@ -3874,10 +3883,11 @@ app.post('/jobs/:ref/events', async (c) => {
 });
 
 /* --------------------------------- ratings -------------------------------- */
-// Rate the three sides of a delivery — the seller, the driver (rider) and the
-// courier. Only the job's participants (sender / recipient) or ops can rate;
-// sellers can't rate themselves; ratings open once the parcel is delivered or
-// ready for collection. One score per reviewer per target — resubmits update.
+// Rate the three sides of a delivery — the SENDER (rated by the recipient),
+// the RIDER and the courier. DB keys stay 'seller'/'driver' for compatibility
+// but the UI says sender/rider. Only job participants or ops may rate; a
+// sender cannot rate himself, nor a rider/courier their own score. Ratings
+// open once the parcel is delivered or ready for collection.
 const RATING_TARGETS = new Set(['seller', 'driver', 'courier']);
 const RATING_OPEN = new Set(['delivered', 'ready_for_collection']);
 
@@ -3892,7 +3902,7 @@ function containsProfanity(text: string): boolean {
 async function ratingTargetKey(job: any, targetType: string): Promise<string | null> {
   if (targetType === 'seller') return `phone:${job.sender_phone}`;
   if (targetType === 'driver') return job.rider_id ? `rider:${job.rider_id}` : null;
-  return `courier:${job.courier_id}`;
+  return job.courier_id ? `courier:${job.courier_id}` : null;
 }
 
 app.post('/jobs/:ref/rate', async (c) => {
@@ -3913,16 +3923,36 @@ app.post('/jobs/:ref/rate', async (c) => {
   if (!job) return c.json({ error: 'not found' }, 404);
 
   const role = c.get('role');
-  const reviewer = role === 'ops'
+  const staff = role === 'ops' || isAdmin(c);
+  const riderId = c.get('riderId');
+  const courierId = c.get('courierId');
+  const reviewer = staff
     ? normalizeZmPhone(String(b?.reviewer_phone ?? job.sender_phone))
     : (c.get('phone') as string);
-  if (role === 'customer' && reviewer !== job.sender_phone && reviewer !== job.recipient_phone) {
-    return c.json({ error: 'not found' }, 404); // no existence leak
+  // PARTICIPANTS ONLY (owner 2026-11-21): the old check applied to customers
+  // only, so any signed-in rider could rate themselves on any job. Everyone
+  // must actually be a party to THIS job.
+  if (!staff) {
+    const isSender = !!reviewer && reviewer === job.sender_phone;
+    const isRecipient = !!reviewer && reviewer === job.recipient_phone;
+    const isAssignedRider = role === 'rider' && riderId != null && riderId === job.rider_id;
+    const isAssignedCourier = !!courierId && courierId === job.courier_id;
+    if (!isSender && !isRecipient && !isAssignedRider && !isAssignedCourier) {
+      return c.json({ error: 'not found' }, 404); // no existence leak
+    }
   }
+  // The SENDER is rated by the RECIPIENT only. Riders/couriers cannot score
+  // themselves either (target keys resolve back to their own ids).
   if (targetType === 'seller' && reviewer === job.sender_phone) {
     return c.json({ error: 'cannot_rate_self' }, 403);
   }
-  if (role === 'customer' && !RATING_OPEN.has(String(job.status))) {
+  if (targetType === 'driver' && role === 'rider' && riderId === job.rider_id) {
+    return c.json({ error: 'cannot_rate_self' }, 403);
+  }
+  if (targetType === 'courier' && courierId != null && courierId === job.courier_id) {
+    return c.json({ error: 'cannot_rate_self' }, 403);
+  }
+  if (!staff && !RATING_OPEN.has(String(job.status))) {
     return c.json({ error: 'not_complete', message: 'Rate once the parcel is delivered or ready for collection.' }, 409);
   }
   const targetKey = await ratingTargetKey(job, targetType);
@@ -3934,9 +3964,14 @@ app.post('/jobs/:ref/rate', async (c) => {
      ON CONFLICT(job_ref, target_type, reviewer_phone)
      DO UPDATE SET stars = excluded.stars, comment = excluded.comment, updated_at = datetime('now')`,
   ).bind(job.ref, job.id, targetType, targetKey, reviewer, role ?? 'customer', stars, comment || null).run();
-  await c.env.DB.prepare(
-    `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rated', ?2)`,
-  ).bind(job.id, `${targetType} rated ${stars}/5`).run();
+  const alreadyLogged = await c.env.DB.prepare(
+    `SELECT 1 FROM job_events WHERE job_id = ?1 AND status = 'rated' AND note LIKE ?2 LIMIT 1`,
+  ).bind(job.id, `${targetType} rated%`).first<any>();
+  if (!alreadyLogged) {
+    await c.env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rated', ?2)`,
+    ).bind(job.id, `${targetType} rated ${stars}/5`).run();
+  }
 
   return c.json({ ok: true, target_type: targetType, stars });
 });
@@ -3987,7 +4022,7 @@ app.get('/jobs/:ref/ratings', async (c) => {
   }
   const { results } = await c.env.DB.prepare(
     `SELECT target_type, stars, comment, reviewer_phone, verified, hidden, created_at, updated_at
-       FROM ratings WHERE job_ref = ?1 ORDER BY id`,
+       FROM ratings WHERE job_ref = ?1 AND hidden = 0 ORDER BY id`,
   ).bind(job.ref).all<any>();
 
   const viewer = c.get('phone');
@@ -4237,7 +4272,7 @@ app.get('/track/incoming', async (c) => {
          AND COALESCE(j.status, '') NOT IN ('deleted', 'canceled', 'cancelled')
       ORDER BY j.id DESC LIMIT ?2`,
   ).bind(phone, limit).all();
-  const APP_URL = (c.env.APP_URL ?? '').replace(/\/$/, '');
+  const appPublicUrl = publicLinkBase(c.env);
   const parcels = [] as any[];
   for (const row of results as any[]) {
     let token: string | null = row.tracking_token ?? null;
@@ -4252,7 +4287,7 @@ app.get('/track/incoming', async (c) => {
       ref: row.ref, status: row.status, created_at: row.created_at,
       dest_city: row.dest_city, recipient_name: row.recipient_name,
       courier: row.courier_name, depot: row.courier_depot,
-      tracking_url: token && !row.payment_held ? `${APP_URL}/track/${token}` : null,
+      tracking_url: token && !row.payment_held ? `${appPublicUrl}/track/${token}` : null,
     });
   }
   return c.json({ parcels });
@@ -5381,13 +5416,14 @@ app.post('/admin/support/threads/:id/status', async (c) => {
 });
 
 /* ------------------------------ users & roles ----------------------------- */
-// GET: any staff can review accounts. Role writes: SUPERADMIN only (owner or
-// admin key) — the owner can promote an assistant to admin; admins cannot
-// mint more admins, and the owner row can never be demoted (no self-lockout).
+// GET: any staff can review accounts. Role writes: any ADMIN (owner or a
+// delegated admin) — the owner may promote assistants and every non-superadmin
+// role is assignable. `superadmin` is an identity, never a DB role. The owner
+// row can never be demoted (no self-lockout).
 app.get('/admin/users', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
   const { results } = await c.env.DB.prepare(
-    `SELECT email, phone, full_name, role, email_verified, created_at, photo_url
+    `SELECT email, phone, full_name, role, courier_id, email_verified, created_at, photo_url
        FROM auth_users ORDER BY created_at DESC LIMIT 200`,
   ).all();
   const owner = ownerPhone(c.env);
@@ -5397,12 +5433,22 @@ app.get('/admin/users', async (c) => {
 });
 
 app.post('/admin/users/role', async (c) => {
-  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  // ADMIN SUPPORT (owner 2026-11-21): delegated admins may assign every role
+  // except the superadmin identity. (Previously superadmin-only, so the
+  // console offered controls that always 403'd.) Ops cannot mint roles.
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
   const b: any = await c.req.json().catch(() => null);
   const email = String(b?.email ?? '').trim().toLowerCase();
   const role = String(b?.role ?? '');
-  if (!email || !['customer', 'admin', 'partner', 'rider', 'ops', 'cfo'].includes(role)) {
+  const courierId = Number(b?.courier_id ?? 0);
+  if (!email || !ASSIGNABLE_ROLES.includes(role as any)) {
     return c.json({ error: 'email and role (customer|admin|partner|rider|ops|cfo) required' }, 400);
+  }
+  // A partner MUST be linked to a real courier, or /partner/* is a dead end.
+  if (role === 'partner') {
+    if (!courierId) return c.json({ error: 'courier_id_required_for_partner' }, 400);
+    const courier = await c.env.DB.prepare('SELECT id FROM couriers WHERE id = ?1').bind(courierId).first<any>();
+    if (!courier) return c.json({ error: 'courier not found' }, 404);
   }
   const user = await c.env.DB.prepare(
     'SELECT email, phone, role FROM auth_users WHERE email = ?1',
@@ -5414,9 +5460,50 @@ app.post('/admin/users/role', async (c) => {
   if (role !== 'admin' && isOwnerRow) {
     return c.json({ error: 'owner_cannot_be_demoted' }, 400);
   }
-  const res = await c.env.DB.prepare('UPDATE auth_users SET role = ?2 WHERE email = ?1')
-    .bind(email, role).run();
-  return c.json({ ok: true, email, role, updated: res.meta.changes ?? 0 });
+  const sets = role === 'partner'
+    ? `UPDATE auth_users SET role = ?2, courier_id = ?3 WHERE email = ?1`
+    : `UPDATE auth_users SET role = ?2 WHERE email = ?1`;
+  const res = role === 'partner'
+    ? await c.env.DB.prepare(sets).bind(email, role, courierId).run()
+    : await c.env.DB.prepare(sets).bind(email, role).run();
+  return c.json({ ok: true, email, role, courier_id: role === 'partner' ? courierId : null, updated: res.meta.changes ?? 0 });
+});
+
+// Admin "add email to a phone number" flow — the app already called this route
+// but it never existed, so every Edit-details submit 404'd. Admin-only, and
+// owner/admin rows are protected from edits.
+app.post('/admin/users/:phone/update', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const phone = normalizeZmPhone(String(c.req.param('phone') ?? ''));
+  const b: any = await c.req.json().catch(() => null);
+  const email = String(b?.email ?? '').trim().toLowerCase();
+  const fullName = String(b?.full_name ?? '').trim().slice(0, 120);
+  if (!phone || (!email && !fullName)) return c.json({ error: 'email or full_name required' }, 400);
+  if (email && !isValidEmail(email)) return c.json({ error: 'invalid_email' }, 400);
+  const user = await c.env.DB.prepare('SELECT phone, email, role FROM auth_users WHERE phone = ?1')
+    .bind(phone).first<any>();
+  if (!user) return c.json({ error: 'not found' }, 404);
+  const owner = ownerPhone(c.env);
+  if ((owner && phone === owner) || user.role === 'admin') {
+    return c.json({ error: 'admin_account_protected' }, 403);
+  }
+  if (email) {
+    const clash = await c.env.DB.prepare('SELECT 1 FROM auth_users WHERE email = ?1 AND phone <> ?2')
+      .bind(email, phone).first<any>();
+    if (clash) return c.json({ error: 'email_already_registered' }, 409);
+  }
+  try {
+    await c.env.DB.prepare(
+      `UPDATE auth_users
+          SET email = COALESCE(?2, email),
+              full_name = COALESCE(?3, full_name),
+              email_verified = CASE WHEN ?2 IS NULL THEN email_verified ELSE 1 END
+        WHERE phone = ?1`,
+    ).bind(phone, email || null, fullName || null).run();
+  } catch {
+    return c.json({ error: 'email_already_registered' }, 409);
+  }
+  return c.json({ ok: true, phone, email: email || (user.email ?? null), full_name: fullName || null });
 });
 
 /* -------- admin/superadmin SMS communication + marketing ------------------- */
@@ -8070,7 +8157,7 @@ app.get('/refer/code', async (c) => {
   ).bind(phone).first<any>();
   return c.json({
     code,
-    share_text: `Join me on DropOff — senders get home pickup to their courier. Use my link: https://api.carpsosolutions.store/r/${code}`,
+    share_text: `Join me on DropOff — senders get home pickup to their courier. Use my link: ${publicLinkBase(c.env)}/r/${code}`,
     stats: { pending: stats?.pending ?? 0, rewarded: stats?.rewarded ?? 0, total: stats?.total ?? 0 },
   });
 });
@@ -9613,16 +9700,39 @@ app.delete('/admin/riders/:id', async (c) => {
 // invisible instantly, with payments & events retained for audit.
 app.post('/admin/jobs/:ref/delete', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
-  const ref = String(c.req.param('ref') ?? '').trim();
+  // The support-ticket prefill used to carry the LOCAL DO-… reference, which
+  // never matches jobs.ref (DRO-…). Normalise both and give staff an honest
+  // error instead of a bare 404.
+  const ref = String(c.req.param('ref') ?? '').trim().replace(/^#/, '').toUpperCase();
   if (!ref) return c.json({ error: 'ref required' }, 400);
   const row = await c.env.DB.prepare(
-    `SELECT id, ref, status FROM jobs WHERE ref = ?1`,
+    `SELECT id, ref, status, sender_phone FROM jobs WHERE UPPER(ref) = ?1`,
   ).bind(ref).first<any>();
-  if (!row) return c.json({ error: 'not found' }, 404);
-  await c.env.DB.batch([
+  if (!row) return c.json({
+    error: 'booking_not_found',
+    detail: `No booking with reference ${ref}. Use the DRO-… server reference from the booking, not the local DO-… reference.`,
+  }, 404);
+  if (String(row.status) === 'deleted') return c.json({ ok: true, ref: row.ref, already_deleted: true });
+  const statements: any[] = [
     c.env.DB.prepare(`UPDATE jobs SET status = 'deleted' WHERE id = ?1`).bind(row.id),
     c.env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'admin_deleted', 'Booking deleted by admin')`).bind(row.id),
-  ]);
+  ];
+  // Close deletion-request tickets that reference this job — keep the thread
+  // as the audit trail, never delete it.
+  try {
+    const threads = await c.env.DB.prepare(
+      `SELECT id FROM chat_threads
+        WHERE kind = 'support' AND phone = ?1
+          AND (subject LIKE ?2 OR id IN (SELECT thread_id FROM chat_messages WHERE body LIKE ?2))`,
+    ).bind(row.sender_phone, `%${row.ref}%`).all<any>();
+    for (const t of (threads.results ?? [])) {
+      statements.push(c.env.DB.prepare(`UPDATE chat_threads SET status = 'closed', updated_at = datetime('now') WHERE id = ?1`).bind(t.id));
+      statements.push(c.env.DB.prepare(
+        `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, 'ops', ?3)`,
+      ).bind(t.id, 'dropoff', `SYSTEM: Booking ${row.ref} was deleted by an admin. This request is closed.`));
+    }
+  } catch { /* ticket hygiene never blocks the deletion */ }
+  await c.env.DB.batch(statements);
   return c.json({ ok: true, ref: row.ref });
 });
 
@@ -11119,11 +11229,11 @@ app.get('/rider/reviews', async (c) => {
   if (!rider) return c.json({ error: 'rider_not_found' }, 404);
   const sum = await c.env.DB.prepare(
     `SELECT COUNT(*) AS n, COALESCE(ROUND(AVG(stars), 1), 0) AS avg FROM ratings
-      WHERE target_type = 'rider' AND target_key = CAST(?1 AS TEXT) AND hidden = 0 AND verified = 1`,
+      WHERE target_type = 'driver' AND target_key = 'rider:' || ?1 AND hidden = 0 AND verified = 1`,
   ).bind(rider.id).first<any>() as any;
   const recent = await c.env.DB.prepare(
     `SELECT stars, comment, created_at FROM ratings
-      WHERE target_type = 'rider' AND target_key = CAST(?1 AS TEXT) AND hidden = 0 AND verified = 1
+      WHERE target_type = 'driver' AND target_key = 'rider:' || ?1 AND hidden = 0 AND verified = 1
       ORDER BY created_at DESC, id DESC LIMIT 5`,
   ).bind(rider.id).all<any>();
   return c.json({

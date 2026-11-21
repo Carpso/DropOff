@@ -9,6 +9,7 @@ import 'tickets_screen.dart';
 import 'rider_map_screen.dart';
 import '../screens/account_screen.dart';
 import '../ui/app_spinner.dart';
+import '../ui/app_toast.dart';
 
 /// Recipient parcel tracking — the same view the SMS link opens, reachable
 /// in-app. Paste the tracking link or the token. The SERVER decides who sees
@@ -132,6 +133,11 @@ class _TrackScreenState extends State<TrackScreen> {
                 icon: const Icon(Icons.support_agent_outlined),
                 label: const Text('Get help with this parcel'),
               ),
+              // RECIPIENT RATES THE SENDER (owner 2026-11-21): the sender
+              // cannot rate himself; only the parcel's recipient can.
+              if (['delivered', 'ready_for_collection']
+                  .contains('${_data?['status'] ?? ''}'))
+                _RateSenderCard(jobRef: '${_data?['ref'] ?? ''}'),
             ],
             const SizedBox(height: 8),
             _riderStrip(_data!),
@@ -412,4 +418,84 @@ class _TrackScreenState extends State<TrackScreen> {
       ),
     );
   }
+}
+
+/// The recipient scores the SENDER (owner 2026-11-21). A sender opening their
+/// own tracking link is rejected by the worker's cannot_rate_self guard.
+class _RateSenderCard extends StatefulWidget {
+  final String jobRef;
+  const _RateSenderCard({required this.jobRef});
+
+  @override
+  State<_RateSenderCard> createState() => _RateSenderCardState();
+}
+
+class _RateSenderCardState extends State<_RateSenderCard> {
+  int _stars = 0;
+  bool _busy = false;
+  bool _done = false;
+
+  Future<void> _submit() async {
+    if (_stars < 1) {
+      AppToast.show(context, 'Tap the stars to rate the sender first.');
+      return;
+    }
+    setState(() => _busy = true);
+    final res = await DropOffApi.rateJob(
+      jobRef: widget.jobRef,
+      targetType: 'seller',
+      stars: _stars,
+    );
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (res.ok || res.error == 'cannot_rate_self' || res.error == 'already_rated') _done = true;
+    });
+    AppToast.show(context, switch (res.error) {
+      'cannot_rate_self' => 'You are the sender — only the recipient can rate you.',
+      _ => res.ok ? 'Done — "Thank You" The sender has been rated.' : 'Could not save your rating (${res.error ?? 'network'}).',
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Row(children: [
+                Icon(Icons.star_rounded, color: AppColors.amber),
+                SizedBox(width: 8),
+                Expanded(child: Text('Rate the sender', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+              ]),
+              const SizedBox(height: 4),
+              const Text('You received this parcel — your score is the sender\'s rating.', style: AppType.caption),
+              const SizedBox(height: 8),
+              Row(children: [
+                for (var i = 1; i <= 5; i++)
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(minWidth: 42, minHeight: 42),
+                    onPressed: _done ? null : () => setState(() => _stars = i),
+                    icon: Icon(i <= _stars ? Icons.star_rounded : Icons.star_border_rounded,
+                        color: AppColors.amber, size: 28),
+                  ),
+              ]),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _done || _busy ? null : _submit,
+                  icon: _busy
+                      ? const AppLogoSpinner(size: 16)
+                      : Icon(_done ? Icons.check_circle : Icons.send_outlined),
+                  label: Text(_done ? 'Done' : (_busy ? 'Saving…' : 'Submit rating')),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      );
 }

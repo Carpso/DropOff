@@ -27,6 +27,60 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (sixth pass) — bold rating copy, admin delete, role management
+
+- **Rating success copy:** `Done — "Thank You" Your rating helps Riders,
+  Couriers and Senders build a good name.` — the quoted phrase is bold
+  (`RichText` via `_messageText`), role words capitalised.
+- **Admin delete after a support ticket:** root cause was the ticket prefill
+  using the LOCAL `DO-…` reference, not the server `DRO-…` one. Both the
+  deletion-request and help ticket prefills now use
+  `booking.serverRef ?? booking.reference`. The worker normalises the ref
+  (strips `#`, uppercases), returns `booking_not_found` with an explanatory
+  detail, is idempotent for already-deleted jobs, and closes (never deletes)
+  matching support threads with a SYSTEM audit note.
+- **Role management:** `ASSIGNABLE_ROLES` = customer/rider/partner/ops/admin/cfo
+  is the single whitelist; `/admin/users/role` is now `isAdmin`-gated (delegated
+  admins can assign every non-superadmin role); owner row cannot be demoted;
+  `superadmin` remains an IDENTITY and is never assignable. Partner role now
+  REQUIRES a courier depot (admin console prompts for one) so it is functional.
+  CFO can open the console (finance-only). Ops no longer sees role controls.
+  Added the missing `POST /admin/users/:phone/update` route that the Edit button
+  already called. `courier_id` is returned by `GET /admin/users`.
+
+## 2026-11-21 (fifth pass) — link domains, ratings, waybill image
+
+### User-facing links use the PWA domain
+- New worker var `APP_PUBLIC_URL = https://dropoff.carpsosolutions.store`
+  (kept separate from `APP_URL`, which stays the API base for `/health`).
+  `publicLinkBase()` now drives tracking SMS/email, `/track/incoming`,
+  `authMagicLink()` and referral share text. App-side hardcoded referral /
+  tracking strings updated too.
+- `app/web/_redirects` proxies `/track/*`, `/t/*`, `/auth/*` and
+  `/.well-known/*` to the API Worker so the PWA domain can consume single-use
+  auth tokens and serve App Link verification. Do NOT proxy `/r`, `/promo`,
+  `/plans`, `/bookings` — the Flutter app handles those.
+- Android App Links and iOS Associated Domains now include
+  `dropoff.carpsosolutions.store` (old hosts retained for sent links).
+- Unchanged on purpose: API `baseUrl`/`fallbackBaseUrl`, `DROPOFF_API_URL`
+  dart-define, `LIPILA_CALLBACK_URL`, `[[routes]]` for the API host.
+
+### Ratings
+- Worker ratings are now participant-only for ALL roles, with self-rating
+  blocked for sender/rider/courier; one `rated` job event per target;
+  `/rider/reviews` queries the real stored key (`target_type='driver'`,
+  `target_key='rider:<id>'`); hidden ratings filtered; null courier key fixed.
+- UI says **Rider / Sender / Courier** (DB tokens `driver`/`seller` retained).
+  Submit button becomes **Done** and is disabled until a star/comment changes.
+  The recipient now has a **Rate the sender** card in TrackScreen; the sender
+  cannot rate himself (server guard + hidden target).
+
+### Waybill share image
+- The right-side cut came from a ~64-char unbreakable tracking URL inside the
+  fixed-width `RepaintBoundary`. Tracking URL/token now use `FittedBox(scaleDown)`,
+  the capture box is `ConstrainedBox(maxWidth: width)` + `ClipRect`, and the
+  depot title / row values have maxLines + overflow.
+
 ## 2026-11-21 (fourth pass) — rider package value, courier receipt download, target-linked pay
 
 - **Rider waybill package value:** `/jobs/:ref/waybill` now selects and returns
