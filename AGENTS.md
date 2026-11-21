@@ -50,7 +50,7 @@ After every change session, without asking the owner:
 - Morning window labels corrected to **5:30–7:30 AM** (06:00 is the slot name).
 - Home screen: trust strip and 3-step card removed, replaced by one
   "How DropOff works — six quick steps" tile. Version bumped to `0.5.62+72`
-  (codes 57–71 consumed).
+  then `0.5.63+73` for the banner fix (codes 57–72 consumed).
 
 ## 2026-11-21 (twelfth pass) — Task Queue / Team tab UI polish
 
