@@ -13,7 +13,7 @@ Goal: courier counters confirm receipt without running DropOff app.
 5. DropOff (ops) marks the job delivered manually; counter never opens the app.
 
 ### B) QR/app-lite (when counter has a smartphone)
-1. Counter opens `https://dropoff-api.godfreymoseskalambo.workers.dev/partner/console`
+1. Counter opens `https://dropoff.carpsosolutions.store/partner/console`
 2. Enters the **DropOff ref** or **the courier waybill number** shown on the DropOff waybill
 3. Taps “Confirm arrival” / “Departed” / “Delivered” — closes the loop with no POS integration
 4. If counter has a scanner, scan the QR from the DropOff waybill; enters the same ref/waybill.
