@@ -15,7 +15,6 @@ import 'booking_screen.dart';
 import 'coverage_screen.dart';
 import 'track_screen.dart';
 import '../ui/app_spinner.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 /// The seller's business dashboard: plan usage, parcels in flight, delivered
 /// count, referral income — one glance, all server-backed. Shown as a bottom
@@ -339,8 +338,6 @@ class _BusinessScreenState extends State<BusinessScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
           children: [
-            SvgPicture.asset('assets/brand/dropoff-logo.svg', height: 40),
-            const SizedBox(height: 8),
             Row(children: [
               const Text('Business', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.6)),
               const Spacer(),

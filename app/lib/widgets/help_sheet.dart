@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import '../ui/app_theme.dart';
 
@@ -174,8 +173,6 @@ class HelpSheet extends StatelessWidget {
               Text(row.body, style: AppType.body),
               const SizedBox(height: 12),
             ],
-            const SizedBox(height: 8),
-            Center(child: SvgPicture.asset('assets/brand/dropoff-logo.svg', height: 32)),
           ],
         ),
       ),

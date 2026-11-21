@@ -22,7 +22,6 @@ import '../ui/in_app_browser.dart';
 import '../services/device_lock.dart';
 import '../ui/money_errors.dart';
 import '../ui/app_spinner.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import '../services/step_sounds.dart';
 
 /// Email + password sign in / create account (the JWT + phone persist locally;
@@ -541,10 +540,6 @@ class _AccountScreenState extends State<AccountScreen> {
         controller: _listController,
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
         children: [
-          if (!signedIn) ...[
-            Center(child: SvgPicture.asset('assets/brand/dropoff-logo.svg', height: 56)),
-            const SizedBox(height: 16),
-          ],
           if (signedIn) ...[
             Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [

@@ -32,7 +32,6 @@ import 'account_screen.dart';
 import 'bookings_screen.dart';
 import 'waybill_screen.dart';
 import '../ui/app_spinner.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 class BookingScreen extends StatefulWidget {
   final String? initialCourierId;
@@ -1694,8 +1693,6 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
           padding: const EdgeInsets.all(26),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             const Spacer(),
-            SvgPicture.asset('assets/brand/dropoff-logo.svg', height: 48),
-            const SizedBox(height: 16),
             const CircleAvatar(radius: 48, backgroundColor: Color(0xFFE3EFE6), child: Icon(Icons.check_rounded, color: AppColors.forest, size: 52)),
             const SizedBox(height: 26),
             const Text('Your pickup is booked.', textAlign: TextAlign.center, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),

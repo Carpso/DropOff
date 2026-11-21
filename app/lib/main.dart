@@ -1,4 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────
+// ignore_for_file: prefer_const_constructors, prefer_const_literals_to_create_immutables
 // DROPOFF — ownership stamp (do not remove)
 // :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
 // © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
@@ -8,7 +9,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import 'ui/keys.dart';
 import 'data/catalog.dart' as cat;
@@ -33,6 +33,7 @@ import 'services/device_lock.dart';
 
 import 'ui/app_spinner.dart';
 import 'ui/in_app_browser.dart';
+import 'widgets/common.dart';
 
 /// Root navigator so push-notification taps and deep links can open the right screen from anywhere.
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -402,11 +403,11 @@ class _SplashScreenState extends State<_SplashScreen> {
       backgroundColor: AppColors.forest,
       body: Center(
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          SvgPicture.asset('assets/brand/dropoff-logo.svg', height: 56),
-          const SizedBox(height: 16),
-          const AppLogoSpinner(size: 28, color: AppColors.amber),
-          const SizedBox(height: 12),
-          const Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
+          DropOffLogo(size: 56),
+          SizedBox(height: 16),
+          AppLogoSpinner(size: 28, color: AppColors.amber),
+          SizedBox(height: 12),
+          Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
         ]),
       ),
     );
