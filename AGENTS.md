@@ -53,7 +53,8 @@ After every change session, without asking the owner:
   the worker still auto-upgrades large/over-cap parcels to a car.
 - Home screen: trust strip and 3-step card removed, replaced by one
   "How DropOff works — six quick steps" tile. Version bumped to `0.5.62+72`
-  then `0.5.63+73` for the banner fix (codes 57–72 consumed).
+  then `0.5.63+73` for the banner fix, then `0.5.64+74` for removing the
+  sender vehicle question (codes 57–73 consumed).
 
 ## 2026-11-21 (twelfth pass) — Task Queue / Team tab UI polish
 
