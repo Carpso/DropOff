@@ -48,6 +48,9 @@ After every change session, without asking the owner:
 - Read-heavy copy cut: counter fare explained once, pin explanation condensed,
   help/tutorial rows shortened to one line each, "item" used consistently.
 - Morning window labels corrected to **5:30–7:30 AM** (06:00 is the slot name).
+- Sender vehicle selection: removed the "Does it need a car? yes/no" question
+  from booking and collections. Motorcycle is the only sender-facing choice;
+  the worker still auto-upgrades large/over-cap parcels to a car.
 - Home screen: trust strip and 3-step card removed, replaced by one
   "How DropOff works — six quick steps" tile. Version bumped to `0.5.62+72`
   then `0.5.63+73` for the banner fix (codes 57–72 consumed).

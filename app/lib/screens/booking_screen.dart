@@ -112,11 +112,9 @@ class _BookingScreenState extends State<BookingScreen> {
   double? _promoPct;
   String _promoNote = '';
 
-  /// The system decides the vehicle from parcel size + the car preference —
-  /// senders no longer pick one (owner 2026-11-21).
-  bool _needsCar = false;
+  // The worker chooses car vs motorcycle from parcel size + count; the sender
+  // never picks a vehicle class.
   String get _vehicleClass {
-    if (_needsCar) return 'car';
     if (_size == ParcelSize.large) return 'car';
     final cap = switch (_size) {
       ParcelSize.small => 10,
@@ -209,7 +207,6 @@ class _BookingScreenState extends State<BookingScreen> {
           _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
         }
       }
-      _needsCar = pre['needs_car'] == true || '${pre['needs_car'] ?? ''}' == '1' || '${pre['vehicle_class'] ?? ''}' == 'car';
       final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
       if (parcels > 0 && parcels <= _parcelCapFor(_vehicleClass)) {
         _parcels = parcels;
@@ -724,7 +721,6 @@ class _BookingScreenState extends State<BookingScreen> {
       pickupAt: null,
       parcels: _parcels,
       vehicleClass: _vehicleClass,
-      needsCar: _needsCar,
       pickupLat: _pickupLat,
       pickupLng: _pickupLng,
       parcelPhotoUrl: _parcelPhotoUrl,
@@ -1074,22 +1070,9 @@ class _BookingScreenState extends State<BookingScreen> {
           child: Text('Optional — printed on the depot counter receipt so the depot knows what it is carrying.', style: AppType.caption),
         ),
         const SizedBox(height: 10),
-        // VEHICLE IS SERVER-DECIDED (owner 2026-11-21): the only sender input
-        // is "does it need a car?". Motorcycles stay first priority (fast lane).
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(value: false, label: Text('No — motorcycle'), icon: Icon(Icons.two_wheeler)),
-            ButtonSegment(value: true, label: Text('Yes — car'), icon: Icon(Icons.directions_car)),
-          ],
-          selected: {_needsCar},
-          onSelectionChanged: (v) {
-            setState(() => _needsCar = v.first);
-          },
-        ),
-        const SizedBox(height: 8),
-        const Text('Motorcycles are our fast lane. Choose "car" for bulky items — we assign the right rider automatically.',
-            style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.3)),
-        const SizedBox(height: 10),
+        // VEHICLE IS SERVER-DECIDED (owner 2026-11-21): motorcycles are the
+        // default; the worker upgrades to a car automatically for large or
+        // over-cap parcels. No vehicle question is shown to the sender.
         _vehicleClass == 'motorcycle'
             ? DropdownButtonFormField<int>(
                 initialValue: _parcels.clamp(1, _parcelCap),

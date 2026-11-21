@@ -35,8 +35,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   String _window = '10:00';
   final String _payment = 'Mobile money';
   // Vehicle is SERVER-DECIDED from parcel size + this one preference.
-  bool _needsCar = false;
-  String get _vehicleClass => _needsCar || _size == 'large' ? 'car' : 'motorcycle';
+  String get _vehicleClass => _size == 'large' ? 'car' : 'motorcycle';
   String _size = 'medium'; // drives the server's size-aware motorcycle cap
   int _parcels = 1;
   bool _saving = false;
@@ -192,7 +191,6 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       description: _description.text.trim().isEmpty ? null : _description.text.trim(),
       parcels: _parcels,
       vehicleClass: _vehicleClass,
-      needsCar: _needsCar,
       promoCode: promoCode,
       payMethod: 'mobile_money',
       parcelSize: _size,
@@ -400,19 +398,8 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           ]),
         ),
         const SizedBox(height: 16),
-        // VEHICLE IS SERVER-DECIDED (owner 2026-11-21).
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(value: false, label: Text('No — motorcycle'), icon: Icon(Icons.two_wheeler)),
-            ButtonSegment(value: true, label: Text('Yes — car'), icon: Icon(Icons.directions_car)),
-          ],
-          selected: {_needsCar},
-          onSelectionChanged: (v) => setState(() => _needsCar = v.first),
-        ),
-        const SizedBox(height: 8),
-        const Text('Motorcycles are the fast lane. Choose "car" for bulky items — we assign the rider automatically.',
-            style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.3)),
-        const SizedBox(height: 10),
+        // VEHICLE IS SERVER-DECIDED: motorcycle by default, car automatically
+        // for large or over-cap items. No vehicle question for the sender.
         _vehicleClass == 'motorcycle'
             ? DropdownButtonFormField<int>(
                 initialValue: _parcels.clamp(1, _parcelCapFor(_vehicleClass, _size)),
