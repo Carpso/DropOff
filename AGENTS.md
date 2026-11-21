@@ -51,10 +51,9 @@ After every change session, without asking the owner:
   those sprites are present. `/jobs/:ref/live` now returns `vehicle_class`
   (server-decided car upgrade), and the rider navigator + sender tracking map
   show the same marker.
-- **3D art still blocked:** both sprite generation jobs failed again with
-  "Insufficient balance" (pay-as-you-go image credits). Git confirms no
-  `map_bike_3d.png` / `map_car_3d.png` were ever committed. The hand-drawn
-  branded marker is the shipping fallback.
+- **3D art resolved:** the sprite files now exist at `app/assets/brand/map_bike_3d.png`
+  and `app/assets/brand/map_car_3d.png` with the DropOff logo composited onto
+  the helmet (bike) and roof (car). `MapVehicleMarker` auto-loads them.
 
 ## 2026-11-21 (fifteenth pass) — premium navigation voice + smart saved pins
 
