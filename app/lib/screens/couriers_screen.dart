@@ -85,7 +85,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
         children: [
           const Text('Courier directory', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.6)),
           const SizedBox(height: 6),
-          const Text('Compare available rates, inspect sample receipts, then book a rider to your preferred depot.', style: TextStyle(color: AppColors.muted, height: 1.45)),
+          const Text('Browse partner depots, see sample receipts, then book a rider.', style: TextStyle(color: AppColors.muted, height: 1.45)),
           const SizedBox(height: 20),
           TextField(
             controller: _searchCtl,
@@ -318,7 +318,7 @@ class _LiveDepotsSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          const InfoPill(icon: Icons.info_outline, label: 'In-app courier payment & live parcel scanning — coming soon. Pay the depot at drop-off.'),
+          const InfoPill(icon: Icons.info_outline, label: 'Your rider pays the depot at the counter. You repay the exact receipt in DropOff.'),
         ]);
       },
     );

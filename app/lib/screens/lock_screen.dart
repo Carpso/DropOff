@@ -67,7 +67,7 @@ class BiometricLockScreen extends StatelessWidget {
                 ),
               TextButton(
                 onPressed: busy ? null : onUsePassword,
-                child: const Text('Use my password instead',
+                child: const Text('Sign in another way',
                     style: TextStyle(color: Color(0xFFC9D9D2), fontWeight: FontWeight.w700)),
               ),
             ]),

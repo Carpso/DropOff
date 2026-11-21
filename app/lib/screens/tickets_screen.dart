@@ -237,7 +237,7 @@ class _NewTicketSheetState extends State<_NewTicketSheet> {
           const SizedBox(height: 16),
           const Text('New support ticket', style: AppType.title),
           const SizedBox(height: 14),
-          TextField(controller: _subject, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Subject', hintText: 'e.g. Parcel not delivered')),
+          TextField(controller: _subject, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Subject', hintText: 'e.g. Item not delivered')),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: _category,

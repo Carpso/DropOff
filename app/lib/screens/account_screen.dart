@@ -656,7 +656,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.menu_book_outlined, color: AppColors.forest),
                   title: const Text('How DropOff works — tutorial', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  subtitle: const Text('6 quick steps for senders.', style: TextStyle(fontSize: 11.5)),
+                  subtitle: Text(store.isRider ? '6 quick steps for riders.' : '6 quick steps for senders.', style: const TextStyle(fontSize: 11.5)),
                   onTap: () => TutorialSheet.show(context, senderOnly: !store.isRider, rider: store.isRider),
                 ),
                 const SizedBox(height: 6),
@@ -664,7 +664,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.pin_outlined, color: AppColors.forest),
                   title: const Text('Door handover PIN', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  subtitle: const Text('Set your own 4-digit code — show it to the rider at your door.', style: TextStyle(fontSize: 11.5)),
+                  subtitle: const Text('Set your own 4-digit door code — recipients show it at handover.', style: TextStyle(fontSize: 11.5)),
                   onTap: _editDoorPin,
                 ),
                 const SizedBox(height: 6),
@@ -1199,7 +1199,7 @@ class _TiersCardState extends State<_TiersCard> {
     // Arrival ranges (CAT) — matches the booking slot picker. Cap at 3 so the
     // label can never balloon into a tall vertical stack.
     const ranges = {
-      '06:00': '6:00–7:30 AM',
+      '06:00': '5:30—7:30 AM',
       '10:00': '10:00–11:30 AM',
       '14:00': '2:00–3:30 PM',
     };
@@ -1236,7 +1236,7 @@ class _TiersCardState extends State<_TiersCard> {
           const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.',
               style: TextStyle(fontSize: 12.5, height: 1.4)),
           const SizedBox(height: 8),
-          const Text('The prompt adds our processing fee (platform cut) plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-parcel money.',
+          const Text('The prompt adds our processing fee plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-parcel money.',
               style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
         ]),
         actions: [
@@ -1814,7 +1814,7 @@ class _CreateAccountSheetState extends State<_CreateAccountSheet> {
         const SizedBox(height: 12),
         TextField(controller: _password, obscureText: true, autofillHints: const [AutofillHints.password], decoration: const InputDecoration(labelText: 'Password (8+ chars)', helperText: 'At least 8 characters')),
         const SizedBox(height: 12),
-        TextField(controller: _phone, keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber], decoration: const InputDecoration(labelText: 'Mobile money phone', helperText: '09..., 097... or +260... — parcels addressed to it appear automatically')),
+        TextField(controller: _phone, keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber], decoration: const InputDecoration(labelText: 'Mobile money phone', helperText: '09..., 097... or +260... — items addressed to it appear automatically')),
         const SizedBox(height: 12),
         TextField(controller: _fullName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Full name (optional)')),
         const SizedBox(height: 12),

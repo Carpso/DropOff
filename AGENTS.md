@@ -27,6 +27,21 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (thirteenth pass) — premium sender UI/UX copy pass
+
+- Truthfulness: counter fare now says rider pays at the counter and sender
+  repays the photographed receipt in DropOff (booking, booking detail, waybill,
+  courier directory, collections). "Auto-bill" changed to a momo reminder.
+  Canceled-booking copy replaced with the roll-forward message.
+- Raw error/ref codes no longer shown: booking, payment, receipt and ticket
+  errors are plain next-step sentences. Raw DRO- refs removed from success copy.
+- Read-heavy copy cut: counter fare explained once, pin explanation condensed,
+  help/tutorial rows shortened to one line each, "item" used consistently.
+- Morning window labels corrected to **5:30–7:30 AM** (06:00 is the slot name).
+- Home screen: trust strip and 3-step card removed, replaced by one
+  "How DropOff works — six quick steps" tile. Version bumped to `0.5.62+72`
+  (codes 57–71 consumed).
+
 ## 2026-11-21 (twelfth pass) — Task Queue / Team tab UI polish
 
 - Rider sweep-shift control moved OUT of the Task Queue body into a compact

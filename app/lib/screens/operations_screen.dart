@@ -341,7 +341,7 @@ class OperationsScreen extends StatelessWidget {
           const SizedBox(height: 12),
           const _SelfieBanner(),
           Row(children: [
-            Expanded(child: _Metric(value: '${store.bookings.length}', label: 'Bookings on device', icon: Icons.inventory_2_outlined)),
+            Expanded(child: _Metric(value: '${store.bookings.length}', label: 'Jobs on this device', icon: Icons.inventory_2_outlined)),
             const SizedBox(width: 12),
             Expanded(child: _TeamSizeChip(fallback: activeRiders)),
           ]),
@@ -603,7 +603,7 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
       if (!silent && res.ok) {
         AppToast.show(context, 'Live position shared with senders of your jobs.');
       } else if (!silent && !res.ok) {
-        AppToast.show(context, 'Could not submit position (network) — retry when online.');
+        AppToast.show(context, 'Could not share your position - retry when online.');
       }
     } catch (_) {
       if (!mounted) return;
@@ -1109,7 +1109,7 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
             Text(
               onTrack
                   ? 'On pace: $pace expected by day $day of the month.'
-                  : '$behind behind pace - clear the daily $daily first, then use the rest of the month to catch up.',
+                  : "$behind behind pace — reach today's $daily target first, then use the rest of the month to catch up.",
               style: TextStyle(color: onTrack ? AppColors.forest : AppColors.warning, fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
@@ -1128,7 +1128,7 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
               const Row(children: [
                 Icon(Icons.savings_outlined, size: 15, color: AppColors.forest),
                 SizedBox(width: 6),
-                Text('Over-target bonus', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
+                Text('Target and bonus', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5)),
               ]),
               const SizedBox(height: 4),
               Text(
@@ -1424,15 +1424,15 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
       return const Row(mainAxisSize: MainAxisSize.min, children: [
         AppLogoSpinner(size: 12),
         SizedBox(width: 6),
-        Text('AI is looking…', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+        Text('Checking your selfie…', style: TextStyle(fontSize: 11, color: AppColors.muted)),
       ]);
     }
     if (f == null) return const SizedBox.shrink();
     final verdict = '${f['verdict'] ?? 'review'}';
     final (color, label) = switch (verdict) {
       'pass' => (AppColors.forest, 'One real photo of you'),
-      'fail' => (AppColors.danger, 'Not one person - retake?'),
-      _ => (AppColors.warning, 'AI unsure - admin will decide'),
+      'fail' => (AppColors.danger, 'One clear photo of you is needed - retake it.'),
+      _ => (AppColors.warning, 'Check in progress - DropOff will confirm.'),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -1574,7 +1574,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
                 icon: _faceBusy
                     ? const AppLogoSpinner(size: 15)
                     : const Icon(Icons.auto_awesome, size: 17),
-                label: Text(_faceCheck == null ? 'AI check my selfie' : 'Re-check my selfie'),
+                label: Text(_faceCheck == null ? 'Check my selfie' : 'Re-check my selfie'),
               ),
               _faceChip(),
             ]),
@@ -1669,7 +1669,7 @@ class _SelfieBannerState extends State<_SelfieBanner> {
     }
     final st = '${res.body['verification_status'] ?? ''}';
     _snack(st == 'pending'
-        ? 'This photo does not look like one person - you are back in the review queue.'
+        ? 'We need a clearer selfie. Retake it to return to review.'
         : 'Photo added - senders will see you on the tracking page.');
     setState(() => _needed = false);
   }

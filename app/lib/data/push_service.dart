@@ -60,8 +60,8 @@ class PushService {
             description: 'Booking, dispatch, rider assignment and delivery updates.',
             importance: Importance.high));
       await androidImpl?.createNotificationChannel(
-        const AndroidNotificationChannel('dropoff_chat', 'DropOff — Chat',
-            description: 'Messages from riders, courier partners and DropOff support.',
+        const AndroidNotificationChannel('dropoff_chat', 'DropOff — Support tickets',
+            description: 'Replies to your support tickets and DropOff updates.',
             importance: Importance.high));
       await androidImpl?.createNotificationChannel(
         const AndroidNotificationChannel('dropoff_payments', 'DropOff — Payments',
@@ -127,8 +127,8 @@ class PushService {
 
   static AndroidNotificationChannel _channelFor(String kind) {
     if (kind.startsWith('chat') || kind.contains('support')) {
-      return const AndroidNotificationChannel('dropoff_chat', 'DropOff — Chat',
-          description: 'Messages from riders, courier partners and DropOff support.',
+      return const AndroidNotificationChannel('dropoff_chat', 'DropOff — Support tickets',
+          description: 'Replies to your support tickets and DropOff updates.',
           importance: Importance.high);
     }
     if (kind.contains('payment') || kind.contains('deposit') || kind.contains('plan') || kind.contains('subscription')) {
@@ -207,7 +207,7 @@ class PushService {
         'rider_assigned' => 'Rider assigned',
         'job_assigned' => 'New delivery assigned',
         'job_delivered' => 'Delivered — rate your rider',
-        'pickup_reminder' => 'Time to hand it over',
+        'pickup_reminder' => 'Pickup time',
         'plan_renewed' => 'Plan renewed — parcels unlocked',
         'subscription_active' => 'Plan activated',
         'marketing' => 'DropOff',

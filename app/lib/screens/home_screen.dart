@@ -15,6 +15,7 @@ import 'bookings_screen.dart';
 import 'collections_screen.dart';
 import 'couriers_screen.dart';
 import 'track_screen.dart';
+import '../widgets/tutorial_sheet.dart';
 import '../ui/app_spinner.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -203,13 +204,16 @@ class HomeScreen extends StatelessWidget {
           const SizedBox(height: 14),
           const _FareChecker(),
           const SizedBox(height: 18),
-          const Row(children: [
-            Expanded(child: _TrustItem(icon: Icons.schedule, title: 'Pickup that fits', subtitle: 'From your doorstep')),
-            SizedBox(width: 8),
-            Expanded(child: _TrustItem(icon: Icons.receipt_long, title: 'Clear pricing', subtitle: 'Courier + rider fee')),
-            SizedBox(width: 8),
-            Expanded(child: _TrustItem(icon: Icons.verified_outlined, title: 'Proof of drop', subtitle: 'Receipt & tracking')),
-          ]),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.menu_book_outlined, color: AppColors.forest),
+              title: const Text('How DropOff works', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+              subtitle: const Text('Six quick steps', style: TextStyle(fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+              onTap: () => TutorialSheet.show(context, senderOnly: true),
+            ),
+          ),
           if (active.isNotEmpty) ...[
             const SizedBox(height: 28),
             SectionTitle('On the move', actionLabel: 'View all', onAction: onOpenBookings),
@@ -251,10 +255,6 @@ class HomeScreen extends StatelessWidget {
               },
             ),
           ),
-          const SizedBox(height: 28),
-          const SectionTitle('One booking. Three simple steps.'),
-          const SizedBox(height: 6),
-          const _HowItWorks(),
         ],
         ),
       ),
@@ -262,64 +262,6 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class _TrustItem extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  const _TrustItem({required this.icon, required this.title, required this.subtitle});
-
-  @override
-  Widget build(BuildContext context) => Column(children: [
-        Icon(icon, color: AppColors.forest, size: 25),
-        const SizedBox(height: 8),
-        Text(title, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppType.callout),
-        const SizedBox(height: 3),
-        Text(subtitle, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: AppColors.muted)),
-      ]);
-}
-
-class _HowItWorks extends StatelessWidget {
-  const _HowItWorks();
-
-  @override
-  Widget build(BuildContext context) => const Card(
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Column(children: [
-            _Step(number: '01', title: 'We collect', text: 'Tell us where you are and what you are sending.'),
-            _Step(number: '02', title: 'We drop off', text: 'Your rider takes it to Platinum, Mercury, DHL or another courier.'),
-            _Step(number: '03', title: 'You follow it', text: 'Keep the DropOff reference and the courier waybill in one place.', last: true),
-          ]),
-        ),
-      );
-}
-
-class _Step extends StatelessWidget {
-  final String number;
-  final String title;
-  final String text;
-  final bool last;
-  const _Step({required this.number, required this.title, required this.text, this.last = false});
-
-  @override
-  Widget build(BuildContext context) => IntrinsicHeight(
-        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Column(children: [
-            CircleAvatar(radius: 16, backgroundColor: AppColors.amber, child: Text(number, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: AppColors.ink))),
-            if (!last) const Expanded(child: VerticalDivider(color: AppColors.line, thickness: 1, width: 24)),
-          ]),
-          const SizedBox(width: 12),
-          Expanded(child: Padding(
-            padding: EdgeInsets.only(bottom: last ? 0 : 22),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-              const SizedBox(height: 4),
-              Text(text, style: const TextStyle(color: AppColors.muted, height: 1.4, fontSize: 13)),
-            ]),
-          )),
-        ]),
-      );
-}
 
 /// Enhancement: "Check a fare" right on the home screen — turns price-
 /// shoppers into bookings. Prices the HOME/OFFICE/STORE → nominated depot

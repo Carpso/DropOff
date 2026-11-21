@@ -64,7 +64,7 @@ class _BookingScreenState extends State<BookingScreen> {
   /// Seller-facing slot copy: arrival RANGE + benefit + booking cutoff (CAT).
   /// Closed slots stay visible (list-only) and auto-roll forward.
   static const Map<String, ({String title, String benefit, String cutoff})> slotCopy = {
-    '06:00': (title: '6:00 – 7:30 AM window', benefit: 'Catches early outbound buses', cutoff: '05:30'),
+    '06:00': (title: '5:30 – 7:30 AM window', benefit: 'Catches early outbound buses', cutoff: '05:30'),
     '10:00': (title: '10:00 – 11:30 AM window', benefit: 'Catches midday courier express', cutoff: '09:30'),
     '14:00': (title: '2:00 – 3:30 PM window', benefit: 'Catches final evening transit', cutoff: '13:30'),
   };
@@ -591,7 +591,7 @@ class _BookingScreenState extends State<BookingScreen> {
       // Nudge, never block: a pin gives exact dispatch + turn-by-turn stops;
       // a typed address still books (navigated by its text).
       if (_pickupLat == null) {
-        _message('Tip: tap the location icon to pin the pickup — the nearest rider and the turn-by-turn route both use it.');
+        _message('Pin for the nearest rider and an exact route.');
       }
     }
     if (_step < 2 && target >= 2) {
@@ -737,7 +737,7 @@ class _BookingScreenState extends State<BookingScreen> {
         'slot_required' || 'pickup_window_required' => 'Every parcel must be booked onto a Sweep slot (no untimed pickups).',
         _ => store.lastBookingErrorDetail?.isNotEmpty == true
             ? store.lastBookingErrorDetail!
-            : 'Booking could not be created (${store.lastBookingError}).',
+            : "We couldn't place your booking. Check your connection and try again.",
       };
       _message(msg);
       return;
@@ -751,7 +751,7 @@ class _BookingScreenState extends State<BookingScreen> {
     } else if (store.lastBookingWindowRolled != null) {
       _message('That window closed — your booking moved to the next open slot.');
     } else if (_tomorrowMorning) {
-      _message('You booked the TOMORROW 6:00 – 7:30 AM early sweep — the rider collects in the morning.');
+      _message('You booked the TOMORROW 5:30 – 7:30 AM early sweep — the rider collects in the morning.');
     }
 
     // Live Lipila collect for mobile-money jobs; the Worker responds with the
@@ -979,11 +979,11 @@ class _BookingScreenState extends State<BookingScreen> {
         ],
         if (_pickupLat != null && _pickupLng != null) ...[
           const SizedBox(height: 4),
-          const Text('Pickup pinned to your current location — we will match you with the nearest rider.',
+          const Text('Pickup pinned. Great - we will match the nearest rider.',
               style: TextStyle(color: AppColors.forest, fontSize: 10.5, height: 1.3)),
         ] else ...[
           const SizedBox(height: 4),
-          const Text('No pin yet — the rider still finds you by your address, but pinning it gives the nearest rider and an exact route.',
+          const Text('No pin - the rider uses your address. Pin for an exact route.',
               style: TextStyle(color: AppColors.amber, fontSize: 10.5, height: 1.3)),
         ],
         const SizedBox(height: 16),
@@ -1023,7 +1023,7 @@ class _BookingScreenState extends State<BookingScreen> {
           }),
         ),
         const SizedBox(height: 16),
-        TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents (required)', hintText: 'e.g. Two boxed phones', helperText: 'Declare what is inside — drugs, weapons, fuel and live animals are forbidden.', prefixIcon: Icon(Icons.inventory_2_outlined))),
+        TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Item contents (required)', hintText: 'e.g. Two boxed phones', helperText: 'Declare what is inside — drugs, weapons, fuel and live animals are forbidden.', prefixIcon: Icon(Icons.inventory_2_outlined))),
         const Row(children: [
           Expanded(child: Text('Contents are required — undeclared items are refused at pickup.', style: AppType.caption)),
           HelpIconButton(topic: HelpTopic.forbiddenItems),
@@ -1094,7 +1094,7 @@ class _BookingScreenState extends State<BookingScreen> {
             ? DropdownButtonFormField<int>(
                 initialValue: _parcels.clamp(1, _parcelCap),
                 isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Parcels', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+                decoration: const InputDecoration(labelText: 'Items', hintText: '1', prefixIcon: Icon(Icons.inventory)),
                 items: List.generate(_parcelCap, (i) => i + 1)
                     .map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}')))
                     .toList(),
@@ -1105,7 +1105,7 @@ class _BookingScreenState extends State<BookingScreen> {
             : TextFormField(
                 controller: _parcelsCtl,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Parcels (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
+                decoration: const InputDecoration(labelText: 'Items (no limit)', hintText: '1', prefixIcon: Icon(Icons.inventory)),
                 onChanged: (v) {
                   final n = int.tryParse(v.replaceAll(RegExp(r'[^0-9]'), ''));
                   setState(() => _parcels = (n == null || n < 1) ? 1 : n);
@@ -1117,11 +1117,11 @@ class _BookingScreenState extends State<BookingScreen> {
               style: TextStyle(fontSize: 10.5, color: AppColors.forest, height: 1.3)),
         ],
         const SizedBox(height: 6),
-        const Text('Each parcel counts as one plan parcel.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
+        const Text('Each item uses one plan slot.', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
         const SizedBox(height: 26),
         Text('Choose the courier', style: TextStyle(fontSize: scaleText(context, 18), fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
-        const Text('Your rider takes the parcel to this company’s depot.', style: TextStyle(color: AppColors.ink, fontSize: 13)),
+        const Text('Your rider takes your items to this depot.', style: TextStyle(color: AppColors.ink, fontSize: 13)),
         const SizedBox(height: 12),
         const Text('Search couriers', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.ink)),
         const SizedBox(height: 6),
@@ -1215,7 +1215,7 @@ class _BookingScreenState extends State<BookingScreen> {
         const Padding(
           padding: EdgeInsets.only(top: 8),
           child: Row(children: [
-            Expanded(child: Text('Depot fare — asked at the counter. Rider leg is separate.', style: AppType.caption)),
+            Expanded(child: Text('Rider pays the depot; you repay the exact receipt here.', style: AppType.caption)),
             HelpIconButton(topic: HelpTopic.courierFare),
           ]),
         ),
@@ -1278,7 +1278,7 @@ class _BookingScreenState extends State<BookingScreen> {
           child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Icon(Icons.warning_amber_rounded, color: Color(0xFF7B5710)),
             SizedBox(width: 10),
-            Expanded(child: Text('Repeated missed handovers are logged as warnings. Bookings are still allowed — no strike hold applies.', style: TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
+            Expanded(child: Text('Missed handovers are logged. You can still book.', style: TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5D4200)))),
           ]),
         ),
         const SizedBox(height: 10),
@@ -1316,7 +1316,7 @@ class _BookingScreenState extends State<BookingScreen> {
           ListTile(
             tileColor: const Color(0xFFE9F0EB),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: AppColors.forest)),
-            title: const Text('Tomorrow 6:00 – 7:30 AM', style: TextStyle(fontWeight: FontWeight.w800)),
+            title: const Text('Tomorrow 5:30 – 7:30 AM', style: TextStyle(fontWeight: FontWeight.w800)),
             subtitle: const Text('Picked up tomorrow morning — after today’s late afternoon window has closed.'),
             trailing: const Icon(Icons.event, color: AppColors.forest),
           ),
@@ -1423,7 +1423,7 @@ class _BookingScreenState extends State<BookingScreen> {
         Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('$_from → $_to', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
           const SizedBox(height: 4),
-          Text('${courier.name} • ${_size.label} parcel • ${_tomorrowMorning ? 'Tomorrow morning sweep (06:00 – 07:30)' : pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.ink, fontSize: 13)),
+          Text('${courier.name} • ${_size.label} parcel • ${_tomorrowMorning ? 'Tomorrow morning sweep (05:30 – 07:30)' : pickupWindows[_pickupWindow]}', style: const TextStyle(color: AppColors.ink, fontSize: 13)),
           const Divider(height: 28),
           if (_planLeg == 'pack')
             _priceLine('DropOff leg (sender → depot)', 'Covered by plan')
@@ -1456,7 +1456,7 @@ class _BookingScreenState extends State<BookingScreen> {
           }),
           const Divider(height: 24),
           _priceLine('DropOff charge est. now', kwacha(_dropOffDue), bold: true),
-          const Padding(padding: EdgeInsets.only(top: 8), child: Text('The rider pays the depot fare at the counter. You repay the exact photographed receipt through DropOff to release the photo and reimburse the rider — it is not a DropOff charge.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
+          const Padding(padding: EdgeInsets.only(top: 8), child: Text('Rider pays the depot; you repay the exact receipt here.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
         ]))),
         ];
 
@@ -1495,7 +1495,7 @@ class _BookingScreenState extends State<BookingScreen> {
           Text(kwacha(_dropOffDue), maxLines: 1, overflow: TextOverflow.ellipsis, softWrap: false, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: AppColors.forest)),
           const SizedBox(width: 6),
           const Expanded(
-            child: Text('(+ depot fare repaid to the rider via the receipt)', maxLines: 2, overflow: TextOverflow.ellipsis, softWrap: true, style: TextStyle(fontSize: 11, color: AppColors.muted)),
+            child: Text('', maxLines: 2, overflow: TextOverflow.ellipsis, softWrap: true, style: TextStyle(fontSize: 11, color: AppColors.muted)),
           ),
         ]),
       );

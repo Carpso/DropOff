@@ -26,11 +26,11 @@ class TutorialSheet extends StatelessWidget {
     (Icons.person_add_alt_1, '1. Set up your account',
         'Sign in with your phone number (or email). Add a photo so riders recognise you. In Account → Door handover PIN you can set your own 4-digit code for door deliveries.'),
     (Icons.local_shipping_outlined, '2. Book a pickup',
-        'Choose courier depot, pickup address, parcel contents and size. Add a parcel photo — it protects you in disputes. Pick a 06:00 / 10:00 / 14:00 slot; too many parcels for a bike? Switch to a car.'),
+        'Pick a depot, address and item size. Add a photo for protection, then choose a sweep slot.'),
     (Icons.payments_outlined, '3. Pay on your phone',
         'Approve the momo prompt. Plan members use their included parcel slots; pay-as-you-go pays the quoted fee up front. The rider fronts the depot counter fare; repaying the photographed receipt through DropOff releases the photo and reimburses the rider. It is not a DropOff charge.'),
     (Icons.pin_outlined, '4. Show the pickup code',
-        'You get a 4-digit PICKUP code by SMS. Give it to your rider when they collect — never share it before they arrive.'),
+        'Show your rider the pickup code when they arrive.'),
     (Icons.track_changes, '5. Follow it live',
         'Track the parcel in-app from door to depot and on to the courier. Same-city recipients get no SMS PIN — you confirm receipt in the app when it lands.'),
     (Icons.star_outline, '6. Rate and repeat',
@@ -49,7 +49,7 @@ class TutorialSheet extends StatelessWidget {
     (Icons.receipt_long_outlined, '5. Depot drop',
         'Drop at the depot, photograph the parcel and the written receipt, type the EXACT amount on each receipt, then tap Submit drop. The task ticks off immediately. The rider fronts the counter fare; the sender repays the photographed receipt through DropOff and the rider is reimbursed fee-free.'),
     (Icons.insights_outlined, '6. Stats & bonuses',
-        'Your card shows today, in-hand, done and live earnings. Month-close bonuses need the pace target — keep the streak and the bonuses land automatically.'),
+        'Your card shows today, in hand and done. Pay and bonuses follow your agreement and the monthly target.'),
   ];
 
   @override
@@ -69,7 +69,7 @@ class TutorialSheet extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             senderOnly
-                ? '6 quick steps to send a parcel — keep it handy, it works offline.'
+                ? 'Six quick steps. Works offline.'
                 : rider
                     ? '6 quick steps for DropOff riders — keep it handy, it works offline.'
                     : 'A quick guide for every parcel — keep it handy, it works offline.',

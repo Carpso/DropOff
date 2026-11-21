@@ -7778,7 +7778,7 @@ async function dispatchToNearestRider(
     });
     await sendToPhone(env, pick.rider.phone, {
       title: 'New delivery assigned',
-      body: `Job ${job.ref} — ${String(job.service ?? '') === 'collection' ? 'collect at the depot counter' : `pickup at ${job?.pickup_address ?? 'sender address'}`}. Open the Team tab for details.`,
+      body: `Job ${job.ref} — ${String(job.service ?? '') === 'collection' ? 'collect at the depot counter' : `pickup at ${job?.pickup_address ?? 'sender address'}`}. Open the Task Queue for details.`,
       data: { job_ref: job.ref, kind: 'rider_assigned' },
     });
     return { rider: pick.rider, eta_minutes: etaMin, km: pick.km, fallback, excludedAtDepot: collectExcluded ?? [] };

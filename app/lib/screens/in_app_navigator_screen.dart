@@ -479,7 +479,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                 child: Text(
                   distanceLabel == null
                       ? 'Waiting for GPS…'
-                      : '$distanceLabel · $durationLabel${_engineDown ? ' · straight-line' : ''}${_routeLoading ? ' · routing…' : ''}',
+                      : '$distanceLabel · $durationLabel${_engineDown ? ' · direct line' : ''}${_routeLoading ? ' · routing…' : ''}',
                   style: const TextStyle(color: AppColors.ink, fontSize: 12.5, fontWeight: FontWeight.w600),
                 ),
               ),
@@ -487,7 +487,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                 TextButton.icon(
                   onPressed: _openCueSheet,
                   icon: const Icon(Icons.format_list_bulleted, size: 18),
-                  label: Text('Steps (${_route!.steps.length})'),
+                  label: Text('View steps (${_route!.steps.length})'),
                 ),
             ]),
             if (_error.isNotEmpty) Padding(

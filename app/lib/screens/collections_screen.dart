@@ -68,7 +68,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   static const Map<String, String> _windows = {
-    '06:00': '6:00 – 7:30 AM',
+    '06:00': '5:30 – 7:30 AM',
     '10:00': '10:00 – 11:30 AM',
     '14:00': '2:00 – 3:30 PM',
   };
@@ -143,7 +143,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     final up = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'receipt.jpg', kind: 'receipt');
     if (!mounted) return;
     setState(() => _receiptBusy = false);
-    if (!up.ok) return AppToast.error(context, 'Could not upload the receipt (${up.error}). Try again.');
+    if (!up.ok) return AppToast.error(context, 'Could not upload the receipt. Try again.');
     final url = '${up.body['url'] ?? ''}';
     if (url.isEmpty) return AppToast.error(context, 'The receipt upload returned no image. Try again.');
     setState(() => _receiptUrl = url);
@@ -201,7 +201,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     if (!mounted) return;
     if (!res.ok) {
       setState(() => _saving = false);
-      return _message('Could not book the collection (${res.error}). Try again.');
+      return _message('Could not book the collection. Try again.');
     }
     final ref = '${res.body['ref'] ?? ''}';
     final due = ((res.body['total_zmw'] as num?) ?? 0).toDouble();
@@ -299,9 +299,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           await AppScope.of(context).syncJobsFromServer();
         },
         child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
-        const Text('Where is the parcel waiting?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.4)),
+        const Text('Where are your items waiting?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.4)),
         const SizedBox(height: 4),
-        const Text('Your parcel already arrived at the courier in Lusaka. A rider picks it up and brings it to your recipient’s door.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4)),
+        const Text('Your items are already at the courier depot. A rider brings them to the recipient.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4)),
         const SizedBox(height: 16),
         const Text('Courier', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
@@ -373,7 +373,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
             ]),
             const SizedBox(height: 5),
-            const Text('Photograph the payment receipt from the sender. The rider shows it at the courier counter before collecting your parcel.',
+            const Text('Photograph the payment receipt from the sender. The rider shows it at the counter before collecting your item.',
                 style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
             const SizedBox(height: 10),
             if (_receiptUrl != null) ...[
@@ -434,7 +434,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           initialValue: _size,
-          decoration: const InputDecoration(labelText: 'Parcel size', prefixIcon: Icon(Icons.straighten_outlined)),
+          decoration: const InputDecoration(labelText: 'Item size', prefixIcon: Icon(Icons.straighten_outlined)),
           items: _sizeLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))).toList(),
           onChanged: (v) { if (v != null) { final cap = _parcelCapFor(_vehicleClass, v); setState(() { _size = v; if (_parcels > cap) _parcels = cap; }); } },
         ),
@@ -482,7 +482,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               child: Row(children: [
                 const Icon(Icons.event_repeat_rounded, size: 18, color: AppColors.muted),
                 const SizedBox(width: 10),
-                Expanded(child: Text('Tomorrow 6:00 – 7:30 AM', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _window == 'tomorrow:06:00' ? AppColors.forest : AppColors.ink))),
+                Expanded(child: Text('Tomorrow 5:30 – 7:30 AM', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: _window == 'tomorrow:06:00' ? AppColors.forest : AppColors.ink))),
                 if (_window == 'tomorrow:06:00') const Icon(Icons.check_circle, size: 18, color: AppColors.forest),
               ]),
             ),

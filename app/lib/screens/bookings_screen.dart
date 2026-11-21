@@ -402,7 +402,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           _detailRow('Pickup', booking.pickupAddress),
           if (booking.branch?.isNotEmpty == true)
             _detailRow('Drop-off branch', '${booking.branch} (${courier.name})'),
-          _detailRow('Parcel', '${booking.parcelSize.label} • ${booking.description}'),
+          _detailRow('Item', '${booking.parcelSize.label} • ${booking.description}'),
           _detailRow('Sender', '${booking.senderName}\n${booking.senderPhone}'),
           _detailRow('Recipient', '${booking.recipientName}\n${booking.recipientPhone}'),
           _detailRow('Payment', booking.paymentMethod),
@@ -412,7 +412,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           _detailRow('DropOff rider fee', kwacha(booking.riderFee)),
           _detailRow('Courier fare', kwacha(booking.courierFare)),
           if (booking.lastMileFee > 0) _detailRow('Last-mile fee', kwacha(booking.lastMileFee)),
-          _detailRow('Counter fare', '${booking.courierFare != null ? kwacha(booking.courierFare) : 'Confirmed at depot'} — pay directly to the depot'),
+          _detailRow('Counter fare', 'Rider pays at the counter — repay the receipt in DropOff'),
           _detailRow('DropOff due', '${kwacha(booking.riderFee + booking.lastMileFee)} + processing — DropOff charge, never partner money'),
           if (booking.promoCode != null)
             _detailRow('Promo', '${booking.promoCode}${booking.promoDiscount != null ? ' — saved ${kwacha(booking.promoDiscount)} on the DropOff leg' : ''}'),
@@ -681,7 +681,7 @@ class _MovementLogSheetState extends State<_MovementLogSheet> {
             const Row(children: [
               Icon(Icons.swap_horiz_rounded, color: AppColors.forest),
               SizedBox(width: 10),
-              Expanded(child: Text('How this parcel moved', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: -0.2))),
+              Expanded(child: Text('How your item moved', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, letterSpacing: -0.2))),
             ]),
             const SizedBox(height: 4),
             const Text('Every update on this job — who recorded it and when.', style: AppType.body),
@@ -706,8 +706,8 @@ class _MovementLogSheetState extends State<_MovementLogSheet> {
                 final at = _humanAt('${e['at'] ?? ''}');
                 final note = '${e['note'] ?? ''}'.trim();
                 final (icon, byline) = switch (who) {
-                  'rider' => (Icons.two_wheeler, 'Marked updated by rider${actor.isEmpty || actor == 'rider' ? '' : ' — $actor'}'),
-                  'partner' => (Icons.storefront_outlined, 'Marked updated by the courier depot'),
+                  'rider' => (Icons.two_wheeler, 'Updated by your rider${actor.isEmpty || actor == 'rider' ? '' : ' — $actor'}'),
+                  'partner' => (Icons.storefront_outlined, 'Updated by the courier depot'),
                   _ => (Icons.bolt_outlined, 'Recorded automatically'),
                 };
                 return Padding(
@@ -1272,7 +1272,7 @@ class _RatingCardState extends State<_RatingCard> {
           ]),
           const SizedBox(height: 4),
           const Text(
-            'Rate the rider, the courier and — if you received this parcel — the sender. Comments are optional but help everyone.',
+            'Rate your rider and courier. The recipient can rate the sender.',
             style: AppType.caption,
           ),
           const SizedBox(height: 14),
@@ -1283,7 +1283,7 @@ class _RatingCardState extends State<_RatingCard> {
           if (!_canRateSeller) ...[
             const SizedBox(height: 14),
             const Text(
-              'Only the recipient can rate the sender — share the tracking link with them.',
+              'The recipient rates the sender from their tracking link.',
               style: AppType.caption,
             ),
           ],
@@ -1399,7 +1399,7 @@ class _ParcelsForYou extends StatelessWidget {
             const SizedBox(width: 10),
             const Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Parcels for you', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                Text('Items for you', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
                 Text('Addressed to your number — tap to track', style: TextStyle(color: AppColors.muted, fontSize: 11.5)),
               ]),
             ),
@@ -1481,7 +1481,7 @@ class _ExpiredCard extends StatelessWidget {
             Text(
               booking.lastEvent == 'hold_expired'
                   ? 'The prepayment was never approved within 24 hours, so this booking was canceled. No money was taken. Book again in the app when you are ready.'
-                  : 'This booking was canceled by the system (the parcel never moved). Any unspent prepayment is returned to your momo automatically.',
+                  : 'Your window elapsed, so this booking moved to the next open sweep. No payment was taken.',
               style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4),
             ),
           ]),
@@ -1519,7 +1519,7 @@ class _PrepayCardState extends State<_PrepayCard> {
             : out.status.startsWith('error:')
                 ? (out.status.contains('already paid')
                     ? 'This delivery is already paid.'
-                    : 'Payment could not start (${out.status.substring(6)}) — verify your momo balance and connection, then retry.')
+                    : 'Payment could not start. — verify your momo balance and connection, then retry.')
                 : 'Prompt sent — approve it on your phone to dispatch your rider.');
     unawaited(store.syncJobsFromServer());
   }

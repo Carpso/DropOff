@@ -98,7 +98,7 @@ class _TrackScreenState extends State<TrackScreen> {
     final gated = _data?['requires_account'] == true;
     final held = _data?['payment_held'] == true;
     return Scaffold(
-      appBar: AppBar(title: const Text('Track a parcel', style: TextStyle(fontWeight: FontWeight.w900))),
+      appBar: AppBar(title: const Text('Track a delivery', style: TextStyle(fontWeight: FontWeight.w900))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
         children: [
@@ -131,7 +131,7 @@ class _TrackScreenState extends State<TrackScreen> {
                   builder: (_) => TicketsScreen(prefill: 'Question about parcel ${_data?['ref'] ?? ''}: '),
                 )),
                 icon: const Icon(Icons.support_agent_outlined),
-                label: const Text('Get help with this parcel'),
+                label: const Text('Get help with this delivery'),
               ),
               // RECIPIENT RATES THE SENDER (owner 2026-11-21): the sender
               // cannot rate himself; only the parcel's recipient can.

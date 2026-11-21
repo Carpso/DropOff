@@ -274,13 +274,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Rider sweep-shift terms', style: TextStyle(fontWeight: FontWeight.w900)),
+          title: const Text('Sweep shift terms', style: TextStyle(fontWeight: FontWeight.w900)),
           content: const SingleChildScrollView(child: Text(
             'By going ON SHIFT you agree to work the three pickup windows: 05:30–07:30 (06:00), 10:00–11:30 and 14:00–15:30 CAT. '
             'The next sweep’s orders (06:00 / 10:00 / 14:00) may be claimed at any time, even off shift; collection starts at 05:30 for the 06:00 sweep, or at 10:00 / 14:00. '
             'DropOff assignments stop outside these windows, when you switch OFF SHIFT, or between shifts — so you are free to do other rides then. '
             'You agree to meet the daily target of 30 parcels, or the monthly target across the month if the daily target is missed; pay and bonuses follow the payroll rules. '
-            'You also agree to hand over every parcel only against the correct proof (code/photo) and to keep the app\'s location sharing on while on shift.',
+            'Hand over every item only against the correct proof (code or photo). Keep location sharing on while on shift.',
             style: TextStyle(fontSize: 12.5, height: 1.4),
           )),
           actions: [
@@ -408,7 +408,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 icon: _shiftBusy
                     ? const AppLogoSpinner(size: 15)
                     : Icon(on ? Icons.pause_circle_outline : Icons.play_circle_outline),
-                label: Text(_shiftBusy ? 'Saving…' : (on ? 'ON SHIFT — tap to go off' : 'OFF SHIFT — tap to go on')),
+                label: Text(_shiftBusy ? 'Saving' : (on ? 'Go off shift' : 'Go on shift')),
               ),
             ),
           ]),
@@ -481,7 +481,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       AppToast.error(context, 'This parcel is waiting for the sender\'s prepayment.');
       return;
     }
-    AppToast.error(context, 'Could not claim $ref (${res.error}). Try again.');
+    AppToast.error(context, switch (res.error) { 'at_capacity' => 'You are at capacity - finish a stop first.', 'payment_required' => 'Prepayment is still pending for this job.', _ => 'Could not claim this job - check your connection.' });
   }
 
   /* ----------------------- live clock + arrival GPS ----------------------- */
@@ -637,7 +637,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc');
     if (!mounted) return null;
     if (!res.ok) {
-      AppToast.show(context, 'Proof photo upload failed (${res.error ?? 'network'}) — moving on without it.');
+      AppToast.show(context, 'Proof photo did not upload - check your connection and retake it.');
       return null;
     }
     return '${res.body['url'] ?? ''}';
@@ -734,7 +734,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
             : '$addr${'${s['from_city'] ?? ''}'.trim().isNotEmpty ? ', ${s['from_city']}' : ''}'.trim());
     if (query.isEmpty) {
-      _snack('This stop has no pin or address yet — refresh, or ask ops.');
+      _snack('This stop has no pin yet - pull to refresh or contact DropOff support.');
       return;
     }
     // Toast wording (owner 2026-11-18): say WHAT is being located and that the
@@ -941,7 +941,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   unlocked: picked,
                   icon: Icons.inventory_2_outlined,
                   title: 'Dropped at the depot branch',
-                  subtitle: dropped ? 'Filed ✓' : !picked ? 'Locked — pick up first' : 'Parcel photos + every depot receipt, exact amounts',
+                  subtitle: dropped ? 'Filed' : !picked ? 'Locked - pick up first' : 'Item photos + every depot receipt and amount',
                   onTap: () async {
                     final res = await _depotDropWithReceipt(ref);
                     if (!mounted) return;
@@ -975,7 +975,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 ),
               if (lastMile == 0)
                 const Padding(padding: EdgeInsets.fromLTRB(14, 2, 14, 0), child: Text(
-                  'This run ends at the depot — the courier carries the parcel the rest of the way.',
+                  'The courier carries your items the rest of the way from the depot.',
                   style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.35))),
               const Divider(height: 16),
               // ORDER WAYBILL (owner 2026-11-18): the rider's read-only copy of
@@ -1002,7 +1002,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   leading: const Icon(Icons.swap_horiz_outlined, color: AppColors.forest),
                   title: const Text('Transfer this ride',
                       style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                  subtitle: const Text('Stuck in a queue? Hand this live trip to another rider',
+                  subtitle: const Text('Hand this trip to another active rider',
                       style: TextStyle(fontSize: 12)),
                   onTap: () => _transferStop(s),
                 ),
@@ -1049,8 +1049,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   String _handoverTitle(Map<String, dynamic> s, String kind) {
     final content = '${s['description'] ?? ''}'.trim();
     final words = content.split(RegExp(r'[^A-Za-z0-9]+')).where((w) => w.isNotEmpty).toList();
-    final word = words.isEmpty ? 'PARCEL' : words.first.toUpperCase();
-    return '$kind-$word-${s['ref']}'.toUpperCase();
+    final word = words.isEmpty ? 'item' : words.first.toLowerCase();
+    return '${kind[0].toUpperCase()}${kind.substring(1).toLowerCase()} — $word';
   }
 
   /// Re-fires the 4-digit handover code SMS (owner 2026-11-18). The server
@@ -1124,7 +1124,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               Text('Get the 4-digit PICKUP PIN from: ${senderName.isEmpty ? 'the sender' : senderName}${senderPhone.isNotEmpty ? ' · $senderPhone' : ''}',
                   style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35)),
               const SizedBox(height: 8),
-              const Text('Collect from the sender. Ask them for the 4-digit PICKUP code from their booking SMS — never a code nobody showed you.',
+              const Text('Ask the sender for the 4-digit code from their booking SMS.',
                 style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
               const SizedBox(height: 12),
               TextField(
@@ -1240,7 +1240,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     'otp_required' => 'Code rejected. ${detail.isEmpty ? 'The code is in the sender\'s booking SMS.' : detail}',
                     'otp_locked' => 'Too many wrong codes — DropOff support has been notified.',
                     'photo_required' => detail.isEmpty ? 'Photograph every picked-up item before filing.' : detail,
-                    'photo_locked' => 'Pickup photo already on file for $ref — the evidence is locked. Ask ops to correct a genuine mis-submission.',
+                    'photo_locked' => 'Pickup photo already on file for $ref — the evidence is locked. Contact DropOff support for a correction.',
                     _ => 'Could not file the pickup ($err).',
                   };
                   lastErrCode = err; // rejected-code errors unlock the resend helper
@@ -1254,7 +1254,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     );
     if (res == null) return null;
     if (res.ok) {
-      await _snack('$ref ✓ picked up from the sender');
+      await _snack('$ref - picked up');
       await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
       AnalyticsService.instance.track(feature: 'rider', action: 'picked_up', context: 'sender_stop');
       _load();
@@ -1296,7 +1296,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Row(children: [
-                Expanded(child: Text('Photograph every parcel, photograph every depot receipt exactly as written.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink))),
+                Expanded(child: Text('Photograph every item and each depot receipt with its exact amount.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink))),
                 HelpIconButton(topic: HelpTopic.depotReceipts),
               ]),
               const SizedBox(height: 12),
@@ -1309,12 +1309,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   child: AuthedImage(sellerPhoto, fit: BoxFit.cover, width: double.infinity, height: 140),
                 ),
                 const SizedBox(height: 4),
-                const Text('Compare this with the parcel you photograph below — they must be the same parcel.',
+                const Text('Compare this with the item photos you file below.',
                     style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.35)),
                 const SizedBox(height: 10),
               ],
               // ── Parcel photos (one or more) ──
-              Text('PARCEL PHOTOS (${parcelPhotos.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
+              Text('ITEM PHOTOS (${parcelPhotos.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
               const SizedBox(height: 4),
               if (parcelPhotos.isNotEmpty)
                 SizedBox(
@@ -1345,7 +1345,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 ),
               TextButton.icon(
                 icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                label: Text(parcelPhotos.isEmpty ? 'Add parcel photo (required)' : 'Add another parcel photo',
+                label: Text(parcelPhotos.isEmpty ? 'Capture first item (required)' : 'Capture next item',
                     style: const TextStyle(fontSize: 12.5)),
                 onPressed: () async {
                   final url = await _pickPodPhoto();
@@ -1380,7 +1380,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 onPressed: () => setDialog(() => receipts.add(_ReceiptEntry())),
               ),
               const Row(children: [
-                Expanded(child: Text('Photos stay masked until the sender pays — then they reveal and the reimbursement triggers.', style: AppType.caption)),
+                Expanded(child: Text('Photos unlock when the sender pays, and you are reimbursed.', style: AppType.caption)),
                 HelpIconButton(topic: HelpTopic.depotReceipts),
               ]),
             ]),
@@ -1427,7 +1427,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 if (!ctx.mounted) return;
                 Navigator.pop(ctx, r);
               },
-              child: Text(filing ? 'Filing drop...' : 'Submit drop'),
+              child: Text(filing ? 'Filing…' : 'Confirm depot drop'),
             ),
           ],
         ),
@@ -1437,7 +1437,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (res == null) return null; // cancelled
     if (res.ok) {
       setState(() => _busyRef = null);
-      await _snack('$ref ✓ ${'Dropped at the depot branch'}');
+      await _snack('$ref - dropped at depot');
       await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
       AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
       // Best-effort: compare seller's booking photo vs this drop photo.
@@ -1446,13 +1446,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       if (chk.ok) {
         final verdict = chk.body['same_parcel'] ?? 'uncertain';
         final flagged = chk.body['flagged'] == true;
-        await _snack(flagged
-            ? '$ref parcel check: possible mismatch — ops flagged for review'
-            : '$ref parcel check: $verdict');
+        await _snack(flagged || verdict != 'yes'
+            ? '$ref photo check inconclusive — DropOff support will review'
+            : '$ref photo check passed');
       } else {
         // AI check is best-effort; a slow/unavailable vision model must not
         // confuse a rider who just filed the drop correctly.
-        await _snack('$ref drop filed. Parcel check skipped (${chk.error ?? 'unavailable'}) — ops will eyeball the photos.');
+        await _snack('$ref drop filed. Photo check unavailable — DropOff will review the photos.');
       }
       _load();
       return res;
@@ -1467,7 +1467,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       'two_photos_required' => detail.isEmpty ? 'Parcel photos and receipt photos must be separate images.' : detail,
       'photo_locked' => detail.isEmpty ? 'That proof photo is already filed — pull to refresh; contact support if the task stays open.' : detail,
       'counter_receipt_locked' => detail.isEmpty ? 'The depot receipt is already paid and locked — contact support.' : detail,
-      _ => 'Could not submit the drop ($err).',
+      _ => 'Drop not filed - check your connection and retry.',
     });
     return res;
   }
@@ -1606,7 +1606,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 setDialog(() => submitting = false);
                 _snack(r.error == 'photo_required'
                     ? 'Attach the camera photo of the handover to confirm.'
-                    : 'Handover not filed (${r.error ?? 'network'}) — try again.');
+                    : 'Handover not filed - check your connection and retry.');
               },
               child: submitting
                   ? const AppLogoSpinner(size: 18, color: Colors.white)
@@ -1619,7 +1619,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (!mounted) return null;
     if (res == null) return null; // cancelled
     if (res.ok) {
-      await _snack('$ref — delivered and code-verified ✓');
+      await _snack('$ref - handover complete ✓');
       await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
       _load();
       return res;
@@ -1631,7 +1631,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     await _snack(switch (err) {
       'otp_required' => 'Code rejected. ${detail.isEmpty ? 'Ask the recipient to re-check their SMS.' : detail}',
       'otp_locked' => 'Too many wrong codes — support has been notified.',
-      _ => 'Could not mark delivered ($err).',
+      _ => 'Handover not filed - check your connection and retry.',
     });
     return res;
   }
@@ -1653,7 +1653,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             Text('${_available.length}', style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.forest)),
           ]),
           const SizedBox(height: 3),
-          const Text('Auto-assign could not place these. First to claim owns the parcel.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const Text('Unassigned jobs - first to claim takes them.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
           if (_availableHint != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -1669,7 +1669,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   Text('${j['ref']} · ${j['pickup_address']}', maxLines: 1, overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 2),
-                  Text('${j['sender_name'] ?? ''} → ${j['dest_city'] ?? ''} · ${j['parcels'] ?? 1} parcel(s) · ${j['pickup_window'] ?? ''}',
+                  Text('${j['sender_name'] ?? ''} → ${j['dest_city'] ?? ''} · ${j['parcels'] ?? 1} items · ${j['pickup_window'] ?? ''}',
                       maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
                   if ('${j['needs_car']}' == '1')
                     const Padding(
@@ -1705,7 +1705,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final store = AppScope.of(context);
     if (!store.linked) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Task queue', style: TextStyle(fontWeight: FontWeight.w900))),
+        appBar: AppBar(title: const Text('Task Queue', style: TextStyle(fontWeight: FontWeight.w900))),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
@@ -1776,9 +1776,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             child: Row(children: [
               const Icon(Icons.location_off, size: 16, color: AppColors.ink),
               const SizedBox(width: 8),
-              const Expanded(child: Text('Location sharing is OFF — dispatch cannot see you, so new orders will not arrive.',
+              const Expanded(child: Text('Location sharing is off - new jobs cannot reach you.',
                   style: TextStyle(fontSize: 11.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
-              TextButton(onPressed: () => store.setShareLocationOn(true), child: const Text('Turn on')),
+              TextButton(onPressed: () => store.setShareLocationOn(true), child: const Text('Turn on sharing')),
             ]),
           ),
         if (store.linked && _gpsIssue != null)
@@ -1789,8 +1789,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               const Icon(Icons.gps_off, size: 16, color: AppColors.danger),
               const SizedBox(width: 8),
               Expanded(child: Text(_gpsIssue == 'service'
-                  ? 'Location services are off — ARRIVED and presence updates are paused.'
-                  : 'Location permission was denied — ARRIVED and presence updates are paused.',
+                  ? 'Location services are off - arrival alerts and availability are paused.'
+                  : 'Location permission was denied - arrival alerts and availability are paused.',
                   style: const TextStyle(fontSize: 11.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
               TextButton(
                 onPressed: () => _gpsIssue == 'service'
@@ -1831,7 +1831,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                                     style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
                                 const SizedBox(height: 8),
                                 const Text(
-                                  'Slot batches land here the moment the system assigns you a run — you do not have to book anything. Pull down or tap Check for new rides to sync.',
+                                  'New jobs appear here automatically. Pull down to refresh.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(color: AppColors.muted, height: 1.5),
                                 ),
@@ -1974,7 +1974,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             Icon(Icons.circle, size: 7, color: Colors.greenAccent.withValues(alpha: 0.9)),
             const SizedBox(width: 6),
             Expanded(
-              child: Text('$parcels parcels · synced $_statsSynced · auto 20 s',
+              child: Text('$parcels items · updated $_statsSynced',
                   maxLines: 2, overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.6), fontWeight: FontWeight.w600)),
             ),
@@ -1986,7 +1986,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             const Icon(Icons.badge_outlined, size: 12, color: Colors.white70),
             const SizedBox(width: 6),
             Expanded(
-              child: Text('Earnings: monthly & weekly salary — see your agreement',
+              child: Text('Pay: monthly and weekly salary - see your agreement',
                   maxLines: 2, overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.7))),
             ),
@@ -2013,7 +2013,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           const SizedBox(width: 6),
           Expanded(child: Text('TODAY $today/$daily  ·  MONTH $month/$pace',
               style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800))),
-          const Text('Progress to the monthly target',
+          const Text('Daily progress',
               style: TextStyle(color: AppColors.amber, fontSize: 11, fontWeight: FontWeight.w900)),
         ]),
         const SizedBox(height: 5),
@@ -2024,7 +2024,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         ),
         const SizedBox(height: 4),
         Text(behind > 0
-            ? 'Behind monthly pace by $behind trips — bonus needs the pace target.'
+            ? '$behind behind pace - hit the daily target first.'
             : 'On pace — keep the streak for the month-close bonus.',
             style: const TextStyle(color: Colors.white70, fontSize: 10)),
       ]),
@@ -2077,7 +2077,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     decoration: BoxDecoration(shape: BoxShape.circle,
                       color: AppColors.amber.withValues(alpha: 0.35 + 0.65 * (_radar.value % 1)))),
                   const SizedBox(width: 6),
-                  const Text('TASKS PENDING — pulse until you file these stops',
+                  const Text('Stops left to file',
                       style: TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w700)),
                 ])),
               ],
@@ -2149,7 +2149,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       ? ('${s['service'] ?? ''}' == 'collection'
                           ? 'ARRIVED at the depot — tap ✓ to collect the parcel'
                           : 'ARRIVED — tap ✓ to file the pickup')
-                      : '${'${s['service'] ?? ''}' == 'collection' ? 'Receiver' : 'Seller'}: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} parcel${s['parcels'] == 1 ? '' : 's'} · ${'${s['status']}'.replaceAll('_', ' ')}',
+                      : '${'${s['service'] ?? ''}' == 'collection' ? 'Recipient' : 'Sender'}: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} items',
               style: TextStyle(color: picked ? AppColors.forest : arrived ? AppColors.ink : AppColors.muted,
                   fontSize: 11.5, fontWeight: picked || arrived ? FontWeight.w800 : FontWeight.w400),
             ),
@@ -2185,8 +2185,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   : 'To ${_depotShort(s)}')
               : ('${s['service'] ?? ''}' == 'collection'
                   ? 'To ${_depotShort(s)}'
-                  : 'To ${'${s['seller'] ?? 'Receiver'}'.trim().isEmpty ? 'Receiver' : '${s['seller']}'.trim()}'),
-          picked ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to ${s['seller'] ?? 'the sender'} in the DropOff map',
+                  : 'To ${'${s['seller'] ?? 'Recipient'}'.trim().isEmpty ? 'Recipient' : '${s['seller']}'.trim()}'),
+          picked && '${s['service'] ?? ''}' != 'collection' ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to the handover in the DropOff map',
           picked ? AppColors.forest : AppColors.forestLight,
           Icons.navigation_rounded,
           () => _navigateToStop(s),
@@ -2429,7 +2429,7 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
             _row('Branch', branch),
             _row('City', '${w['from_city'] ?? ''}'),
             const SizedBox(height: 4),
-            const Text('This run ends at the depot — the courier carries the parcel the rest of the way.',
+            const Text('The courier carries your items the rest of the way from the depot.',
                 style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.4)),
           ],
         ]),
@@ -2447,7 +2447,7 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
           ),
         ]),
         const Divider(height: 12),
-        Text('Depot fare is paid at the counter — DropOff never collects partner money. Money fields are never shown on the rider sheet.',
+        Text('Depot fare is paid at the counter — DropOff never collects partner money.',
             style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600, height: 1.4)),
       ]),
     );

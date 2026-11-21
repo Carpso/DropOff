@@ -167,7 +167,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
           const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.',
               style: TextStyle(fontSize: 12.5, height: 1.4)),
           const SizedBox(height: 8),
-          const Text('The prompt adds our processing fee (platform cut) plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-parcel money.',
+          const Text('The prompt adds our processing fee plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-parcel money.',
               style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
         ]),
         actions: [
@@ -245,7 +245,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
         title: expired ? 'Your $tier plan has run out' : '$tier plan ends ${'${sub['period_end'] ?? ''}'.split(' ').first}',
         body: expired
             ? (fee > 0 ? 'Renew for K${fee.toStringAsFixed(0)} to keep your plan rate — trips right now bill ad hoc.' : 'Renew to keep your plan rate — trips right now bill ad hoc.')
-            : 'Renew now and the cycle starts over — your free-rider parcels stay topped up. We auto-bill 3 days before with a momo prompt.',
+            : 'Renew now and the cycle starts over — your free-rider parcels stay topped up. We send a momo reminder 3 days before. Nothing is charged until you approve it.',
         cta: label,
         onCta: _renew,
       );
@@ -262,7 +262,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
         body: next == null
             ? (overageOffered
                 ? 'Extra parcels keep your ${pct > 0 ? '$pct% overage discount' : 'tier discount'} — you never pay full PAYG price.'
-                : 'Extra parcels bill at pay-as-you-go price — no discount while this shipper runs.')
+                : 'Extra items bill at pay-as-you-go price — no discount this cycle.')
             : '${next['tag'] ?? nextTier!.toUpperCase()} adds ${(next['parcels_per_month'] as num?)?.toInt() ?? 0} parcels for K${(next['fee_zmw'] as num?)?.toStringAsFixed(0) ?? ''} —${overageOffered && pct > 0 ? ' and overages stay $pct% off' : ' pro-rated to the day'}. One tap in Manage.',
         cta: next == null ? 'Manage' : 'See $nextTier',
         onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),

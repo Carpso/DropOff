@@ -120,7 +120,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   /// tap-to-north behaviour) — a two-finger rotate no longer strands the map
   /// sideways.
   Widget _compassBadge() => Tooltip(
-        message: 'Tap to rotate the map north-up',
+        message: 'Tap to switch between heading-up and north-up',
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: _snapNorth,
@@ -328,7 +328,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       future: _provider,
       builder: (context, snap) {
         if (snap.hasError) {
-          return _offlineFallback('Map could not load — the rider position still shows as "last seen" below.');
+          return _offlineFallback('Map could not load — your position and navigation are still shown.');
         }
         if (!snap.hasData) {
           return const Center(child: AppLogoSpinner(size: 26));
@@ -459,7 +459,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(6))),
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Text('Straight-line — road routing unreachable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
+                  child: Text('Direct line — turn-by-turn unavailable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
                 ),
               ),
             ),

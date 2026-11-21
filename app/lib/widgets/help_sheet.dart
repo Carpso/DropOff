@@ -28,7 +28,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
       (heading: 'No password, no email required', body: 'Your phone number is your identity. D1 stores a hash of the 6-digit code we SMS you — never the code itself.'),
       (heading: 'Passwordless sign-in', body: 'Type your number → tap "Send code" → enter the code → you\'re in. Works for senders and riders.'),
       (heading: 'Sessions on this device', body: 'The sessions list shows every phone/tablet this account has opened DropOff from. Tap "Revoke" to sign one out — it can\'t be used again until you re-authenticate.'),
-      (heading: 'Your phone is also your payout', body: 'The number you sign in with is the momo that refunds and payouts land on. Double-check it — changing it means a fresh verification.'),
+      (heading: 'Your phone is your identity', body: 'The number you sign in with is where refunds land. Check it carefully — changing it needs fresh verification.'),
     ],
   ),
   HelpTopic.courierFare: (
@@ -43,7 +43,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
   HelpTopic.parcelPhoto: (
     title: 'Parcel photo — why we ask',
     rows: [
-      (heading: 'Protects YOU in disputes', body: 'A clear photo at booking is evidence. If the parcel is lost or damaged in transit, the before/after comparison settles the claim.'),
+      (heading: 'Photo protects you', body: 'A clear photo at booking is evidence. If the parcel is lost or damaged in transit, the before/after comparison resolves a dispute.'),
       (heading: 'Checked at drop-off', body: 'The rider photographs the parcel again when they hand it to the depot. Yours vs. theirs — mismatch triggers a review before the waybill is signed.'),
       (heading: 'What makes it "clear"', body: 'Parcel label visible, packing intact, no other parcels in frame. One photo per parcel, taken in daylight if you can.'),
       (heading: 'Privacy', body: 'Photos go to DropOff for the parcel\'s lifetime only — dispute evidence or the receiver\'s re-pack inspection. Not shared, not marketed.'),
@@ -70,7 +70,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
   HelpTopic.planCap: (
     title: 'Plan cap — how it counts',
     rows: [
-      (heading: 'One parcel = one slot', body: 'Every parcel consumes one plan slot, even when two parcels share one trip to the same receiver. Your cap is a PARCEL count, not a trip count.'),
+      (heading: 'One item = one slot', body: 'Each item uses one plan slot, even when two items share one trip. Your cap counts items, not trips.'),
       (heading: 'When you exceed the cap', body: 'Extra parcels past your pack bill at full PAYG — the pack price applies only inside the pack. The price is always visible before you confirm a booking. Nothing is charged silently.'),
       (heading: 'Cancelled jobs don\'t count', body: 'A booking cancelled before pickup does not consume slots. Payment-held bookings do not consume slots either (no payment = no dispatch = no slot consumed).'),
     ],
@@ -80,14 +80,14 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     rows: [
       (heading: 'One momo prompt per cycle', body: 'A 7-day Weekly Sprint, or a monthly Silver (10) / Gold (25) / Platinum (50). Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.'),
       (heading: 'Held ≠ lost', body: 'Plans never hold a booking. If you book without prepayment, the job is saved and waits for the plan\'s momo prompt to land. No money moves until you approve it.'),
-      (heading: 'Pricing truth', body: 'Packs deduct automated at approval. Inside your pack — the trip leg is free; past your pack, it is PAYG at full rate. The momo prompt adds our processing fee (platform cut) plus the mobile-money collection fee — you cover the transaction cost. Introductory promo prices increase at review (within 3–6 months, no later than 1 year); your current cycle keeps its rate.'),
+      (heading: 'Pricing truth', body: 'Your pack is charged when you approve the prompt. Inside your pack — the trip leg is free; past your pack, it is PAYG at full rate. The momo prompt adds our processing fee plus the mobile-money collection fee — you cover the transaction cost. Introductory promo prices increase at review (within 3–6 months, no later than 1 year); your current cycle keeps its rate.'),
       (heading: 'Where the money goes', body: 'Senders prepay DropOff for every leg. Riders are salaried and never receive per-parcel money, so the rider fee and processing fee stay with DropOff. The courier counter fare is a separate reimbursement you pay through DropOff when the rider fronts it.'),
     ],
   ),
   HelpTopic.depotReceipts: (
     title: 'Depot receipts — filing them',
     rows: [
-      (heading: 'Photograph EVERY depot receipt', body: 'Each receipt needs its own photo and the EXACT amount handwritten on it. Never sum them — DropOff totals the photographed documents.'),
+      (heading: 'One photo per receipt', body: 'Each receipt needs its own photo and the EXACT amount handwritten on it. Never sum them — DropOff totals the photographed documents.'),
       (heading: 'One photo per receipt', body: 'If the depot splits your batch across two receipts, file BOTH. One photo and one amount field on each receipt sheet.'),
       (heading: 'Sender repays you', body: 'The exact amounts photographed go to the sender as the repayment request. The sender pays that amount (+ processing) to DropOff; the rider is reimbursed the same amount fee-free.'),
       (heading: 'Documents stay locked', body: 'The photos you file stay masked from the sender until they pay — then they reveal, and the reimbursement triggers automatically.'),
