@@ -121,7 +121,7 @@ ThemeData buildAppTheme() {
 ///
 /// Flutter's default text scaler lets the system font grow unbounded; on
 /// large-scale phones that crushed rows into a vertical ribbon (the
-/// "Business tab text reading down" bug, and the same in "Parcels in
+/// "Business tab text reading down" bug, and the same in "Items in
 /// flight", KPI tiles, plan cards, etc.). We clamp it everywhere:
 ///  * min 1.0x — never shrink below the system size (accessibility).
 ///  * max 1.30x — never grow past 1.3x so a 14sp body can't become a

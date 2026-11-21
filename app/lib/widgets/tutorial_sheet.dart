@@ -28,26 +28,26 @@ class TutorialSheet extends StatelessWidget {
     (Icons.local_shipping_outlined, '2. Book a pickup',
         'Pick a depot, address and item size. Add a photo for protection, then choose a sweep slot.'),
     (Icons.payments_outlined, '3. Pay on your phone',
-        'Approve the momo prompt. Plan members use their included parcel slots; pay-as-you-go pays the quoted fee up front. The rider fronts the depot counter fare; repaying the photographed receipt through DropOff releases the photo and reimburses the rider. It is not a DropOff charge.'),
+        'Approve the momo prompt. Plan members use their included item slots; pay-as-you-go pays the quoted fee up front. The rider fronts the depot counter fare; repaying the photographed receipt through DropOff releases the photo and reimburses the rider. It is not a DropOff charge.'),
     (Icons.pin_outlined, '4. Show the pickup code',
         'Show your rider the pickup code when they arrive.'),
     (Icons.track_changes, '5. Follow it live',
-        'Track the parcel in-app from door to depot and on to the courier. Same-city recipients get no SMS PIN — you confirm receipt in the app when it lands.'),
+        'Track the item in-app from door to depot and on to the courier. Same-city recipients get no SMS PIN — you confirm receipt in the app when it lands.'),
     (Icons.star_outline, '6. Rate and repeat',
         'Rate the rider, courier and sender after the trip. Your feedback keeps the network honest.'),
   ];
 
   static const _riderSteps = [
     (Icons.badge_outlined, '1. Link this device',
-        'Sign in and link your phone so jobs dispatch to you. Add your selfie and documents — verification is required before you receive parcels.'),
+        'Sign in and link your phone so jobs dispatch to you. Add your selfie and documents — verification is required before you receive items.'),
     (Icons.schedule, '2. Watch your slots',
         'The TODAY card shows your live stats and pace/bonus. Jobs arrive in 06:00 / 10:00 / 14:00 batches; grouped by depot so one run serves several senders.'),
     (Icons.navigation, '3. Navigate & collect',
         'Tap Navigate to open our map. The bike faces your destination; tap the compass to put your heading at the top, and the map auto-zooms as you approach. Voice guidance reads the turns.'),
     (Icons.help_outline, '4. Ask for the codes',
-        'Ask the SENDER for their 4-digit pickup code. Photograph EVERY parcel once. At a door delivery, ask the recipient for their DropOff door PIN (intercity SMS code or their own PIN).'),
+        'Ask the SENDER for their 4-digit pickup code. Photograph EVERY item once. At a door delivery, ask the recipient for their DropOff door PIN (intercity SMS code or their own PIN).'),
     (Icons.receipt_long_outlined, '5. Depot drop',
-        'Drop at the depot, photograph the parcel and the written receipt, type the EXACT amount on each receipt, then tap Submit drop. The task ticks off immediately. The rider fronts the counter fare; the sender repays the photographed receipt through DropOff and the rider is reimbursed fee-free.'),
+        'Drop at the depot, photograph the item and the written receipt, type the EXACT amount on each receipt, then tap Submit drop. The task ticks off immediately. The rider fronts the counter fare; the sender repays the photographed receipt through DropOff and the rider is reimbursed fee-free.'),
     (Icons.insights_outlined, '6. Stats & bonuses',
         'Your card shows today, in hand and done. Pay and bonuses follow your agreement and the monthly target.'),
   ];
@@ -72,7 +72,7 @@ class TutorialSheet extends StatelessWidget {
                 ? 'Six quick steps. Works offline.'
                 : rider
                     ? '6 quick steps for DropOff riders — keep it handy, it works offline.'
-                    : 'A quick guide for every parcel — keep it handy, it works offline.',
+                    : 'A quick guide for every item — keep it handy, it works offline.',
             style: AppType.caption,
           ),
           const SizedBox(height: 10),

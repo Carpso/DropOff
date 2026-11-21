@@ -280,7 +280,7 @@ class DropOffApp extends StatelessWidget {
             theme: buildAppTheme(),
             // Universal text-scale clamp: wrap EVERY screen so a large system
             // font can never crush a row/card into a vertical letter-per-line
-            // ribbon (Business "No plan yet", Parcels in flight, stats, …).
+            // ribbon (Business "No plan yet", Items in flight, stats, …).
             // Never shrink below the system size; never grow past 1.30x.
             builder: (context, child) => MediaQuery(
                   data: MediaQuery.of(context).copyWith(

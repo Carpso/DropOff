@@ -104,7 +104,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   /// Capture the receipt proving the goods are paid for. The rider shows this
-  /// full-screen at the depot counter before collecting the parcel. Offers
+  /// full-screen at the depot counter before collecting the item. Offers
   /// Camera or Gallery — customers re-photograph the sender's receipt.
   Future<void> _pickReceipt() async {
     if (_receiptBusy) return;
@@ -160,7 +160,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return _message('That courier is not available for collection yet — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
     }
     if (!_point.text.trim().isNotEmpty) {
-      return _message('Enter the courier point where the parcel is waiting.');
+      return _message('Enter the courier point where the item is waiting.');
     }
     if (_recipientName.text.trim().length < 2) return _message('Enter the recipient name.');
     if (!RegExp(r'^(?:\+?260|0)?(5[0-9]|7[0-9]|9[1-9])\d{7}$').hasMatch(_recipientPhone.text.replaceAll(RegExp(r'[\s-]'), ''))) {

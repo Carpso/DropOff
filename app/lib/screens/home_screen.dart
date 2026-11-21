@@ -301,7 +301,7 @@ class _FareCheckerState extends State<_FareChecker> {
   }
 
   /// Matches the server's motorcycle walk-up fee (K55 ≤ 5 km · K75 ≤ 12 km ·
-  /// K95 beyond). Cars are assigned by the system when the parcel needs one.
+  /// K95 beyond). Cars are assigned by the system when the item needs one.
   double _fee(double km) => km <= 5 ? 55.0 : km <= 12 ? 75.0 : 95.0;
 
   Future<void> _locate() async {

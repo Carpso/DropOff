@@ -61,7 +61,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
   /// 2026-11-18: "show start and end of route to pick up and drop off").
   ///
   /// COLLECTIONS ARE REVERSED (owner directive 2026-11-20: "on collection the
-  /// depot pin remove it"): the parcel is already at the depot, so the depot
+  /// depot pin remove it"): the item is already at the depot, so the depot
   /// is the START, never the destination. No warehouse pin is drawn — the
   /// route ends at the recipient's handover.
   /// </summary>

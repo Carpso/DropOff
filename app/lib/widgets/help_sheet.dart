@@ -35,27 +35,27 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     title: 'Depot fare — heard at the counter',
     rows: [
       (heading: 'The courier sets their own price', body: 'The fare the courier charges for inter-town freight is quoted at their counter. DropOff never collects partner money — we only front the rider leg to the depot.'),
-      (heading: 'The same conversation for every route', body: 'This applies to Lusaka → Ndola, Copperbelt, Southern Province, international — wherever your parcel is going. The depot sets it; we hand it over at cost.'),
+      (heading: 'The same conversation for every route', body: 'This applies to Lusaka → Ndola, Copperbelt, Southern Province, international — wherever your item is going. The depot sets it; we hand it over at cost.'),
       (heading: 'Our fee is separate', body: 'What you pay DropOff up front is the rider leg only (pickup → depot). The rider fronts the depot fare; the sender repays the exact photographed receipt through DropOff, which releases the photo and reimburses the rider fee-free.'),
       (heading: 'No invented fares', body: 'We don\'t quote the depot fare in-app. The rider fronts it at the counter and you repay the exact photographed receipt here. If anyone asks you to pay that receipt to a personal account instead, that is not DropOff.'),
     ],
   ),
   HelpTopic.parcelPhoto: (
-    title: 'Parcel photo — why we ask',
+    title: 'Item photo — why we ask',
     rows: [
-      (heading: 'Photo protects you', body: 'A clear photo at booking is evidence. If the parcel is lost or damaged in transit, the before/after comparison resolves a dispute.'),
-      (heading: 'Checked at drop-off', body: 'The rider photographs the parcel again when they hand it to the depot. Yours vs. theirs — mismatch triggers a review before the waybill is signed.'),
-      (heading: 'What makes it "clear"', body: 'Parcel label visible, packing intact, no other parcels in frame. One photo per parcel, taken in daylight if you can.'),
-      (heading: 'Privacy', body: 'Photos go to DropOff for the parcel\'s lifetime only — dispute evidence or the receiver\'s re-pack inspection. Not shared, not marketed.'),
+      (heading: 'Photo protects you', body: 'A clear photo at booking is evidence. If the item is lost or damaged in transit, the before/after comparison resolves a dispute.'),
+      (heading: 'Checked at drop-off', body: 'The rider photographs the item again when they hand it to the depot. Yours vs. theirs — mismatch triggers a review before the waybill is signed.'),
+      (heading: 'What makes it "clear"', body: 'Item label visible, packing intact, no other items in frame. One photo per item, taken in daylight if you can.'),
+      (heading: 'Privacy', body: 'Photos go to DropOff for the item\'s lifetime only — dispute evidence or the receiver\'s re-pack inspection. Not shared, not marketed.'),
     ],
   ),
   HelpTopic.forbiddenItems: (
     title: 'What DropOff cannot carry',
     rows: [
-      (heading: 'Declare every parcel', body: 'Parcel contents are mandatory. The rider and depot must know what is inside before a parcel enters a bag. A blank or false description cancels the booking.'),
+      (heading: 'Declare every item', body: 'Item contents are mandatory. The rider and depot must know what is inside before an item enters a bag. A blank or false description cancels the booking.'),
       (heading: 'Never book these', body: 'Illegal drugs/narcotics, firearms and ammunition, explosives/fireworks, petrol/fuel and other flammables, poisons/corrosives, radioactive material, live animals and human remains. These follow the same published restrictions as DHL, UPS and FedEx.'),
       (heading: 'Restricted, not banned', body: 'Medicines, liquids, glass and high-value goods need secure packaging and an accurate description — declare them clearly so the rider can handle them properly.'),
-      (heading: 'If in doubt', body: 'Contact DropOff support before booking. If a parcel is found to contain a prohibited item, the booking is cancelled with no refund.'),
+      (heading: 'If in doubt', body: 'Contact DropOff support before booking. If an item is found to contain a prohibited item, the booking is cancelled with no refund.'),
     ],
   ),
   HelpTopic.depositRejection: (
@@ -71,17 +71,17 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     title: 'Plan cap — how it counts',
     rows: [
       (heading: 'One item = one slot', body: 'Each item uses one plan slot, even when two items share one trip. Your cap counts items, not trips.'),
-      (heading: 'When you exceed the cap', body: 'Extra parcels past your pack bill at full PAYG — the pack price applies only inside the pack. The price is always visible before you confirm a booking. Nothing is charged silently.'),
+      (heading: 'When you exceed the cap', body: 'Extra items past your pack bill at full PAYG — the pack price applies only inside the pack. The price is always visible before you confirm a booking. Nothing is charged silently.'),
       (heading: 'Cancelled jobs don\'t count', body: 'A booking cancelled before pickup does not consume slots. Payment-held bookings do not consume slots either (no payment = no dispatch = no slot consumed).'),
     ],
   ),
   HelpTopic.plansBlurb: (
     title: 'Plans bundle everything',
     rows: [
-      (heading: 'One momo prompt per cycle', body: 'A 7-day Weekly Sprint, or a monthly Silver (10) / Gold (25) / Platinum (50). Every parcel counts as one — two parcels in one trip to the same receiver = two parcels.'),
+      (heading: 'One momo prompt per cycle', body: 'A 7-day Weekly Sprint, or a monthly Silver (10) / Gold (25) / Platinum (50). Every item counts as one — two items in one trip to the same receiver = two items.'),
       (heading: 'Held ≠ lost', body: 'Plans never hold a booking. If you book without prepayment, the job is saved and waits for the plan\'s momo prompt to land. No money moves until you approve it.'),
       (heading: 'Pricing truth', body: 'Your pack is charged when you approve the prompt. Inside your pack — the trip leg is free; past your pack, it is PAYG at full rate. The momo prompt adds our processing fee plus the mobile-money collection fee — you cover the transaction cost. Introductory promo prices increase at review (within 3–6 months, no later than 1 year); your current cycle keeps its rate.'),
-      (heading: 'Where the money goes', body: 'Senders prepay DropOff for every leg. Riders are salaried and never receive per-parcel money, so the rider fee and processing fee stay with DropOff. The courier counter fare is a separate reimbursement you pay through DropOff when the rider fronts it.'),
+      (heading: 'Where the money goes', body: 'Senders prepay DropOff for every leg. Riders are salaried and never receive per-item money, so the rider fee and processing fee stay with DropOff. The courier counter fare is a separate reimbursement you pay through DropOff when the rider fronts it.'),
     ],
   ),
   HelpTopic.depotReceipts: (
@@ -127,7 +127,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
   HelpTopic.biometric: (
     title: 'Biometric sign-in',
     rows: [
-      (heading: 'On', body: 'Opening DropOff asks for your fingerprint or face. Your parcels and bookings stay private to you.'),
+      (heading: 'On', body: 'Opening DropOff asks for your fingerprint or face. Your items and bookings stay private to you.'),
       (heading: 'Off', body: 'DropOff opens straight away. Pairs well with a strong PIN phone if you prefer.'),
     ],
   ),

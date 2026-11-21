@@ -9,7 +9,7 @@
 ///   AnalyticsService.instance.track(
 ///     feature: 'booking', action: 'submit',
 ///     context: 'booking_step_3',
-///     meta: {'parcels': 2, 'vehicle_class': 'motorcycle', 'last_mile': true},
+///     meta: {'items': 2, 'vehicle_class': 'motorcycle', 'last_mile': true},
 ///   );
 library analytics_service;
 

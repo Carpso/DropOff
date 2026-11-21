@@ -46,7 +46,7 @@ class RiderMap extends StatefulWidget {
   final ValueChanged<String>? onSavedTap;
 
   /// Vehicle class for the rider marker: 'motorcycle' (default) or 'car'.
-  /// Server decides this for large/over-cap parcels; the sender, recipient and
+  /// Server decides this for large/over-cap items; the sender, recipient and
   /// rider all see the SAME branded marker.
   final String vehicleClass;
 

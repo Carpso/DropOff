@@ -16,7 +16,7 @@ import 'coverage_screen.dart';
 import 'track_screen.dart';
 import '../ui/app_spinner.dart';
 
-/// The seller's business dashboard: plan usage, parcels in flight, delivered
+/// The seller's business dashboard: plan usage, items in flight, delivered
 /// count, referral income — one glance, all server-backed. Shown as a bottom
 /// tab for signed-in sellers (riders keep their Team view; admin keeps theirs).
 class BusinessScreen extends StatefulWidget {
@@ -84,7 +84,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
     // mirrors the server, which answers 402 payment_required for held jobs.
     final lastEvent = '${job['last_event'] ?? ''}';
     if (lastEvent == 'advance_pending' || lastEvent == 'prepayment_pending') {
-      AppToast.show(context, 'Payment is held — pay for this parcel to unlock tracking.');
+      AppToast.show(context, 'Payment is held — pay for this item to unlock tracking.');
       return;
     }
     AppToast.show(context, 'Opening tracking…');
@@ -127,7 +127,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
   /// DropOff leg spend across the last 30 days: rider fee + door legs +
   /// processing (what the sender pays DropOff per parcel). Partner money is not
   /// counted — sellers don't see courier fares here anyway.
-  ({double k, int parcels}) get _spend {
+  ({double k, int items}) get _spend {
     var k = 0.0;
     var n = 0;
     for (final job in _jobs.where(_within30d)) {
@@ -137,7 +137,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       k += fee;
       n += (job['parcels'] as num?)?.toInt() ?? 1;
     }
-    return (k: (k * 100).roundToDouble() / 100, parcels: n);
+    return (k: (k * 100).roundToDouble() / 100, items: n);
   }
 
   Map<String, dynamic>? _planOf(String tier) =>
@@ -221,11 +221,11 @@ class _BusinessScreenState extends State<BusinessScreen> {
     final plan = _plan;
     if (sub == null) {
       final s = _spend;
-      if (s.parcels < 3) return null; // not a regular yet — don't be pushy
+      if (s.items < 3) return null; // not a regular yet — don't be pushy
       return _banner(
         icon: Icons.trending_up_rounded,
-        title: '3+ parcels a month pays off with a plan',
-        body: 'You shipped ${s.parcels > 30 ? 30 : s.parcels} parcels paying ad hoc. A plan bundles the rider fee — most regulars save K${s.k.toStringAsFixed(0)}+ per cycle.',
+        title: '3+ items a month pays off with a plan',
+        body: 'You shipped ${s.items > 30 ? 30 : s.items} items paying ad hoc. A plan bundles the rider fee — most regulars save K${s.k.toStringAsFixed(0)}+ per cycle.',
         cta: 'Browse plans',
         onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
       );
@@ -245,7 +245,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
         title: expired ? 'Your $tier plan has run out' : '$tier plan ends ${'${sub['period_end'] ?? ''}'.split(' ').first}',
         body: expired
             ? (fee > 0 ? 'Renew for K${fee.toStringAsFixed(0)} to keep your plan rate — trips right now bill ad hoc.' : 'Renew to keep your plan rate — trips right now bill ad hoc.')
-            : 'Renew now and the cycle starts over — your free-rider parcels stay topped up. We send a momo reminder 3 days before. Nothing is charged until you approve it.',
+            : 'Renew now and the cycle starts over — your free-rider items stay topped up. We send a momo reminder 3 days before. Nothing is charged until you approve it.',
         cta: label,
         onCta: _renew,
       );
@@ -261,9 +261,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
         title: 'You outgrew the $tier plan this cycle',
         body: next == null
             ? (overageOffered
-                ? 'Extra parcels keep your ${pct > 0 ? '$pct% overage discount' : 'tier discount'} — you never pay full PAYG price.'
+                ? 'Extra items keep your ${pct > 0 ? '$pct% overage discount' : 'tier discount'} — you never pay full PAYG price.'
                 : 'Extra items bill at pay-as-you-go price — no discount this cycle.')
-            : '${next['tag'] ?? nextTier!.toUpperCase()} adds ${(next['parcels_per_month'] as num?)?.toInt() ?? 0} parcels for K${(next['fee_zmw'] as num?)?.toStringAsFixed(0) ?? ''} —${overageOffered && pct > 0 ? ' and overages stay $pct% off' : ' pro-rated to the day'}. One tap in Manage.',
+            : '${next['tag'] ?? nextTier!.toUpperCase()} adds ${(next['parcels_per_month'] as num?)?.toInt() ?? 0} items for K${(next['fee_zmw'] as num?)?.toStringAsFixed(0) ?? ''} —${overageOffered && pct > 0 ? ' and overages stay $pct% off' : ' pro-rated to the day'}. One tap in Manage.',
         cta: next == null ? 'Manage' : 'See $nextTier',
         onCta: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen(focusPlans: true))),
       );
@@ -343,7 +343,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
               const Spacer(),
               IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh)),
             ]),
-            const Text('Your plan, your parcels, your referrals — at a glance.', style: TextStyle(color: AppColors.muted, height: 1.4)),
+            const Text('Your plan, your items, your referrals — at a glance.', style: TextStyle(color: AppColors.muted, height: 1.4)),
             const SizedBox(height: 16),
             if (_loading)
               const Padding(padding: EdgeInsets.all(24), child: Center(child: AppLogoSpinner(size: 26)))
@@ -418,9 +418,9 @@ class _BusinessScreenState extends State<BusinessScreen> {
   String savingsLine(Map<String, dynamic>? rec) {
     if (rec == null) return '';
     final save = (rec['est_savings_zmw'] as num?) ?? 0;
-    if (save > 0) return 'Covers ~${rec['parcels_per_month']} parcels — est. save K${save.toStringAsFixed(0)} vs pay-as-you-go';
-    if (save < 0) return 'Covers ~${rec['parcels_per_month']} parcels — costs K${(-save).toStringAsFixed(0)} more than pay-as-you-go';
-    return 'Covers ~${rec['parcels_per_month']} parcels — about the same as pay-as-you-go';
+    if (save > 0) return 'Covers ~${rec['parcels_per_month']} items — est. save K${save.toStringAsFixed(0)} vs pay-as-you-go';
+    if (save < 0) return 'Covers ~${rec['parcels_per_month']} items — costs K${(-save).toStringAsFixed(0)} more than pay-as-you-go';
+    return 'Covers ~${rec['parcels_per_month']} items — about the same as pay-as-you-go';
   }
 
   Widget? _predictCard() {
@@ -440,7 +440,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
     final trendFlat = trend == 0;
     final headline = forecast <= 0
         ? 'Not enough shipments yet to predict'
-        : '≈ $forecast parcels in the next 30 days';
+        : '≈ $forecast items in the next 30 days';
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -510,7 +510,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
           ] else if (daily != null) ...[
             const SizedBox(height: 12),
             const Text(
-              'Shipping in bursts? Weekly Sprint covers 20 parcels over 7 days — likely beats a month plan.',
+              'Shipping in bursts? Weekly Sprint covers 20 items over 7 days — likely beats a month plan.',
               style: AppType.caption,
             ),
           ],
@@ -553,7 +553,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                         ),
                         SizedBox(height: 6),
                         Row(children: [
-                          Expanded(child: Text('Weekly or monthly bundles — one momo prompt, no rider fee per parcel.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4))),
+                          Expanded(child: Text('Weekly or monthly bundles — one momo prompt, no rider fee per item.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4))),
                           HelpIconButton(topic: HelpTopic.plansBlurb),
                         ]),
                       ],
@@ -607,7 +607,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
                   Text('$used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 30, color: AppColors.forest)),
                   const SizedBox(width: 5),
                   Flexible(
-                    child: Text('/ $cap parcels used', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700)),
+                    child: Text('/ $cap items used', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700)),
                   ),
                 ],
               ),
@@ -628,8 +628,8 @@ class _BusinessScreenState extends State<BusinessScreen> {
           const SizedBox(height: 8),
           Text(
             used >= cap
-                ? 'Extra parcels now pay your tier discount — auto-applied at booking. Renews $renews.'
-                : 'Each parcel counts as one — even several in one trip. Cycle renews $renews.',
+                ? 'Extra items now pay your tier discount — auto-applied at booking. Renews $renews.'
+                : 'Each item counts as one — even several in one trip. Cycle renews $renews.',
             style: AppType.caption,
           ),
         ]),
@@ -648,7 +648,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
       const SizedBox(width: 10),
       Expanded(child: _Stat(
         value: spend.k > 0 ? 'K${spend.k % 1 == 0 ? spend.k.toStringAsFixed(0) : spend.k.toStringAsFixed(2)}' : 'K0',
-        label: spend.k > 0 ? 'DropOff spend · 30d (${spend.parcels} parcels)' : 'DropOff spend · 30d',
+        label: spend.k > 0 ? 'DropOff spend · 30d (${spend.items} items)' : 'DropOff spend · 30d',
         icon: Icons.receipt_long_outlined,
       )),
     ]);
@@ -689,7 +689,7 @@ class _BusinessScreenState extends State<BusinessScreen> {
             ),
           ]),
           const SizedBox(height: 4),
-          Text('This device · $totalParcels parcel${totalParcels == 1 ? '' : 's'} logged locally',
+          Text('This device · $totalParcels item${totalParcels == 1 ? '' : 's'} logged locally',
               style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
           const SizedBox(height: 10),
           Row(children: [
@@ -732,11 +732,11 @@ class _BusinessScreenState extends State<BusinessScreen> {
             const SizedBox(width: 8),
             // maxLines:1 — when both action buttons squeeze the row (small
             // phones / large system font) an unconstrained title used to wrap
-            // letter-by-letter down the card ("Parcels in flight" vertical
+            // letter-by-letter down the card ("Items in flight" vertical
             // text bug).
             const Expanded(
               child: Text(
-                'Parcels in flight',
+                'Items in flight',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,

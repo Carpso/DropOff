@@ -63,7 +63,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
     setState(() {});
   }
 
-  /// Parcels addressed to the signed-in caller's phone — claimed automatically,
+  /// Items addressed to the signed-in caller's phone — claimed automatically,
   /// no link pasting needed. Auto-tagged because the account phone matches the
   /// recipient phone on the job.
   Future<void> _loadIncoming() async {
@@ -80,7 +80,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
   Future<void> _openIncoming(Map<String, dynamic> parcel) async {
     final url = '${parcel['tracking_url'] ?? ''}';
     if (url.isEmpty) {
-      AppToast.show(context, 'Tracking link not available for this parcel yet.');
+      AppToast.show(context, 'Tracking link not available for this item yet.');
       return;
     }
     await Navigator.of(context).push(MaterialPageRoute<void>(
@@ -156,7 +156,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
                     title: _incoming.isEmpty ? 'Nothing in transit.' : 'Nothing you sent yet.',
                     message: _incoming.isEmpty
                         ? 'Book your first home-to-depot pickup. Your tracking timeline appears here.'
-                        : 'Everything below is addressed to you. When you send a parcel yourself it will appear here too.',
+                        : 'Everything below is addressed to you. When you send an item yourself it will appear here too.',
                     action: FilledButton.icon(
                       onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen())),
                       icon: const Icon(Icons.add),
@@ -692,8 +692,8 @@ class _MovementLogSheetState extends State<_MovementLogSheet> {
   String _labelFor(String status) => switch (status) {
         'created' => 'Booking placed',
         'rider_assigned' => 'Rider assigned',
-        'partner_confirmed' => 'Courier depot accepted the parcel',
-        'picked_up' => 'Parcel collected from the depot',
+        'partner_confirmed' => 'Courier depot accepted the item',
+        'picked_up' => 'Item collected from the depot',
         'at_depot' => 'At courier depot',
         'departed' => 'Left the depot',
         'arrived' => 'Arrived at the destination',
@@ -810,7 +810,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
     line('Declared value', ev['declared_value_zmw']),
   ].join('\n');
 
-  // Parcel-check verdict chip (sender photo vs rider photo, AI + rules).
+  // Item-check verdict chip (sender photo vs rider photo, AI + rules).
   final same = '${check['same_parcel'] ?? ''}';
   final (chipIcon, chipColor, chipLabel) = switch (same) {
     'yes' => (Icons.verified_outlined, AppColors.forest, 'Same parcel'),
@@ -1133,7 +1133,7 @@ class _TrackingLinkCardState extends State<_TrackingLinkCard> {
   bool _busy = false;
 
   /// Copies a message WITH context (not the bare URL) so whatever channel the
-  /// user pastes it into is instantly understood: what it is, whose parcel,
+  /// user pastes it into is instantly understood: what it is, whose item,
   /// how to use it.
   Future<void> _copy() async {
     setState(() => _busy = true);
@@ -1422,7 +1422,7 @@ class _RatingCardState extends State<_RatingCard> {
   }
 }
 
-/// "Parcels for you" — parcels addressed to the signed-in caller's phone,
+/// "Items for you" — items addressed to the signed-in caller's phone,
 /// auto-claimed by phone match. Tap any row to open its live tracking page.
 class _ParcelsForYou extends StatelessWidget {
   final List<Map<String, dynamic>> parcels;
@@ -1510,7 +1510,7 @@ class _ParcelsForYou extends StatelessWidget {
 /// phone. Pay now reuses the live prompt or issues a fresh one; approval
 /// settles the payment server-side and dispatches the rider.
 /// The server canceled this booking on its own (prepayment never approved, or
-/// the parcel never moved) — surfaced so the sender is not left staring at a
+/// the item never moved) — surfaced so the sender is not left staring at a
 /// silent stage-0 booking. Nothing was charged; they can rebook freely.
 class _ExpiredCard extends StatelessWidget {
   final Booking booking;
@@ -1916,7 +1916,7 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
 }
 
 /// Counter fare settled — show the unlocked depot receipt photo(s). A depot
-/// that split a multi-parcel batch across receipts shows ALL of them.
+/// that split a multi-item batch across receipts shows ALL of them.
 class _CounterReceiptPaidCard extends StatelessWidget {
   final Booking booking;
   const _CounterReceiptPaidCard({required this.booking});

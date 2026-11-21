@@ -225,7 +225,7 @@ class PushService {
         'job_assigned' => 'New delivery assigned',
         'job_delivered' => 'Delivered — rate your rider',
         'pickup_reminder' => 'Pickup time',
-        'plan_renewed' => 'Plan renewed — parcels unlocked',
+        'plan_renewed' => 'Plan renewed — items unlocked',
         'subscription_active' => 'Plan activated',
         'marketing' => 'DropOff',
         'promo_issued' => 'Your promo reward is ready',

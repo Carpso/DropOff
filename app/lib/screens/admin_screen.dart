@@ -9,6 +9,18 @@ import '../data/analytics_service.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
 
+String _adminError(ApiResponse res, String fallback) {
+  return switch (res.error ?? '') {
+    'superadmin_required' || 'admin_required' || 'owner_required' => 'You need admin access to do that.',
+    'owner_cannot_be_demoted' || 'cannot_delete_owner' => 'That account cannot be changed.',
+    'courier_id_required_for_partner' => 'Pick a courier depot for the partner.',
+    'booking_not_found' => 'Booking not found. Check the reference and try again.',
+    'network_error' => 'Connection problem. Check your signal and try again.',
+    'too_many_requests' => 'Too many attempts. Wait a moment and try again.',
+    _ => fallback,
+  };
+}
+
 /// Admin console inside the app: live business stats, security
 /// alerts, the fraud queue, depot branches, and SMS broadcasts. The screen
 /// re-checks GET /me on open — a sender who deep-links here gets a lock door.
@@ -114,7 +126,7 @@ class _AdminScreenState extends State<AdminScreen> {
     setState(() => _sending = false);
     AppToast.show(context, res.ok
         ? (broadcast ? 'Broadcast queued — sends run in the background.' : 'SMS sent.')
-        : 'Send failed: ${res.error}');
+        : _adminError(res, 'Could not send the message. Try again.'));
     if (res.ok) {
       _smsBody.clear();
       AnalyticsService.instance.track(
@@ -134,7 +146,7 @@ class _AdminScreenState extends State<AdminScreen> {
     setState(() => _pushSending = false);
     AppToast.show(context, res.ok
         ? 'Push broadcast queued — FCM sends in the background.'
-        : 'Push failed: ${res.error}');
+        : _adminError(res, 'Could not send the push. Try again.'));
     if (res.ok) {
       _pushTitle.clear();
       _pushBody.clear();
@@ -438,7 +450,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final res = await run();
     if (!mounted) return;
     setState(() { _payrollBusy = false; });
-    AppToast.show(context, res.ok ? '$label done.' : '$label failed: ${res.error ?? 'try again'}');
+    AppToast.show(context, res.ok ? '$label done.' : _adminError(res, '$label could not be completed. Try again.'));
     if (res.ok && reload) {
       final p = await DropOffApi.adminPayroll();
       if (mounted) {
@@ -652,7 +664,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final res = await run();
     if (!mounted) return;
     setState(() { _taxBusy = false; });
-    AppToast.show(context, res.ok ? '$label recorded.' : '$label failed: ${res.error ?? 'try again'}');
+    AppToast.show(context, res.ok ? '$label recorded.' : _adminError(res, '$label could not be recorded. Try again.'));
     if (res.ok) {
       final t = await DropOffApi.adminTax();
       if (mounted) setState(() { _tax = ((t?['periods'] as List?) ?? const []).cast<Map<String, dynamic>>(); });
@@ -1145,7 +1157,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
     if (!mounted) return;
     setState(() => _sending = false);
     if (!res.ok) {
-      AppToast.show(context, 'Reply failed: ${res.error}');
+      AppToast.show(context, _adminError(res, 'Could not send the reply. Try again.'));
       return;
     }
     await _load();
@@ -1155,7 +1167,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
   Future<void> _setTicketStatus(String status) async {
     final res = await DropOffApi.adminTicketStatus(widget.threadId, status);
     if (!mounted) return;
-    if (!res.ok) return AppToast.show(context, 'Could not update ticket: ${res.error}');
+    if (!res.ok) return AppToast.show(context, _adminError(res, 'Could not update the ticket. Try again.'));
     AppToast.show(context, 'Ticket marked $status.');
     _load();
   }
@@ -1169,7 +1181,7 @@ class _SupportTicketSheetState extends State<_SupportTicketSheet> {
     setState(() => _drafting = false);
     final draft = '${res.body['draft'] ?? ''}'.trim();
     if (!res.ok || draft.isEmpty) {
-      AppToast.show(context, res.ok ? 'AI returned an empty draft — write the reply yourself.' : 'AI draft unavailable: ${res.error ?? 'try again'}');
+      AppToast.show(context, res.ok ? 'AI returned an empty draft — write the reply yourself.' : _adminError(res, 'AI draft unavailable. Try again.'));
       return;
     }
     setState(() { _reply.text = draft; });
@@ -1406,7 +1418,7 @@ class _UsersCardState extends State<_UsersCard> {
     if (!mounted) return;
     AppToast.show(context, res.ok
         ? '$name was deleted. Their sessions are dead.'
-        : 'Failed: ${res.error == 'superadmin_required' || res.error == 'admin_required' ? 'admins only' : res.error == 'cannot_delete_owner' ? 'that account cannot be deleted' : res.error}');
+        : _adminError(res, 'Could not complete that action. Try again.'));
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(
@@ -1516,7 +1528,7 @@ class _UsersCardState extends State<_UsersCard> {
     if (!mounted) return;
     AppToast.show(context, res.ok
         ? '$email is now $role.'
-        : 'Failed: ${res.error == 'owner_cannot_be_demoted' ? 'that account cannot be demoted' : res.error == 'superadmin_required' || res.error == 'admin_required' ? 'admins only' : res.error == 'courier_id_required_for_partner' ? 'pick a courier depot for the partner' : res.error}');
+        : _adminError(res, 'Could not update that account. Try again.'));
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(
@@ -1649,7 +1661,7 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
     setState(() => _busy = false);
     AppToast.show(context, res.ok
         ? '$ref released to ${res.body['window'] ?? 'the next'} sweep and the claim board.'
-        : 'Could not release $ref — ${res.body['detail'] ?? res.error ?? 'try again'}');
+        : 'Could not release $ref. ${res.body['detail']?.toString().isNotEmpty == true ? res.body['detail'] : 'Check the booking and try again.'}');
   }
 
   Future<void> _delete() async {
@@ -1692,11 +1704,7 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
       unawaited(_loadRequests());
     } else {
       final detail = '${res.body['detail'] ?? ''}'.trim();
-      AppToast.show(context, res.error == 'admin_required'
-          ? 'Admins only.'
-          : detail.isNotEmpty
-              ? detail
-              : 'Failed: ${res.error ?? 'try again'}');
+      AppToast.show(context, detail.isNotEmpty ? detail : _adminError(res, 'Could not delete that booking. Try again.'));
     }
   }
 
@@ -1854,7 +1862,7 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
     });
     if (!mounted) return;
     setState(() => _saving = false);
-    AppToast.show(context, res.ok ? 'Branch added.' : 'Failed: ${res.error}');
+    AppToast.show(context, res.ok ? 'Branch added.' : _adminError(res, 'Could not add the branch. Try again.'));
     if (res.ok) {
       _name.clear(); _address.clear(); _lat.clear(); _lng.clear(); _phone.clear(); _loadBranches();
       AnalyticsService.instance.track(
@@ -2018,7 +2026,7 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (!res.ok) {
-      _msg(res.body['detail']?.toString() ?? 'Could not save (${res.error ?? 'network'}).');
+      _msg(res.body['detail']?.toString() ?? _adminError(res, 'Could not save. Try again.'));
       return;
     }
     final recorded = _fromToText;
@@ -2127,7 +2135,7 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: _weight,
-              decoration: const InputDecoration(labelText: 'Parcel size', isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+              decoration: const InputDecoration(labelText: 'Item size', isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
               items: [for (final w in _weights) DropdownMenuItem(value: w, child: Text(w))],
               onChanged: (v) => setState(() => _weight = v ?? _weight),
             ),
@@ -2239,7 +2247,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (!res.ok) {
-      AppToast.show(context, 'Could not generate codes (${res.error}).');
+      AppToast.show(context, _adminError(res, 'Could not generate codes. Try again.'));
       return;
     }
     final codes = ((res.body['codes'] as List?) ?? const []).map((c) => '$c').toList();
@@ -2475,7 +2483,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
                 : key == 'overage_discount_enabled'
                     ? (on ? 'Overage discount ON — tiers apply on PAYG overage.' : 'Overage discount OFF — overage bills at full PAYG.')
                     : (on ? '$key ON.' : '$key OFF.'))
-        : 'Could not flip the switch (${res.error ?? 'admins only'})');
+        : _adminError(res, 'Could not update that setting. Try again.'));
     unawaited(Future.delayed(const Duration(milliseconds: 400), _load));
   }
 
@@ -2508,21 +2516,21 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
   Future<void> _togglePlan(Map<String, dynamic> t, bool on) async {
     final res = await DropOffApi.adminSaveTier({'tier': t['tier'], 'active': on ? 1 : 0});
     if (!mounted) return;
-    _snack(res.ok ? 'Plan ${on ? 'ON' : 'OFF'} — ${_tierLabels['${t['tier']}'] ?? t['tier']}' : 'Could not toggle plan (${res.error ?? 'try again'})');
+    _snack(res.ok ? 'Plan ${on ? 'ON' : 'OFF'} — ${_tierLabels['${t['tier']}'] ?? t['tier']}' : _adminError(res, 'Could not update the plan. Try again.'));
     await _load();
   }
 
   Future<void> _toggleCourier(Map<String, dynamic> c, bool on) async {
     final res = await DropOffApi.adminCourierToggle((c['id'] as num).toInt(), on);
     if (!mounted) return;
-    _snack(res.ok ? 'Courier ${on ? 'ON' : 'OFF'} — ${c['name']}' : 'Could not toggle courier (${res.error ?? 'try again'})');
+    _snack(res.ok ? 'Courier ${on ? 'ON' : 'OFF'} — ${c['name']}' : _adminError(res, 'Could not update the courier. Try again.'));
     await _load();
   }
 
   String _planSubtitle(Map<String, dynamic> t) {
     final ppd = (t['parcels_per_day'] as num?)?.toInt() ?? 0;
     final ppm = (t['parcels_per_month'] as num?)?.toInt() ?? 0;
-    final cap = ppd > 0 ? '$ppd parcel${ppd == 1 ? '' : 's'}/day' : (ppm > 0 ? '$ppm parcels/month' : 'no cap');
+    final cap = ppd > 0 ? '$ppd item${ppd == 1 ? '' : 's'}/day' : (ppm > 0 ? '$ppm items/month' : 'no cap');
     final cycle = (t['cycle_days'] as num?)?.toInt() ?? 0;
     final fee = (t['fee_zmw'] as num?)?.toDouble() ?? 0;
     // Overage discounts removed entirely (owner 2026-11-18) — no discount copy.
@@ -2546,8 +2554,8 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(controller: fee, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Fee per cycle (K)')),
-            TextField(controller: ppd, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Parcels per day (0 = monthly plan)')),
-            TextField(controller: ppm, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Parcels per month (0 = none)')),
+            TextField(controller: ppd, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Items per day (0 = monthly plan)')),
+            TextField(controller: ppm, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Items per month (0 = none)')),
             TextField(controller: rider, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rider fee inside cap (0 = bundled)')),
             TextField(controller: days, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cycle length (days)')),
             TextField(controller: tag, decoration: const InputDecoration(labelText: 'Tag (shown in the app)', hintText: 'e.g. Most popular')),
@@ -2579,7 +2587,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
               if (!ctx.mounted) return;
               Navigator.pop(ctx);
               if (mounted) {
-                _snack(res.ok ? 'Plan saved' : 'Save failed (${res.error ?? 'try again'})');
+                _snack(res.ok ? 'Plan saved' : _adminError(res, 'Could not save the plan. Try again.'));
                 await _load();
               }
             },
@@ -2610,7 +2618,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
             ),
           ]),
           const SizedBox(height: 2),
-          const Text('Off hides the offer from senders instantly (new subscriptions stop; existing subscribers keep their cycle benefit). Edit every field below — price, parcels/day, parcels/month, cycle length, discount, tag.',
+          const Text('Off hides the offer from senders instantly (new subscriptions stop; existing subscribers keep their cycle benefit). Edit every field below — price, items/day, items/month, cycle length, discount, tag.',
               style: AppType.caption),
           const SizedBox(height: 10),
           const Row(children: [
@@ -2757,7 +2765,7 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
     final res = await DropOffApi.clearBookingStrikes(phone);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.ok ? 'Strikes cleared — audit warnings removed.' : 'Could not clear strikes (${res.error})'),
+      content: Text(res.ok ? 'Strikes cleared — audit warnings removed.' : _adminError(res, 'Could not clear strikes. Try again.')),
     ));
     await _load();
   }
@@ -2868,7 +2876,7 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
     final res = await DropOffApi.adminIncentiveToggle(id, active: on);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.ok ? '${on ? 'Activated' : 'Ended'} "${row['title']}" — through payroll, as always.' : 'Could not toggle (${res.error})'),
+      content: Text(res.ok ? '${on ? 'Activated' : 'Ended'} "${row['title']}" — through payroll, as always.' : _adminError(res, 'Could not update that setting. Try again.')),
     ));
     await _load();
   }
@@ -2893,10 +2901,10 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
             TextField(controller: endsOn, decoration: const InputDecoration(labelText: 'Ends on (blank = always-on)', hintText: '2026-12-31')),
             Row(children: [
               Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: completion, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Completion K')))),
-              Expanded(child: TextField(controller: perExtra, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per extra parcel K'))),
+              Expanded(child: TextField(controller: perExtra, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per extra item K'))),
             ]),
             Row(children: [
-              Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: cap, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max extra parcels')))),
+              Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: cap, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max extra items')))),
               Expanded(child: TextField(controller: stretch, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stretch ratio'))),
             ]),
             TextField(controller: stretchBonus, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stretch bonus K')),
@@ -2922,7 +2930,7 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
     });
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.ok ? 'Saved "${title.text.trim()}" — it pays through payroll, never cash-in-app.' : 'Could not save (${res.error})'),
+      content: Text(res.ok ? 'Saved "${title.text.trim()}" — it pays through payroll, never cash-in-app.' : _adminError(res, 'Could not save. Try again.')),
     ));
     await _load();
   }
@@ -3061,7 +3069,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     setState(() => _busy = null);
     AppToast.show(context, res.ok
         ? (status == 'verified' ? 'Driver verified.' : 'Driver rejected.')
-        : 'Could not update (${res.error}).');
+        : _adminError(res, 'Could not update. Try again.'));
     if (res.ok) {
       _load();
       AnalyticsService.instance.track(
@@ -3079,10 +3087,7 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     if (!mounted) return;
     setState(() => _busy = null);
     if (!res.ok) {
-      final msg = res.error == 'network_error'
-          ? 'Could not reach the AI — check your connection and retry (vision models are cold-start slow).'
-          : 'AI check failed (${res.error}).';
-      AppToast.show(context, msg);
+      AppToast.show(context, _adminError(res, 'AI check failed. Try again.'));
       return;
     }
     AnalyticsService.instance.track(
@@ -3182,9 +3187,9 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
             const Icon(Icons.verified_user_outlined, color: AppColors.forest),
             const SizedBox(width: 10),
             const Expanded(child: Text('Rider verification & targets', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
-            IconButton(visualDensity: VisualDensity.compact, onPressed: _load, icon: const Icon(Icons.refresh, size: 18)),
+            IconButton(tooltip: 'Refresh', visualDensity: VisualDensity.compact, onPressed: _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
-          Text('$pending pending review - $verified verified. Daily target is 30 parcels; month pace carries any missed day.',
+          Text('$pending pending review - $verified verified. Daily target is 30 items; month pace carries any missed day.',
               style: AppType.caption),
           const SizedBox(height: 12),
           Wrap(spacing: 6, runSpacing: 6, children: [
@@ -3444,7 +3449,7 @@ class _AnalyticsKpiCardState extends State<_AnalyticsKpiCard> {
                 Expanded(child: _KpiMetric('Subs active', '${ops['subscriptions_active'] ?? 0}', Icons.workspace_premium_outlined)),
               ]),
               const SizedBox(height: 6),
-              Text('Delivery rate ${deliveryPct == null ? '—' : '${deliveryPct.toStringAsFixed(1)}%'} · Pickups ${ops['pickups'] ?? 0} · Parcels shipped ${ops['parcels_shipped'] ?? 0} · Chargebook routes learned ${ops['chargebook_routes_learned'] ?? 0} · Float jobs ${ops['wallet_charge_jobs'] ?? 0}',
+              Text('Delivery rate ${deliveryPct == null ? '—' : '${deliveryPct.toStringAsFixed(1)}%'} · Pickups ${ops['pickups'] ?? 0} · Items shipped ${ops['parcels_shipped'] ?? 0} · Chargebook routes learned ${ops['chargebook_routes_learned'] ?? 0} · Float jobs ${ops['wallet_charge_jobs'] ?? 0}',
                   style: const TextStyle(color: AppColors.muted, fontSize: 11)),
             ],
             const SizedBox(height: 14),
@@ -3608,7 +3613,7 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
           Text(
             _loading
                 ? 'Learning from the last 8 weeks…'
-                : '≈ ${totals['predicted_7d_parcels'] ?? 0} parcels predicted'
+                : '≈ ${totals['predicted_7d_parcels'] ?? 0} items predicted'
                   '${totals['busiest_branch'] != null ? ' · busiest: ${totals['busiest_branch']}' : ''}'
                   '${totals['busiest_window'] != null ? ' · window ${totals['busiest_window']}' : ''}',
             style: AppType.caption,
@@ -3632,7 +3637,7 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                     ),
                     const SizedBox(width: 8),
-                    Text('${b['predicted_7d_parcels']} parcels', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.forest)),
+                    Text('${b['predicted_7d_parcels']} items', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.forest)),
                   ]),
                 ),
             ],
@@ -3713,7 +3718,7 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
     final res = await DropOffApi.retryPayout(id);
     if (!mounted) return;
     setState(() => _busyId = null);
-    AppToast.show(context, res.ok ? 'Payout requeued for immediate retry.' : 'Retry failed: ${res.error}');
+    AppToast.show(context, res.ok ? 'Payout requeued for immediate retry.' : _adminError(res, 'Could not retry the payout. Try again.'));
     _load();
   }
 

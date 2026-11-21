@@ -169,14 +169,14 @@ class Booking {
           'Booking placed',
           'Rider assigned',
           'Rider at depot',
-          'Parcel collected',
+          'Item collected',
           'Delivered to recipient',
         ]
       : lastMileFee > 0
           ? const [
               'Booking placed',
               'Rider assigned',
-              'Parcel collected',
+              'Item collected',
               'At courier depot',
               'Dropped at depot',
               'Out for door delivery',
@@ -185,7 +185,7 @@ class Booking {
           : const [
               'Booking placed',
               'Rider assigned',
-              'Parcel collected',
+              'Item collected',
               'At courier depot',
               'Dropped at depot',
             ];

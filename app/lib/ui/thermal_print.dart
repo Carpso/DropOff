@@ -179,7 +179,7 @@ class ThermalWaybill {
     ]);
     section('PARCEL', [
       ('Size', d.size),
-      ('Parcels', d.parcels),
+      ('Items', d.parcels),
       ('Vehicle', d.vehicle),
       ('Description', d.description),
     ]);
@@ -225,7 +225,7 @@ class ThermalWaybill {
 
     out.addAll(gen.hr());
     for (final line in _wrapWords(
-      'The rider pays the depot fare at the counter. The sender repays the exact photographed receipt through DropOff to reimburse the rider — it is not a DropOff charge. Keep this waybill until the parcel is lodged.',
+      'The rider pays the depot fare at the counter. The sender repays the exact photographed receipt through DropOff to reimburse the rider — it is not a DropOff charge. Keep this waybill until the item is lodged.',
       40,
     )) {
       out.addAll(gen.text(line,

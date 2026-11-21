@@ -337,7 +337,7 @@ String? branchDistanceLabel(CourierBranch branch, String sellerCity) {
 
 const _stopWords = {
   'to', 'in', 'from', 'the', 'a', 'an', 'and', 'or', 'for', 'of', 'vs',
-  'parcel', 'parcels', 'package', 'small', 'medium', 'large', 'courier', 'delivery',
+  'item', 'items', 'package', 'small', 'medium', 'large', 'courier', 'delivery',
 };
 
 /// Smart courier search: matches name/strapline/status/id/branches plus route

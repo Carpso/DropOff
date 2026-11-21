@@ -30,7 +30,8 @@ class AccountScreen extends StatefulWidget {
   /// Optional one-shot referral code for pre-fill (used by the dropoff.carpsosolutions.store/r/CODE deep link).
   static String? prefillReferral;
   final bool focusPlans;
-  const AccountScreen({super.key, this.focusPlans = false});
+  final bool openCreate;
+  const AccountScreen({super.key, this.focusPlans = false, this.openCreate = false});
 
   @override
   State<AccountScreen> createState() => _AccountScreenState();
@@ -68,6 +69,11 @@ class _AccountScreenState extends State<AccountScreen> {
     // /r/CODE deep link: prefill the referral box on account creation.
     if (widget.focusPlans) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToPlans());
+    }
+    if (widget.openCreate) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showCreateAccountSheet();
+      });
     }
     StepSounds.load().then((_) {
       if (mounted) {
@@ -1238,7 +1244,7 @@ class _TiersCardState extends State<_TiersCard> {
           const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.',
               style: TextStyle(fontSize: 12.5, height: 1.4)),
           const SizedBox(height: 8),
-          const Text('The prompt adds our processing fee plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-parcel money.',
+          const Text('The prompt adds our processing fee plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-item money.',
               style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
         ]),
         actions: [
@@ -1328,8 +1334,8 @@ class _TiersCardState extends State<_TiersCard> {
       meta: {'tier': tier, 'status': status},
     );
       AppToast.show(context, switch (status) {
-      'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of parcels are ready.',
-      'success' => '$tier plan is LIVE — your monthly parcels are ready.',
+      'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of items are ready.',
+      'success' => '$tier plan is LIVE — your monthly items are ready.',
       'failed' => (failReason == null || failReason.isEmpty)
           ? 'The mobile-money prompt was rejected — verify your momo balance has the funds, then tap Pay now again.'
           : 'Payment failed: $failReason — top up your momo wallet, then tap Pay now again.',
@@ -1381,10 +1387,10 @@ class _TiersCardState extends State<_TiersCard> {
                     );
                   }
                   const display = <String, ({String label, String blurb})>{
-                    'weekly': (label: 'WEEKLY SPRINT', blurb: '20 parcels / 7 days — no monthly lock-in'),
-                    'silver': (label: 'SILVER', blurb: '10 parcels / month — low-volume senders'),
-                    'gold': (label: 'GOLD', blurb: '25 parcels / month — weekly shippers'),
-                    'platinum': (label: 'PLATINUM', blurb: '50 parcels / month — daily bulk senders'),
+                    'weekly': (label: 'WEEKLY SPRINT', blurb: '20 items / 7 days — no monthly lock-in'),
+                    'silver': (label: 'SILVER', blurb: '10 items / month — low-volume senders'),
+                    'gold': (label: 'GOLD', blurb: '25 items / month — weekly shippers'),
+                    'platinum': (label: 'PLATINUM', blurb: '50 items / month — daily bulk senders'),
                   };
                   final currentTier = '${_current?['tier'] ?? ''}';
                   final currentActive = '${_current?['status'] ?? ''}' == 'active';

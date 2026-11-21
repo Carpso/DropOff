@@ -206,6 +206,59 @@ class _LinkableTextState extends State<LinkableText> {
   }
 }
 
+/// Branded empty/loading/error state used across lists and detail screens.
+class StateMessage extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final bool loading;
+
+  const StateMessage({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), shape: BoxShape.circle),
+                child: loading
+                    ? const Padding(padding: EdgeInsets.all(14), child: AppLogoSpinner(size: 24))
+                    : Icon(icon, color: AppColors.forest, size: 28),
+              ),
+              const SizedBox(height: 14),
+              Text(title, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+              const SizedBox(height: 6),
+              Text(message, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.45)),
+              if (actionLabel != null && onAction != null) ...[
+                const SizedBox(height: 14),
+                FilledButton.tonal(onPressed: onAction, child: Text(actionLabel!)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Rounded initials chip for a courier operator (used wherever a courier is
 /// shown: directory, booking step 2, collections form).
 class CourierAvatar extends StatelessWidget {

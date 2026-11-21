@@ -1004,7 +1004,7 @@ class _RevenueRow extends StatelessWidget {
 /// (Full salary only when the month target is met; pro-rated by rides done if
 /// the target is missed.) Split out so rider economics stay out of seller copy.
 
-/// Driver's daily 30-parcel target, with the month pace line so a missed day
+/// Driver's daily 30-item target, with the month pace line so a missed day
 /// is caught up inside the month instead of silently sliding.
 class _RiderTargetsCard extends StatefulWidget {
   const _RiderTargetsCard();

@@ -33,12 +33,12 @@ import '../services/step_sounds.dart';
 /// The rider's day as slot-batched task queues:
 ///   BATCH: 10:00—11:30 slot · 6:00—7:30 AM window · 23 min in
 ///   TOTAL PARCELS: 6 · STOPS: 3 (1 picked) · DESTINATION: Mercury — Kabulonga
-///   1. 10:05 AM · 14 Reedbuck Rd (Beauty Hub) — 2 parcels ...
+///   1. 10:05 AM · 14 Reedbuck Rd (Beauty Hub) — 2 items ...
 ///
 /// Owner directives (2026-11-17) built into this screen:
 ///  • Pull-to-refresh + a 20s auto-sync poll; the queue is the rider's
 ///    FIRST tab (AppShell), highly visible, never lost between cards.
-///  • The "How did the parcel move on?" sheet is SEQUENTIAL: steps tick ✓
+///  • The "How did the item move on?" sheet is SEQUENTIAL: steps tick ✓
 ///    as they are filed and only the next step stays open. The first leg
 ///    ends at the DEPOT (sender → depot); only last-mile/collection jobs
 ///    continue to the recipient's door with the recipient's 4-digit code.
@@ -185,9 +185,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       // in the batches must equal the figures in the stats card. Server keeps
       // the fields the queue cannot know (delivered today, earnings).
       final qBatches = ((data?['batches'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      var stops = 0, pickedStops = 0, parcels = 0;
+      var stops = 0, pickedStops = 0, items = 0;
       for (final b in qBatches) {
-        parcels += (b['total_parcels'] as num?)?.toInt() ?? 0;
+        items += (b['total_parcels'] as num?)?.toInt() ?? 0;
         final ss = ((b['stops'] as List?) ?? const []);
         stops += ss.length;
         pickedStops += ss.where((x) => _picked('${(x as Map)['status'] ?? ''}')).length;
@@ -197,7 +197,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         merged['total'] = stops;
         merged['waiting'] = stops - pickedStops;
         merged['picked'] = pickedStops;
-        merged['parcels'] = parcels;
+        merged['parcels'] = items;
       }
       setState(() {
         _stats = merged;
@@ -486,7 +486,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       return;
     }
     if (res.error == 'payment_required') {
-      AppToast.error(context, 'This parcel is waiting for the sender\'s prepayment.');
+      AppToast.error(context, 'This item is waiting for the sender\'s prepayment.');
       return;
     }
     AppToast.error(context, switch (res.error) { 'at_capacity' => 'You are at capacity - finish a stop first.', 'payment_required' => 'Prepayment is still pending for this job.', _ => 'Could not claim this job - check your connection.' });
@@ -615,11 +615,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
 
   /* ------------------------ stop advancement (proof kit) -------------------- */
   // Anti-false-parcel handover: pickups confirm the SENDER's 4-digit code and
-  // photograph every parcel exactly once; depot drops need the depot's own
+  // photograph every item exactly once; depot drops need the depot's own
   // receipt photos; door deliveries (last-mile/collection jobs only) require
   // the recipient's 4-digit DropOff code.
 
-  /// CAMERA-ONLY capture for pickup parcel photos (owner directive
+  /// CAMERA-ONLY capture for pickup item photos (owner directive
   /// 2026-11-17: "no repeat capture" — a gallery pick could re-file an old
   /// photo, so collection evidence is captured live, one photo per picked-up item).
   Future<String?> _captureParcelPhoto() async {
@@ -678,7 +678,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Future<void> _navigateToStop(Map<String, dynamic> s) async {
     final picked = _picked('${s['status'] ?? ''}');
     // COLLECTION jobs run DEPOT → RECIPIENT (the reverse of a drop-off). The
-    // first leg is the courier counter where the parcel is already waiting;
+    // first leg is the courier counter where the item is already waiting;
     // only after the pickup does the rider head to the recipient's door.
     final isCollection = '${s['service'] ?? ''}' == 'collection';
     // After a collection pickup there is no door pin on the job (only the
@@ -697,7 +697,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final label = isCollection
         ? (picked
             ? 'Deliver to ${'${s['recipient'] ?? 'recipient'}'}'
-            : '$depotName depot — collect the parcel')
+            : '$depotName depot — collect the item')
         : (picked
             ? '$depotName depot'
             : (senderName.isNotEmpty ? '$senderName — $addr' : '${s['ref'] ?? 'Stop'} — $addr').trim());
@@ -706,7 +706,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // pin too, heading to the depot shows the sender's stop too.
     //
     // COLLECTION (owner directive 2026-11-20: "on collection the depot pin
-    // remove it, only when handover"): the depot is the parcel's ORIGIN, not
+    // remove it, only when handover"): the depot is the item's ORIGIN, not
     // a place to navigate to — no depot context pin is drawn on a collection
     // at any stage. The only pin is the leg destination (depot counter first,
     // recipient door at handover).
@@ -995,7 +995,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               const Divider(height: 16),
               // ORDER WAYBILL (owner 2026-11-18): the rider's read-only copy of
               // the full order sheet — contacts, both addresses, depot,
-              // parcels — no money fields. Available any time on this stop.
+              // items — no money fields. Available any time on this stop.
               ListTile(
                 enabled: _busyRef == null,
                 leading: const Icon(Icons.receipt_long_outlined),
@@ -1282,7 +1282,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   }
 
   /// Depot drop with the counter-receipt kit (owner directive 2026-11-12):
-  /// photograph EVERY parcel in the batch, and file EVERY depot receipt the
+  /// photograph EVERY item in the batch, and file EVERY depot receipt the
   /// depot wrote — each photographed, each with the EXACT amount written on
   /// it. A submitted receipt is a single, exact, photographed document, never
   /// a rider-computed sum; the SERVER totals the receipts. The rider fronts
@@ -1292,7 +1292,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (_busyRef != null) return null;
     if (!mounted) return null;
     setState(() => _busyRef = ref); // one step at a time — see _pickUpFromSender
-    final parcelPhotos = <String>[]; // batch: one or more parcel photos
+    final parcelPhotos = <String>[]; // batch: one or more item photos
     final branchCtrl = TextEditingController();
     // Each depot receipt: its own amount field + its own photo. A batch may
     // be split across receipts by the depot — file them all, one by one.
@@ -1393,7 +1393,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 ),
               ),
               const SizedBox(height: 4),
-              const Text('Optional — the branch the parcel landed at. Route stays "to Platinum" until this is filled.',
+              const Text('Optional — the branch the item landed at. Route stays "to Platinum" until this is filled.',
                   style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.35)),
               const Divider(height: 20),
               // ── Depot receipts (one or more, each exact) ──
@@ -1417,7 +1417,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             FilledButton(
               onPressed: filing ? null : () async {
                 if (parcelPhotos.isEmpty) {
-                  _snack('At least one parcel photo is required.');
+                  _snack('At least one item photo is required.');
                   return;
                 }
                 if (receipts.isEmpty) {
@@ -1570,7 +1570,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             Text('Hand this item to: ${recName.isEmpty ? 'the recipient' : recName}${recPhone.isNotEmpty ? ' · $recPhone' : ''}',
                 style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35)),
             const SizedBox(height: 8),
-            const Text('Intercity parcels: the recipient shows their 4-digit DropOff code from the handover SMS. Lusaka parcels carry no SMS PIN — but if the recipient set their own door PIN in the app, ask for it here. Otherwise attach the proof photo; they confirm receipt in their own app.',
+            const Text('Intercity items: the recipient shows their 4-digit DropOff code from the handover SMS. Lusaka items carry no SMS PIN — but if the recipient set their own door PIN in the app, ask for it here. Otherwise attach the proof photo; they confirm receipt in their own app.',
               style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
             const SizedBox(height: 12),
             TextField(
@@ -1906,7 +1906,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       builder: (context, _) {
         final t = _radar.value;
         // Rings start near the logo and expand past the screen edges, so the
-        // radar reads as searching the whole city for a parcel signal.
+        // radar reads as searching the whole city for an item signal.
         return ClipRect(
           child: SizedBox(
             width: double.infinity,
@@ -1947,7 +1947,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 ),
                 clipBehavior: Clip.antiAlias,
                 // Cover fills the whole circle with the green app artwork —
-                // no white corners/patches around the pin + parcel mark.
+                // no white corners/patches around the pin + item mark.
                 child: Image.asset('assets/brand/dropoff_logo.png', width: 76, height: 76, fit: BoxFit.cover),
               ),
             ]),
@@ -1962,7 +1962,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final waiting = (s['waiting'] as num?)?.toInt() ?? 0;
     final picked = (s['picked'] as num?)?.toInt() ?? 0;
     final delivered = (s['delivered'] as num?)?.toInt() ?? 0;
-    final parcels = (s['parcels'] as num?)?.toInt() ?? 0;
+    final items = (s['parcels'] as num?)?.toInt() ?? 0;
   
     // Always visible (owner 2026-11-18): a quiet day still shows the card —
     // a zero-total card used to shrink away and look "missing".
@@ -2001,7 +2001,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             Icon(Icons.circle, size: 7, color: Colors.greenAccent.withValues(alpha: 0.9)),
             const SizedBox(width: 6),
             Expanded(
-              child: Text('$parcels items · updated $_statsSynced',
+              child: Text('$items items · updated $_statsSynced',
                   maxLines: 2, overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.6), fontWeight: FontWeight.w600)),
             ),
@@ -2283,7 +2283,7 @@ class _ReceiptEntry {
 
 /// ORDER WAYBILL (owner 2026-11-18): the rider's read-only copy of the order
 /// sheet — the same facts the sender's waybill carries (contacts, both
-/// addresses, depot/branch, parcels, window) with every money field stripped
+/// addresses, depot/branch, items, window) with every money field stripped
 /// server-side. The rider reaches it from the stop sheet → "View order
 /// waybill", any time before the drop is filed. When the rider sees it:
 /// before navigating to a pickup (who/what/where), when the sender or
@@ -2460,11 +2460,11 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
                 style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.4)),
           ],
         ]),
-        _section('PARCEL', [
-          _row('Parcels', '${w['parcels'] ?? 1}'),
+        _section('ITEM', [
+          _row('Items', '${w['parcels'] ?? 1}'),
           _row('Contents', '${w['description'] ?? ''}'),
           _row('Size', '${w['weight_class'] ?? ''}'),
-          // Declared parcel VALUE (owner request): needed at the depot counter.
+          // Declared item VALUE (owner request): needed at the depot counter.
           // No fees, rates or rider payouts are ever shown on this sheet.
           _row(
             'Package value',

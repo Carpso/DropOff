@@ -4,6 +4,7 @@ import '../data/dropoff_api.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_toast.dart';
 import '../ui/app_spinner.dart';
+import '../widgets/common.dart';
 
 /// Customer-facing help desk. Parcel chat was removed — every conversation with
 /// DropOff now starts here as a ticket with a subject, a category and a status.
@@ -115,15 +116,9 @@ class _TicketsScreenState extends State<TicketsScreen> {
           child: _loading
               ? const Center(child: AppLogoSpinner(size: 26))
               : _error != null
-                  ? Center(child: Padding(padding: const EdgeInsets.all(28), child: Text(_error!, textAlign: TextAlign.center, style: AppType.body)))
+                  ? StateMessage(icon: Icons.cloud_off_outlined, title: 'Could not load tickets', message: _error!, actionLabel: 'Try again', onAction: _load)
                   : _tickets.isEmpty
-                      ? const Center(child: Padding(padding: EdgeInsets.all(32), child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.support_agent, size: 52, color: AppColors.forestLight),
-                          SizedBox(height: 12),
-                          Text('No tickets yet', style: AppType.subhead),
-                          SizedBox(height: 6),
-                          Text('Need help with a delivery or payment? Tap New ticket.', style: AppType.body, textAlign: TextAlign.center),
-                        ])))
+                      ? StateMessage(icon: Icons.support_agent, title: 'No tickets yet', message: 'Need help with a delivery or payment? Tap New ticket.', actionLabel: 'New ticket', onAction: () => _openNewTicket())
                       : RefreshIndicator(
                           onRefresh: _load,
                           child: ListView.separated(

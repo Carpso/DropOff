@@ -86,8 +86,8 @@ class _TrackScreenState extends State<TrackScreen> {
   }
 
   /// Open the account flow, then retry the lookup with the fresh session.
-  Future<void> _openAccount() async {
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
+  Future<void> _openAccount({bool create = false}) async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AccountScreen(openCreate: create)));
     if (!mounted) return;
     if (AppScope.of(context).linked) await _lookup();
   }
@@ -177,7 +177,7 @@ class _TrackScreenState extends State<TrackScreen> {
     );
   }
 
-  /// Payment-held parcel (owner directive 2026-11-15): the sender's prepayment
+  /// Payment-held item (owner directive 2026-11-15): the sender's prepayment
   /// has not settled, so tracking stays locked — no timeline, no rider, no
   /// live location. The server flips it open itself the moment payment lands.
   Widget _heldCard() {
@@ -229,14 +229,14 @@ class _TrackScreenState extends State<TrackScreen> {
           Row(children: [
             Expanded(
               child: FilledButton(
-                onPressed: _openAccount,
+                onPressed: () => _openAccount(create: true),
                 child: const Text('Create account', maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: OutlinedButton(
-                onPressed: _openAccount,
+                onPressed: () => _openAccount(),
                 child: const Text('Sign in', maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ),

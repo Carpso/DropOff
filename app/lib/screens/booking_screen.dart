@@ -207,10 +207,10 @@ class _BookingScreenState extends State<BookingScreen> {
           _courierId = courierCatalogForServerId(int.tryParse('${pre['courier_id'] ?? ''}') ?? 1);
         }
       }
-      final parcels = (pre['parcels'] as num?)?.toInt() ?? 0;
-      if (parcels > 0 && parcels <= _parcelCapFor(_vehicleClass)) {
-        _parcels = parcels;
-        _parcelsCtl.text = '$parcels';
+      final items = (pre['parcels'] as num?)?.toInt() ?? 0;
+      if (items > 0 && items <= _parcelCapFor(_vehicleClass)) {
+        _parcels = items;
+        _parcelsCtl.text = '$items';
       }
       final pw = '${pre['pickup_window'] ?? pre['pickupWindow'] ?? ''}'.trim();
       if (pw == 'tomorrow:06:00') {
@@ -387,7 +387,7 @@ class _BookingScreenState extends State<BookingScreen> {
   /// What the customer pays DropOff on the prompt for this order.
   double get _dropOffDue {
     final leg = DropOffApi.round2(_dropOffLeg);
-    // Pack parcels carry NO per-parcel processing fees — the server passes
+    // Pack items carry NO per-item processing fees — the server passes
     // riderFee=null to collectionFees() for them, so the prompt is the leg only.
     if (_planLeg == 'pack') return leg;
     return DropOffApi.collectionFees(leg, riderFee: _riderFeeEstimate)['prompt_total_zmw'] ?? leg;
@@ -425,7 +425,7 @@ class _BookingScreenState extends State<BookingScreen> {
     final bytes = await picked.readAsBytes();
     DateTime? capturedAt;
     try { capturedAt = await picked.lastModified(); } catch (_) {}
-    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'parcel.jpg', kind: 'kyc', capturedAt: capturedAt);
+    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'item.jpg', kind: 'kyc', capturedAt: capturedAt);
     if (!mounted) return;
     setState(() {
       _parcelPhotoUploading = false;
@@ -638,6 +638,7 @@ class _BookingScreenState extends State<BookingScreen> {
                       Navigator.pop(ctx);
                     },
                     trailing: IconButton(
+                      tooltip: 'Remove recipient',
                       icon: const Icon(Icons.delete_outline, color: AppColors.muted),
                       onPressed: () async {
                         final id = (r['id'] as num?)?.toInt();
@@ -755,7 +756,7 @@ class _BookingScreenState extends State<BookingScreen> {
     // Live Lipila collect for mobile-money jobs; the Worker responds with the
     // payment id and the client polls GET /payments/:id/status every 2s.
     // Plan-covered trips skip payment entirely — the subscription already paid
-    // for the rider leg, and the parcels were deducted server-side.
+    // for the rider leg, and the items were deducted server-side.
     final inclusion = store.lastBookingPlanInclusion;
     final due = store.lastBookingDueZmw;
     final used = store.lastBookingPlanUsed;
@@ -780,9 +781,9 @@ class _BookingScreenState extends State<BookingScreen> {
         final remaining = (inclusion == 'pack' && used != null && cap != null) ? cap - used : null;
         _message(
           remaining != null && remaining >= 0
-              ? 'Covered by your plan — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted ($remaining left on your plan). No payment due.'
+              ? 'Covered by your plan — $justParcels item${justParcels == 1 ? '' : 's'} deducted ($remaining left on your plan). No payment due.'
               : remaining != null
-                  ? 'Covered by your plan — $justParcels parcel${justParcels == 1 ? '' : 's'} deducted. No payment due.'
+                  ? 'Covered by your plan — $justParcels item${justParcels == 1 ? '' : 's'} deducted. No payment due.'
                   : 'Booking dispatched — no payment due.',
         );
       }
@@ -829,7 +830,7 @@ class _BookingScreenState extends State<BookingScreen> {
     AnalyticsService.instance.track(
       feature: 'booking', action: 'submit', context: 'booking_step_3',
       meta: {
-        'parcels': _parcels,
+        'items': _parcels,
         'weight_class': switch (_size) {
           ParcelSize.small => '0-5kg',
           ParcelSize.medium => '5-15kg',
@@ -861,7 +862,7 @@ class _BookingScreenState extends State<BookingScreen> {
               const SizedBox(height: 16),
               const Text('Sign up to book a pickup', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              const Text('Create your free account (phone code or email) to book, pay and track your parcels.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const Text('Create your free account (phone code or email) to book, pay and track your items.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
               const SizedBox(height: 20),
               FilledButton.icon(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
@@ -878,7 +879,7 @@ class _BookingScreenState extends State<BookingScreen> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text('Book a pickup', style: TextStyle(fontWeight: FontWeight.w900)),
-        leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+        leading: IconButton(tooltip: 'Close', icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
       ),
       body: Column(children: [
         Padding(
@@ -901,7 +902,19 @@ class _BookingScreenState extends State<BookingScreen> {
               ],
             ]),
             const SizedBox(height: 10),
-            Align(alignment: Alignment.centerLeft, child: Text('STEP ${_step + 1} OF 3  •  ${['ROUTE', 'PARCEL & COURIER', 'DETAILS & REVIEW'][_step]}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8, color: AppColors.muted))),
+            Align(alignment: Alignment.centerLeft, child: Text('STEP ${_step + 1} OF 3  •  ${['ROUTE', 'ITEM & COURIER', 'DETAILS & REVIEW'][_step]}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8, color: AppColors.muted))),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                const [
+                  'Choose where we collect from and the depot destination.',
+                  'Describe the item, add a photo, and pick the courier.',
+                  'Confirm contacts, review the fee, then place the booking.',
+                ][_step],
+                style: const TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.35),
+              ),
+            ),
           ]),
         ),
         Expanded(
@@ -933,7 +946,7 @@ class _BookingScreenState extends State<BookingScreen> {
                 onPressed: _saving ? null : (_step < 2 ? _next : _submit),
                 child: _saving
                     ? const AppLogoSpinner(size: 22, color: Colors.white)
-                    : Text(_step < 2 ? 'Continue' : 'Place booking'),
+                    : Text(_step < 2 ? (_step == 0 ? 'Continue to item details' : 'Continue to review') : 'Place booking'),
               )),
             ]),
           ),
@@ -998,7 +1011,7 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 10),
           _cityDropdown('Return city', _returnCity, (value) => setState(() => _returnCity = value)),
           const SizedBox(height: 10),
-          TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Your door — where the parcel comes back', prefixIcon: Icon(Icons.house_outlined))),
+          TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Your door — where the item comes back', prefixIcon: Icon(Icons.house_outlined))),
           const SizedBox(height: 6),
           const Text('The return ride (depot → your door) is confirmed at the counter before the return starts.', style: AppType.caption),
         ],
@@ -1063,7 +1076,7 @@ class _BookingScreenState extends State<BookingScreen> {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(
             labelText: 'Declared value (ZMW)',
-            hintText: 'What the parcel is worth, e.g. 450',
+            hintText: 'What the item is worth, e.g. 450',
             prefixIcon: Icon(Icons.payments_outlined),
           ),
         ),
@@ -1074,18 +1087,18 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 10),
         // VEHICLE IS SERVER-DECIDED (owner 2026-11-21): motorcycles are the
         // default; the worker upgrades to a car automatically for large or
-        // over-cap parcels. No vehicle question is shown to the sender.
+        // over-cap items. No vehicle question is shown to the sender.
         _vehicleClass == 'motorcycle'
             ? DropdownButtonFormField<int>(
                 initialValue: _parcels.clamp(1, _parcelCap),
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Items', hintText: '1', prefixIcon: Icon(Icons.inventory)),
                 items: List.generate(_parcelCap, (i) => i + 1)
-                    .map((i) => DropdownMenuItem(value: i, child: Text('$i parcel${i == 1 ? '' : 's'}')))
+                    .map((i) => DropdownMenuItem(value: i, child: Text('$i item${i == 1 ? '' : 's'}')))
                     .toList(),
                 onChanged: (v) { if (v != null) { _parcels = v; _parcelsCtl.text = '$v'; setState(() {}); } },
               )
-            // Cars, vans and trucks: UNLIMITED parcels — type any number.
+            // Cars, vans and trucks: UNLIMITED items — type any number.
             // Controller-driven so the value stays in sync with every clamp.
             : TextFormField(
                 controller: _parcelsCtl,
@@ -1423,7 +1436,7 @@ class _BookingScreenState extends State<BookingScreen> {
           if (_planLeg == 'pack')
             const Padding(
               padding: EdgeInsets.only(top: 6),
-              child: Text('Your plan covers this trip\'s sender → depot leg — no momo prompt at booking, no per-parcel fees.',
+              child: Text('Your plan covers this trip\'s sender → depot leg — no momo prompt at booking, no per-item fees.',
                   style: TextStyle(color: AppColors.forest, fontSize: 11.5, height: 1.4)),
             )
           else if (_payment == 'Mobile money') Builder(builder: (context) {
@@ -1443,6 +1456,26 @@ class _BookingScreenState extends State<BookingScreen> {
           _priceLine('DropOff charge est. now', kwacha(_dropOffDue), bold: true),
           const Padding(padding: EdgeInsets.only(top: 8), child: Text('Rider pays the depot; you repay the exact receipt here.', style: TextStyle(color: AppColors.muted, fontSize: 11))),
         ]))),
+        const SizedBox(height: 12),
+        Card(
+          color: AppColors.forest.withValues(alpha: 0.04),
+          child: const Padding(
+            padding: EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(Icons.route_outlined, size: 18, color: AppColors.forest),
+                SizedBox(width: 8),
+                Text('What happens next', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+              ]),
+              SizedBox(height: 8),
+              Text('1. Place booking — your rider is assigned to your sweep slot.', style: TextStyle(fontSize: 12.5, height: 1.4)),
+              SizedBox(height: 4),
+              Text('2. Approve the momo prompt on your phone if payment is required.', style: TextStyle(fontSize: 12.5, height: 1.4)),
+              SizedBox(height: 4),
+              Text('3. Track the item live in Bookings until it reaches the depot.', style: TextStyle(fontSize: 12.5, height: 1.4)),
+            ]),
+          ),
+        ),
         ];
 
   Widget _priceLine(String label, String value, {bool bold = false}) => Padding(
@@ -1700,6 +1733,8 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
             Text('Reference ${booking.reference}\n${booking.fromCity} → ${booking.toCity}', textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, height: 1.6)),
             const SizedBox(height: 18),
             InfoPill(icon: Icons.route_rounded, label: 'DropOff rides to the courier — reference ${booking.reference}'),
+            const SizedBox(height: 10),
+            const Text('What happens next: we’ll notify you when the rider collects your item and when it reaches the depot.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45, fontSize: 12.5)),
             const Spacer(),
             FilledButton.tonalIcon(
               onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => WaybillScreen(bookingId: booking.id))),
@@ -1746,6 +1781,8 @@ class _BookingSuccessScreenState extends State<BookingSuccessScreen>
                   label: _promptPhone == null
                       ? 'Momo prompt pending — approve it to dispatch'
                       : 'Momo prompt sent to $_promptPhone — approve it to dispatch'),
+              const SizedBox(height: 10),
+              const Text('What happens next: approve the prompt on your phone. Dispatch starts automatically once payment is confirmed.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45, fontSize: 12.5)),
               const Spacer(),
               if (!paused && (_watchTimer?.isActive ?? false)) ...[
                 const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -1892,12 +1929,12 @@ class _PlanBannerState extends State<_PlanBanner> {
             Row(children: [
               const Icon(Icons.card_membership, size: 17, color: AppColors.forest),
               const SizedBox(width: 8),
-              Expanded(child: Text('$tier plan active — $used of $cap parcels used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest))),
+              Expanded(child: Text('$tier plan active — $used of $cap items used', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.forest))),
             ]),
             const SizedBox(height: 5),
             Text(
               covered
-                  ? 'This trip deducts ${widget.parcels} parcel${widget.parcels == 1 ? '' : 's'} — $remaining left. Renews $renews.'
+                  ? 'This trip deducts ${widget.parcels} item${widget.parcels == 1 ? '' : 's'} — $remaining left. Renews $renews.'
                   : 'Only $remaining left on your $tier plan — this trip pays your tier discount ($pct% off pay-as-you-go). Renews $renews.',
               style: AppType.caption,
             ),
@@ -1911,7 +1948,7 @@ class _PlanBannerState extends State<_PlanBanner> {
 /// Catalog → live chargebook ids: see data/catalog.dart (kCourierServerIds,
 /// courierServerIdOf, courierCatalogForServerId) — single source of truth.
 
-/// Delivery IQ — how fast this courier's depot actually receives parcels:
+/// Delivery IQ — how fast this courier's depot actually receives items:
 /// the typical (and slow-day) pickup→depot minutes from the last 90 days of
 /// real job events, shown right where the pickup window is picked.
 class _DeliveryIqCard extends StatefulWidget {

@@ -467,7 +467,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                   suffixIcon: _searchBusy
                       ? const Padding(padding: EdgeInsets.all(12), child: AppLogoSpinner(size: 18))
                       : (_search.text.isNotEmpty
-                          ? IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() { _search.clear(); _results = const []; }))
+                          ? IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close), onPressed: () => setState(() { _search.clear(); _results = const []; }))
                           : null),
                   border: InputBorder.none,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),

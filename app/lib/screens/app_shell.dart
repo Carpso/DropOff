@@ -67,7 +67,7 @@ class _AppShellState extends State<AppShell> {
       // Universal text-scale clamp: EVERY screen in the app lives below this
       // clamp (MaterialApp.builder), so rows can't crush into a vertical
       // ribbon on large-font phones (the "Business tab text reading down",
-      // "Parcels in flight", KPI tiles, plan cards, …). max 1.30x.
+      // "Items in flight", KPI tiles, plan cards, …). max 1.30x.
       bottomNavigationBar: MediaQuery.withClampedTextScaling(
         maxScaleFactor: 1.30,
         child: NavigationBar(

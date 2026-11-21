@@ -589,11 +589,11 @@ class _ReceiptCard extends StatelessWidget {
 
                   _receiptSection('PARCEL', [
                     _row('Size', booking.parcelSize.label),
-                    _row('Parcels', '${booking.parcels}'),
+                    _row('Items', '${booking.parcels}'),
                     _row('Vehicle class', _vehicleLabel(booking.vehicleClass)),
                     _row('Description', booking.description),
                     if (booking.roundTrip) ...[
-                      _row('Round trip', 'Yes — unreturned parcel comes back to sender'),
+                      _row('Round trip', 'Yes — unreturned item comes back to sender'),
                       if (booking.returnCity?.trim().isNotEmpty == true) _row('Return city', booking.returnCity!),
                       if (booking.returnAddress?.trim().isNotEmpty == true) _row('Return address', booking.returnAddress!),
                       if (booking.returnLegFee > 0) _row('Return leg fee', kwacha(booking.returnLegFee)),
@@ -677,7 +677,7 @@ class _ReceiptCard extends StatelessWidget {
                   const _DashedLine(),
                   const SizedBox(height: 10),
                   const Text(
-                    'The rider pays the depot fare at the counter. The sender repays the exact photographed receipt through DropOff to reimburse the rider — it is not a DropOff charge. Keep this waybill until the parcel is lodged at the depot.',
+                    'The rider pays the depot fare at the counter. The sender repays the exact photographed receipt through DropOff to reimburse the rider — it is not a DropOff charge. Keep this waybill until the item is lodged at the depot.',
                     textAlign: TextAlign.center,
                     style: AppType.caption,
                   ),
