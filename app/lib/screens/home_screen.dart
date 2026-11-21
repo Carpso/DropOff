@@ -8,6 +8,7 @@ import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_toast.dart';
 import '../widgets/common.dart';
 import 'account_screen.dart';
 import 'booking_screen.dart';
@@ -195,7 +196,7 @@ class HomeScreen extends StatelessWidget {
                 child: Row(children: [
                   Icon(Icons.location_on_outlined, color: AppColors.forest),
                   SizedBox(width: 12),
-                  Expanded(child: Text('Expecting a parcel? Track it', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14))),
+                  Expanded(child: Text('Expecting an item? Track it', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14))),
                   Icon(Icons.chevron_right, color: AppColors.muted),
                 ]),
               ),
@@ -312,7 +313,7 @@ class _FareCheckerState extends State<_FareChecker> {
       }
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permission is needed to pin the pickup.')));
+          AppToast.warning(context, 'Location permission is needed to pin the pickup.');
         }
         return;
       }
@@ -327,7 +328,7 @@ class _FareCheckerState extends State<_FareChecker> {
       });
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not get your location — the fee locks exactly when you book.')));
+        AppToast.error(context, 'Could not get your location — the fee locks exactly when you book.');
       }
     } finally {
       if (mounted) setState(() => _locating = false);
@@ -337,12 +338,11 @@ class _FareCheckerState extends State<_FareChecker> {
   void _checkFee() {
     final from = _place.text.trim();
     if (from.length < 3 && _lat == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Type where we collect from — or pin your location.')));
+      AppToast.warning(context, 'Type where we collect from — or pin your location.');
       return;
     }
     setState(() => _feeChecked = true);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('✓ Fee checked — your rider fee is on the card. Book when ready.')));
+    AppToast.success(context, 'Fee checked — your rider fee is on the card. Book when ready.');
   }
 
   /// Check the rider fee → Book: carry over EVERYTHING the sender already

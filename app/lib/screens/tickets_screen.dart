@@ -221,7 +221,7 @@ class _NewTicketSheetState extends State<_NewTicketSheet> {
     final res = await DropOffApi.createTicket(subject: subject, category: _category, body: body);
     if (!mounted) return;
     setState(() => _saving = false);
-    if (!res.ok) return AppToast.error(context, 'Could not open the ticket (${res.error}). Try again.');
+    if (!res.ok) return AppToast.error(context, 'Could not open the ticket. Check your connection and try again.');
     Navigator.of(context).pop(true);
     AppToast.show(context, 'Ticket opened — we will reply here.');
   }
@@ -319,7 +319,7 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
     final res = await DropOffApi.ticketReply(widget.id, body);
     if (!mounted) return;
     setState(() => _sending = false);
-    if (!res.ok) return AppToast.error(context, 'Could not send (${res.error}).');
+    if (!res.ok) return AppToast.error(context, 'Could not send your message. Check your connection and try again.');
     _reply.clear();
     _load();
   }
@@ -327,7 +327,7 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
   Future<void> _setStatus(String status) async {
     final res = await DropOffApi.ticketStatus(widget.id, status);
     if (!mounted) return;
-    if (!res.ok) return AppToast.error(context, 'Could not update the ticket (${res.error}).');
+    if (!res.ok) return AppToast.error(context, 'Could not update the ticket. Check your connection and try again.');
     AppToast.show(context, status == 'closed' ? 'Ticket closed.' : 'Ticket reopened.');
     _load();
   }

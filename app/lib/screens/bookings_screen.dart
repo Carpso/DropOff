@@ -105,7 +105,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
               const SizedBox(height: 16),
               const Text('Sign in to see your bookings', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              const Text('Your parcels, courier handovers and support tickets live behind your account — phone code or email, your choice.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const Text('Your items, courier handovers and support tickets live behind your account — phone code or email, your choice.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
               const SizedBox(height: 20),
               FilledButton.icon(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
@@ -741,7 +741,7 @@ class _MovementLogSheetState extends State<_MovementLogSheet> {
                 label: const Text('Try again'),
               )),
             ] else if (_timeline.isEmpty)
-              const Text('No updates yet — they appear here the moment the parcel moves.', style: AppType.body),
+              const Text('No updates yet — they appear here the moment the item moves.', style: AppType.body),
             for (final e in _timeline)
               () {
                 final who = '${e['who'] ?? 'system'}';
@@ -885,7 +885,7 @@ Future<void> _showEvidenceLocker(BuildContext context, Booking booking) async {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Share evidence — ${data['ref'] ?? ref}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
-          const Text('Proof-of-condition photos and the parcel comparison. Share only with trusted parties.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
+          const Text('Proof-of-condition photos and the item comparison. Share only with trusted parties.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
           const SizedBox(height: 12),
           Flexible(
             child: SingleChildScrollView(
@@ -1693,7 +1693,7 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
       setState(() => _busy = false);
       AppToast.show(context, res.error == 'counter_fare_already_paid'
           ? 'Already paid — your receipt is unlocked.'
-          : 'Could not start the prompt (${res.error ?? 'network'}) — check your connection and balance, then try again.');
+          : 'Could not start the prompt. Check your connection and balance, then try again.');
       return;
     }
     final paymentId = '${res.body['payment_id']}';

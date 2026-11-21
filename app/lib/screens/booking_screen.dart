@@ -411,7 +411,7 @@ class _BookingScreenState extends State<BookingScreen> {
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take parcel photo'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take item photo'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
           ListTile(leading: const Icon(Icons.photo_library), title: const Text('Pick from gallery'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
         ]),
       ),
@@ -431,7 +431,7 @@ class _BookingScreenState extends State<BookingScreen> {
       _parcelPhotoUploading = false;
       if (res.ok && res.body['url'] is String) _parcelPhotoUrl = res.body['url'] as String;
     });
-    _message(res.ok ? 'Parcel photo attached — protects you if the parcel is disputed.' : 'Photo upload failed. You can still book.');
+    _message(res.ok ? 'Item photo attached — protects you if the item is disputed.' : 'Photo upload failed. You can still book.');
   }
 
   /// ✨ Tidy, the DropOff app AI (server /ai/address + local pin snap).
@@ -594,7 +594,7 @@ class _BookingScreenState extends State<BookingScreen> {
       }
     }
     if (_step < 2 && target >= 2) {
-      if (_description.text.trim().length < 3) return _message('Briefly describe what is inside the parcel.');
+      if (_description.text.trim().length < 3) return _message('Briefly describe what is inside the item.');
     }
     setState(() => _step = target);
   }
@@ -953,7 +953,7 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 10),
         _cityDropdown('Depot destination (receipt)', _to, (value) => setState(() => _to = value)),
         const SizedBox(height: 8),
-        const InfoPill(icon: Icons.receipt_long, label: 'Your parcel is dropped at the courier depot. The destination above is for your receipt only — it is not the actual door drop-off.', color: AppColors.amber),
+        const InfoPill(icon: Icons.receipt_long, label: 'Your item is dropped at the courier depot. The destination above is for your receipt only — it is not the actual door drop-off.', color: AppColors.amber),
         const SizedBox(height: 18),
               TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market — or a plus code like 8FQ4+J9', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _tidyAddress, child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('✨ Tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const AppLogoSpinner(size: 18) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
         if (_saved.isNotEmpty) ...[
@@ -990,7 +990,7 @@ class _BookingScreenState extends State<BookingScreen> {
           tileColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15), side: const BorderSide(color: AppColors.line)),
           title: const Text('Round trip', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-          subtitle: const Text('If it can\'t travel on, the rider returns the parcel from the depot back to your door — no re-booking'),
+          subtitle: const Text('If it can\'t travel on, the rider returns the item from the depot back to your door — no re-booking'),
           value: _roundTrip,
           onChanged: (value) => setState(() => _roundTrip = value),
         ),
@@ -1032,7 +1032,7 @@ class _BookingScreenState extends State<BookingScreen> {
           icon: _parcelPhotoUploading
               ? const AppLogoSpinner(size: 18)
               : Icon(_parcelPhotoUrl == null ? Icons.add_a_photo_outlined : Icons.check_circle, color: _parcelPhotoUrl == null ? null : AppColors.success),
-          label: Text(_parcelPhotoUrl == null ? 'Add parcel photo (recommended)' : 'Parcel photo attached'),
+          label: Text(_parcelPhotoUrl == null ? 'Add item photo (recommended)' : 'Item photo attached'),
         ),
         if (_parcelPhotoUrl != null || _parcelPhotoPath != null) ...[
           const SizedBox(height: 8),
@@ -1098,7 +1098,7 @@ class _BookingScreenState extends State<BookingScreen> {
               ),
         if (_vehicleClass == 'car') ...[
           const SizedBox(height: 6),
-          const Text('A car has been assigned automatically for this parcel size — no vehicle choice needed.',
+          const Text('A car has been assigned automatically for this item size — no vehicle choice needed.',
               style: TextStyle(fontSize: 10.5, color: AppColors.forest, height: 1.3)),
         ],
         const SizedBox(height: 6),
@@ -1395,7 +1395,7 @@ class _BookingScreenState extends State<BookingScreen> {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Mobile money — prepayment at booking', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
               SizedBox(height: 2),
-              Text('The prompt pays for your parcel delivery (trip price + processing fee) and dispatches your rider on approval. No cash; riders never handle money.',
+              Text('The prompt pays for your item delivery (trip price + processing fee) and dispatches your rider on approval. No cash; riders never handle money.',
                   style: AppType.caption),
             ])),
           ]),

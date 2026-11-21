@@ -15,7 +15,7 @@ String moneyErrorText(ApiResponse r, String fallback) {
   if (err == 'too_many_requests') return 'Too many attempts — wait a minute and try again.';
   if (err == 'identity_required' || err == 'unauthorized') return 'Sign in first — your plan is tied to your phone.';
   if (err == 'no_subscription' || err == 'choose_a_plan') return 'Choose a plan first, then tap Start.';
-  if (err.startsWith('http_')) return 'Payment provider returned an error ($err) — try again.';
+  if (err.startsWith('http_')) return 'Payment provider returned an error — try again in a moment.';
   if (err.isEmpty) return fallback;
-  return '$fallback ($err)';
+  return fallback;
 }

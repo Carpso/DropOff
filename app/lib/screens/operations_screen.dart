@@ -1306,7 +1306,7 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
     if (!mounted) return;
     setState(() => _busyField = null);
     if (!res.ok) {
-      AppToast.show(context, 'Photo upload failed (${res.error}).');
+      AppToast.show(context, 'Photo upload failed. Check your connection and try again.');
       return;
     }
     final url = '${res.body['url'] ?? ''}';

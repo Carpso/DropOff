@@ -310,7 +310,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       if (!mounted) return;
       AppToast.show(context, on ? 'You are ON SHIFT — DropOff jobs will flow in your sweeps.' : 'You are OFF SHIFT — other ride work is unrestricted.');
     } else {
-      AppToast.show(context, 'Could not update shift (${res.error ?? 'network'}).');
+      AppToast.show(context, 'Could not update shift. Check your connection and try again.');
     }
   }
 
@@ -631,7 +631,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'pickup.jpg', kind: 'kyc', capturedAt: capturedAt);
     if (!mounted) return null;
     if (!res.ok) {
-      AppToast.show(context, 'Photo upload failed (${res.error ?? 'network'}) — try the capture again.');
+      AppToast.show(context, 'Photo upload failed. Check your connection and try the capture again.');
       return null;
     }
     return '${res.body['url'] ?? ''}';
@@ -1567,7 +1567,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         builder: (ctx, setDialog) => AlertDialog(
           title: Text(_handoverTitle(s, 'COLLECTION'), style: AppType.subhead),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Hand this parcel to: ${recName.isEmpty ? 'the recipient' : recName}${recPhone.isNotEmpty ? ' · $recPhone' : ''}',
+            Text('Hand this item to: ${recName.isEmpty ? 'the recipient' : recName}${recPhone.isNotEmpty ? ' · $recPhone' : ''}',
                 style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35)),
             const SizedBox(height: 8),
             const Text('Intercity parcels: the recipient shows their 4-digit DropOff code from the handover SMS. Lusaka parcels carry no SMS PIN — but if the recipient set their own door PIN in the app, ask for it here. Otherwise attach the proof photo; they confirm receipt in their own app.',
@@ -1601,7 +1601,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             Row(children: [
               PhotoPreview(pathOrUrl: podUrl!, label: 'PROOF', size: 96),
               const SizedBox(width: 10),
-              const Expanded(child: Text('Check this is the parcel you handed over before you confirm.', style: AppType.caption)),
+              const Expanded(child: Text('Check this is the item you handed over before you confirm.', style: AppType.caption)),
             ]),
           ],
           ]),
@@ -2084,7 +2084,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('${b['label']}', style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.8)),
               const SizedBox(height: 5),
-              Text('TOTAL PARCELS TO PICK UP: ${b['total_parcels']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
+              Text('TOTAL ITEMS TO PICK UP: ${b['total_parcels']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
               const SizedBox(height: 2),
               Text('STOPS: $pickedCount of ${b['total_stops']} picked', style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700)),
               if (dest != null)

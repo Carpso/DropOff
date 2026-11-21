@@ -88,7 +88,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
     title: 'Depot receipts — filing them',
     rows: [
       (heading: 'One photo per receipt', body: 'Each receipt needs its own photo and the EXACT amount handwritten on it. Never sum them — DropOff totals the photographed documents.'),
-      (heading: 'One photo per receipt', body: 'If the depot splits your batch across two receipts, file BOTH. One photo and one amount field on each receipt sheet.'),
+      (heading: 'Split batches need separate photos', body: 'If the depot splits your batch across two receipts, file BOTH. One photo and one amount field on each receipt sheet.'),
       (heading: 'Sender repays you', body: 'The exact amounts photographed go to the sender as the repayment request. The sender pays that amount (+ processing) to DropOff; the rider is reimbursed the same amount fee-free.'),
       (heading: 'Documents stay locked', body: 'The photos you file stay masked from the sender until they pay — then they reveal, and the reimbursement triggers automatically.'),
     ],
@@ -191,6 +191,8 @@ class HelpIconButton extends StatelessWidget {
   Widget build(BuildContext context) => IconButton(
         tooltip: 'Help',
         visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        padding: const EdgeInsets.all(10),
         icon: Icon(Icons.help_outline, size: size, color: AppColors.muted),
         onPressed: () => HelpSheet.show(context, topic),
       );

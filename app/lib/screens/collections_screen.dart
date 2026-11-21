@@ -277,7 +277,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               const SizedBox(height: 16),
               const Text('Sign up to book a collection', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              const Text('Collect a parcel from a courier point and we deliver it to the door.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
+              const Text('Collect an item from a courier point and deliver it to the door.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, height: 1.45)),
               const SizedBox(height: 20),
               FilledButton.icon(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),

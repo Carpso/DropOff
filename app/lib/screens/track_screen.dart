@@ -117,7 +117,15 @@ class _TrackScreenState extends State<TrackScreen> {
           const SizedBox(height: 14),
           if (_loading) const Center(child: Padding(padding: EdgeInsets.all(22), child: AppLogoSpinner(size: 26))),
           if (_error != null)
-            Text(_error!, style: const TextStyle(color: AppColors.ink, fontSize: 13)),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.line)),
+              child: Row(children: [
+                const Icon(Icons.search_off_rounded, color: AppColors.muted),
+                const SizedBox(width: 10),
+                Expanded(child: Text(_error!, style: const TextStyle(color: AppColors.ink, fontSize: 13, height: 1.35))),
+              ]),
+            ),
           if (gated) _accountCard(),
           if (held) _heldCard(),
           if (_data != null && !gated && !held) ...[
@@ -128,7 +136,7 @@ class _TrackScreenState extends State<TrackScreen> {
               // no account and cannot read the parcel or open a ticket.
               FilledButton.tonalIcon(
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => TicketsScreen(prefill: 'Question about parcel ${_data?['ref'] ?? ''}: '),
+                  builder: (_) => TicketsScreen(prefill: 'Question about item ${_data?['ref'] ?? ''}: '),
                 )),
                 icon: const Icon(Icons.support_agent_outlined),
                 label: const Text('Get help with this delivery'),
@@ -151,7 +159,7 @@ class _TrackScreenState extends State<TrackScreen> {
                   child: Row(children: [
                     const Icon(Icons.check_circle, size: 18, color: AppColors.forest),
                     const SizedBox(width: 10),
-                    Expanded(child: Text('${e['status']}'.replaceAll('_', ' '), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                    Expanded(child: Text(_prettyStatus('${e['status']}'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
                   ]),
                 ),
               if (((_data!['events'] as List?) ?? const []).isEmpty)
@@ -213,8 +221,8 @@ class _TrackScreenState extends State<TrackScreen> {
           const SizedBox(height: 8),
           Text(
             hint.isEmpty
-                ? 'This parcel opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Sign in or create your account, then open the link again.'
-                : 'This parcel opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Try the number ending $hint.',
+                ? 'This item opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Sign in or create your account, then open the link again.'
+                : 'This item opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Try the number ending $hint.',
             style: const TextStyle(color: AppColors.ink, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 14),
@@ -235,12 +243,18 @@ class _TrackScreenState extends State<TrackScreen> {
           ]),
           const SizedBox(height: 10),
           const Text(
-            'Create your account with the number the parcel was sent to and every parcel addressed to you appears here automatically.',
+            'Create your account with the number the item was sent to and every item addressed to you appears here automatically.',
             style: AppType.caption,
           ),
         ]),
       ),
     );
+  }
+
+  static String _prettyStatus(String raw) {
+    final s = raw.replaceAll('_', ' ').trim();
+    if (s.isEmpty) return s;
+    return s.split(RegExp(r'\s+')).map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}').join(' ');
   }
 
   String? _formatArrival(String? iso) {
@@ -288,9 +302,9 @@ class _TrackScreenState extends State<TrackScreen> {
                 Expanded(
                   child: Text(
                     d['you_are'] == 'recipient'
-                        ? 'Addressed to you${d['verified_for'] != null ? ' — ${d['verified_for']}' : ''} · this parcel belongs to your number'
+                        ? 'Addressed to you${d['verified_for'] != null ? ' — ${d['verified_for']}' : ''} · this item belongs to your number'
                         : d['you_are'] == 'sender'
-                            ? 'You sent this parcel'
+                            ? 'You sent this item'
                             : 'Tracking as DropOff team',
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12),
                   ),
@@ -453,7 +467,7 @@ class _RateSenderCardState extends State<_RateSenderCard> {
     });
     AppToast.show(context, switch (res.error) {
       'cannot_rate_self' => 'You are the sender — only the recipient can rate you.',
-      _ => res.ok ? 'Done — Thank You for rating the sender. Your rating helps Riders, Couriers and Senders build a good name.' : 'Could not save your rating (${res.error ?? 'network'}).',
+      _ => res.ok ? 'Done — Thank You for rating the sender. Your rating helps Riders, Couriers and Senders build a good name.' : 'Could not save your rating. Check your connection and try again.',
     });
   }
 
@@ -470,7 +484,7 @@ class _RateSenderCardState extends State<_RateSenderCard> {
                 Expanded(child: Text('Rate the sender', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
               ]),
               const SizedBox(height: 4),
-              const Text('You received this parcel — your score is the sender\'s rating.', style: AppType.caption),
+              const Text('You received this item — your score is the sender\'s rating.', style: AppType.caption),
               const SizedBox(height: 8),
               Row(children: [
                 for (var i = 1; i <= 5; i++)
