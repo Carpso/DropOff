@@ -91,7 +91,9 @@ CONFIRMED from the fee engine (`workers/src/fees.ts`) and worker:
   `/refer/claim` rejects riders; `/promo/check` needs sender identity.
 - **Branding:** forest + logo native splash, "DropOff · " prefix on every push
   title, branded waybill title.
-- **Release:** version bumped to `0.5.60+70`.
+- **Release:** version bumped to `0.5.60+70` — **code 70 was rejected by Play
+  ("already used")**, so the uploadable release is `0.5.61+71`. Codes 57–70
+  are consumed; never reuse any of them.
 - **Destination consolidation:** merged the public Zambia town/city list
   (Wikipedia "List of populated places in Zambia", fetched 2026-11-21) into
   `catalog.dart cities` for the counter-receipt destination picker. Courier-
