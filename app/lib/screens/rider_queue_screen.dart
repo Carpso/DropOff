@@ -76,6 +76,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   // rider at a depot, everyone at capacity). Every verified rider sees the
   // same list; the first to claim owns it and it disappears for the others.
   List<Map<String, dynamic>> _available = const [];
+  String? _availableHint;
   String? _claimingRef;
 
   // NEW-ORDER ALERT (owner 2026-11-20): when the queue gains NEW assigned
@@ -95,7 +96,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   // SWEEP SHIFTS (owner 2026-11-21): all riders commit to 06:00–08:30,
   // 10:00–12:30 and 14:00–16:30 CAT. Between shifts they can do other rides.
   static const Map<String, String> _shiftLabels = {
-    '06:00': '06:00–08:30',
+    '06:00': '05:30–08:30 (06:00)',
     '10:00': '10:00–12:30',
     '14:00': '14:00–16:30',
   };
@@ -275,7 +276,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         builder: (ctx) => AlertDialog(
           title: const Text('Rider sweep-shift terms', style: TextStyle(fontWeight: FontWeight.w900)),
           content: const SingleChildScrollView(child: Text(
-            'By going ON SHIFT you agree to work the three DropOff sweeps: 06:00–08:30, 10:00–12:30 and 14:00–16:30 CAT. '
+            'By going ON SHIFT you agree to work the three DropOff sweeps: 05:30–08:30 (06:00 sweep), 10:00–12:30 and 14:00–16:30 CAT. '
+            'Tomorrow’s 06:00 sweep orders may be claimed at any time, even off shift; collection starts at 05:30 CAT. '
             'DropOff assignments stop outside these windows, when you switch OFF SHIFT, or between shifts — so you are free to do other rides then. '
             'You agree to meet the daily target of 30 parcels, or the monthly target across the month if the daily target is missed; pay and bonuses follow the payroll rules. '
             'You also agree to hand over every parcel only against the correct proof (code/photo) and to keep the app\'s location sharing on while on shift.',
@@ -331,7 +333,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               ),
           ]),
           const SizedBox(height: 6),
-          const Text('Committed windows (CAT). Between them you are free to do other rides.',
+          const Text('Committed windows (CAT). 06:00 opens at 05:30. Between them you are free to do other rides.',
               style: TextStyle(fontSize: 11, color: AppColors.muted)),
           const SizedBox(height: 8),
           Wrap(spacing: 6, children: [
@@ -394,7 +396,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Future<void> _loadAvailable() async {
     final data = await DropOffApi.riderAvailable();
     if (!mounted) return;
-    setState(() => _available = ((data?['jobs'] as List?) ?? const []).cast<Map<String, dynamic>>());
+    setState(() {
+      _available = ((data?['jobs'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _availableHint = data?['hint'] as String?;
+    });
   }
 
   Future<void> _claim(Map<String, dynamic> job) async {
@@ -1595,6 +1600,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ]),
           const SizedBox(height: 3),
           const Text('Auto-assign could not place these. First to claim owns the parcel.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          if (_availableHint != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(_availableHint!, style: const TextStyle(fontSize: 11, color: AppColors.forest, fontWeight: FontWeight.w700)),
+            ),
           const SizedBox(height: 8),
           for (final j in _available.take(5)) ...[
             Container(

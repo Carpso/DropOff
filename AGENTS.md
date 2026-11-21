@@ -27,6 +27,17 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-21 (eleventh pass) — advance claiming of tomorrow's 06:00 sweep
+
+- The **06:00 shift now opens at 05:30 CAT** (early-pick window) and closes at
+  08:30. Label in the rider app: `05:30–08:30 (06:00)`.
+- Riders **off shift can still claim tomorrow's 06:00 sweep jobs** at any time:
+  `/rider/available` returns only those advance jobs with `off_shift: true`
+  and a clear hint; `POST /claim` allows them via `isTomorrowSweepJob()`. All
+  other jobs remain shift-gated.
+- The claim board sorts by `pickup_at` so tomorrow's sweep is first; the rider
+  card shows the advance-claim hint. Shift terms updated to state this.
+
 ## 2026-11-21 (tenth pass) — rider sweep shifts (06:00/10:00/14:00 CAT)
 
 - Migration `0077_rider_shifts.sql`: `riders.shifts` (default ALL THREE),

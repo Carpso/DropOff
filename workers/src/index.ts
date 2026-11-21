@@ -211,7 +211,9 @@ const PICKUP_WINDOWS = ['now', '06:00', '10:00', '14:00', 'tomorrow:06:00'];
 // CAT, each a 2h30 shift. Between shifts riders may do other work — DropOff
 // simply does not dispatch or offer claims outside an ACTIVE committed shift.
 const RIDER_SHIFTS: Record<string, { start: number; end: number; label: string }> = {
-  '06:00': { start: 360, end: 510, label: '06:00–08:30' },
+  // The 06:00 sweep opens 30 min early (05:30) so tomorrow's early pickups can
+  // be started before the window; other sweeps start at their posted time.
+  '06:00': { start: 330, end: 510, label: '05:30–08:30 (06:00 sweep)' },
   '10:00': { start: 600, end: 750, label: '10:00–12:30' },
   '14:00': { start: 840, end: 990, label: '14:00–16:30' },
 };
@@ -227,6 +229,17 @@ function parseRiderShifts(raw: unknown): string[] {
     return valid.length ? valid : ['06:00', '10:00', '14:00'];
   } catch { return ['06:00', '10:00', '14:00']; }
 }
+/** Is this an unclaimed job for the NEXT 06:00 sweep? Those are booked in
+ *  advance and may be claimed by ANY rider even outside their shift (owner
+ *  2026-11-21: "tomorrow 6am orders claimable after the last shift"). */
+function isTomorrowSweepJob(job: any): boolean {
+  if (!job || String(job.pickup_window ?? '') !== '06:00' || job.rider_id) return false;
+  const at = Date.parse(String(job.pickup_at ?? '').replace(' ', 'T') + (String(job.pickup_at ?? '').endsWith('Z') ? '' : 'Z'));
+  if (!Number.isFinite(at)) return false;
+  const hoursAhead = (at - Date.now()) / 3_600_000;
+  return hoursAhead > 0 && hoursAhead <= 30; // next 06:00 CAT (today or tomorrow)
+}
+
 function activeShiftFor(rider: any, nowMin = nowCatMinute()): string | null {
   if (Number(rider?.on_shift ?? 1) !== 1) return null;
   for (const shift of parseRiderShifts(rider?.shifts)) {
@@ -7953,15 +7966,11 @@ app.get('/rider/available', async (c) => {
   // they are busy — but there is no algorithmic reason to keep jobs reserved.
   if (!rider || !rider.active) return c.json({ error: 'rider_not_active' }, 403);
   const active = activeShiftFor(rider);
-  if (!active) {
-    return c.json({
-      jobs: [],
-      off_shift: true,
-      active_shift: null,
-      shifts: parseRiderShifts(rider.shifts),
-      hint: 'You are outside your committed DropOff sweeps. Between shifts you may do other rides — DropOff assignments return at your next shift.',
-    });
-  }
+  // OFF-SHIFT EXCEPTION (owner 2026-11-21): tomorrow's 06:00 sweep jobs are
+  // booked in advance and may be claimed by ANY rider at ANY time — they are
+  // only picked up from 05:30 CAT when the early 06:00 shift opens.
+  const extra = active ? '' : ` AND j.pickup_window = '06:00'
+      AND j.pickup_at > datetime('now') AND j.pickup_at <= datetime('now', '+30 hours')`;
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.pickup_address, j.pickup_lat, j.pickup_lng, j.dest_city, j.dest_address,
             j.parcels, j.vehicle_class, j.needs_car, j.description, j.weight_class, j.pickup_window, j.pickup_at,
@@ -7969,12 +7978,19 @@ app.get('/rider/available', async (c) => {
             co.name AS courier_name, co.depot_name
        FROM jobs j JOIN couriers co ON co.id = j.courier_id
       WHERE j.rider_id IS NULL AND j.status = 'created'
-        AND date(j.created_at) >= date('now', '-2 days')
+        AND date(j.created_at) >= date('now', '-2 days')` + extra + `
         AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.job_id = j.id AND p.status = 'pending')
-      ORDER BY j.created_at DESC
+      ORDER BY j.pickup_at ASC, j.created_at DESC
       LIMIT 50`,
   ).all();
-  return c.json({ jobs: results, rider_id: rider.id, active_shift: active });
+  return c.json({
+    jobs: results,
+    rider_id: rider.id,
+    active_shift: active,
+    off_shift: !active,
+    tomorrow_claim: !active,
+    hint: active ? null : 'Off shift — only tomorrow’s 06:00 sweep orders are listed. Claim them now; pick up from 05:30 CAT.',
+  });
 });
 
 app.post('/jobs/:ref/claim', async (c) => {
@@ -7989,17 +8005,19 @@ app.post('/jobs/:ref/claim', async (c) => {
   // the rider's own login identity — riders prove who they are when they log
   // in, so we don't second-guess it here.
   if (!rider || !rider.active) return c.json({ error: 'verified_active_rider_required' }, 403);
-  if (!activeShiftFor(rider)) {
-    return c.json({ error: 'off_shift', detail: 'You are outside your committed DropOff sweeps — assignments return at your next shift.' }, 403);
-  }
   const cap = Number(rider.capacity ?? 8);
   if (cap > 0 && Number(rider.current_load ?? 0) >= cap) return c.json({ error: 'at_capacity' }, 409);
   const ref = c.req.param('ref');
   const job = await c.env.DB.prepare(
-    `SELECT id, ref, service, rider_id, status, sender_phone, pickup_address, pickup_lat, pickup_lng
+    `SELECT id, ref, service, rider_id, status, pickup_window, pickup_at, sender_phone, pickup_address, pickup_lat, pickup_lng
        FROM jobs WHERE ref = ?1`,
   ).bind(ref).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
+  // A rider off-shift may STILL claim tomorrow's 06:00 sweep job; they only
+  // collect it from 05:30 CAT. Everything else is shift-gated.
+  if (!activeShiftFor(rider) && !isTomorrowSweepJob(job)) {
+    return c.json({ error: 'off_shift', detail: 'Outside your sweeps you may only claim tomorrow’s 06:00 orders.' }, 403);
+  }
   if (job.rider_id) return c.json({ error: 'already_claimed', rider_id: job.rider_id }, 409);
   if (job.status !== 'created') return c.json({ error: 'not_claimable', status: job.status }, 409);
   if (await jobPaymentHeld(c.env.DB, job.id)) {
