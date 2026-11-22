@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -67,6 +68,10 @@ class RiderMap extends StatefulWidget {
 
   static const String tileUrl =
       'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/region-zm-zw-mw-mz.pmtiles';
+  /// Map label assets (glyphs + sprites) mirrored into OUR R2 bucket. Nothing
+  /// on the map reaches protomaps.github.io or any other external host.
+  static const String labelAssetBase =
+      'https://pub-d23651cb1a9d491f998c73094d54f379.r2.dev';
   static const LatLng chibolya = LatLng(-15.4255, 28.2805);
 
   /// All map markers currently on screen (for camera fitting).
@@ -84,9 +89,28 @@ class RiderMap extends StatefulWidget {
   State<RiderMap> createState() => _RiderMapState();
 }
 
+/// Basemap pieces: the PMTiles provider plus the theme (fonts/sprites/urls)
+/// hosted on our own R2 bucket — no external map host at all.
+class _MapAssets {
+  final PmTilesVectorTileProvider provider;
+  final dynamic theme;
+  const _MapAssets(this.provider, this.theme);
+}
+
 class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin {
-  late final Future<PmTilesVectorTileProvider> _provider =
-      PmTilesVectorTileProvider.fromSource(RiderMap.tileUrl);
+  late final Future<_MapAssets> _assets = () async {
+    final provider = await PmTilesVectorTileProvider.fromSource(RiderMap.tileUrl);
+    // The theme JSON ships in the app bundle; its glyphs + sprite templates
+    // point at OUR R2 bucket, so nothing on the map touches another host.
+    final raw = await rootBundle.loadString('assets/map/theme-light-v4.json');
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    final layers = (decoded['layers'] as List).cast<Map<String, Object>>();
+    final theme = ProtomapsThemes(
+      glyphs: decoded['glyphs'] as String,
+      sprites: decoded['sprite'] as String,
+    ).build(layers);
+    return _MapAssets(provider, theme);
+  }();
   final MapController _mapCtl = MapController();
 
   // BIKE PULSE (owner 2026-11-18: "make the bike icon more 3d or lively"): a
@@ -280,8 +304,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<PmTilesVectorTileProvider>(
-      future: _provider,
+    return FutureBuilder<_MapAssets>(
+      future: _assets,
       builder: (context, snap) {
         if (snap.hasError) {
           return _offlineFallback('Map could not load — your position and navigation are still shown.');
@@ -318,8 +342,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
             ),
             children: [
               VectorTileLayer(
-                theme: ProtomapsThemes.lightV4(),
-                tileProviders: TileProviders({'protomaps': snap.data!}),
+                theme: snap.data!.theme,
+                tileProviders: TileProviders({'protomaps': snap.data!.provider}),
                 fileCacheTtl: const Duration(days: 30),
               ),
               // Labels are rendered by the PMTiles/Protomaps theme; avoid third-party

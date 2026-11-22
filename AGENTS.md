@@ -27,6 +27,27 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-22 (seventeenth pass) — map fully self-hosted on our R2
+
+- The basemap had two external dependencies left: Protomaps glyphs
+  (`protomaps.github.io/basemaps-assets/fonts/...`) and sprites
+  (`.../sprites/v4/light`). Both now live in **our** R2 bucket
+  `dropoff-map-assets` (`https://pub-d23651cb1a9d491f998c73094d54f379.r2.dev`),
+  together with the tile archive bucket. Nothing on the map calls another host;
+  the only remote strings left in the theme are attribution links, which are
+  never fetched.
+- Mirrored in R2: `fonts/Noto Sans Regular|Medium|Italic|Devanagari Regular v1/0-255…768-1023.pbf`
+  (16 files, the Latin + Devanagari ranges actually used by the light v4 theme)
+  and `sprites/v4/light{,@2x}.{json,png}`.
+- The light v4 theme layers are bundled in the app as JSON
+  (`app/assets/map/theme-light-v4.json`) and loaded with `rootBundle`; the
+  vendored 154 KB Dart const copy was removed, so analysis stays fast and the
+  theme needs no network round-trip at map start.
+- `RiderMap.selfHostedTheme` is gone: `_RiderMapState._assets` now returns the
+  PMTiles provider **plus** the parsed theme, and `VectorTileLayer` uses both.
+  Street names still come from the `roads`/`roads_labels_*` layers.
+- Release `0.5.69+79` (codes 57–78 consumed).
+
 ## 2026-11-21 (sixteenth pass) — evidence stamps, fare-receipt unlock, order ring, vehicle markers
 
 - Photo evidence: `uploadImage` now takes `capturedAt` and every camera/gallery
