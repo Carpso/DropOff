@@ -29,6 +29,7 @@ import 'rider_map_screen.dart';
 import 'track_screen.dart';
 import 'waybill_screen.dart';
 import '../ui/app_spinner.dart';
+import '../ui/app_sheet.dart';
 
 class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
@@ -38,6 +39,7 @@ class BookingsScreen extends StatefulWidget {
 
 class _BookingsScreenState extends State<BookingsScreen> {
   List<Map<String, dynamic>> _incoming = const [];
+  bool _counterPromptShown = false;
 
   @override
   void initState() {
@@ -46,11 +48,46 @@ class _BookingsScreenState extends State<BookingsScreen> {
     // Pull the account's server-side jobs (collections, standing orders,
     // ops-created jobs) into the local list — they would otherwise never
     // appear here, since the tab renders the local cache.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) AppScope.of(context).syncJobsFromServer();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await AppScope.of(context).syncJobsFromServer();
+      if (mounted) _maybePromptCounterFare();
     });
     _refresh();
     _loadIncoming();
+  }
+
+  void _maybePromptCounterFare() {
+    if (_counterPromptShown || !mounted) return;
+    final store = AppScope.of(context);
+    final due = store.bookings.where((b) => b.counterFareDue).toList();
+    if (due.isEmpty) return;
+    _counterPromptShown = true;
+    final b = due.first;
+    final amount = b.counterReceiptZmw;
+    final msg = amount != null && amount > 0
+        ? 'Your rider filed the depot receipt for ${b.reference}. Pay K${amount.toStringAsFixed(2)} now to unlock the receipt photo and reimburse your rider.'
+        : 'Your rider filed a depot receipt for ${b.reference}. Pay the exact amount written on the receipt to unlock it and reimburse your rider.';
+    showAppSheet<void>(context, child: Builder(builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(width: 40, height: 40, decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
+          child: const Icon(Icons.lock_clock_outlined, color: Color(0xFF7B5710))),
+        const SizedBox(width: 12),
+        const Expanded(child: Text('Courier receipt locked', style: AppType.subhead)),
+      ]),
+      const SizedBox(height: 14),
+      Text(msg, style: const TextStyle(fontSize: 14, height: 1.45, color: AppColors.ink)),
+      const SizedBox(height: 18),
+      SizedBox(width: double.infinity, child: FilledButton(
+        onPressed: () {
+          Navigator.pop(ctx);
+          Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => BookingDetailScreen(bookingId: b.id)));
+        },
+        child: const Text('View and pay now'),
+      )),
+      const SizedBox(height: 8),
+      SizedBox(width: double.infinity, child: TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Later'))),
+    ])));
   }
 
   Future<void> _refresh() async {

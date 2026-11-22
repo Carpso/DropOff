@@ -8314,80 +8314,167 @@ app.get('/rider/queue', async (c) => {
   }
 
   const depot = { lat: -15.4255, lng: 28.2805 };
-  // ONE CARD PER SLOT (owner 2026-11-19: depot grouping produced duplicate
-  // 06:00 cards). Each stop still carries its depot name; the app groups
-  // visually without splitting the slot.
+  // ONE CARD PER SLOT. Stops are ordered as one sweep run: pickups first
+  // (nearest-neighbour), then depot drops grouped by depot (one stop per
+  // depot, all that depot's items together), then last-mile/collection
+  // deliveries. No interleaving by default; job-level proof/status remains
+  // the source of truth.
   const batches = Object.entries(buckets)
     .filter(([, jobs]) => jobs.length > 0)
     .map(([slot, jobs]) => {
-      // Slot metadata (the TOMORROW roll-up reuses the 06:00 timings).
       const meta = slot === TOMORROW_SLOT ? SWEEP_SLOTS['06:00'] : SWEEP_SLOTS[slot];
       const slotLabel = slot === TOMORROW_SLOT ? 'TOMORROW 06:00—07:30 SLOT' : meta.label;
-      // Nearest-neighbour stop chain from the rider's last known position.
-      let curLat = Number(rider.last_lat ?? depot.lat);
-      let curLng = Number(rider.last_lng ?? depot.lng);
-      const remaining = [...jobs];
-      const stops: any[] = [];
-      // STABLE PLAN TIMES (owner bug 2026-11-20: "orders time keeps changing
-      // to the current time"): the stop chain is anchored to the SLOT START,
-      // not to the live clock. A rider refreshing the queue must see the same
-      // pickup times every poll; lateness is shown separately ("starts in /
-      // min in"), never by rewriting the order's time on every refresh.
       const clockMin = minutesOf(meta.start);
-      let chainMin = clockMin; // mutable running clock for the ETA chain
-      while (remaining.length) {
-        let bestIdx = 0;
-        let bestKm = Infinity;
-        for (let i = 0; i < remaining.length; i++) {
-          const lat = Number(remaining[i].pickup_lat ?? 0);
-          const lng = Number(remaining[i].pickup_lng ?? 0);
-          const km = lat && lng ? haversine(curLat, curLng, lat, lng) : 2; // no coords -> ~2km guess
-          if (km < bestKm) { bestKm = km; bestIdx = i; }
+      let chainMin = clockMin;
+      let phaseLat = Number(rider.last_lat ?? depot.lat);
+      let phaseLng = Number(rider.last_lng ?? depot.lng);
+
+      const isPicked = (j: any) => ['picked_up', 'at_depot', 'departed', 'arrived', 'ready_for_collection', 'delivered'].includes(String(j.status ?? ''));
+      const isCollection = (j: any) => String(j.service ?? '') === 'collection';
+      const isLastMile = (j: any) => Number(j.last_mile ?? 0) === 1 || isCollection(j);
+      // Standard intercity after depot drop is no longer a rider depot action.
+      const needsDepotDrop = (j: any) => isPicked(j) && !isLastMile(j) && String(j.status ?? '') === 'picked_up';
+
+      const pickupJobs = jobs.filter(j => !isPicked(j));
+      const depotDropJobs = jobs.filter(j => needsDepotDrop(j));
+      const deliveryJobs = jobs.filter(j => isPicked(j) && !needsDepotDrop(j) && (isLastMile(j) || ['at_depot', 'departed', 'arrived', 'ready_for_collection'].includes(String(j.status ?? ''))));
+      // Any remaining active jobs keep a stable fallback stop so nothing is hidden.
+      const seen = new Set<string>([...pickupJobs, ...depotDropJobs, ...deliveryJobs].map(j => String(j.ref)));
+      const remainingJobs = jobs.filter(j => !seen.has(String(j.ref)));
+
+      const stops: any[] = [];
+      const pushStop = (stop: any, lat: number | null, lng: number | null) => {
+        const km = lat && lng ? haversine(phaseLat, phaseLng, lat, lng) : 2;
+        chainMin += Math.max(5, Math.round((km / 22) * 60 + 4));
+        stops.push({ n: stops.length + 1, time: hmOf(chainMin), ...stop });
+        if (lat && lng) { phaseLat = lat; phaseLng = lng; }
+      };
+
+      const orderByNN = <T,>(arr: T[], latOf: (j: T) => number | null, lngOf: (j: T) => number | null) => {
+        const remaining = [...arr];
+        const ordered: T[] = [];
+        let cLat = phaseLat, cLng = phaseLng;
+        while (remaining.length) {
+          let bestIdx = 0, bestKm = Infinity;
+          for (let i = 0; i < remaining.length; i++) {
+            const lat = latOf(remaining[i]), lng = lngOf(remaining[i]);
+            const km = lat && lng ? haversine(cLat, cLng, lat, lng) : 2;
+            if (km < bestKm) { bestKm = km; bestIdx = i; }
+          }
+          const j = remaining.splice(bestIdx, 1)[0];
+          ordered.push(j);
+          const lat = latOf(j), lng = lngOf(j);
+          if (lat && lng) { cLat = lat; cLng = lng; }
         }
-        const job = remaining.splice(bestIdx, 1)[0];
-        chainMin += Math.max(5, Math.round((bestKm / 22) * 60 + 4)); // 22 km/h + 4 min stop
-        stops.push({
-          n: stops.length + 1,
-          time: hmOf(chainMin),
-          ref: job.ref,
-          address: job.pickup_address,
-          // Coordinates let the app offer one-tap in-app navigation per stop;
-          // null for typed addresses without a pin (the app then navigates
-          // by address text).
-          lat: job.pickup_lat ?? null,
-          lng: job.pickup_lng ?? null,
-          // Depot drop coordinates for the "navigate to depot" leg after the
-          // pickup is done — the matched branch first, else the courier's own
-          // depot pin, so the leg almost always opens the in-app navigator
-          // instead of falling through to address geocoding (owner bug
-          // 2026-11-18: "keeps toasting Finding… but never navigates").
-          depot_lat: job.branch_lat ?? job.courier_lat ?? null,
-          depot_lng: job.branch_lng ?? job.courier_lng ?? null,
-          from_city: job.from_city ?? '',
-          seller: job.sender_name,
-          seller_phone: job.sender_phone ?? '',
-          // Parcel content names the pickup/collection sheet ("PICKUP-BOOKS-…"),
-          // and the recipient contact names who holds the door code.
-          description: job.description ?? '',
-          recipient: job.recipient_name ?? '',
-          recipient_phone: job.recipient_phone ?? '',
-          parcels: Number(job.parcels ?? 1),
-          status: job.status,
-          // Collection jobs start at the DEPOT (pickup_address) and end at the
-          // recipient's door (dest_address) — the app needs both to navigate.
-          service: job.service ?? 'standard',
-          dest_address: job.dest_address ?? '',
-          collection_receipt_url: job.collection_receipt_url ?? null,
-          last_mile: Number(job.last_mile ?? 0),
-          courier: job.courier_name,
-          // The DEPOT name itself ("Platinum", "Icypeed") — the depot-leg
-          // button and navigator label read this, not a generic "depot".
-          depot: job.depot_name ?? job.courier_name,
-        });
-        curLat = Number(job.pickup_lat ?? curLat);
-        curLng = Number(job.pickup_lng ?? curLng);
+        return { ordered, cLat, cLng };
+      };
+
+      const baseStop = (j: any) => ({
+        ref: j.ref,
+        refs: [j.ref],
+        address: j.pickup_address,
+        lat: j.pickup_lat ?? null,
+        lng: j.pickup_lng ?? null,
+        depot_lat: j.branch_lat ?? j.courier_lat ?? null,
+        depot_lng: j.branch_lng ?? j.courier_lng ?? null,
+        from_city: j.from_city ?? '',
+        seller: j.sender_name,
+        seller_phone: j.sender_phone ?? '',
+        description: j.description ?? '',
+        recipient: j.recipient_name ?? '',
+        recipient_phone: j.recipient_phone ?? '',
+        parcels: Number(j.parcels ?? 1),
+        status: j.status,
+        service: j.service ?? 'standard',
+        dest_address: j.dest_address ?? '',
+        collection_receipt_url: j.collection_receipt_url ?? null,
+        last_mile: Number(j.last_mile ?? 0),
+        courier: j.courier_name,
+        depot: j.depot_name ?? j.courier_name,
+      });
+
+      // Phase 1: pickups first.
+      const pickups = orderByNN(pickupJobs,
+        j => isCollection(j) ? (Number(j.branch_lat ?? j.courier_lat ?? 0) || null) : (Number(j.pickup_lat ?? 0) || null),
+        j => isCollection(j) ? (Number(j.branch_lng ?? j.courier_lng ?? 0) || null) : (Number(j.pickup_lng ?? 0) || null));
+      phaseLat = pickups.cLat; phaseLng = pickups.cLng;
+      for (const j of pickups.ordered) {
+        const coll = isCollection(j);
+        const lat = coll ? (j.branch_lat ?? j.courier_lat ?? null) : (j.pickup_lat ?? null);
+        const lng = coll ? (j.branch_lng ?? j.courier_lng ?? null) : (j.pickup_lng ?? null);
+        pushStop({
+          ...baseStop(j),
+          kind: 'pickup',
+          address: coll ? `${j.depot_name ?? j.courier_name} depot` : j.pickup_address,
+          lat, lng,
+        }, lat != null ? Number(lat) : null, lng != null ? Number(lng) : null);
       }
-      // Majority destination branch across the batch.
+
+      // Phase 2: depot drops grouped by depot.
+      const depotGroups = new Map<string, any[]>();
+      for (const j of depotDropJobs) {
+        const key = `${j.courier_name}|${j.depot_name}|${j.branch_lat ?? j.courier_lat ?? ''}|${j.branch_lng ?? j.courier_lng ?? ''}`;
+        const arr = depotGroups.get(key) ?? [];
+        arr.push(j);
+        depotGroups.set(key, arr);
+      }
+      const depotGroupList = [...depotGroups.values()].map(group => ({
+        group,
+        lat: Number(group[0].branch_lat ?? group[0].courier_lat ?? 0) || null,
+        lng: Number(group[0].branch_lng ?? group[0].courier_lng ?? 0) || null,
+      }));
+      const depotOrdered = orderByNN(depotGroupList, g => g.lat, g => g.lng);
+      phaseLat = depotOrdered.cLat; phaseLng = depotOrdered.cLng;
+      for (const g of depotOrdered.ordered) {
+        const first = g.group[0];
+        const refs = g.group.map((j: any) => String(j.ref));
+        const parcels = g.group.reduce((sum: number, j: any) => sum + Number(j.parcels ?? 1), 0);
+        pushStop({
+          kind: g.group.length > 1 ? 'depot_drop_group' : 'depot_drop',
+          ref: first.ref,
+          refs,
+          address: `${first.depot_name ?? first.courier_name} depot`,
+          lat: g.lat, lng: g.lng,
+          depot_lat: g.lat, depot_lng: g.lng,
+          from_city: first.from_city ?? '',
+          seller: g.group.length === 1 ? first.sender_name : `${g.group.length} pickups`,
+          seller_phone: g.group.length === 1 ? (first.sender_phone ?? '') : '',
+          description: g.group.length === 1 ? (first.description ?? '') : refs.join(', '),
+          recipient: '', recipient_phone: '',
+          parcels,
+          status: 'picked_up',
+          service: 'standard',
+          dest_address: '',
+          collection_receipt_url: null,
+          last_mile: 0,
+          courier: first.courier_name,
+          depot: first.depot_name ?? first.courier_name,
+        }, g.lat, g.lng);
+      }
+
+      // Phase 3: last-mile/collection deliveries.
+      const deliveries = orderByNN(deliveryJobs,
+        j => isCollection(j) ? null : (Number(j.pickup_lat ?? 0) || null),
+        j => isCollection(j) ? null : (Number(j.pickup_lng ?? 0) || null));
+      phaseLat = deliveries.cLat; phaseLng = deliveries.cLng;
+      for (const j of deliveries.ordered) {
+        const coll = isCollection(j);
+        const lat = coll ? null : (j.pickup_lat ?? null);
+        const lng = coll ? null : (j.pickup_lng ?? null);
+        pushStop({
+          ...baseStop(j),
+          kind: 'delivery',
+          address: coll ? (j.dest_address ?? j.pickup_address) : j.pickup_address,
+          lat, lng,
+        }, lat != null ? Number(lat) : null, lng != null ? Number(lng) : null);
+      }
+
+      for (const j of remainingJobs) {
+        const lat = Number(j.pickup_lat ?? 0) || null;
+        const lng = Number(j.pickup_lng ?? 0) || null;
+        pushStop({ ...baseStop(j), kind: isPicked(j) ? 'delivery' : 'pickup' }, lat, lng);
+      }
+
       const counts = new Map<string, { name: string; branch: string; city: string; n: number }>();
       for (const j of jobs) {
         const key = `${j.courier_name}|${j.depot_name}`;
@@ -8396,23 +8483,16 @@ app.get('/rider/queue', async (c) => {
         counts.set(key, e);
       }
       const dest = [...counts.values()].sort((a, b) => b.n - a.n)[0];
-      const totalParcels = jobs.reduce((s, j) => s + Number(j.parcels ?? 1), 0);
+      const totalParcels = jobs.reduce((sum, j) => sum + Number(j.parcels ?? 1), 0);
       return {
         slot,
         label: slotLabel,
         cutoff: SWEEP_SLOTS[slot]?.cutoff ?? null,
-        // The full CAT window shown on the slot card footer (owner audit
-        // 2026-11-17: the footer range was ambiguous).
         range: slot === TOMORROW_SLOT ? 'Tomorrow 6:00—7:30 AM' : meta.range,
         total_parcels: totalParcels,
-        total_stops: jobs.length,
+        total_stops: stops.length,
         destination: dest ? { courier: dest.name, branch: dest.branch, city: dest.city } : null,
         target_dropoff: meta.target,
-        // ROUTE TIME, not wall-clock offset (owner bug 2026-11-20: "1034 min
-        // on the road?"): the chain now starts at max(slot start, now), so
-        // subtracting the slot start counted hours that had ALREADY ELAPSED
-        // before the rider even opened the app. This is the real time the run
-        // spends moving between stops.
         minutes_on_road: Math.max(0, chainMin - clockMin),
         stops,
       };

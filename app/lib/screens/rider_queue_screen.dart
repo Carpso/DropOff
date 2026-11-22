@@ -806,7 +806,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   }
 
   Future<void> _navigateToStop(Map<String, dynamic> s) async {
-    final picked = _picked('${s['status'] ?? ''}');
+    final kind = '${s['kind'] ?? ''}';
+    final isDepotAction = kind == 'depot_drop' || kind == 'depot_drop_group';
+    final picked = isDepotAction ? true : _picked('${s['status'] ?? ''}');
     // COLLECTION jobs run DEPOT → RECIPIENT (the reverse of a drop-off). The
     // first leg is the courier counter where the item is already waiting;
     // only after the pickup does the rider head to the recipient's door.
@@ -814,10 +816,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // After a collection pickup there is no door pin on the job (only the
     // typed dest_address) — leave coords null so the address is geocoded.
     final lat = picked
-        ? (isCollection ? null : (s['depot_lat'] as num?)?.toDouble())
+        ? (isCollection ? null : (s['depot_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble())
         : (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble();
     final lng = picked
-        ? (isCollection ? null : (s['depot_lng'] as num?)?.toDouble())
+        ? (isCollection ? null : (s['depot_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble())
         : (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble();
     final addr = '${s['address'] ?? ''}'.trim();
     // "To Platinum" / "To Icypeed" (owner 2026-11-18): the depot leg is named
@@ -990,6 +992,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Future<void> _advanceStop(Map<String, dynamic> s) async {
     final String ref = '${s['ref']}';
     if (_busyRef != null) return;
+    final kind = '${s['kind'] ?? ''}';
+    final refs = ((s['refs'] as List?) ?? [ref]).map((e) => '$e').where((e) => e.isNotEmpty).toList();
+    if (kind == 'depot_drop' || kind == 'depot_drop_group') {
+      await _depotDropGroupSheet(s, refs);
+      return;
+    }
     final lastMile = (s['last_mile'] as num?)?.toInt() ?? 0;
     final parcels = (s['parcels'] as num?)?.toInt() ?? 1;
     // Live status — declared OUTSIDE the sheet builder so each filed step
@@ -1434,6 +1442,65 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// a rider-computed sum; the SERVER totals the receipts. The rider fronts
   /// the fare with their own money; DropOff reimburses it fee-free the moment
   /// the sender pays.
+  Future<void> _depotDropGroupSheet(Map<String, dynamic> s, List<String> refs) async {
+    final depotName = '${s['depot'] ?? s['courier'] ?? 'depot'}'.trim();
+    final done = <String>{};
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: StatefulBuilder(builder: (ctx, setSheet) {
+          final remaining = refs.where((r) => !done.contains(r)).toList();
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Depot drop — $depotName', style: AppType.subhead),
+              const SizedBox(height: 6),
+              Text(
+                remaining.isEmpty
+                    ? 'All items for this depot have been filed.'
+                    : 'Drop each order at this depot. File proof for one order at a time — no interleaving between depots.',
+                style: const TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.35),
+              ),
+              const SizedBox(height: 12),
+              ...refs.map((r) {
+                final isDone = done.contains(r);
+                final busy = _busyRef == r;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(isDone ? Icons.check_circle : Icons.inventory_2_outlined, color: isDone ? AppColors.forest : AppColors.muted),
+                  title: Text(r, style: TextStyle(fontWeight: FontWeight.w800, color: isDone ? AppColors.muted : AppColors.ink)),
+                  subtitle: Text(isDone ? 'Depot drop filed' : 'File parcel photo and depot receipt'),
+                  trailing: busy
+                      ? const AppLogoSpinner(size: 18)
+                      : isDone
+                          ? const Icon(Icons.lock, size: 16, color: AppColors.muted)
+                          : FilledButton(
+                              onPressed: _busyRef != null ? null : () async {
+                                final res = await _depotDropWithReceipt(r);
+                                if (!mounted) return;
+                                setState(() => _busyRef = null);
+                                if (res != null && res.ok) {
+                                  setSheet(() => done.add(r));
+                                  _load();
+                                }
+                              },
+                              child: const Text('File drop'),
+                            ),
+                );
+              }),
+              if (remaining.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+                ),
+            ]),
+          );
+        }),
+      ),
+    );
+  }
+
   Future<ApiResponse?> _depotDropWithReceipt(String ref) async {
     if (_busyRef != null) return null;
     if (!mounted) return null;
@@ -2236,7 +2303,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Widget _batchCard(Map<String, dynamic> b) {
     final dest = b['destination'] as Map<String, dynamic>?;
     final stops = ((b['stops'] as List?) ?? const []).cast<Map<String, dynamic>>();
-    final pickedCount = stops.where((s) => _picked('${s['status'] ?? ''}')).length;
+        final pickedCount = stops.where((s) {
+      final k = '';
+      if (k == 'depot_drop' || k == 'depot_drop_group') return '' == 'delivered';
+      return _picked('');
+    }).length;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Card(
@@ -2315,13 +2386,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
 
   Widget _stopRow(Map<String, dynamic> s, {required bool isActive}) {
     final ref = '${s['ref']}';
-    final picked = _picked('${s['status'] ?? ''}');
-    final arrived = !picked && _arrivedRefs.contains(ref);
+    final kind = '${s['kind'] ?? ''}';
+    final isDepotAction = kind == 'depot_drop' || kind == 'depot_drop_group';
+    final picked = isDepotAction ? false : _picked('${s['status'] ?? ''}');
+    final done = isDepotAction ? '${s['status'] ?? ''}' == 'delivered' : picked;
+    final arrived = !done && !isDepotAction && _arrivedRefs.contains(ref);
     final depotName = '${s['depot'] ?? s['courier'] ?? 'depot'}'.trim();
-    // READABLE STOP ROW (owner 2026-11-18): the old single-row cram squeezed
-    // the time+address until it clipped at the left margin. The title now
-    // gets full width and wraps to two lines, the meta line runs full width,
-    // and the action buttons live on their own row — nothing is cut.
+    final refs = ((s['refs'] as List?) ?? [ref]).map((e) => '$e').where((e) => e.isNotEmpty).toList();
     final col = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('${s['n']}.', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5, color: AppColors.forest)),
@@ -2332,18 +2403,22 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.25,
-                    color: picked ? AppColors.muted : AppColors.ink)),
+                    color: done ? AppColors.muted : AppColors.ink)),
             const SizedBox(height: 2),
             Text(
-              picked
-                  ? '✓ picked — ${'${s['last_mile'] ?? 0}' == '1' ? 'door handover next' : 'drop at the $depotName depot'}'
-                  : arrived
-                      ? ('${s['service'] ?? ''}' == 'collection'
-                          ? 'ARRIVED at the depot — tap ✓ to collect the parcel'
-                          : 'ARRIVED — tap ✓ to file the pickup')
-                      : '${'${s['service'] ?? ''}' == 'collection' ? 'Recipient' : 'Sender'}: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} items',
-              style: TextStyle(color: picked ? AppColors.forest : arrived ? AppColors.ink : AppColors.muted,
-                  fontSize: 11.5, fontWeight: picked || arrived ? FontWeight.w800 : FontWeight.w400),
+              isDepotAction
+                  ? (done
+                      ? '✓ dropped at $depotName'
+                      : 'Drop ${s['parcels'] ?? refs.length} item(s) at $depotName · ${refs.length} order(s)')
+                  : picked
+                      ? '✓ picked — ${'${s['last_mile'] ?? 0}' == '1' ? 'door handover next' : 'drop at the $depotName depot'}'
+                      : arrived
+                          ? ('${s['service'] ?? ''}' == 'collection'
+                              ? 'ARRIVED at the depot — tap ✓ to collect the parcel'
+                              : 'ARRIVED — tap ✓ to file the pickup')
+                          : '${'${s['service'] ?? ''}' == 'collection' ? 'Recipient' : 'Sender'}: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} items',
+              style: TextStyle(color: done ? AppColors.forest : arrived ? AppColors.ink : AppColors.muted,
+                  fontSize: 11.5, fontWeight: done || arrived ? FontWeight.w800 : FontWeight.w400),
             ),
             if (arrived) ...[
               const SizedBox(height: 4),
@@ -2371,15 +2446,15 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ),
         const Spacer(),
         _navBtn(
-          picked
+          (picked || isDepotAction)
               ? ('${s['service'] ?? ''}' == 'collection'
                   ? 'To ${'${s['recipient'] ?? 'recipient'}'}'
                   : 'To ${_depotShort(s)}')
               : ('${s['service'] ?? ''}' == 'collection'
                   ? 'To ${_depotShort(s)}'
                   : 'To ${'${s['seller'] ?? 'Recipient'}'.trim().isEmpty ? 'Recipient' : '${s['seller']}'.trim()}'),
-          picked && '${s['service'] ?? ''}' != 'collection' ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to the handover in the DropOff map',
-          picked ? AppColors.forest : AppColors.forestLight,
+          (picked || isDepotAction) && '${s['service'] ?? ''}' != 'collection' ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to the handover in the DropOff map',
+          (picked || isDepotAction) ? AppColors.forest : AppColors.forestLight,
           Icons.navigation_rounded,
           () => _navigateToStop(s),
         ),
@@ -2388,8 +2463,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           visualDensity: VisualDensity.compact,
           icon: _busyRef == ref
               ? const AppLogoSpinner(size: 18)
-              : Icon(picked ? Icons.check_circle : Icons.check_circle_outline, color: AppColors.forest),
-          onPressed: () => _advanceStop(s),
+              : Icon(done ? Icons.check_circle : Icons.check_circle_outline, color: AppColors.forest),
+          onPressed: done ? null : () => _advanceStop(s),
         ),
       ]),
     ]);
