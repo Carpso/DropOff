@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
+import '../data/map_tile_sources.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
 import '../ui/saved_place_pin.dart';
@@ -68,6 +69,15 @@ class RiderMap extends StatefulWidget {
 
   static const String tileUrl =
       'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/region-zm-zw-mw-mz.pmtiles';
+  /// High-detail Lusaka archive from the SAME bucket (z0–16, clipped to the
+  /// city). Street-level zoom in Lusaka comes from here; the regional file
+  /// still covers the rest of Zambia/Zimbabwe/Malawi/Mozambique.
+  static const String lusakaTileUrl =
+      'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/tiles/lusaka-z0-16.pmtiles';
+  /// Lusaka rectangle read from that archive's own PMTiles header
+  /// (south, west, north, east).
+  static const MapBounds lusakaBounds =
+      MapBounds(south: -15.78, west: 27.66, north: -15.02, east: 28.62);
   /// Map label assets (glyphs + sprites) mirrored into OUR R2 bucket. Nothing
   /// on the map reaches protomaps.github.io or any other external host.
   static const String labelAssetBase =
@@ -92,14 +102,29 @@ class RiderMap extends StatefulWidget {
 /// Basemap pieces: the PMTiles provider plus the theme (fonts/sprites/urls)
 /// hosted on our own R2 bucket — no external map host at all.
 class _MapAssets {
-  final PmTilesVectorTileProvider provider;
+  final VectorTileProvider provider;
   final dynamic theme;
   const _MapAssets(this.provider, this.theme);
 }
 
 class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin {
   late final Future<_MapAssets> _assets = () async {
-    final provider = await PmTilesVectorTileProvider.fromSource(RiderMap.tileUrl);
+    // Regional archive first (always required), then the Lusaka city archive.
+    // The city file is an upgrade, never a dependency: if it cannot be opened
+    // the map still draws the regional basemap.
+    final regional = await PmTilesVectorTileProvider.fromSource(RiderMap.tileUrl);
+    VectorTileProvider provider = regional;
+    try {
+      final lusaka =
+          await PmTilesVectorTileProvider.fromSource(RiderMap.lusakaTileUrl);
+      provider = CityFirstTileProvider(
+        regional: regional,
+        city: lusaka,
+        cityBounds: RiderMap.lusakaBounds,
+      );
+    } catch (_) {
+      /* Lusaka archive unavailable — regional basemap still renders. */
+    }
     // The theme JSON ships in the app bundle; its glyphs + sprite templates
     // point at OUR R2 bucket, so nothing on the map touches another host.
     final raw = await rootBundle.loadString('assets/map/theme-light-v4.json');
@@ -339,6 +364,9 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               // area. Capped, so the rider map always reads like the sender's
               // tracking view.
               initialCameraFit: bounds == null ? null : CameraFit.bounds(bounds: bounds, maxZoom: 16.5),
+              // Lusaka's city archive carries z16 detail; allow the camera to
+              // reach it. Outside the city the basemap stops at z15.
+              maxZoom: 16.5,
             ),
             children: [
               VectorTileLayer(

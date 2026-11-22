@@ -279,41 +279,38 @@ class _BusinessScreenState extends State<BusinessScreen> {
         border: Border.all(color: AppColors.amber.withValues(alpha: 0.35)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Icon rail + full-width text block. The button is on its OWN row so a
-        // long label can never squeeze the body into a 1-character column
-        // (the vertical-text bug on 360 px phones).
+        // Icon rail + title share one line; the BODY sits on its own
+        // full-width line below it. Keeping the body out of the Row means no
+        // sibling (icon, badge, button) can ever squeeze it into a vertical
+        // one-character-per-line ribbon on small phones.
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           SizedBox(
-            width: 40,
-            height: 40,
+            width: 36,
+            height: 36,
             child: Icon(icon, size: 22, color: AppColors.amber),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  softWrap: true,
-                  textAlign: TextAlign.left,
-                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, height: 1.2)),
-              const SizedBox(height: 3),
-              Text(body,
-                  softWrap: true,
-                  textAlign: TextAlign.left,
-                  style: AppType.caption.copyWith(height: 1.4)),
-            ]),
+            child: Text(title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                softWrap: true,
+                textAlign: TextAlign.left,
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, height: 1.2)),
           ),
         ]),
+        const SizedBox(height: 6),
+        Text(body,
+            softWrap: true,
+            textAlign: TextAlign.left,
+            style: AppType.caption.copyWith(height: 1.4)),
         const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
           child: FilledButton(
             style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
             onPressed: onCta,
-            // ellipsis so a long label ('See platinum', 'Renew now') clips cleanly
-            // instead of pushing the body text off the banner on small phones.
-            child: Text(cta, maxLines: 1, overflow: TextOverflow.ellipsis),
+            child: Text(cta, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
           ),
         ),
       ]),

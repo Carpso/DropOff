@@ -47,6 +47,22 @@ After every change session, without asking the owner:
   PMTiles provider **plus** the parsed theme, and `VectorTileLayer` uses both.
   Street names still come from the `roads`/`roads_labels_*` layers.
 - Release `0.5.69+79` (codes 57–78 consumed).
+- **Lusaka street-level zoom:** the same R2 bucket that carries the regional
+  archive already ships `tiles/lusaka-z0-16.pmtiles` (header read live:
+  z0–16, bounds S −15.78 / W 27.66 / N −15.02 / E 28.62 — identical to
+  churchonapp_flutter's `MAPS_EXTRA_SOURCES.lusaka`). New
+  `app/lib/data/map_tile_sources.dart` adds `CityFirstTileProvider`, which
+  serves that archive inside the Lusaka rectangle from z13 up (so z16 detail
+  is reachable) and the regional archive everywhere else, falling back to
+  regional whenever a city tile is missing. The rider map now reports
+  `maximumZoom` 16 and allows the camera to 16.5. Unit-tested in
+  `app/test/map_tile_sources_test.dart` (city inside bbox, regional outside,
+  regional at low zoom, regional fallback on a missing city tile).
+- **Vertical-text bugs (owner 2026-11-22):** the Business retention banner now
+  keeps its body on its own full-width line (it used to live inside the
+  icon+title `Row`), and the depot-drop sheet replaced its `ListTile` +
+  `trailing` button with a stacked card and a full-width **File drop** button,
+  so neither label can be squeezed into a one-character column.
 
 ## 2026-11-21 (sixteenth pass) — evidence stamps, fare-receipt unlock, order ring, vehicle markers
 

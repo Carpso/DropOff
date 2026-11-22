@@ -1506,27 +1506,63 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 final busy = _busyRef == r;
                 final label = '${it?['seller'] ?? ''}'.trim().isNotEmpty ? '$r · ${it?['seller']}' : r;
                 final detail = '${it?['description'] ?? ''}'.trim();
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(isDone ? Icons.check_circle : Icons.inventory_2_outlined, color: isDone ? AppColors.forest : AppColors.muted),
-                  title: Text(label, style: TextStyle(fontWeight: FontWeight.w800, color: isDone ? AppColors.muted : AppColors.ink)),
-                  subtitle: Text(isDone ? 'Depot drop filed' : (detail.isNotEmpty ? detail : 'File parcel photo and depot receipt')),
-                  trailing: busy
-                      ? const AppLogoSpinner(size: 18)
-                      : isDone
-                          ? const Icon(Icons.lock, size: 16, color: AppColors.muted)
-                          : FilledButton(
-                              onPressed: _busyRef != null ? null : () async {
-                                final res = await _depotDropWithReceipt(r);
-                                if (!mounted) return;
-                                setState(() => _busyRef = null);
-                                if (res != null && res.ok) {
-                                  setSheet(() => done.add(r));
-                                  _load();
-                                }
-                              },
-                              child: const Text('File drop'),
-                            ),
+                // Stacked layout, never a ListTile: a trailing button inside a
+                // ListTile competes with the title for width and can crush the
+                // label into a vertical one-character-per-line ribbon on small
+                // phones. Text owns full width; the button gets its own row.
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.line.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.line),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Icon(isDone ? Icons.check_circle : Icons.inventory_2_outlined, size: 20, color: isDone ? AppColors.forest : AppColors.muted),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
+                            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: isDone ? AppColors.muted : AppColors.ink)),
+                      ),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text(
+                      isDone ? 'Depot drop filed' : (detail.isNotEmpty ? detail : 'File parcel photo and depot receipt'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35),
+                    ),
+                    const SizedBox(height: 10),
+                    if (busy)
+                      const Center(child: AppLogoSpinner(size: 18))
+                    else if (isDone)
+                      const Row(children: [
+                        Icon(Icons.lock, size: 14, color: AppColors.muted),
+                        SizedBox(width: 6),
+                        Text('Filed — locked', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.muted)),
+                      ])
+                    else
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: _busyRef != null ? null : () async {
+                            final res = await _depotDropWithReceipt(r);
+                            if (!mounted) return;
+                            setState(() => _busyRef = null);
+                            if (res != null && res.ok) {
+                              setSheet(() => done.add(r));
+                              _load();
+                            }
+                          },
+                          child: const Text('File drop', maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
+                        ),
+                      ),
+                  ]),
                 );
               }),
               if (remaining.isEmpty)
