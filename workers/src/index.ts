@@ -6682,22 +6682,15 @@ async function reimburseRider(
         `INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'rider_reimburse', ?3)`,
       ).bind(rider.phone, amount, job.id),
     ]);
-    const disb = await lipilaDisburse(env, rider.phone, amount, ref,
-      `DropOff counter fare reimbursement ${job.ref ?? job.id}`.replace(/[^A-Za-z0-9 ]/g, ' '));
-    if (!disb.ok) {
-      await env.DB.batch([
-        env.DB.prepare(`UPDATE payments SET status = 'failed' WHERE lipila_reference = ?1 AND status = 'pending'`).bind(ref),
-        env.DB.prepare(
-          `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_failed', ?2)`,
-        ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} to the rider failed at payout init (Lipila) — retry via /admin/payments/:id/refund. The rider is OWED this money.`),
-      ]);
-      // Surface Lipila's own error (auth/float/whitelist) on the row's meta so
-      // ops screens can show WHY the payout failed, not just "failed".
-      try {
-        const row = await env.DB.prepare('SELECT id FROM payments WHERE lipila_reference = ?1 ORDER BY id DESC LIMIT 1').bind(ref).first<any>();
-        if (row?.id) await recordFailReason(env, row.id, String(disb.raw ?? '').slice(0, 200) || 'payout_init_failed');
-      } catch { /* best-effort */ }
-    }
+    // ADMIN GATE: reimbursements queue for admin confirmation before money moves.
+    const payout = await enqueuePayout(env, {
+      kind: 'settlement', jobId: job.id, phone: rider.phone, amount,
+      note: `DropOff counter fare reimbursement ${job.ref ?? job.id}`,
+      needsAdminConfirm: true,
+    });
+    await env.DB.prepare(
+      `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_pending', ?2)`,
+    ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} to the rider is queued and awaiting admin confirmation (${payout.reference}).`);
   } catch {
     try {
       await env.DB.prepare(
@@ -6854,7 +6847,7 @@ async function failPayout(env: Env, id: number, reason: string): Promise<void> {
 
 async function enqueuePayout(env: Env, input: {
   kind: string; paymentId?: number | null; jobId?: number | null;
-  phone: string; amount: number; note?: string;
+  phone: string; amount: number; note?: string; needsAdminConfirm?: boolean;
 }): Promise<{ id: number; reference: string; duplicate: boolean }> {
   // One payout per source payment — a refund webhook replay or a double tap on
   // the admin button can never queue a second transfer.
@@ -6867,9 +6860,9 @@ async function enqueuePayout(env: Env, input: {
   const prefix = input.kind === 'refund' ? 'REF' : input.kind === 'fee_sweep' ? 'SWEEP' : 'SET';
   const reference = moneyRef(prefix);
   const { meta } = await env.DB.prepare(
-    `INSERT INTO payouts (kind, payment_id, job_id, phone, amount_zmw, reference, status, next_attempt_at)
-     VALUES (?1,?2,?3,?4,?5,?6,'queued',datetime('now'))`,
-  ).bind(input.kind, input.paymentId ?? null, input.jobId ?? null, input.phone, input.amount, reference).run();
+    `INSERT INTO payouts (kind, payment_id, job_id, phone, amount_zmw, reference, status, next_attempt_at, needs_admin_confirm)
+     VALUES (?1,?2,?3,?4,?5,?6,'queued',datetime('now'),?7)`,
+  ).bind(input.kind, input.paymentId ?? null, input.jobId ?? null, input.phone, input.amount, reference, input.needsAdminConfirm ? 1 : 0).run();
   await logLipila(env, 'disbursement', reference, input.phone, input.amount, 'pending', 'queued');
   return { id: meta.last_row_id as number, reference, duplicate: false };
 }
@@ -6891,6 +6884,7 @@ async function runPayoutQueue(env: Env): Promise<void> {
     const due = await env.DB.prepare(
       `SELECT * FROM payouts WHERE status IN ('queued', 'failed')
          AND next_attempt_at <= datetime('now') AND attempts < max_attempts
+         AND needs_admin_confirm = 0
        ORDER BY id LIMIT 20`,
     ).all<any>();
     for (const p of due.results ?? []) {
@@ -11807,6 +11801,21 @@ app.get('/admin/payouts', async (c) => {
       ORDER BY p.id DESC LIMIT ?1`,
   ).bind(limit).all();
   return c.json({ payouts: results });
+});
+
+app.post('/admin/payouts/:id/confirm', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const id = Number(c.req.param('id'));
+  const p = await c.env.DB.prepare('SELECT id, status, needs_admin_confirm FROM payouts WHERE id = ?1').bind(id).first<any>();
+  if (!p) return c.json({ error: 'not found' }, 404);
+  if (p.status === 'success') return c.json({ error: 'already settled' }, 409);
+  await c.env.DB.prepare(
+    `UPDATE payouts SET needs_admin_confirm = 0, admin_confirm_by = ?2, admin_confirm_at = datetime('now'),
+       status = 'queued', next_attempt_at = datetime('now'), updated_at = datetime('now')
+     WHERE id = ?1`,
+  ).bind(id, c.get('phone') ?? 'admin').run();
+  c.executionCtx.waitUntil(runPayoutQueue(c.env));
+  return c.json({ ok: true, payout_id: id, status: 'queued' });
 });
 
 app.post('/admin/payouts/:id/retry', async (c) => {

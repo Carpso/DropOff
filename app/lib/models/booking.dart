@@ -66,6 +66,7 @@ class CourierInfo {
   final String sourceDate;
   final String note;
   final int colorValue;
+  final String? logoUrl;
   final List<CourierRate> rates;
   final List<CourierBranch> branches;
   final List<String> receiptAssets;
@@ -82,6 +83,7 @@ class CourierInfo {
     required this.sourceDate,
     required this.note,
     required this.colorValue,
+    this.logoUrl,
     this.rates = const [],
     this.branches = const [],
     this.receiptAssets = const [],

@@ -322,13 +322,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 tileProviders: TileProviders({'protomaps': snap.data!}),
                 fileCacheTtl: const Duration(days: 30),
               ),
-              // Street/place labels overlay so road names stay readable on the
-              // DropOff basemap.
-              TileLayer(
-                urlTemplate: 'https://basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
-                userAgentPackageName: 'store.carpsosolutions.dropoff',
-                maxZoom: 20,
-              ),
+              // Labels are rendered by the PMTiles/Protomaps theme; avoid third-party
+              // label overlays that require external API keys.
               if (casing != null && core != null)
                 PolylineLayer(polylines: widget.routeIsStraightLine
                     ? [Polyline(points: widget.route!, strokeWidth: 4, color: AppColors.mint,

@@ -871,8 +871,8 @@ class _BatchPickupCardState extends State<_BatchPickupCard> {
                         decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
                         child: ExpansionTile(
                           leading: const Icon(Icons.route_rounded, color: AppColors.forest),
-                          title: Text('Route ${route['route']} — ${(route['stops'] as List).length} stops · ${route['total_km']} km · ~${route['est_minutes']} min', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                          subtitle: Text('rider: ${route['rider_hint']}', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                          title: Text('Route ${route['route']} — ${(route['stops'] as List).length} stops · ${route['total_km']} km · ~${route['est_minutes']} min', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                          subtitle: Text('rider: ${route['rider_hint']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 11)),
                           children: [
                             ...(route['stops'] as List).cast<Map<String, dynamic>>().map((stop) => ListTile(
                                   dense: true,

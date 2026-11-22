@@ -119,7 +119,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
                 child: const Text(
-                  'Rider has not shared a fix yet (or GPS is denied). Check again in a minute — the map fills in as soon as they ping.',
+                  'Waiting for the rider\'s live location. It will appear here as soon as their next GPS update arrives.',
                   style: TextStyle(color: Colors.white, fontSize: 12, height: 1.4),
                 ),
               ),

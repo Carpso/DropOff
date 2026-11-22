@@ -948,6 +948,9 @@ class DropOffApi {
   /// Refund / settlement payout ledger (guarded retry engine).
   static Future<Map<String, dynamic>?> adminPayouts() => getAdmin('/admin/payouts');
 
+  static Future<ApiResponse> confirmPayout(int id) =>
+      post('/admin/payouts/$id/confirm', {});
+
   static Future<ApiResponse> retryPayout(int id) =>
       post('/admin/payouts/$id/retry', const {}, admin: true);
 

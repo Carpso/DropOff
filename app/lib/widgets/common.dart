@@ -272,11 +272,30 @@ class CourierAvatar extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+    final logo = courier.logoUrl;
+    final base = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: Color(courier.colorValue).withValues(alpha: 0.11), borderRadius: BorderRadius.circular(size * 0.3)),
+      child: Text(initials, style: TextStyle(color: Color(courier.colorValue), fontWeight: FontWeight.w900, fontSize: size * 0.32)),
+    );
+    if (logo == null || logo.isEmpty) return base;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.3),
+      child: Container(
         width: size,
         height: size,
+        color: Colors.white,
         alignment: Alignment.center,
-        decoration: BoxDecoration(color: Color(courier.colorValue).withValues(alpha: 0.11), borderRadius: BorderRadius.circular(size * 0.3)),
-        child: Text(initials, style: TextStyle(color: Color(courier.colorValue), fontWeight: FontWeight.w900, fontSize: size * 0.32)),
-      );
+        padding: const EdgeInsets.all(3),
+        child: Image.network(
+          logo,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => base,
+        ),
+      ),
+    );
+  }
 }

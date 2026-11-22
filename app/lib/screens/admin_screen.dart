@@ -3710,6 +3710,15 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
     _load();
   }
 
+  Future<void> _confirm(int id) async {
+    setState(() => _busyId = id);
+    final res = await DropOffApi.confirmPayout(id);
+    if (!mounted) return;
+    setState(() => _busyId = null);
+    AppToast.show(context, res.ok ? 'Rider reimbursement confirmed — payout queued.' : _adminError(res, 'Could not confirm the payout. Try again.'));
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -3733,6 +3742,7 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
             ..._rows.take(10).map((p) {
               final id = (p['id'] as num?)?.toInt() ?? 0;
               final status = '${p['status'] ?? 'queued'}';
+              final needsConfirm = (p['needs_admin_confirm'] as num?)?.toInt() == 1;
               final retryable = status == 'failed' || status == 'queued';
               final error = '${p['last_error'] ?? ''}';
               return Padding(
@@ -3750,7 +3760,15 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 10, color: status == 'success' ? AppColors.success : AppColors.warning)),
                     ])),
-                    if (retryable)
+                    if (needsConfirm)
+                      IconButton(
+                        tooltip: 'Confirm rider reimbursement',
+                        onPressed: _busyId != null ? null : () => _confirm(id),
+                        icon: _busyId == id
+                            ? const AppLogoSpinner(size: 16)
+                            : const Icon(Icons.verified_outlined, size: 19),
+                      ),
+                    if (retryable && !needsConfirm)
                       IconButton(
                         tooltip: 'Retry now (superadmin)',
                         onPressed: _busyId != null ? null : () => _retry(id),

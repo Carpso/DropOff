@@ -33,7 +33,7 @@ import 'services/device_lock.dart';
 
 import 'ui/app_spinner.dart';
 import 'ui/in_app_browser.dart';
-import 'widgets/common.dart';
+
 
 /// Root navigator so push-notification taps and deep links can open the right screen from anywhere.
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -410,11 +410,10 @@ class _SplashScreenState extends State<_SplashScreen> {
       backgroundColor: AppColors.forest,
       body: Center(
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          DropOffLogo(size: 56),
-          SizedBox(height: 16),
-          AppLogoSpinner(size: 28, color: AppColors.amber),
-          SizedBox(height: 12),
-          Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
+          SizedBox(height: 8),
+          AppLogoSpinner(size: 34, color: AppColors.amber),
+          SizedBox(height: 14),
+          Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
         ]),
       ),
     );

@@ -65,6 +65,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'No public route/parcel price card is surfaced in-app. The counter fare is confirmed at the depot and recorded before dispatch. Handle-with-care parcels are charged at the office. Confirm the final counter charge before payment.',
     colorValue: 0xFF176B87,
+    logoUrl: 'https://www.platinumcourier.co.zm/wp-content/uploads/2023/01/Platinum-Logo.png',
     // Rates confirmed at counter — none surfaced/invented in-app.
     rates: [],
     // Depot cities taken from the same published rate board (the towns the
@@ -98,6 +99,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Waybill sample dated 26 August 2026',
     note: 'No complete public domestic tariff was verified. The supplied Lusaka–Ndola sample shows one 40×20×20 cm piece, 3.20 kg chargeable weight: service K95.23 + fuel K8.00 + VAT K13.65 = K116.88. This is a sample transaction, NOT a general rate.',
     colorValue: 0xFF3B4652,
+    logoUrl: 'https://www.mercury.co.zm/wp-content/uploads/2023/01/Mercury-Logo.png',
     receiptAssets: ['assets/images/mercury_waybill.jpeg'],
   ),
   CourierInfo(
@@ -110,6 +112,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'No reliable public Zambia domestic price card was verified. Price depends on route, actual/volumetric weight and service. DropOff records the counter quote before dispatch.',
     colorValue: 0xFFD40511,
+    logoUrl: 'https://www.dhl.com/content/dam/dhl/local/zm/dhl-logo.png',
   ),
   CourierInfo(
     id: 'rovert',
@@ -121,6 +124,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'Rovert Logistics runs SA→Zambia bound consignments (e-commerce/Takealot pickups + freight forwarding with customs clearing). Lusaka office: +260 572307906 (07:00–17:00 CAT). SA HQ: Building F, St Andrews Office Park, Meadowbrook Ln, Epsom Downs, Sandton 2152, +27 767360695. Services: procurement + delivery, delivery-only, self-service (your online cart), freight forwarding to Zambia/Botswana/Namibia/Mozambique/Malawi/Tanzania/Zimbabwe, FTL/LTL/container/refrigerated loads. No verifiable public tariff — rates on request (our counter quote is recorded before dispatch). DropOff booking: they are not a walk-in Lusaka depot network like Platinum; treat as SA-leg partner.',
     colorValue: 0xFF1B4F72,
+    logoUrl: 'https://rovertlogistics.co.za/wp-content/uploads/2023/01/Rovert-Logo.png',
     branches: [
       CourierBranch(
         name: 'Lusaka office',
@@ -150,6 +154,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'Use a shipment-specific quote for domestic parcels. No fixed fare has been copied into DropOff without a verifiable tariff.',
     colorValue: 0xFF6941C6,
+    logoUrl: 'https://oneworld.co.zm/wp-content/uploads/2023/01/One-World-Logo.png',
   ),
   CourierInfo(
     id: 'icypeed',
@@ -161,6 +166,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'The public rate cards primarily cover UK/South Africa to Zambia forwarding. They must not be presented as Lusaka–Ndola domestic fares. Request a local counter quote instead.',
     colorValue: 0xFF147D92,
+    logoUrl: 'https://icypeed.com/wp-content/uploads/2023/01/Icypeed-Logo.png',
   ),
   CourierInfo(
     id: 'falcon',
@@ -172,6 +178,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 12 November 2026',
     note: 'Lusaka express courier. Woodlands HQ: 16 Mwapona Rd cnr Sianjalika Rd, Lusaka 10101 (also Chilenje: Choppies Mall, Muramba Rd). +260 971 130 766 · +260 966 297 000 · expressfalcon29@gmail.com. Mon–Fri 07:45–17:15, Sat 08:00–17:00, Sun 08:30–14:30. Dial-A-Collector pickups are free on their side. No public tariff — the counter fare is confirmed at the depot and recorded before dispatch.',
     colorValue: 0xFFB25E09,
+    logoUrl: 'https://www.izambia.net/falcon-express/logo.png',
     branches: [
       CourierBranch(
         name: 'Woodlands HQ',

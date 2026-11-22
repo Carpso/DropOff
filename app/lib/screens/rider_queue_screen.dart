@@ -679,6 +679,14 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       _posSub = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 12),
       ).listen(_onPosition);
+      // Prime an immediate ping so a rider who just granted permission is
+      // dispatchable right away instead of waiting for the first movement.
+      try {
+        final cur = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        );
+        if (mounted) _onPosition(cur);
+      } catch (_) { /* stream will deliver the next fix */ }
     } catch (_) {
       // Arrival detection is a bonus — the rider can always tap arrived, but
       // surface a recoverable banner rather than failing silently.
