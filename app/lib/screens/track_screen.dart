@@ -118,12 +118,20 @@ class _TrackScreenState extends State<TrackScreen> {
           if (_loading) const Center(child: Padding(padding: EdgeInsets.all(22), child: AppLogoSpinner(size: 26))),
           if (_error != null)
             Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.line)),
-              child: Row(children: [
-                const Icon(Icons.search_off_rounded, color: AppColors.muted),
-                const SizedBox(width: 10),
-                Expanded(child: Text(_error!, style: const TextStyle(color: AppColors.ink, fontSize: 13, height: 1.35))),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: AppColors.line)),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Container(
+                  width: 42, height: 42,
+                  decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.search_off_rounded, color: AppColors.forest),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('We couldn’t find that delivery', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  Text(_error!, style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4)),
+                ])),
               ]),
             ),
           if (gated) _accountCard(),
@@ -177,77 +185,79 @@ class _TrackScreenState extends State<TrackScreen> {
     );
   }
 
-  /// Payment-held item (owner directive 2026-11-15): the sender's prepayment
-  /// has not settled, so tracking stays locked — no timeline, no rider, no
-  /// live location. The server flips it open itself the moment payment lands.
+  /// Payment-held item: tracking stays locked until prepayment settles.
   Widget _heldCard() {
-    final hint = '${_data?['hint'] ?? ''}';
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Row(children: [
-            Icon(Icons.lock_clock, color: AppColors.amber),
-            SizedBox(width: 10),
-            Expanded(child: Text('Tracking is locked — payment pending',
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16))),
-          ]),
-          const SizedBox(height: 8),
-          Text(
-            hint.isEmpty
-                ? 'Prepayment pending — tracking opens once the sender’s payment is approved.'
-                : hint,
-            style: const TextStyle(color: AppColors.ink, fontSize: 13, height: 1.4),
-          ),
-        ]),
+    final hint = '${_data?['hint'] ?? ''}'.trim();
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.line),
+        boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 16, offset: Offset(0, 6))],
       ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 48, height: 48,
+          decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(14)),
+          child: const Icon(Icons.lock_clock_rounded, color: Color(0xFF8A5A00)),
+        ),
+        const SizedBox(height: 14),
+        const Text('Tracking unlocks after payment', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
+        const SizedBox(height: 8),
+        Text(
+          hint.isEmpty ? 'The sender’s prepayment is still pending. Live tracking, rider details, and timeline updates appear as soon as payment is approved.' : hint,
+          style: const TextStyle(color: AppColors.muted, fontSize: 13.5, height: 1.45),
+        ),
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(14)),
+          child: const Row(children: [
+            Icon(Icons.bolt_rounded, size: 18, color: AppColors.forest),
+            SizedBox(width: 8),
+            Expanded(child: Text('This updates automatically once payment settles.', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600))),
+          ]),
+        ),
+      ]),
     );
   }
 
-  /// Account gate — shown when the server says the viewer has no account-backed
-  /// access (requires_account). Only a signed-in account whose phone is the
-  /// sender's or recipient's can open the parcel; the link alone proves nothing.
+  /// Account gate: only sender/recipient account can open the parcel.
   Widget _accountCard() {
-    final hint = '${_data?['hint_phone'] ?? ''}';
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Row(children: [
-            Icon(Icons.lock_outline, color: AppColors.forest),
-            SizedBox(width: 10),
-            Expanded(child: Text('An account is needed', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16))),
-          ]),
-          const SizedBox(height: 8),
-          Text(
-            hint.isEmpty
-                ? 'This item opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Sign in or create your account, then open the link again.'
-                : 'This item opens only in a DropOff account signed in with the phone it was addressed to (or the sender’s). Try the number ending $hint.',
-            style: const TextStyle(color: AppColors.ink, fontSize: 13, height: 1.4),
-          ),
-          const SizedBox(height: 14),
-          Row(children: [
-            Expanded(
-              child: FilledButton(
-                onPressed: () => _openAccount(create: true),
-                child: const Text('Create account', maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () => _openAccount(),
-                child: const Text('Sign in', maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          const Text(
-            'Create your account with the number the item was sent to and every item addressed to you appears here automatically.',
-            style: AppType.caption,
-          ),
-        ]),
+    final hint = '${_data?['hint_phone'] ?? ''}'.trim();
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.line),
+        boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 16, offset: Offset(0, 6))],
       ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 48, height: 48,
+          decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
+          child: const Icon(Icons.shield_outlined, color: AppColors.forest),
+        ),
+        const SizedBox(height: 14),
+        const Text('Sign in to view this delivery', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
+        const SizedBox(height: 8),
+        Text(
+          hint.isEmpty
+              ? 'For safety, this item only opens in the DropOff account of the sender or recipient.'
+              : 'For safety, this item only opens in the DropOff account of the sender or recipient. Try the number ending $hint.',
+          style: const TextStyle(color: AppColors.muted, fontSize: 13.5, height: 1.45),
+        ),
+        const SizedBox(height: 16),
+        Row(children: [
+          Expanded(child: FilledButton(onPressed: () => _openAccount(create: true), child: const Text('Create account'))),
+          const SizedBox(width: 10),
+          Expanded(child: OutlinedButton(onPressed: () => _openAccount(), child: const Text('Sign in'))),
+        ]),
+        const SizedBox(height: 12),
+        const Text('Use the phone number this item was sent to. Your deliveries will appear automatically.', style: AppType.caption),
+      ]),
     );
   }
 

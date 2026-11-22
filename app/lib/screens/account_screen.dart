@@ -18,6 +18,7 @@ import '../screens/tickets_screen.dart';
 import '../screens/legal_screen.dart';
 import '../state/app_store.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_sheet.dart';
 import '../ui/in_app_browser.dart';
 import '../services/device_lock.dart';
 import '../ui/money_errors.dart';
@@ -433,16 +434,13 @@ class _AccountScreenState extends State<AccountScreen> {
 
   Future<void> _removePhoto() async {
     if (_photoBusy) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (d) => AlertDialog(
-        title: const Text('Remove profile photo?'),
-        content: const Text('Your photo will be removed and initials will be shown instead.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Remove')),
-        ],
-      ),
+    final ok = await showConfirmSheet(
+      context,
+      title: 'Remove profile photo?',
+      message: 'Your photo will be removed and initials will be shown instead.',
+      confirmLabel: 'Remove',
+      danger: true,
+      icon: Icons.delete_outline,
     );
     if (ok != true) return;
     setState(() => _photoBusy = true);
@@ -1067,16 +1065,13 @@ class _RecurringCardState extends State<_RecurringCard> {
                   ),
                 ])),
                 IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline, color: AppColors.muted), onPressed: () async {
-                  final ok = await showDialog<bool>(
-                    context: context,
-                    builder: (d) => AlertDialog(
-                      title: const Text('Delete recurring plan?'),
-                      content: const Text('This will remove the recurring plan. This cannot be undone.'),
-                      actions: [
-                        TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
-                        FilledButton(style: FilledButton.styleFrom(backgroundColor: AppColors.danger), onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
-                      ],
-                    ),
+                  final ok = await showConfirmSheet(
+                    context,
+                    title: 'Delete recurring plan?',
+                    message: 'This will remove the recurring plan. This cannot be undone.',
+                    confirmLabel: 'Delete',
+                    danger: true,
+                    icon: Icons.delete_outline,
                   );
                   if (ok != true) return;
                   await DropOffApi.deleteRecurring((plan['id'] as num).toInt());

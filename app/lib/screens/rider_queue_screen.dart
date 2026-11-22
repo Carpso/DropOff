@@ -1251,7 +1251,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       barrierDismissible: false,
       builder: (dctx) => StatefulBuilder(
         builder: (dctx, setDialog) => AlertDialog(
-          title: Text(_handoverTitle(s, isCollection ? 'COLLECT' : 'PICKUP'), style: AppType.subhead),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(_handoverTitle(s, isCollection ? 'COLLECT' : 'PICKUP'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               if (isCollection) ...[
@@ -1440,7 +1441,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
-          title: Text('Depot drop — $ref', style: AppType.subhead),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('Depot drop — $ref', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Row(children: [
@@ -1694,7 +1696,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
-          title: Text(_handoverTitle(s, 'COLLECTION'), style: AppType.subhead),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(_handoverTitle(s, 'COLLECTION'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Hand this item to: ${recName.isEmpty ? 'the recipient' : recName}${recPhone.isNotEmpty ? ' · $recPhone' : ''}',
                 style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35)),

@@ -1,4 +1,3 @@
-import '../ui/app_toast.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,6 +9,7 @@ import '../data/dropoff_api.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_sheet.dart';
 import '../widgets/common.dart';
 import '../widgets/sample_stamp.dart';
 import 'account_screen.dart';
@@ -114,7 +114,14 @@ class _CouriersScreenState extends State<CouriersScreen> {
                     if (live) {
                       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CourierDetailScreen(courier: courier)));
                     } else {
-                      AppToast.show(context, 'Coming soon — this courier joins the DropOff network shortly. Lusaka couriers are live today.');
+                      showInfoSheet(
+                        context,
+                        title: 'Expanding coverage',
+                        message: '${courier.name} is not live in the DropOff network yet. Lusaka couriers are available today, and we’ll open more partners as coverage expands.',
+                        icon: Icons.hourglass_top_rounded,
+                        accent: AppColors.amber,
+                        buttonLabel: 'Got it',
+                      );
                     }
                   },
                   child: Padding(
@@ -242,7 +249,13 @@ class _LiveDepotsSection extends StatelessWidget {
                     if (isLusaka) {
                       Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
                     } else {
-                      AppToast.show(context, 'Coming soon — ${c['city'] ?? 'this city'} depot coverage launches shortly. Lusaka is live today.');
+                      showInfoSheet(
+                        context,
+                        title: 'Coverage expanding',
+                        message: '${c['city'] ?? 'This city'} depot coverage is not live yet. You can book in Lusaka today; outside live coverage, depot fares are quoted at the counter.',
+                        icon: Icons.location_city_outlined,
+                        accent: AppColors.amber,
+                      );
                     }
                   },
                   child: Padding(
@@ -398,7 +411,13 @@ class CourierDetailScreen extends StatelessWidget {
                             builder: (_) => BookingScreen(initialCourierId: courier.id),
                           ));
                         } else {
-                          AppToast.show(context, 'Coming soon — DropOff pickup in ${branch.city} launches shortly.');
+                          showInfoSheet(
+                            context,
+                            title: 'Branch opening soon',
+                            message: 'DropOff pickup in ${branch.city} is not live yet. Book from a live Lusaka branch today, or use a booking where the counter fare is quoted at the counter.',
+                            icon: Icons.storefront_outlined,
+                            accent: AppColors.amber,
+                          );
                         }
                       },
                       child: Padding(

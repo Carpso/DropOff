@@ -23,6 +23,7 @@ import '../data/analytics_service.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_sheet.dart';
 import '../ui/in_app_browser.dart';
 import '../ui/tidy.dart';
 import '../widgets/common.dart';
@@ -648,16 +649,13 @@ class _BookingScreenState extends State<BookingScreen> {
                       onPressed: () async {
                         final id = (r['id'] as num?)?.toInt();
                         if (id == null) return;
-                        final ok = await showDialog<bool>(
-                          context: context,
-                          builder: (d) => AlertDialog(
-                            title: const Text('Remove saved recipient?'),
-                            content: Text('Remove $name ($phone) from your saved recipients?'),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
-                              FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Remove')),
-                            ],
-                          ),
+                        final ok = await showConfirmSheet(
+                          context,
+                          title: 'Remove saved recipient?',
+                          message: 'Remove $name ($phone) from your saved recipients?',
+                          confirmLabel: 'Remove',
+                          danger: true,
+                          icon: Icons.person_remove_outlined,
                         );
                         if (ok != true) return;
                         await DropOffApi.deleteRecipient(id);
@@ -1163,22 +1161,31 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 12),
         if (_from != 'Lusaka') ...[
           const SizedBox(height: 12),
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Icon(Icons.schedule, size: 18, color: AppColors.muted),
-                  SizedBox(width: 10),
-                  Expanded(child: Text('Coming soon — courier coverage outside Lusaka', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-                ]),
-                SizedBox(height: 8),
-                Text(
-                  'DropOff’s partner depot network is live in Lusaka. Nationwide courier coverage launches shortly — your city will appear here once it does.',
-                  style: AppType.caption,
-                ),
-              ]),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF8EE),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFF0D8A8)),
             ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.hourglass_top_rounded, color: Color(0xFF8A5A00), size: 20),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(child: Text('Expanding coverage', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16))),
+              ]),
+              const SizedBox(height: 10),
+              const Text(
+                'DropOff partner depot pickups are live in Lusaka. You can still book from other cities — the counter fare is quoted at the counter and confirmation may be manual.',
+                style: TextStyle(fontSize: 13, height: 1.45, color: AppColors.ink),
+              ),
+              const SizedBox(height: 10),
+              const Text('Live now: Lusaka • Expanding next: more Zambian cities', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.muted)),
+            ]),
           ),
           const SizedBox(height: 26),
         ] else ...[
