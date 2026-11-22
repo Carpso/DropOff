@@ -55,6 +55,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool _photoBusy = false;
   bool _stepSounds = true; // step-complete chime — persisted option (owner 2026-11-20)
   bool _voiceGuidance = true; // spoken turns — persisted option (owner audit 2026-11-21)
+  double _voiceRate = 0.5;
   String? _otpMsg;
   String? _error;
   // "Resend verification email" only matters when the error actually mentions
@@ -80,6 +81,7 @@ class _AccountScreenState extends State<AccountScreen> {
         setState(() {
           _stepSounds = StepSounds.enabled;
           _voiceGuidance = StepSounds.voiceGuidance;
+          _voiceRate = StepSounds.voiceRate;
         });
       }
     });
@@ -658,6 +660,37 @@ class _AccountScreenState extends State<AccountScreen> {
                     setState(() => _voiceGuidance = v);
                   },
                 ),
+                if (_voiceGuidance)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 56, right: 8, bottom: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text('Voice speed', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                            ),
+                            Text(
+                              _voiceRate <= 0.35 ? 'Slow' : _voiceRate <= 0.6 ? 'Normal' : 'Fast',
+                              style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+                            ),
+                          ],
+                        ),
+                        Slider(
+                          value: _voiceRate.clamp(0.2, 1.0),
+                          min: 0.2,
+                          max: 1.0,
+                          divisions: 8,
+                          label: _voiceRate.toStringAsFixed(2),
+                          onChanged: (v) async {
+                            setState(() => _voiceRate = v);
+                            await StepSounds.setVoiceRate(v);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 // Recipient door PIN (owner 2026-11-18): your own 4-digit code
                 // shown to the rider at the door — no SMS code for same-city.
                 ListTile(

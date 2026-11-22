@@ -216,6 +216,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// rider_id everywhere.
   Future<void> _transferStop(Map<String, dynamic> s) async {
     final ref = '${s['ref']}';
+    final pickup = '${s['pickup'] ?? s['pickup_address'] ?? 'Pickup'}';
+    final status = '${s['status'] ?? ''}';
     setState(() => _busyRef = ref);
     try {
       final data = await DropOffApi.teamRoster();
@@ -223,34 +225,151 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       final riders = ((data?['riders'] as List?) ?? const <dynamic>[])
           .whereType<Map>()
           .map((m) => Map<String, dynamic>.from(m))
+          .where((r) => (r['id'] as num?)?.toInt() != null)
           .toList();
       if (riders.isEmpty) {
-        AppToast.show(context, 'No other riders available to transfer to.');
+        AppToast.show(context, 'No other active riders are available to take this trip right now.');
         return;
       }
-      final target = await showDialog<int>(
+
+      final target = await showModalBottomSheet<Map<String, dynamic>>(
         context: context,
-        builder: (ctx) => SimpleDialog(
-          title: const Text('Transfer this trip to'),
-          children: [
-            for (final r in riders)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(ctx).pop((r['id'] as num?)?.toInt() ?? 0),
-                child: Text('${r['full_name'] ?? r['phone']} · ${r['vehicle'] ?? ''}',
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
+        isScrollControlled: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        builder: (ctx) {
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + MediaQuery.of(ctx).viewPadding.bottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+                  const SizedBox(height: 16),
+                  Row(children: [
+                    Container(
+                      width: 42, height: 42,
+                      decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12)),
+                      child: const Icon(Icons.swap_horiz_rounded, color: AppColors.forest),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Transfer ride', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.2)),
+                      SizedBox(height: 2),
+                      Text('Hand this trip to another active rider.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                    ])),
+                    IconButton(onPressed: () => Navigator.of(ctx).pop(), icon: const Icon(Icons.close)),
+                  ]),
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.line)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(ref, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+                      const SizedBox(height: 4),
+                      Text(pickup, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                      if (status.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text('Status: $status', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.forest)),
+                      ],
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: const Color(0xFFFFF7E8), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFF1D39A))),
+                    child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(Icons.info_outline, size: 18, color: Color(0xFF8A5A00)),
+                      SizedBox(width: 8),
+                      Expanded(child: Text('Only transfer if you cannot complete this ride. The selected rider gets the trip, waybill, and responsibility immediately.', style: TextStyle(fontSize: 12, height: 1.35, color: Color(0xFF5F4308)))),
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('Choose a rider', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 8),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.38),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: riders.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) {
+                        final r = riders[i];
+                        final name = '${r['full_name'] ?? r['phone'] ?? 'Rider'}';
+                        final vehicle = '${r['vehicle'] ?? ''}'.trim();
+                        final phone = '${r['phone'] ?? ''}'.trim();
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(14),
+                          onTap: () => Navigator.of(ctx).pop(r),
+                          child: Ink(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: AppColors.line),
+                              color: Colors.white,
+                            ),
+                            child: Row(children: [
+                              CircleAvatar(
+                                radius: 20,
+                                backgroundColor: AppColors.forest.withValues(alpha: 0.1),
+                                child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'R', style: const TextStyle(color: AppColors.forest, fontWeight: FontWeight.w900)),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                                const SizedBox(height: 2),
+                                Text([if (vehicle.isNotEmpty) vehicle, if (phone.isNotEmpty) phone].join(' · '),
+                                    style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                              ])),
+                              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.muted),
+                            ]),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ),
+            ),
+          );
+        },
+      );
+      if (target == null || !mounted) return;
+
+      final toRiderId = (target['id'] as num?)?.toInt() ?? 0;
+      final targetName = '${target['full_name'] ?? target['phone'] ?? 'this rider'}';
+      if (toRiderId <= 0) return;
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Confirm transfer', style: TextStyle(fontWeight: FontWeight.w900)),
+          content: Text('Transfer $ref to $targetName?\n\nThey will receive the trip immediately, including the waybill and responsibility for the next steps.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.forest),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Transfer ride'),
+            ),
           ],
         ),
       );
-      if (target == null || target == 0 || !mounted) return;
-      final res = await DropOffApi.transferJob(ref, target);
+      if (confirmed != true || !mounted) return;
+
+      final res = await DropOffApi.transferJob(ref, toRiderId);
       if (!mounted) return;
-      AppToast.show(context, res.ok
-          ? '$ref transferred — the waybill and rider list are updated.'
-          : 'Could not transfer (${res.body['detail'] ?? res.error ?? 'try again'})');
       if (res.ok) {
+        AppToast.show(context, '$ref transferred to $targetName.');
         Navigator.of(context).pop();
         _load();
+      } else {
+        final detail = res.body['detail'] ?? res.body['error'] ?? res.error ?? 'Try again.';
+        AppToast.error(context, 'Could not transfer this ride. $detail');
       }
     } finally {
       if (mounted) setState(() => _busyRef = null);

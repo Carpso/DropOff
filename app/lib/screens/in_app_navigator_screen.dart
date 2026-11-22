@@ -90,8 +90,10 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     _fix();
     _timer = Timer.periodic(const Duration(seconds: 10), (_) { if (_me == null) _fix(); });
     _startGuidance();
-    StepSounds.load().then((_) {
-      if (mounted) setState(() => _voiceOn = StepSounds.voiceGuidance);
+    StepSounds.load().then((_) async {
+      if (!mounted) return;
+      setState(() => _voiceOn = StepSounds.voiceGuidance);
+      try { await _tts.setSpeechRate(StepSounds.voiceRate); } catch (_) {}
     });
     SavedPlaces.load().then((list) { if (mounted) setState(() => _saved = list); });
   }
@@ -109,10 +111,11 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
   Future<void> _setupTts() async {
     try {
+      await StepSounds.load();
       final languages = await _tts.getLanguages;
       final voice = languages.contains('en-GB') ? 'en-GB' : 'en-US';
       await _tts.setLanguage(voice);
-      await _tts.setSpeechRate(1.0);
+      await _tts.setSpeechRate(StepSounds.voiceRate);
       await _tts.setVolume(1.0);
       await _tts.awaitSpeakCompletion(true);
     } catch (_) {/* guidance still works visually */}
@@ -247,6 +250,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         : band == 1
             ? '$lowering ahead.'
             : 'In ${(metres / 50).floor() * 50} metres, $lowering';
+    try { await _tts.setSpeechRate(StepSounds.voiceRate); } catch (_) {}
     await _tts.speak(say).catchError((_) => 0);
   }
 

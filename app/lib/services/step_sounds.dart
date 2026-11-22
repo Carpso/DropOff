@@ -27,10 +27,12 @@ class StepSounds {
 
   static const String _prefKey = 'step_sounds_enabled';
   static const String _voicePrefKey = 'voice_guidance_enabled';
+  static const String _voiceRatePrefKey = 'voice_guidance_rate';
   static const String officialSound = 'sounds/step_done.wav';
 
   static bool _enabled = true;
   static bool _voiceGuidance = true;
+  static double _voiceRate = 0.5;
   static bool _loaded = false;
   static final AudioPlayer _player = AudioPlayer();
 
@@ -40,6 +42,9 @@ class StepSounds {
   /// Whether spoken turn-by-turn guidance is allowed (separate from chimes).
   static bool get voiceGuidance => _voiceGuidance;
 
+  /// Speech rate for spoken guidance (0.2 slow - 1.0 fast).
+  static double get voiceRate => _voiceRate;
+
   /// Reads the persisted preferences once per app run.
   static Future<void> load() async {
     if (_loaded) return;
@@ -47,6 +52,7 @@ class StepSounds {
       final prefs = await SharedPreferences.getInstance();
       _enabled = prefs.getBool(_prefKey) ?? true;
       _voiceGuidance = prefs.getBool(_voicePrefKey) ?? true;
+      _voiceRate = (prefs.getDouble(_voiceRatePrefKey) ?? 0.5).clamp(0.2, 1.0);
       final flags = DropOffApi.featureFlags;
       if (flags['step_sounds_enabled'] == false) _enabled = false;
       if (flags['voice_guidance_enabled'] == false) _voiceGuidance = false;
@@ -71,6 +77,15 @@ class StepSounds {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_voicePrefKey, value);
+    } catch (_) {/* preference is a nicety — never break the toggle */}
+  }
+
+  /// Persists voice guidance speech rate.
+  static Future<void> setVoiceRate(double value) async {
+    _voiceRate = value.clamp(0.2, 1.0);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_voiceRatePrefKey, _voiceRate);
     } catch (_) {/* preference is a nicety — never break the toggle */}
   }
 
