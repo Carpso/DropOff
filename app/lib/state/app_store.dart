@@ -13,7 +13,7 @@ import '../data/catalog.dart';
 import '../ui/keys.dart';
 import '../models/booking.dart';
 
-class AppStore extends ChangeNotifier {
+class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   static const _rememberKey = 'dropoff_remember_v1';
   static const _biometricKey = 'dropoff_biometric_v1';
   static const _deviceKey = 'dropoff_device_id_v1';
@@ -134,7 +134,25 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Registered once at startup. Keeps the signed-in identity (including the
+  /// profile photo) current on EVERY screen — the Task Queue avatar, Home
+  /// header, Account, tracking — without waiting for the user to tap a profile
+  /// picture or open Account.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _linkedPhone != null && DropOffApi.enabled) {
+      unawaited(refreshRole(force: true));
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   Future<void> initialize() async {
+    WidgetsBinding.instance.addObserver(this);
     final preferences = await SharedPreferences.getInstance();
     final remember = preferences.getBool(_rememberKey) ?? true;
     _biometricEnabled = preferences.getBool(_biometricKey) ?? false;
@@ -223,9 +241,9 @@ class AppStore extends ChangeNotifier {
   /// Team/admin surfaces from ordinary sellers and recipients. Runs even
   /// without a JWT: an ops-key device (rider build) resolves role='ops' via
   /// X-Api-Key; a bare session gets role=null (fail closed — staff hidden).
-  Future<void> refreshRole() async {
+  Future<void> refreshRole({bool force = false}) async {
     if (!DropOffApi.enabled) return;
-    final me = await DropOffApi.me();
+    final me = await DropOffApi.me(force: force);
     if (me == null) return;
     final next = '${me['role'] ?? ''}';
     final role = next.isEmpty ? null : next;

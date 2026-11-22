@@ -993,9 +993,14 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> iqEta(int courierId, String window) =>
       get('/iq/eta', {'courier_id': '$courierId', 'window': window});
 
-  /// Identity of the signed-in caller: {phone, role}. role 'admin' | 'ops'
-  /// unlocks the in-app admin console (owner phone is admin server-side).
-  static Future<Map<String, dynamic>?> me() => get('/me');
+  /// Identity of the signed-in caller: {phone, role, photo_url, full_name}.
+  /// role 'admin' | 'ops' unlocks the in-app admin console (owner phone is
+  /// admin server-side). `force` drops the tiny in-memory freshness window so
+  /// a photo changed on the server (another device / admin) shows up at once.
+  static Future<Map<String, dynamic>?> me({bool force = false}) {
+    if (force) _memCache.remove(_cacheKey('/me', null));
+    return get('/me');
+  }
 
   // ---- admin console (owner / admin key) ----
 

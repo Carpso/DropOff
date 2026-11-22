@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../main.dart';
@@ -19,9 +21,14 @@ class _AppShellState extends State<AppShell> {
   int _index = 0;
 
   void goTo(int index) {
+    final store = AppScope.of(context);
     // Bookings is a persistent tab — re-sync on every switch so collections
     // and standing orders appear without an app restart.
-    if (index == 2) AppScope.of(context).syncJobsFromServer();
+    if (index == 2) store.syncJobsFromServer();
+    // Keep the identity fresh on EVERY tab (profile photo, name, role). The
+    // avatars in the Task Queue and Home read this store; a photo changed on
+    // another device or by support must show without tapping a profile picture.
+    if (store.linked) unawaited(store.refreshRole(force: true));
     setState(() => _index = index);
   }
 

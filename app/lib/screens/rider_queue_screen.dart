@@ -821,26 +821,36 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // first leg is the courier counter where the item is already waiting;
     // only after the pickup does the rider head to the recipient's door.
     final isCollection = '${s['service'] ?? ''}' == 'collection';
-    // After a collection pickup there is no door pin on the job (only the
-    // typed dest_address) — leave coords null so the address is geocoded.
-    final lat = picked
-        ? (isCollection ? null : (s['depot_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble())
-        : (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble();
-    final lng = picked
-        ? (isCollection ? null : (s['depot_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble())
-        : (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble();
+    // A DELIVERY stop (standard last-mile OR collection handover) goes to the
+    // recipient's door. Its saved pickup_lat/lng belong to the SENDER, never
+    // the door — leave them null so the typed dest_address is geocoded.
+    final isDelivery = !isDepotAction && kind == 'delivery';
+    final double? lat;
+    final double? lng;
+    if (isDelivery) {
+      lat = null;
+      lng = null;
+    } else if (picked) {
+      lat = isCollection ? null : (s['depot_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble();
+      lng = isCollection ? null : (s['depot_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble();
+    } else {
+      lat = (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble();
+      lng = (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble();
+    }
     final addr = '${s['address'] ?? ''}'.trim();
     // "To Platinum" / "To Icypeed" (owner 2026-11-18): the depot leg is named
     // by the DEPOT, not a generic "depot" — stop rows carry `depot` now.
     final depotName = '${s['depot'] ?? s['courier'] ?? 'DropOff'}'.trim();
     final senderName = '${s['seller'] ?? ''}'.trim();
-    final label = isCollection
-        ? (picked
-            ? 'Deliver to ${'${s['recipient'] ?? 'recipient'}'}'
-            : '$depotName depot — collect the item')
-        : (picked
-            ? '$depotName depot'
-            : (senderName.isNotEmpty ? '$senderName — $addr' : '${s['ref'] ?? 'Stop'} — $addr').trim());
+    final label = isDelivery
+        ? 'Deliver to ${'${s['recipient'] ?? 'recipient'}'}'
+        : isCollection
+            ? (picked
+                ? 'Deliver to ${'${s['recipient'] ?? 'recipient'}'}'
+                : '$depotName depot — collect the item')
+            : (picked
+                ? '$depotName depot'
+                : (senderName.isNotEmpty ? '$senderName — $addr' : '${s['ref'] ?? 'Stop'} — $addr').trim());
     // Whole-job context on the map (owner 2026-11-18 "fix the rider map just
     // like the sender map tracking"): heading to the sender shows the depot
     // pin too, heading to the depot shows the sender's stop too.
@@ -852,24 +862,31 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // recipient door at handover).
     final otherLat = isCollection
         ? null
-        : (picked
-            ? (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble()
-            : (s['depot_lat'] as num?)?.toDouble());
+        : isDelivery
+            ? (s['depot_lat'] as num?)?.toDouble()
+            : (picked
+                ? (s['pickup_lat'] as num?)?.toDouble() ?? (s['lat'] as num?)?.toDouble()
+                : (s['depot_lat'] as num?)?.toDouble());
     final otherLng = isCollection
         ? null
-        : (picked
-            ? (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble()
-            : (s['depot_lng'] as num?)?.toDouble());
+        : isDelivery
+            ? (s['depot_lng'] as num?)?.toDouble()
+            : (picked
+                ? (s['pickup_lng'] as num?)?.toDouble() ?? (s['lng'] as num?)?.toDouble()
+                : (s['depot_lng'] as num?)?.toDouble());
     if (lat != null && lng != null) {
+      // Re-bind to non-null finals: Dart cannot promote a nullable local that
+      // was assigned in branches once it is captured by this builder closure.
+      final dLat = lat, dLng = lng;
       Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => InAppNavigatorScreen(
-          destLat: lat,
-          destLng: lng,
+          destLat: dLat,
+          destLng: dLng,
           label: label,
-          destIsDepot: isCollection ? !picked : picked,
+          destIsDepot: isDelivery ? false : isCollection ? !picked : picked,
           otherLat: otherLat,
           otherLng: otherLng,
-          otherIsDepot: isCollection ? picked : !picked,
+          otherIsDepot: isDelivery ? true : isCollection ? picked : !picked,
           vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}',
         ),
       ));
@@ -877,28 +894,32 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     }
     // No pin on the booking — geocode the typed address OURSELVES and keep
     // the rider inside the DropOff navigator.
-    final query = isCollection
-        ? (picked
-            ? (('${s['dest_address'] ?? ''}'.trim().isEmpty)
+    final doorAddr = '${s['dest_address'] ?? ''}'.trim();
+    final doorCity = '${s['dest_city'] ?? ''}'.trim();
+    final query = isDelivery
+        ? '$doorAddr${doorCity.isNotEmpty ? ', $doorCity' : ''}'.trim()
+        : isCollection
+            ? (picked
+                ? (doorAddr.isEmpty
+                    ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
+                    : doorAddr)
+                : '$depotName depot ${s['from_city'] ?? ''}'.trim())
+            : (picked
                 ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
-                : '${s['dest_address']}'.trim())
-            : '$depotName depot ${s['from_city'] ?? ''}'.trim())
-        : (picked
-            ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
-            : '$addr${'${s['from_city'] ?? ''}'.trim().isNotEmpty ? ', ${s['from_city']}' : ''}'.trim());
+                : '$addr${'${s['from_city'] ?? ''}'.trim().isNotEmpty ? ', ${s['from_city']}' : ''}'.trim());
     if (query.isEmpty) {
       _snack('This stop has no pin yet - pull to refresh or contact DropOff support.');
       return;
     }
     // Toast wording (owner 2026-11-18): say WHAT is being located and that the
     // DropOff map is doing it — a raw geocoder query reads like an error.
-    _snack(isCollection
-        ? (picked
-            ? 'Finding the recipient door on the DropOff map…'
-            : 'Finding the $depotName depot on the DropOff map…')
-        : (picked
+    _snack(isDelivery || (isCollection && picked)
+        ? 'Finding the recipient door on the DropOff map…'
+        : isCollection
             ? 'Finding the $depotName depot on the DropOff map…'
-            : 'Finding the pickup point on the DropOff map…'));
+            : picked
+                ? 'Finding the $depotName depot on the DropOff map…'
+                : 'Finding the pickup point on the DropOff map…');
     final hits = await MapServices.search(query);
     if (!mounted) return;
     if (hits.isNotEmpty) {
@@ -908,10 +929,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           destLat: hit.point.latitude,
           destLng: hit.point.longitude,
           label: label,
-          destIsDepot: isCollection ? !picked : picked,
+          destIsDepot: isDelivery ? false : isCollection ? !picked : picked,
           otherLat: otherLat,
           otherLng: otherLng,
-          otherIsDepot: isCollection ? picked : !picked,
+          otherIsDepot: isDelivery ? true : isCollection ? picked : !picked,
           vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}',
         ),
       ));
@@ -1008,6 +1029,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     }
     final lastMile = (s['last_mile'] as num?)?.toInt() ?? 0;
     final parcels = (s['parcels'] as num?)?.toInt() ?? 1;
+    // A collection runs DEPOT → RECIPIENT and a delivery stop always ends at
+    // the door. Their `last_mile` field may still be 0, so never show them a
+    // second "drop at the depot" step — that dead-ended the handover.
+    final doorHandover = lastMile == 1 || kind == 'delivery' || '${s['service'] ?? ''}' == 'collection';
     // Live status — declared OUTSIDE the sheet builder so each filed step
     // survives setSheet rebuilds: the sheet auto-marks the done step and
     // leaves only the next one open (owner directive 2026-11-17).
@@ -1096,7 +1121,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               // FIRST LEG (owner directive 2026-11-17): sender → depot. The
               // depot step only exists for first-leg jobs; the sheet never
               // ends at the recipient for them.
-              if (lastMile == 0)
+              if (!doorHandover)
                 step(
                   done: dropped,
                   unlocked: picked,
@@ -1116,7 +1141,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 ),
               // LAST MILE (collection/door jobs only): the RECIPIENT holds
               // the 4-digit code for this handover.
-              if (lastMile == 1)
+              if (doorHandover)
                 step(
                   done: dropped,
                   unlocked: picked,
@@ -1134,7 +1159,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     }
                   },
                 ),
-              if (lastMile == 0)
+              if (!doorHandover)
                 const Padding(padding: EdgeInsets.fromLTRB(14, 2, 14, 0), child: Text(
                   'The courier carries your items the rest of the way from the depot.',
                   style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.35))),
@@ -1811,7 +1836,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.handshake_outlined, color: AppColors.forest)),
                     const SizedBox(width: 12),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(_handoverTitle(s, 'COLLECTION'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: -0.2)),
+                      Text(_handoverTitle(s, '${s['service'] ?? ''}' == 'collection' ? 'COLLECTION' : 'HANDOVER'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: -0.2)),
                       Text(recName.isEmpty ? 'Confirm recipient handover' : 'Hand over to $recName', style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
                     ])),
                   ]),
@@ -2022,6 +2047,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             icon: (store.photoUrl ?? '').isNotEmpty
                 ? ClipOval(child: Image.network(
                     '${DropOffApi.baseUrl}${store.photoUrl}',
+                    headers: DropOffApi.authHeaders, // /media is auth-gated — without this the avatar never loads
                     width: 28, height: 28, fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => const Icon(Icons.account_circle)))
                 : Icon(store.email != null ? Icons.account_circle : Icons.account_circle_outlined),
@@ -2403,8 +2429,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final ref = '${s['ref']}';
     final kind = '${s['kind'] ?? ''}';
     final isDepotAction = kind == 'depot_drop' || kind == 'depot_drop_group';
-    final picked = isDepotAction ? false : _picked('${s['status'] ?? ''}');
-    final done = isDepotAction ? '${s['status'] ?? ''}' == 'delivered' : picked;
+    // A DELIVERY stop stays open until the handover is FILED. Before this fix
+    // `done` was just `picked`, so every last-mile/collection stop became a
+    // locked, unclickable ✓ the moment the item was picked up — even though
+    // the door step had not been filed. That is why a live order sat on the
+    // queue with no way to tick it.
+    final isDelivery = !isDepotAction && kind == 'delivery';
+    final status = '${s['status'] ?? ''}';
+    final picked = isDepotAction ? false : _picked(status);
+    final done = isDepotAction
+        ? status == 'delivered'
+        : isDelivery
+            ? ['delivered', 'ready_for_collection'].contains(status)
+            : picked;
     final arrived = !done && !isDepotAction && _arrivedRefs.contains(ref);
     final depotName = '${s['depot'] ?? s['courier'] ?? 'depot'}'.trim();
     final refs = ((s['refs'] as List?) ?? [ref]).map((e) => '$e').where((e) => e.isNotEmpty).toList();
@@ -2429,13 +2466,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       if (items.isNotEmpty) return 'Drop ${s['parcels'] ?? refs.length} item(s) at $depotName · $doneCount/${items.length} filed';
                       return 'Drop ${s['parcels'] ?? refs.length} item(s) at $depotName · ${refs.length} order(s)';
                     })()
-                  : picked
-                      ? '✓ picked — ${'${s['last_mile'] ?? 0}' == '1' ? 'door handover next' : 'drop at the $depotName depot'}'
-                      : arrived
-                          ? ('${s['service'] ?? ''}' == 'collection'
-                              ? 'ARRIVED at the depot — tap ✓ to collect the parcel'
-                              : 'ARRIVED — tap ✓ to file the pickup')
-                          : '${'${s['service'] ?? ''}' == 'collection' ? 'Recipient' : 'Sender'}: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} items',
+                  : isDelivery
+                      ? (done
+                          ? '✓ delivered to ${'${s['recipient'] ?? 'recipient'}'}'
+                          : arrived
+                              ? 'ARRIVED — tap ✓ to file the door handover'
+                              : 'Tap ✓ to file the door handover to ${'${s['recipient'] ?? 'recipient'}'}')
+                      : picked
+                          ? '✓ picked — drop at the $depotName depot'
+                          : arrived
+                              ? ('${s['service'] ?? ''}' == 'collection'
+                                  ? 'ARRIVED at the depot — tap ✓ to collect the parcel'
+                                  : 'ARRIVED — tap ✓ to file the pickup')
+                              : '${'${s['service'] ?? ''}' == 'collection' ? 'Recipient' : 'Sender'}: ${s['seller']} · ${s['depot'] ?? 'depot'} · ${s['parcels']} items',
               style: TextStyle(color: done ? AppColors.forest : arrived ? AppColors.ink : AppColors.muted,
                   fontSize: 11.5, fontWeight: done || arrived ? FontWeight.w800 : FontWeight.w400),
             ),
@@ -2465,15 +2508,21 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ),
         const Spacer(),
         _navBtn(
-          (picked || isDepotAction)
-              ? ('${s['service'] ?? ''}' == 'collection'
-                  ? 'To ${'${s['recipient'] ?? 'recipient'}'}'
-                  : 'To ${_depotShort(s)}')
-              : ('${s['service'] ?? ''}' == 'collection'
-                  ? 'To ${_depotShort(s)}'
-                  : 'To ${'${s['seller'] ?? 'Recipient'}'.trim().isEmpty ? 'Recipient' : '${s['seller']}'.trim()}'),
-          (picked || isDepotAction) && '${s['service'] ?? ''}' != 'collection' ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map' : 'Navigate to the handover in the DropOff map',
-          (picked || isDepotAction) ? AppColors.forest : AppColors.forestLight,
+          isDelivery
+              ? 'To ${'${s['recipient'] ?? 'Recipient'}'}'
+              : (picked || isDepotAction)
+                  ? ('${s['service'] ?? ''}' == 'collection'
+                      ? 'To ${'${s['recipient'] ?? 'recipient'}'}'
+                      : 'To ${_depotShort(s)}')
+                  : ('${s['service'] ?? ''}' == 'collection'
+                      ? 'To ${_depotShort(s)}'
+                      : 'To ${'${s['seller'] ?? 'Recipient'}'.trim().isEmpty ? 'Recipient' : '${s['seller']}'.trim()}'),
+          isDelivery
+              ? 'Navigate to the recipient door in the DropOff map'
+              : (picked || isDepotAction) && '${s['service'] ?? ''}' != 'collection'
+                  ? 'Navigate to the ${s['depot'] ?? s['courier'] ?? 'depot'} depot in the DropOff map'
+                  : 'Navigate to the handover in the DropOff map',
+          (isDelivery || picked || isDepotAction) ? AppColors.forest : AppColors.forestLight,
           Icons.navigation_rounded,
           () => _navigateToStop(s),
         ),

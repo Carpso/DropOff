@@ -8420,6 +8420,7 @@ app.get('/rider/queue', async (c) => {
         status: j.status,
         service: j.service ?? 'standard',
         dest_address: j.dest_address ?? '',
+        dest_city: j.dest_city ?? '',
         collection_receipt_url: j.collection_receipt_url ?? null,
         last_mile: Number(j.last_mile ?? 0),
         courier: j.courier_name,

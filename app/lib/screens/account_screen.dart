@@ -434,7 +434,7 @@ class _AccountScreenState extends State<AccountScreen> {
       _snackPhoto('Could not save photo (${res.error}).');
       return;
     }
-    await AppScope.of(context).refreshRole();
+    await AppScope.of(context).refreshRole(force: true);
     if (!mounted) return;
     final st = '${res.body['verification_status'] ?? ''}';
     _snackPhoto(st == 'pending'
@@ -461,7 +461,7 @@ class _AccountScreenState extends State<AccountScreen> {
       _snackPhoto('Could not remove photo (${res.error}).');
       return;
     }
-    await AppScope.of(context).refreshRole();
+    await AppScope.of(context).refreshRole(force: true);
     if (mounted) _snackPhoto('Photo removed.');
   }
 

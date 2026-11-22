@@ -29,6 +29,7 @@ class PhotoPreview extends StatelessWidget {
     final image = _isLocal
         ? Image.file(File(pathOrUrl), fit: BoxFit.cover, width: size, height: size)
         : Image.network('${DropOffApi.baseUrl}${pathOrUrl.startsWith('/') ? '' : '/'}$pathOrUrl',
+            headers: DropOffApi.authHeaders, // evidence photos live behind the auth-gated /media route
             fit: BoxFit.cover, width: size, height: size,
             errorBuilder: (_, __, ___) => Container(
                   width: size, height: size, color: AppColors.line.withValues(alpha: 0.25),
