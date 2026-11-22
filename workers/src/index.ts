@@ -6643,6 +6643,8 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'cod_remit_paid', ?2)`,
     ).bind(pay.job_id, 'COD remit paid to sender momo (webhook)').run();
   }
+  // Instant platform-fee split to the configured business mobile money channel.
+  await sweepPlatformIncome(env).catch(() => {});
 }
 
 // Reimburse the rider the EXACT depot counter amount they fronted — fee-free
@@ -6706,19 +6708,19 @@ async function reimburseRider(
 // business number in one disbursement. Idempotent: the ledger row is written
 // BEFORE the disburse call, so a crash-then-rerun can never double-pay
 // (the pending row blocks the next sweep until it is marked success/failed).
-async function sweepPlatformIncome(env: Env): Promise<void> {
+async function sweepPlatformIncome(env: Env, minZmw = 0): Promise<void> {
   const businessPhone = env.BUSINESS_PHONE;
   if (!businessPhone) return;
   const earnedRow = await env.DB.prepare(
     `SELECT COALESCE(SUM(platform_fee_zmw), 0) AS total FROM payments WHERE status = 'success'`,
   ).first<any>();
   const sweptRow = await env.DB.prepare(
-    `SELECT COALESCE(SUM(amount_zmw), 0) AS total FROM platform_disbursements WHERE status = 'success'`,
+    `SELECT COALESCE(SUM(amount_zmw), 0) AS total FROM platform_disbursements WHERE status IN ('success', 'pending')`,
   ).first<any>();
   const pending = round2((earnedRow?.total ?? 0) - (sweptRow?.total ?? 0));
-  if (pending < PLATFORM_SWEEP_MIN_ZMW) return;
+  if (pending <= 0 || pending < minZmw) return;
   const open = await env.DB.prepare(
-    `SELECT id FROM platform_disbursements WHERE status = 'pending' AND created_at > datetime('now', '-1 hour') LIMIT 1`,
+    `SELECT id FROM platform_disbursements WHERE status = 'pending' AND created_at > datetime('now', '-30 minutes') LIMIT 1`,
   ).first<any>();
   if (open) return; // a sweep is still in flight — never disburse twice
   const ref = `sweep-${Date.now().toString(36)}`;

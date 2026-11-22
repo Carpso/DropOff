@@ -2319,10 +2319,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final dest = b['destination'] as Map<String, dynamic>?;
     final stops = ((b['stops'] as List?) ?? const []).cast<Map<String, dynamic>>();
         final pickedCount = stops.where((s) {
-      final k = '';
-      if (k == 'depot_drop' || k == 'depot_drop_group') return '' == 'delivered';
-      return _picked('');
-    }).length;
+          final k = '${s['kind'] ?? ''}';
+          if (k == 'depot_drop' || k == 'depot_drop_group') return '${s['status'] ?? ''}' == 'delivered';
+          return _picked('${s['status'] ?? ''}');
+        }).length;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Card(
