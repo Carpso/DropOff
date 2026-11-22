@@ -8,6 +8,7 @@ import '../data/dropoff_api.dart';
 import '../ui/money_errors.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_sheet.dart';
 import '../ui/in_app_browser.dart';
 import 'account_screen.dart';
 import 'admin_screen.dart';
@@ -152,29 +153,27 @@ class _BusinessScreenState extends State<BusinessScreen> {
     final days = (plan?['cycle_days'] as num?)?.toInt() ?? 30;
     final unit = days == 7 ? '/wk' : days == 1 ? '/day' : '/mo';
     final price = fee == null ? 'the plan price' : 'K$fee$unit';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Text(renewal ? 'Renew $label?' : 'Switch to $label?',
-            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('This plan costs $price.', style: AppType.bodyStrong),
-          const SizedBox(height: 6),
-          const Text('Introductory promo price — it will increase within 3–6 months (no later than 1 year). This cycle keeps the current rate.',
-              style: TextStyle(fontSize: 11, color: AppColors.danger, fontWeight: FontWeight.w700, height: 1.35)),
-          const SizedBox(height: 10),
-          const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.',
-              style: TextStyle(fontSize: 12.5, height: 1.4)),
-          const SizedBox(height: 8),
-          const Text('The prompt adds our processing fee plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-parcel money.',
-              style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
+    final ok = await showAppSheet<bool>(
+      context,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+        const SizedBox(height: 16),
+        Text(renewal ? 'Renew $label?' : 'Switch to $label?', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+        const SizedBox(height: 12),
+        Text('This plan costs $price.', style: AppType.bodyStrong),
+        const SizedBox(height: 6),
+        const Text('Introductory promo price — it will increase within 3–6 months (no later than 1 year). This cycle keeps the current rate.', style: TextStyle(fontSize: 11, color: AppColors.danger, fontWeight: FontWeight.w700, height: 1.35)),
+        const SizedBox(height: 10),
+        const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.', style: TextStyle(fontSize: 12.5, height: 1.4)),
+        const SizedBox(height: 8),
+        const Text('The prompt adds our processing fee plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-parcel money.', style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
+        const SizedBox(height: 20),
+        Row(children: [
+          Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Not now'))),
+          const SizedBox(width: 10),
+          Expanded(child: FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Send momo prompt'))),
         ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Not now')),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Send momo prompt')),
-        ],
-      ),
+      ]),
     );
     return ok ?? false;
   }

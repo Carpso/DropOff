@@ -389,23 +389,32 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     sync(() => _shiftBusy = true);
     bool accepted = _shifts?['terms_accepted'] == true;
     if (on && !accepted) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Sweep shift terms', style: TextStyle(fontWeight: FontWeight.w900)),
-          content: const SingleChildScrollView(child: Text(
+      final ok = await showAppSheet<bool>(
+        context,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+          const SizedBox(height: 16),
+          const Row(children: [
+            Icon(Icons.schedule_outlined, color: AppColors.forest),
+            SizedBox(width: 10),
+            Expanded(child: Text('Sweep shift terms', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20))),
+          ]),
+          const SizedBox(height: 12),
+          const Text(
             'By going ON SHIFT you agree to work the three pickup windows: 05:30–07:30 (06:00), 10:00–11:30 and 14:00–15:30 CAT. '
             'The next sweep’s orders (06:00 / 10:00 / 14:00) may be claimed at any time, even off shift; collection starts at 05:30 for the 06:00 sweep, or at 10:00 / 14:00. '
             'DropOff assignments stop outside these windows, when you switch OFF SHIFT, or between shifts — so you are free to do other rides then. '
             'You agree to meet the daily target of 30 parcels, or the monthly target across the month if the daily target is missed; pay and bonuses follow the payroll rules. '
             'Hand over every item only against the correct proof (code or photo). Keep location sharing on while on shift.',
-            style: TextStyle(fontSize: 12.5, height: 1.4),
-          )),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('I agree')),
-          ],
-        ),
+            style: TextStyle(fontSize: 12.5, height: 1.45, color: AppColors.ink),
+          ),
+          const SizedBox(height: 20),
+          Row(children: [
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel'))),
+            const SizedBox(width: 10),
+            Expanded(child: FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('I agree'))),
+          ]),
+        ]),
       );
       if (ok != true) {
         sync(() => _shiftBusy = false);

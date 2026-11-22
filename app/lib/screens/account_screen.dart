@@ -222,32 +222,42 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _editDoorPin() async {
     final ctrl = TextEditingController();
     bool busy = false;
-    final res = await showDialog<bool>(
+    final res = await showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialog) => AlertDialog(
-        title: const Text('Door handover PIN', style: TextStyle(fontWeight: FontWeight.w900)),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Choose a 4-digit code. The rider asks for it when your parcel reaches your door. Keep it secret — never share it by SMS.',
-              style: TextStyle(fontSize: 12.5, height: 1.4)),
-          const SizedBox(height: 12),
-          TextField(controller: ctrl, keyboardType: TextInputType.number, maxLength: 4,
-            decoration: const InputDecoration(labelText: '4-digit PIN', counterText: '', border: OutlineInputBorder())),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          if (busy) const AppLogoSpinner(size: 18)
-          else TextButton(
-            onPressed: () async {
-              final pin = ctrl.text.replaceAll(RegExp(r'[^0-9]'), '');
-              if (pin.length != 4) { _snackSimple('Enter exactly 4 digits.'); return; }
-              setDialog(() => busy = true);
-              final out = await DropOffApi.setDoorPin(pin);
-              if (!ctx.mounted) return;
-              Navigator.pop(ctx, out.ok);
-              if (mounted) _snackSimple(out.ok ? 'Door PIN saved.' : moneyErrorText(out, 'Could not save PIN'));
-            },
-            child: const Text('Save PIN')),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialog) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+            const SizedBox(height: 16),
+            const Text('Door handover PIN', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+            const SizedBox(height: 8),
+            const Text('Choose a 4-digit code. The rider asks for it when your parcel reaches your door. Keep it secret — never share it by SMS.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),
+            const SizedBox(height: 12),
+            TextField(controller: ctrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: '4-digit PIN', counterText: '', border: OutlineInputBorder())),
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(child: OutlinedButton(onPressed: busy ? null : () => Navigator.pop(ctx, false), child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: busy ? null : () async {
+                  final pin = ctrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+                  if (pin.length != 4) { _snackSimple('Enter exactly 4 digits.'); return; }
+                  setDialog(() => busy = true);
+                  final out = await DropOffApi.setDoorPin(pin);
+                  if (!ctx.mounted) return;
+                  Navigator.pop(ctx, out.ok);
+                  if (mounted) _snackSimple(out.ok ? 'Door PIN saved.' : moneyErrorText(out, 'Could not save PIN'));
+                },
+                child: busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Save PIN'),
+              )),
+            ]),
+          ]),
+        ),
       )),
     );
     if (res == true && mounted) setState(() {});
@@ -499,17 +509,13 @@ class _AccountScreenState extends State<AccountScreen> {
       return;
     }
     final dev = res.body['dev_reset_link'] as String?;
-    showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Check your email'),
-        content: Text(
-          dev != null
-              ? 'Email delivery is not configured yet — reset link for this build:\n\n$dev'
-              : 'If $email has an account, a reset link valid for 1 hour is on its way.',
-        ),
-        actions: <Widget>[TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-      ),
+    await showInfoSheet(
+      context,
+      title: 'Check your email',
+      message: dev != null
+          ? 'Email delivery is not configured yet — reset link for this build:\n\n$dev'
+          : 'If $email has an account, a reset link valid for 1 hour is on its way.',
+      icon: Icons.mark_email_read_outlined,
     );
   }
 
@@ -1257,29 +1263,27 @@ class _TiersCardState extends State<_TiersCard> {
     final plan = models?[tier] as Map<String, dynamic>?;
     final fee = plan?['fee_zmw'];
     final price = fee == null ? 'the plan price' : 'K$fee${_cycleUnit(plan)}';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Text(upgrade ? 'Upgrade to ${tier.toUpperCase()}?' : 'Start ${tier.toUpperCase()}?',
-            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('This plan costs $price.', style: AppType.bodyStrong),
-          const SizedBox(height: 6),
-          const Text('Introductory promo price — it will increase within 3–6 months (no later than 1 year). This cycle keeps the current rate.',
-              style: TextStyle(fontSize: 11, color: AppColors.danger, fontWeight: FontWeight.w700, height: 1.35)),
-          const SizedBox(height: 10),
-          const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.',
-              style: TextStyle(fontSize: 12.5, height: 1.4)),
-          const SizedBox(height: 8),
-          const Text('The prompt adds our processing fee plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-item money.',
-              style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
+    final ok = await showAppSheet<bool>(
+      context,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+        const SizedBox(height: 16),
+        Text(upgrade ? 'Upgrade to ${tier.toUpperCase()}?' : 'Start ${tier.toUpperCase()}?', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+        const SizedBox(height: 12),
+        Text('This plan costs $price.', style: AppType.bodyStrong),
+        const SizedBox(height: 6),
+        const Text('Introductory promo price — it will increase within 3–6 months (no later than 1 year). This cycle keeps the current rate.', style: TextStyle(fontSize: 11, color: AppColors.danger, fontWeight: FontWeight.w700, height: 1.35)),
+        const SizedBox(height: 10),
+        const Text('We will send a mobile-money prompt to your phone. Nothing is charged until you approve it with your PIN.', style: TextStyle(fontSize: 12.5, height: 1.4)),
+        const SizedBox(height: 8),
+        const Text('The prompt adds our processing fee plus the mobile-money collection fee. Nothing else is charged — riders are salaried and never receive per-item money.', style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4)),
+        const SizedBox(height: 20),
+        Row(children: [
+          Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Not now'))),
+          const SizedBox(width: 10),
+          Expanded(child: FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Send momo prompt'))),
         ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Not now')),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Send momo prompt')),
-        ],
-      ),
+      ]),
     );
     return ok ?? false;
   }

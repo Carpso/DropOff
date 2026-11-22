@@ -13,6 +13,7 @@ import '../data/push_service.dart';
 import '../state/app_store.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_sheet.dart';
 import 'in_app_navigator_screen.dart';
 import '../widgets/common.dart';
 import 'rider_queue_screen.dart';
@@ -210,37 +211,30 @@ class OperationsScreen extends StatelessWidget {
     final store = AppScope.of(context);
     if (!(store.isSuperAdmin || store.isAdminRole)) return;
     final openCount = store.bookings.where((b) => b.riderId == '${rider.id}' && b.stage < b.timeline.length - 1).length;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Remove rider from team?'),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('This permanently removes ${rider.name} from the shared rider roster.', style: const TextStyle(height: 1.4)),
-          const SizedBox(height: 10),
-          if (openCount > 0)
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(12)),
-              child: Text('Blocked by condition: $openCount open booking(s) are still assigned to this rider. Reassign/complete them or deactivate the rider instead.',
-                style: const TextStyle(fontSize: 12.5, height: 1.35, color: Color(0xFF7A4A00))),
-            )
-          else
-            const Text('If this rider has historical deliveries, removal is only allowed when no open jobs are assigned (server-checked). Consider deactivating instead if unsure.',
-              style: TextStyle(fontSize: 12.5, height: 1.35, color: AppColors.ink)),
+    final confirmed = await showAppSheet<bool?>(
+      context,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+        const SizedBox(height: 16),
+        const Text('Remove rider from team?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+        const SizedBox(height: 12),
+        Text('This permanently removes ${rider.name} from the shared rider roster.', style: const TextStyle(height: 1.4)),
+        const SizedBox(height: 10),
+        if (openCount > 0)
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(12)),
+            child: Text('Blocked by condition: $openCount open booking(s) are still assigned to this rider. Reassign/complete them or deactivate the rider instead.', style: const TextStyle(fontSize: 12.5, height: 1.35, color: Color(0xFF7A4A00))),
+          )
+        else
+          const Text('If this rider has historical deliveries, removal is only allowed when no open jobs are assigned (server-checked). Consider deactivating instead if unsure.', style: TextStyle(fontSize: 12.5, height: 1.35, color: AppColors.ink)),
+        const SizedBox(height: 20),
+        Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.end, children: [
+          OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(context, null), child: const Text('Deactivate instead')),
+          FilledButton(style: FilledButton.styleFrom(backgroundColor: AppColors.danger), onPressed: openCount > 0 ? null : () => Navigator.pop(context, true), child: const Text('Delete permanently')),
         ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton.tonal(
-            onPressed: () => Navigator.pop(ctx, null),
-            child: const Text('Deactivate instead'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: openCount > 0 ? null : () => Navigator.pop(ctx, true),
-            child: const Text('Delete permanently'),
-          ),
-        ],
-      ),
+      ]),
     );
     if (confirmed == null && context.mounted) {
       // "Deactivate instead" convenience action

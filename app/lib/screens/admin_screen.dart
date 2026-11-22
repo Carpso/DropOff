@@ -1498,19 +1498,23 @@ class _UsersCardState extends State<_UsersCard> {
         AppToast.show(context, 'No courier depots on file — add one under Plans & couriers first.');
         return;
       }
-      final picked = await showDialog<int>(
-        context: context,
-        builder: (ctx) => SimpleDialog(
-          title: const Text('Which depot does this partner run?'),
-          children: [
-            for (final c in couriers)
-              SimpleDialogOption(
-                onPressed: () => Navigator.of(ctx).pop((c['id'] as num?)?.toInt() ?? 0),
-                child: Text('${c['name'] ?? c['depot_name'] ?? 'Courier #${c['id']}'}',
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
-              ),
-          ],
-        ),
+      final picked = await showAppSheet<int>(
+        context,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+          const SizedBox(height: 16),
+          const Text('Which depot does this partner run?', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+          const SizedBox(height: 12),
+          for (final c in couriers)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.storefront_outlined, color: AppColors.forest),
+              title: Text('${c['name'] ?? c['depot_name'] ?? 'Courier #${c['id']}'}', style: const TextStyle(fontWeight: FontWeight.w700)),
+              onTap: () => Navigator.of(context).pop((c['id'] as num?)?.toInt() ?? 0),
+            ),
+          const SizedBox(height: 8),
+          SizedBox(width: double.infinity, child: OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel'))),
+        ]),
       );
       if (picked == null || picked == 0) return;
       courierId = picked;
@@ -2527,55 +2531,64 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
     final days = TextEditingController(text: '${(t['cycle_days'] as num?)?.toInt() ?? 30}');
     final tag = TextEditingController(text: '${t['tag'] ?? ''}');
     var active = (t['active'] == true || t['active'] == 1);
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Edit plan — ${_tierLabels['${t['tier']}'] ?? t['tier']}',
-            style: const TextStyle(fontWeight: FontWeight.w900)),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: fee, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Fee per cycle (K)')),
-            TextField(controller: ppd, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Items per day (0 = monthly plan)')),
-            TextField(controller: ppm, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Items per month (0 = none)')),
-            TextField(controller: rider, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rider fee inside cap (0 = bundled)')),
-            TextField(controller: days, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cycle length (days)')),
-            TextField(controller: tag, decoration: const InputDecoration(labelText: 'Tag (shown in the app)', hintText: 'e.g. Most popular')),
-            StatefulBuilder(
-              builder: (ctx2, setDialog) => SwitchListTile(
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialog) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+              const SizedBox(height: 16),
+              Text('Edit plan — ${_tierLabels['${t['tier']}'] ?? t['tier']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+              const SizedBox(height: 12),
+              TextField(controller: fee, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Fee per cycle (K)')),
+              TextField(controller: ppd, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Items per day (0 = monthly plan)')),
+              TextField(controller: ppm, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Items per month (0 = none)')),
+              TextField(controller: rider, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rider fee inside cap (0 = bundled)')),
+              TextField(controller: days, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cycle length (days)')),
+              TextField(controller: tag, decoration: const InputDecoration(labelText: 'Tag (shown in the app)', hintText: 'e.g. Most popular')),
+              SwitchListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Plan active (visible for sale)'),
                 value: active,
                 onChanged: (v) => setDialog(() => active = v),
               ),
-            ),
-          ]),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              final res = await DropOffApi.adminSaveTier({
-                'tier': t['tier'],
-                'fee_zmw': double.tryParse(fee.text.trim()) ?? 0,
-                'parcels_per_day': int.tryParse(ppd.text.trim()) ?? 0,
-                'parcels_per_month': int.tryParse(ppm.text.trim()) ?? 0,
-                'rider_fee_zmw': double.tryParse(rider.text.trim()) ?? 0,
-                'cycle_days': int.tryParse(days.text.trim()) ?? 30,
-                'tag': tag.text.trim().isEmpty ? null : tag.text.trim(),
-                'active': active ? 1 : 0,
-              });
-              if (!ctx.mounted) return;
-              Navigator.pop(ctx);
-              if (mounted) {
-                _snack(res.ok ? 'Plan saved' : _adminError(res, 'Could not save the plan. Try again.'));
-                await _load();
-              }
-            },
-            child: const Text('Save'),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel'))),
+                const SizedBox(width: 10),
+                Expanded(child: FilledButton(
+                  onPressed: () async {
+                    final res = await DropOffApi.adminSaveTier({
+                      'tier': t['tier'],
+                      'fee_zmw': double.tryParse(fee.text.trim()) ?? 0,
+                      'parcels_per_day': int.tryParse(ppd.text.trim()) ?? 0,
+                      'parcels_per_month': int.tryParse(ppm.text.trim()) ?? 0,
+                      'rider_fee_zmw': double.tryParse(rider.text.trim()) ?? 0,
+                      'cycle_days': int.tryParse(days.text.trim()) ?? 30,
+                      'tag': tag.text.trim().isEmpty ? null : tag.text.trim(),
+                      'active': active ? 1 : 0,
+                    });
+                    if (!ctx.mounted) return;
+                    Navigator.pop(ctx);
+                    if (mounted) {
+                      _snack(res.ok ? 'Plan saved' : _adminError(res, 'Could not save the plan. Try again.'));
+                      await _load();
+                    }
+                  },
+                  child: const Text('Save'),
+                )),
+              ]),
+            ]),
           ),
-        ],
-      ),
+        ),
+      )),
     );
   }
 
@@ -2866,31 +2879,33 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
     final cap = TextEditingController(text: '${row?['per_extra_cap'] ?? 135}');
     final stretch = TextEditingController(text: '${row?['stretch_ratio'] ?? 1.25}');
     final stretchBonus = TextEditingController(text: '${row?['stretch_bonus_zmw'] ?? 150}');
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(row == null ? 'New rider incentive' : 'Edit: ${row['title']}',
-            style: const TextStyle(fontWeight: FontWeight.w900)),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: title, decoration: const InputDecoration(labelText: 'Promo title (e.g. Christmas Bonus)', hintText: 'Christmas Bonus')),
-            const SizedBox(height: 8),
-            TextField(controller: endsOn, decoration: const InputDecoration(labelText: 'Ends on (blank = always-on)', hintText: '2026-12-31')),
-            Row(children: [
-              Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: completion, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Completion K')))),
-              Expanded(child: TextField(controller: perExtra, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per extra item K'))),
-            ]),
-            Row(children: [
-              Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: cap, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max extra items')))),
-              Expanded(child: TextField(controller: stretch, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stretch ratio'))),
-            ]),
-            TextField(controller: stretchBonus, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stretch bonus K')),
+    final result = await showAppSheet<bool>(
+      context,
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+          const SizedBox(height: 16),
+          Text(row == null ? 'New rider incentive' : 'Edit: ${row['title']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+          const SizedBox(height: 12),
+          TextField(controller: title, decoration: const InputDecoration(labelText: 'Promo title (e.g. Christmas Bonus)', hintText: 'Christmas Bonus')),
+          const SizedBox(height: 8),
+          TextField(controller: endsOn, decoration: const InputDecoration(labelText: 'Ends on (blank = always-on)', hintText: '2026-12-31')),
+          Row(children: [
+            Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: completion, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Completion K')))),
+            Expanded(child: TextField(controller: perExtra, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Per extra item K'))),
           ]),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
-        ],
+          Row(children: [
+            Expanded(child: Padding(padding: const EdgeInsets.only(right: 6), child: TextField(controller: cap, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max extra items')))),
+            Expanded(child: TextField(controller: stretch, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stretch ratio'))),
+          ]),
+          TextField(controller: stretchBonus, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stretch bonus K')),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel'))),
+            const SizedBox(width: 10),
+            Expanded(child: FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save'))),
+          ]),
+        ]),
       ),
     );
     if (result != true) return;
@@ -3018,20 +3033,23 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     String? note;
     if (status == 'rejected') {
       final controller = TextEditingController();
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Reject driver'),
-          content: TextField(
-            controller: controller,
-            maxLines: 3,
-            decoration: const InputDecoration(labelText: 'Reason (sent to the driver)'),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Reject')),
-          ],
-        ),
+      final ok = await showAppSheet<bool>(
+        context,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+          const SizedBox(height: 16),
+          const Text('Reject driver', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+          const SizedBox(height: 8),
+          const Text('Share a clear reason. It will be sent to the driver.', style: TextStyle(fontSize: 13, color: AppColors.muted)),
+          const SizedBox(height: 12),
+          TextField(controller: controller, maxLines: 3, decoration: const InputDecoration(labelText: 'Reason (sent to the driver)', border: OutlineInputBorder())),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel'))),
+            const SizedBox(width: 10),
+            Expanded(child: FilledButton(style: FilledButton.styleFrom(backgroundColor: AppColors.danger), onPressed: () => Navigator.of(context).pop(true), child: const Text('Reject driver'))),
+          ]),
+        ]),
       );
       if (ok != true) return;
       note = controller.text.trim();
@@ -3084,40 +3102,33 @@ class _RiderVerificationAdminCardState extends State<_RiderVerificationAdminCard
     final matchLabel = matchSame == 'yes' ? 'SAME PERSON' : matchSame == 'no' ? 'DIFFERENT' : 'UNCERTAIN';
     final matchColor = matchSame == 'yes' ? AppColors.forest : matchSame == 'no' ? AppColors.danger : AppColors.warning;
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('AI KYC identity check'),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Plate match: ${plateMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: plateMatch ? AppColors.forest : AppColors.danger)),
+    await showAppSheet<void>(
+      context,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+        const SizedBox(height: 16),
+        const Text('AI KYC identity check', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+        const SizedBox(height: 12),
+        Text('Plate match: ${plateMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: plateMatch ? AppColors.forest : AppColors.danger)),
+        const SizedBox(height: 4),
+        Text('NRC match: ${nrcMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: nrcMatch ? AppColors.forest : AppColors.danger)),
+        const SizedBox(height: 4),
+        Text('Selfie face: ${faceVerdict.isEmpty ? 'not checked' : faceVerdict.toUpperCase()}', style: TextStyle(fontWeight: FontWeight.w800, color: faceVerdict.isEmpty ? AppColors.muted : faceColor)),
+        if (faceNote.isNotEmpty) ...[const SizedBox(height: 2), Text('AI note: $faceNote', style: AppType.caption)],
+        if (faceMatch != null) ...[
           const SizedBox(height: 4),
-          Text('NRC match: ${nrcMatch ? 'YES' : 'no'}', style: TextStyle(fontWeight: FontWeight.w800, color: nrcMatch ? AppColors.forest : AppColors.danger)),
-          const SizedBox(height: 4),
-          Text('Selfie face: ${faceVerdict.isEmpty ? 'not checked' : faceVerdict.toUpperCase()}',
-              style: TextStyle(fontWeight: FontWeight.w800, color: faceVerdict.isEmpty ? AppColors.muted : faceColor)),
-          if (faceNote.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text('AI note: $faceNote', style: AppType.caption),
-          ],
-          if (faceMatch != null) ...[
-            const SizedBox(height: 4),
-            Text('Selfie vs ID portrait: $matchLabel  (${faceMatch['confidence'] ?? 'low'} confidence)',
-                style: TextStyle(fontWeight: FontWeight.w800, color: matchColor)),
-            if ('${faceMatch['note'] ?? ''}'.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text('AI note: ${faceMatch['note']}', style: AppType.caption),
-              ),
-          ],
-          const SizedBox(height: 10),
-          const Text('Text read from the photo:', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-          const SizedBox(height: 4),
-          SelectableText(text.isEmpty ? '(nothing readable)' : text, style: const TextStyle(fontSize: 12, height: 1.4)),
-          const SizedBox(height: 10),
-          const Text('AI is an assist only - the decision is still yours.', style: TextStyle(color: AppColors.muted, fontSize: 11)),
-        ]),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
-      ),
+          Text('Selfie vs ID portrait: $matchLabel  (${faceMatch['confidence'] ?? 'low'} confidence)', style: TextStyle(fontWeight: FontWeight.w800, color: matchColor)),
+          if ('${faceMatch['note'] ?? ''}'.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: Text('AI note: ${faceMatch['note']}', style: AppType.caption)),
+        ],
+        const SizedBox(height: 10),
+        const Text('Text read from the photo:', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+        const SizedBox(height: 4),
+        SelectableText(text.isEmpty ? '(nothing readable)' : text, style: const TextStyle(fontSize: 12, height: 1.4)),
+        const SizedBox(height: 10),
+        const Text('AI is an assist only - the decision is still yours.', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+        const SizedBox(height: 16),
+        SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))),
+      ]),
     );
     _load();
   }

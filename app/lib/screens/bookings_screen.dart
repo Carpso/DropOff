@@ -471,6 +471,12 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             _detailRow('Promo', '${booking.promoCode}${booking.promoDiscount != null ? ' — saved ${kwacha(booking.promoDiscount)} on the DropOff leg' : ''}'),
         ]))),
         const SizedBox(height: 20),
+        if (booking.dispatched && DropOffApi.enabled) ...[
+          const SectionTitle('Photos & evidence'),
+          const SizedBox(height: 8),
+          _InlineEvidenceGallery(ref: booking.serverRef ?? booking.reference),
+          const SizedBox(height: 20),
+        ],
         // PREPAY GATE (owner directive): a booking that never got its momo
         // prepayment approved is HELD — surface it loudly with a working
         // Pay now. [paymentHeld] is the server's own deposit decision,
@@ -772,6 +778,79 @@ class _MovementLogSheetState extends State<_MovementLogSheet> {
           ]),
         ),
       ),
+    );
+  }
+}
+
+class _InlineEvidenceGallery extends StatefulWidget {
+  final String ref;
+  const _InlineEvidenceGallery({required this.ref});
+  @override
+  State<_InlineEvidenceGallery> createState() => _InlineEvidenceGalleryState();
+}
+
+class _InlineEvidenceGalleryState extends State<_InlineEvidenceGallery> {
+  late Future<Map<String, dynamic>?> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = DropOffApi.jobEvidence(widget.ref);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _future,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Card(child: Padding(padding: EdgeInsets.all(16), child: Center(child: AppLogoSpinner(size: 22))));
+        }
+        final data = snap.data;
+        if (data == null) {
+          return Card(child: Padding(padding: const EdgeInsets.all(14), child: Row(children: [
+            const Icon(Icons.photo_library_outlined, color: AppColors.muted),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Photos will appear here as the delivery progresses.', style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.35))),
+            TextButton(onPressed: () => setState(() => _future = DropOffApi.jobEvidence(widget.ref)), child: const Text('Retry')),
+          ])));
+        }
+        final ev = (data['evidence'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+        final items = <(String, String)>[
+          ('Booking photo', '${ev['booking_photo'] ?? ''}'),
+          ('Pickup photo', '${ev['pickup_photo'] ?? ''}'),
+          ('Drop-off photo', '${ev['depot_or_dropoff_photo'] ?? ''}'),
+        ].where((e) => e.$2.isNotEmpty).toList();
+        if (items.isEmpty) {
+          return const Card(child: Padding(padding: EdgeInsets.all(14), child: Row(children: [
+            Icon(Icons.photo_library_outlined, color: AppColors.muted),
+            SizedBox(width: 10),
+            Expanded(child: Text('No photos yet. Pickup and delivery photos will appear here automatically.', style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.35))),
+          ])));
+        }
+        return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(
+            height: 110,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: items.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, i) => GestureDetector(
+                onTap: () => showDialog<void>(context: context, builder: (dctx) => Dialog(backgroundColor: Colors.black, child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Padding(padding: const EdgeInsets.fromLTRB(14, 10, 14, 4), child: Text(items[i].$1, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))),
+                  Flexible(child: InteractiveViewer(maxScale: 4, child: AuthedImage(items[i].$2, fit: BoxFit.contain, width: double.infinity))),
+                  TextButton(onPressed: () => Navigator.pop(dctx), child: const Text('Close', style: TextStyle(color: Colors.white))),
+                ]))),
+                child: Column(children: [
+                  ClipRRect(borderRadius: BorderRadius.circular(10), child: ColoredBox(color: AppColors.line.withValues(alpha: 0.18), child: AuthedImage(items[i].$2, fit: BoxFit.contain, width: 110, height: 84))),
+                  const SizedBox(height: 4),
+                  SizedBox(width: 110, child: Text(items[i].$1, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: AppColors.muted))),
+                ]),
+              ),
+            ),
+          ),
+        ])));
+      },
     );
   }
 }
