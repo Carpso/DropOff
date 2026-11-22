@@ -69,6 +69,8 @@ class CourierInfo {
   final List<CourierRate> rates;
   final List<CourierBranch> branches;
   final List<String> receiptAssets;
+  /// CAT weekdays when this depot/courier does not take DropOff sweeps (1=Mon .. 7=Sun).
+  final List<int> closedWeekdays;
 
   const CourierInfo({
     required this.id,
@@ -83,9 +85,18 @@ class CourierInfo {
     this.rates = const [],
     this.branches = const [],
     this.receiptAssets = const [],
+    this.closedWeekdays = const [],
   });
 
   bool get hasVerifiedRates => rates.isNotEmpty;
+
+  /// True when this courier/depot is closed for DropOff sweeps on the given
+  /// CAT day (defaults to now). 1=Mon .. 7=Sun, evaluated in CAT (UTC+2).
+  bool isClosedOnCat([DateTime? now]) {
+    if (closedWeekdays.isEmpty) return false;
+    final cat = (now ?? DateTime.now()).toUtc().add(const Duration(hours: 2));
+    return closedWeekdays.contains(cat.weekday);
+  }
 
   /// Couriers with no explicit branch list are Lusaka-headquartered depots
   /// (Mercury, DHL, One World, Icypeed); the rest must list a Lusaka branch.

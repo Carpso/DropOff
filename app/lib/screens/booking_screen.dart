@@ -327,7 +327,16 @@ class _BookingScreenState extends State<BookingScreen> {
     if (est == null) return 'Indicative DropOff delivery ($from → $to): quote at the depot counter.';
     return 'Indicative DropOff delivery ($from → $to): K${est.toStringAsFixed(0)} rider leg • depot fare quoted at counter.';
   }
-  List<CourierInfo> get _filteredCouriers => smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size, activeServerIds: AppScope.of(context).activeCourierIds);
+  DateTime get _serviceDayCat {
+    final nowCat = DateTime.now().toUtc().add(const Duration(hours: 2));
+    final base = DateTime(nowCat.year, nowCat.month, nowCat.day);
+    return _tomorrowMorning ? base.add(const Duration(days: 1)) : base;
+  }
+
+  List<CourierInfo> get _filteredCouriers {
+    final list = smartCourierSearch(_courierSearchCtl.text, fromCity: _from, toCity: _to, size: _size, activeServerIds: AppScope.of(context).activeCourierIds);
+    return list.where((c) => !c.isClosedOnCat(_serviceDayCat)).toList();
+  }
 
   /// Server-mirrored plan state for THIS trip — 'pack' (sender → depot leg
   /// covered: K0 rider fee, no per-parcel processing fees, no momo prompt),
@@ -1210,33 +1219,54 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
           const SizedBox(height: 26),
         ] else ...[
-          for (final courier in _filteredCouriers)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(17),
-                onTap: () => setState(() => _courierId = courier.id),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.all(13),
-                  decoration: BoxDecoration(
-                    color: _courierId == courier.id ? const Color(0xFFE9F0EB) : Colors.white,
+          Builder(builder: (context) {
+            final filtered = _filteredCouriers;
+            if (filtered.isEmpty) {
+              return Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.line)),
+                child: const Row(children: [
+                  Icon(Icons.event_busy_outlined, color: AppColors.muted),
+                  SizedBox(width: 10),
+                  Expanded(child: Text('No depots are taking sweeps for the selected day. Try another day or check back soon.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted))),
+                ]),
+              );
+            }
+            if (!filtered.any((c) => c.id == _courierId)) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _courierId = filtered.first.id);
+              });
+            }
+            return Column(children: [
+              for (final courier in filtered)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: InkWell(
                     borderRadius: BorderRadius.circular(17),
-                    border: Border.all(color: _courierId == courier.id ? AppColors.forest : AppColors.line, width: _courierId == courier.id ? 1.5 : 1),
+                    onTap: () => setState(() => _courierId = courier.id),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.all(13),
+                      decoration: BoxDecoration(
+                        color: _courierId == courier.id ? const Color(0xFFE9F0EB) : Colors.white,
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(color: _courierId == courier.id ? AppColors.forest : AppColors.line, width: _courierId == courier.id ? 1.5 : 1),
+                      ),
+                      child: Row(children: [
+                        CourierAvatar(courier: courier, size: 42),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(courier.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                          const SizedBox(height: 3),
+                          const Text('Depot fare confirmed at counter', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+                        ])),
+                        Icon(_courierId == courier.id ? Icons.check_circle : Icons.circle_outlined, color: _courierId == courier.id ? AppColors.forest : AppColors.line),
+                      ]),
+                    ),
                   ),
-                  child: Row(children: [
-                    CourierAvatar(courier: courier, size: 42),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(courier.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                      const SizedBox(height: 3),
-                      const Text('Depot fare confirmed at counter', style: TextStyle(fontSize: 11, color: AppColors.muted)),
-                    ])),
-                    Icon(_courierId == courier.id ? Icons.check_circle : Icons.circle_outlined, color: _courierId == courier.id ? AppColors.forest : AppColors.line),
-                  ]),
                 ),
-              ),
-            ),
+            ]);
+          }),
         ],
         const SizedBox(height: 18),
         Container(

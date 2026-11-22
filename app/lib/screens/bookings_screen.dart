@@ -508,18 +508,13 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         ],
         if (!store.isStaff && booking.stage >= booking.timeline.length - 1)
           const InfoPill(icon: Icons.check_circle, label: 'Journey complete'),
-        // COURIER RECEIPT (owner 2026-11-21): after the journey, the sender gets
-        // one clear "Download courier receipt" action. Locked until the exact
-        // courier bill written on the photographed receipt is repaid.
-        if (booking.dispatched &&
-            complete &&
-            (booking.counterReceiptUrl?.isNotEmpty == true || booking.counterFareDue))
-          _CourierReceiptButton(booking: booking),
         if (booking.dispatched && DropOffApi.enabled) ...[
           const SizedBox(height: 20),
           const SectionTitle('Help & actions'),
           const SizedBox(height: 8),
           Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [
+            if (complete && (booking.counterReceiptUrl?.isNotEmpty == true || booking.counterFareDue))
+              _CourierReceiptButton(booking: booking),
             if (store.linked)
               ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -1820,12 +1815,41 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
     final paid = widget.booking.counterReceiptPaid;
     final amount = widget.booking.counterReceiptZmw;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const SizedBox(height: 12),
+        if (url.isNotEmpty)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Stack(alignment: Alignment.center, children: [
+              SizedBox(
+                height: 140,
+                width: double.infinity,
+                child: paid
+                    ? AuthedImage(url, fit: BoxFit.cover, width: double.infinity, height: 140)
+                    : ImageFiltered(
+                        imageFilter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        child: ColorFiltered(
+                          colorFilter: const ColorFilter.mode(Color(0xAAFFFFFF), BlendMode.lighten),
+                          child: AuthedImage(url, fit: BoxFit.cover, width: double.infinity, height: 140),
+                        ),
+                      ),
+              ),
+              if (!paid)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(14)),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.lock_outline, color: Colors.white),
+                    const SizedBox(height: 4),
+                    Text(amount != null && amount > 0 ? 'Pay K${amount.toStringAsFixed(2)} to unlock' : 'Pay receipt to unlock', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                  ]),
+                ),
+            ]),
+          ),
+        const SizedBox(height: 10),
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(52),
+            minimumSize: const Size.fromHeight(50),
             foregroundColor: paid ? AppColors.forest : AppColors.muted,
             backgroundColor: paid ? null : AppColors.line.withValues(alpha: 0.16),
           ),
@@ -1836,17 +1860,12 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
               await _payReceiptBill();
             }
           },
-          icon: _busy
-              ? const AppLogoSpinner(size: 16)
-              : Icon(paid ? Icons.download_outlined : Icons.lock_outlined, size: 17),
-          label: Text(
-            paid ? 'Download courier receipt' : 'Download courier receipt — locked',
-            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5),
-          ),
+          icon: _busy ? const AppLogoSpinner(size: 16) : Icon(paid ? Icons.download_outlined : Icons.lock_outline, size: 17),
+          label: Text(paid ? 'Download courier receipt' : 'Download courier receipt — locked', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5)),
         ),
         if (!paid)
           Padding(
-            padding: const EdgeInsets.only(top: 5),
+            padding: const EdgeInsets.only(top: 6),
             child: Text(
               amount != null && amount > 0
                   ? 'Pay the K${amount.toStringAsFixed(2)} courier bill written on the receipt to unlock the photo and download it.'

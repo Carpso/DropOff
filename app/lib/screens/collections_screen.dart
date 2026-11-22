@@ -312,29 +312,50 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         const SizedBox(height: 16),
         const Text('Courier', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
-        for (final c in couriers)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(15),
-              onTap: () => setState(() => _courierId = c.id),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: _courierId == c.id ? const Color(0xFFE9F0EB) : Colors.white,
+        Builder(builder: (context) {
+          final availableCouriers = couriers.where((c) => !c.isClosedOnCat()).toList();
+          if (availableCouriers.isEmpty) {
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.line)),
+              child: const Row(children: [
+                Icon(Icons.event_busy_outlined, color: AppColors.muted),
+                SizedBox(width: 10),
+                Expanded(child: Text('No depots are taking sweeps today. Please check back on the next open day.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted))),
+              ]),
+            );
+          }
+          if (!availableCouriers.any((c) => c.id == _courierId)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _courierId = availableCouriers.first.id);
+            });
+          }
+          return Column(children: [
+            for (final c in availableCouriers)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: InkWell(
                   borderRadius: BorderRadius.circular(15),
-                  border: Border.all(color: _courierId == c.id ? AppColors.forest : AppColors.line, width: _courierId == c.id ? 1.5 : 1),
+                  onTap: () => setState(() => _courierId = c.id),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _courierId == c.id ? const Color(0xFFE9F0EB) : Colors.white,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: _courierId == c.id ? AppColors.forest : AppColors.line, width: _courierId == c.id ? 1.5 : 1),
+                    ),
+                    child: Row(children: [
+                      CourierAvatar(courier: c, size: 38),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(c.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+                      Icon(_courierId == c.id ? Icons.check_circle : Icons.circle_outlined, color: _courierId == c.id ? AppColors.forest : AppColors.line),
+                    ]),
+                  ),
                 ),
-                child: Row(children: [
-                  CourierAvatar(courier: c, size: 38),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(c.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
-                  Icon(_courierId == c.id ? Icons.check_circle : Icons.circle_outlined, color: _courierId == c.id ? AppColors.forest : AppColors.line),
-                ]),
               ),
-            ),
-          ),
+          ]);
+        }),
         const SizedBox(height: 8),
         TextField(
           controller: _point,

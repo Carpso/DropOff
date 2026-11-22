@@ -73,7 +73,7 @@ class _CouriersScreenState extends State<CouriersScreen> {
     }
     final activeIds = AppScope.of(context).activeCourierIds;
     final filtered = smartCourierSearch(_query, fromCity: 'Lusaka', toCity: '', size: ParcelSize.small,
-        activeServerIds: activeIds);
+        activeServerIds: activeIds).where((c) => !c.isClosedOnCat()).toList();
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: () async {
