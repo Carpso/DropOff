@@ -206,82 +206,18 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try { return _mapCtl.camera.rotationRad * 180 / math.pi; } catch (_) { return 0; }
   }
 
-  /// The rider's bike badge — 3D and alive (owner 2026-11-18): a radar ring
-  /// that breathes outwards behind a gradient dome with rim light and a
-  /// ground shadow, so the pin reads as lifted off the map, not painted on.
+  /// The rider's vehicle on the map — just the vehicle, no frame/badge.
   Widget _riderMarker() {
-    const amber = Color(0xFFE8A020);
-    return AnimatedBuilder(
-      animation: _pulse,
-      builder: (context, _) {
-        final t = Curves.easeOut.transform(_pulse.value);
-        return SizedBox(
-          width: 76,
-          height: 76,
-          child: Stack(alignment: Alignment.center, children: [
-            // Expanding radar ring — fades as it grows.
-            Transform.scale(
-              scale: 0.55 + 0.85 * t,
-              child: Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: amber.withValues(alpha: (1 - t) * 0.6), width: 3),
-                ),
-              ),
-            ),
-            // Second, slower echo ring for depth.
-            Transform.scale(
-              scale: 0.4 + 0.85 * ((t + 0.5) % 1.0),
-              child: Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: amber.withValues(alpha: (1 - (t + 0.5) % 1.0) * 0.35), width: 2),
-                ),
-              ),
-            ),
-            // Ground shadow — the "3D lift" cue.
-            Positioned(
-              bottom: 8,
-              child: Container(
-                width: 30,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.30),
-                  borderRadius: BorderRadius.circular(7),
-                ),
-              ),
-            ),
-            // The dome: amber gradient sphere, white rim, soft drop shadow.
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFFFD268), amber, Color(0xFFB97A0E)],
-                  stops: [0.0, 0.55, 1.0],
-                ),
-                border: Border.all(color: Colors.white, width: 2.4),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 3)),
-                  BoxShadow(color: Color(0x2EE8A020), blurRadius: 14, spreadRadius: 2),
-                ],
-              ),
-              child: MapVehicleMarker(
-                heading: _routeHeading - _mapRotationDeg,
-                vehicle: widget.vehicleClass,
-                size: 30,
-              ),
-            ),
-          ]),
-        );
-      },
+    return SizedBox(
+      width: 64,
+      height: 64,
+      child: Center(
+        child: MapVehicleMarker(
+          heading: _routeHeading - _mapRotationDeg,
+          vehicle: widget.vehicleClass,
+          size: 52,
+        ),
+      ),
     );
   }
 
@@ -385,6 +321,13 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 theme: ProtomapsThemes.lightV4(),
                 tileProviders: TileProviders({'protomaps': snap.data!}),
                 fileCacheTtl: const Duration(days: 30),
+              ),
+              // Street/place labels overlay so road names stay readable on the
+              // DropOff basemap.
+              TileLayer(
+                urlTemplate: 'https://basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
+                userAgentPackageName: 'store.carpsosolutions.dropoff',
+                maxZoom: 20,
               ),
               if (casing != null && core != null)
                 PolylineLayer(polylines: widget.routeIsStraightLine
