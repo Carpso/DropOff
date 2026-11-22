@@ -242,6 +242,24 @@ class _BookingScreenState extends State<BookingScreen> {
         }
       });
     }
+    // Pre-fill sender details from the signed-in account so a logged-in
+    // sender never has to retype their own name/number (owner 2026-11-22).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final store = AppScope.of(context);
+      final name = '${store.fullName ?? ''}'.trim();
+      final phone = '${store.linkedPhone ?? ''}'.trim();
+      var changed = false;
+      if (name.isNotEmpty && _senderName.text.trim().isEmpty) {
+        _senderName.text = name;
+        changed = true;
+      }
+      if (phone.isNotEmpty && _senderPhone.text.trim().isEmpty) {
+        _senderPhone.text = phone;
+        changed = true;
+      }
+      if (changed) setState(() {});
+    });
     AnalyticsService.instance.track(
       feature: 'booking', action: 'view', context: 'booking_step_1',
     );
