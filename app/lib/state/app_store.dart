@@ -1007,7 +1007,7 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
         final ref = '${j['ref'] ?? ''}';
         if (ref.isEmpty) continue;
         final door = (j['last_mile'] ?? 0) == 1 || ((j['leg2_fee_zmw'] as num?) ?? 0) > 0;
-        final stage = _stageFromJobStatus('${j['status']}', door,
+        final stage = stageFromJobStatus('${j['status']}', door,
             collection: '${j['service'] ?? ''}' == 'collection');
         final existing = _bookings.where((b) => b.serverRef == ref).firstOrNull;
         if (existing != null) {
@@ -1061,7 +1061,10 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  static int _stageFromJobStatus(String status, bool door, {bool collection = false}) {
+  /// Public so the collection/standard timelines stay unit-tested
+  /// (`test/collection_flow_test.dart`) — the sender's 5-step collection
+  /// timeline is DEPOT → RECIPIENT, not the 7-step door timeline.
+  static int stageFromJobStatus(String status, bool door, {bool collection = false}) {
     // Collections run DEPOT → RECIPIENT on a 5-step timeline:
     // 0 placed · 1 assigned · 2 rider at depot · 3 collected · 4 delivered.
     if (collection) {

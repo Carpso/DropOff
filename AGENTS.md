@@ -58,6 +58,15 @@ After every change session, without asking the owner:
   `maximumZoom` 16 and allows the camera to 16.5. Unit-tested in
   `app/test/map_tile_sources_test.dart` (city inside bbox, regional outside,
   regional at low zoom, regional fallback on a missing city tile).
+- **Collection tests (owner ask 2026-11-22):** there were none, so
+  `app/test/collection_flow_test.dart` now pins the depot → recipient
+  contract: `isCollection`/`hasCollectionReceipt` (a standard row never
+  surfaces a receipt), the 5-step collection timeline (and that a last-mile
+  fee cannot stretch it to 7), the collection stage map
+  (`AppStore.stageFromJobStatus(..., collection: true)` — made public for
+  this, behaviour unchanged) and the fee prompt (plan-covered = leg only;
+  PAYG = leg + platform fee + momo fee, platform floor respected).
+  Standard timelines/stages are asserted alongside as regression guards.
 - **Vertical-text bugs (owner 2026-11-22):** the Business retention banner now
   keeps its body on its own full-width line (it used to live inside the
   icon+title `Row`), and the depot-drop sheet replaced its `ListTile` +
