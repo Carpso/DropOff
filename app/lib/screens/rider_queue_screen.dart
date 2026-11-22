@@ -1444,7 +1444,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// the sender pays.
   Future<void> _depotDropGroupSheet(Map<String, dynamic> s, List<String> refs) async {
     final depotName = '${s['depot'] ?? s['courier'] ?? 'depot'}'.trim();
-    final done = <String>{};
+    final items = ((s['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final done = <String>{
+      for (final it in items)
+        if (['delivered', 'at_depot'].contains('${it['status'] ?? ''}')) '${it['ref'] ?? ''}'
+    }..remove('');
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1464,13 +1468,16 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               ),
               const SizedBox(height: 12),
               ...refs.map((r) {
-                final isDone = done.contains(r);
+                final it = items.cast<Map<String, dynamic>?>().firstWhere((e) => '${e?['ref'] ?? ''}' == r, orElse: () => null);
+                final isDone = done.contains(r) || ['delivered', 'at_depot'].contains('${it?['status'] ?? ''}');
                 final busy = _busyRef == r;
+                final label = '${it?['seller'] ?? ''}'.trim().isNotEmpty ? '$r · ${it?['seller']}' : r;
+                final detail = '${it?['description'] ?? ''}'.trim();
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(isDone ? Icons.check_circle : Icons.inventory_2_outlined, color: isDone ? AppColors.forest : AppColors.muted),
-                  title: Text(r, style: TextStyle(fontWeight: FontWeight.w800, color: isDone ? AppColors.muted : AppColors.ink)),
-                  subtitle: Text(isDone ? 'Depot drop filed' : 'File parcel photo and depot receipt'),
+                  title: Text(label, style: TextStyle(fontWeight: FontWeight.w800, color: isDone ? AppColors.muted : AppColors.ink)),
+                  subtitle: Text(isDone ? 'Depot drop filed' : (detail.isNotEmpty ? detail : 'File parcel photo and depot receipt')),
                   trailing: busy
                       ? const AppLogoSpinner(size: 18)
                       : isDone
@@ -1492,7 +1499,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               if (remaining.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
-                  child: FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+                  child: SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))),
                 ),
             ]),
           );
@@ -2407,9 +2414,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             const SizedBox(height: 2),
             Text(
               isDepotAction
-                  ? (done
-                      ? '✓ dropped at $depotName'
-                      : 'Drop ${s['parcels'] ?? refs.length} item(s) at $depotName · ${refs.length} order(s)')
+                  ? (() {
+                      final items = ((s['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+                      final doneCount = items.where((i) => ['delivered', 'at_depot'].contains('${i['status'] ?? ''}')).length;
+                      if (done) return '✓ dropped at $depotName';
+                      if (items.isNotEmpty) return 'Drop ${s['parcels'] ?? refs.length} item(s) at $depotName · $doneCount/${items.length} filed';
+                      return 'Drop ${s['parcels'] ?? refs.length} item(s) at $depotName · ${refs.length} order(s)';
+                    })()
                   : picked
                       ? '✓ picked — ${'${s['last_mile'] ?? 0}' == '1' ? 'door handover next' : 'drop at the $depotName depot'}'
                       : arrived

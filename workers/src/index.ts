@@ -7737,6 +7737,37 @@ function buildRoute(stops: { ref: string; address: string; lat: number; lng: num
   };
 }
 
+async function canInsertIntoActiveRun(env: Env, riderId: number, job: any): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const runDate = new Date(Date.now() + 2 * 3600_000).toISOString().slice(0, 10);
+    const slot = String(job.pickup_window ?? '');
+    if (!slot || !['06:00', '10:00', '14:00'].includes(slot)) return { ok: true };
+    const run = await env.DB.prepare(
+      `SELECT id FROM sweep_runs WHERE rider_id=?1 AND run_date=?2 AND slot=?3 AND status='active'`
+    ).bind(riderId, runDate, slot).first<any>();
+    if (!run?.id) return { ok: true };
+    const pending = await env.DB.prepare(
+      `SELECT action, status FROM sweep_run_items WHERE run_id=?1 AND status='pending'`
+    ).bind(run.id).all<any>();
+    const items = (pending.results ?? []) as any[];
+    const hasPendingPickup = items.some(i => i.action === 'pickup');
+    const hasPendingDepotDrop = items.some(i => i.action === 'depot_drop' || i.action === 'depot_drop_group');
+    // Mid-run insertion rule: no interleaving by default. If depot phase has
+    // started (no pending pickups, depot drops pending) a new pickup would
+    // force backtracking — defer to next run unless explicitly forced.
+    const isPickupJob = String(job.status ?? 'created') === 'created';
+    if (isPickupJob && !hasPendingPickup && hasPendingDepotDrop) {
+      await env.DB.prepare(
+        `INSERT INTO sweep_run_decisions (run_id, rider_id, job_ref, decision, reason) VALUES (?1, ?2, ?3, 'rolled_next_run', ?4)`
+      ).bind(run.id, riderId, String(job.ref ?? ''), 'Pickup would interleave with active depot-drop phase').run().catch(() => {});
+      return { ok: false, reason: 'depot_phase_active' };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: true }; // never block dispatch on manifest guard failure
+  }
+}
+
 /* ------------------ smart rider auto-assign + dynamic re-optimization ----- */
 // Nearest available rider with free capacity gets the job; ties broken by
 // current load (emptiest rider first) so work spreads evenly.
@@ -7762,6 +7793,8 @@ async function dispatchToNearestRider(
       ? 'car' : undefined;
     const pick = await nearestAvailableRider(env, lat, lng, collectExcluded, preferred);
     if (!pick) return null;
+    const insert = await canInsertIntoActiveRun(env, pick.rider.id, job);
+    if (!insert.ok) return null;
     const etaMin = Math.round((pick.km / 22) * 60 + 4);
     // Idempotency guard (webhook double-fire or stale dispatch): only claim
     // the job when it is STILL unassigned and not delivered/canceled — and
@@ -8037,6 +8070,10 @@ app.post('/jobs/:ref/claim', async (c) => {
   if (job.status !== 'created') return c.json({ error: 'not_claimable', status: job.status }, 409);
   if (await jobPaymentHeld(c.env.DB, job.id)) {
     return c.json({ error: 'payment_required', hint: 'Prepayment pending — this parcel unlocks when the money lands.' }, 402);
+  }
+  const insert = await canInsertIntoActiveRun(c.env, rider.id, job);
+  if (!insert.ok) {
+    return c.json({ error: 'deferred_to_next_run', detail: 'This pickup would interleave with an active depot-drop phase. It will be rolled to the next run.' }, 409);
   }
   const fallback = job.pickup_lat == null || job.pickup_lng == null;
   const lat = fallback ? -15.4255 : Number(job.pickup_lat);
@@ -8429,10 +8466,18 @@ app.get('/rider/queue', async (c) => {
         const first = g.group[0];
         const refs = g.group.map((j: any) => String(j.ref));
         const parcels = g.group.reduce((sum: number, j: any) => sum + Number(j.parcels ?? 1), 0);
+        const items = g.group.map((j: any) => ({
+          ref: String(j.ref),
+          status: String(j.status ?? ''),
+          parcels: Number(j.parcels ?? 1),
+          description: String(j.description ?? ''),
+          seller: String(j.sender_name ?? ''),
+        }));
         pushStop({
           kind: g.group.length > 1 ? 'depot_drop_group' : 'depot_drop',
           ref: first.ref,
           refs,
+          items,
           address: `${first.depot_name ?? first.courier_name} depot`,
           lat: g.lat, lng: g.lng,
           depot_lat: g.lat, depot_lng: g.lng,
@@ -8442,7 +8487,7 @@ app.get('/rider/queue', async (c) => {
           description: g.group.length === 1 ? (first.description ?? '') : refs.join(', '),
           recipient: '', recipient_phone: '',
           parcels,
-          status: 'picked_up',
+          status: items.every((i: any) => i.status === 'delivered' || i.status === 'at_depot') ? 'delivered' : 'picked_up',
           service: 'standard',
           dest_address: '',
           collection_receipt_url: null,
@@ -8497,6 +8542,58 @@ app.get('/rider/queue', async (c) => {
         stops,
       };
     });
+
+  // Persist additive sweep-run manifest (jobs remain source of truth).
+  try {
+    const runDate = new Date(Date.now() + 2 * 3600_000).toISOString().slice(0, 10);
+    for (const b of batches as any[]) {
+      const slot = String(b.slot ?? '');
+      const existing = await c.env.DB.prepare(
+        `SELECT id FROM sweep_runs WHERE rider_id = ?1 AND run_date = ?2 AND slot = ?3`
+      ).bind(rider.id, runDate, slot).first<any>();
+      let runId: number;
+      if (existing?.id) {
+        runId = Number(existing.id);
+        await c.env.DB.batch([
+          c.env.DB.prepare(`DELETE FROM sweep_run_items WHERE run_id = ?1`).bind(runId),
+          c.env.DB.prepare(`DELETE FROM sweep_run_stops WHERE run_id = ?1`).bind(runId),
+          c.env.DB.prepare(
+            `UPDATE sweep_runs SET status='active', stop_count=?2, parcel_count=?3, minutes_on_road=?4, updated_at=datetime('now') WHERE id=?1`
+          ).bind(runId, Number(b.total_stops ?? 0), Number(b.total_parcels ?? 0), Number(b.minutes_on_road ?? 0)),
+        ]);
+      } else {
+        const ins = await c.env.DB.prepare(
+          `INSERT INTO sweep_runs (rider_id, rider_phone, run_date, slot, status, stop_count, parcel_count, minutes_on_road)
+           VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?7)`
+        ).bind(rider.id, phone, runDate, slot, Number(b.total_stops ?? 0), Number(b.total_parcels ?? 0), Number(b.minutes_on_road ?? 0)).run();
+        runId = Number((ins.meta as any)?.last_row_id ?? 0);
+        if (!runId) {
+          const row = await c.env.DB.prepare(`SELECT id FROM sweep_runs WHERE rider_id=?1 AND run_date=?2 AND slot=?3`).bind(rider.id, runDate, slot).first<any>();
+          runId = Number(row?.id ?? 0);
+        }
+      }
+      if (!runId) continue;
+      for (const s of (b.stops ?? []) as any[]) {
+        const stopIns = await c.env.DB.prepare(
+          `INSERT INTO sweep_run_stops (run_id, seq, kind, label, lat, lng, depot_name, courier_name, eta_min)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
+        ).bind(runId, Number(s.n ?? 0), String(s.kind ?? 'pickup'), String(s.address ?? ''), s.lat ?? null, s.lng ?? null, s.depot ?? null, s.courier ?? null, null).run();
+        const stopId = Number((stopIns.meta as any)?.last_row_id ?? 0);
+        if (!stopId) continue;
+        const refs = Array.isArray(s.refs) ? s.refs : [s.ref];
+        for (const r of refs) {
+          const ref = String(r ?? '').trim();
+          if (!ref) continue;
+          await c.env.DB.prepare(
+            `INSERT INTO sweep_run_items (run_id, stop_id, job_ref, action, status)
+             VALUES (?1, ?2, ?3, ?4, 'pending')`
+          ).bind(runId, stopId, ref, String(s.kind ?? 'pickup')).run();
+        }
+      }
+    }
+  } catch (e) {
+    console.error('sweep manifest persist failed', e);
+  }
 
   return c.json({
     rider: rider.full_name,
