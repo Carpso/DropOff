@@ -807,6 +807,7 @@ class AppStore extends ChangeNotifier {
       parcels: parcels,
       vehicleClass: vehicleClass,
       branch: branch,
+      declaredValueZmw: declaredValueZmw,
     );
     if (lastBookingError != null && lastBookingError != 'network_error') {
       notifyListeners();
@@ -1122,6 +1123,7 @@ class AppStore extends ChangeNotifier {
       parcels: (j['parcels'] as num?)?.toInt() ?? 1,
       vehicleClass: '${j['vehicle_class'] ?? 'motorcycle'}',
       branch: j['branch'] as String?,
+      declaredValueZmw: (j['declared_value_zmw'] as num?)?.toDouble(),
       pickupAt: j['pickup_at'] as String?,
       roundTrip: (j['round_trip'] ?? 0) == 1,
       returnCity: j['return_city'] as String?,

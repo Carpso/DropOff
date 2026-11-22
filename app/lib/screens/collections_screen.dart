@@ -30,6 +30,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   final _recipientPhone = TextEditingController();
   final _address = TextEditingController();
   final _description = TextEditingController();
+  final _declaredValue = TextEditingController();
   final _senderName = TextEditingController();
   final _promoCode = TextEditingController();
   String _window = '10:00';
@@ -83,7 +84,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
   @override
   void dispose() {
-    for (final c in [_point, _recipientName, _recipientPhone, _address, _description, _senderName, _promoCode]) {
+    for (final c in [_point, _recipientName, _recipientPhone, _address, _description, _declaredValue, _senderName, _promoCode]) {
       c.dispose();
     }
     super.dispose();
@@ -167,6 +168,10 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return _message('Use a valid Zambian recipient number, e.g. 0961234567.');
     }
     if (_address.text.trim().length < 4) return _message('Enter the door address for delivery.');
+    final declaredValueZmw = double.tryParse(_declaredValue.text.replaceAll(RegExp(r'[^0-9.]'), ''));
+    if (declaredValueZmw == null || declaredValueZmw <= 0) {
+      return _message('Enter the item value in ZMW before booking the collection.');
+    }
     // Plan code entry: pre-redeem before the collection so the plan covers the
     // rider fee for this booking without a separate step.
     final promo = _promoCode.text.trim().toUpperCase();
@@ -197,11 +202,13 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       payMethod: 'mobile_money',
       parcelSize: _size,
       collectionReceiptUrl: _receiptUrl,
+      declaredValueZmw: declaredValueZmw,
     );
     if (!mounted) return;
     if (!res.ok) {
       setState(() => _saving = false);
-      return _message('Could not book the collection. Try again.');
+      final detail = res.body['detail'];
+      return _message(detail is String && detail.isNotEmpty ? detail : 'Could not book the collection. Try again.');
     }
     final ref = '${res.body['ref'] ?? ''}';
     final due = ((res.body['total_zmw'] as num?) ?? 0).toDouble();
@@ -350,6 +357,20 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         TextField(controller: _address, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Door address', hintText: 'e.g. 12 Kabwata Site, near the shops', prefixIcon: const Icon(Icons.house_outlined), alignLabelWithHint: true, suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_address), child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('AI tidy')))),
         const SizedBox(height: 10),
         TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents (optional)', hintText: 'e.g. One carton of shoes', prefixIcon: Icon(Icons.inventory_2_outlined))),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _declaredValue,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Declared value (ZMW)',
+            hintText: 'What the item is worth, e.g. 450',
+            prefixIcon: Icon(Icons.payments_outlined),
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 4, bottom: 2),
+          child: Text('Required — recorded on the receipt and waybill for this collection.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+        ),
         const SizedBox(height: 10),
         TextField(controller: _senderName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Your name (optional)', prefixIcon: Icon(Icons.person_outline))),
         const SizedBox(height: 14),

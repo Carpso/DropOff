@@ -2326,6 +2326,7 @@ app.post('/jobs', async (c) => {
     // opt-ins are ignored; the legacy columns are zeroed so old bookings'
     // audit trail keeps its shape.
     const declaredValueZmw = Math.max(0, Number(b.declared_value_zmw ?? 0) || 0);
+    if (!(declaredValueZmw > 0)) return c.json({ error: 'declared_value_required', detail: 'Enter the item value in ZMW before booking.' }, 400);
     const coverOptIn = false;
     const coverTosAccepted = false;
     const coverTosVersion = null;
@@ -2787,6 +2788,7 @@ app.post('/collections', async (c) => {
     return c.json({ error: 'bad_parcel_photo_url', detail: 'Upload the parcel photo via /uploads first, then pass its url.' }, 400);
   }
   const declaredValueZmw = Math.max(0, Number(b.declared_value_zmw ?? 0) || 0);
+  if (!(declaredValueZmw > 0)) return c.json({ error: 'declared_value_required', detail: 'Enter the item value in ZMW before booking.' }, 400);
   // COVER REMOVED (owner directive 2026-11-17) — see POST /jobs. No cover is
   // quoted or charged anywhere; legacy columns stay zeroed.
   const coverOptIn = false;

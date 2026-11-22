@@ -233,6 +233,10 @@ class Booking {
   /// The depot branch the rider delivers to (e.g. 'Longacres branch').
   final String? branch;
 
+  /// Sender-declared item value in ZMW. Required for new bookings/collections;
+  /// may be null on legacy records.
+  final double? declaredValueZmw;
+
   const Booking({
     required this.id,
     this.service = 'standard',
@@ -267,6 +271,7 @@ class Booking {
     this.parcels = 1,
     this.vehicleClass = 'motorcycle',
     this.branch,
+    this.declaredValueZmw,
     this.lastEvent,
     this.riderName,
     this.riderPhone,
@@ -326,7 +331,7 @@ class Booking {
 
   double? get total => courierFare == null ? null : courierFare! + riderFee + lastMileFee;
 
-  Booking copyWith({int? stage, String? riderId, double? courierFare, String? serverRef, String? promoCode, double? promoDiscount, int? parcels, String? vehicleClass, String? riderName, String? riderPhone, String? lastEvent, bool? paymentHeld}) => Booking(
+  Booking copyWith({int? stage, String? riderId, double? courierFare, String? serverRef, String? promoCode, double? promoDiscount, int? parcels, String? vehicleClass, String? riderName, String? riderPhone, String? lastEvent, bool? paymentHeld, double? declaredValueZmw}) => Booking(
         id: id,
         service: service,
         reference: reference,
@@ -358,6 +363,8 @@ class Booking {
         pickupAt: pickupAt,
         parcels: parcels ?? this.parcels,
         vehicleClass: vehicleClass ?? this.vehicleClass,
+        branch: branch,
+        declaredValueZmw: declaredValueZmw ?? this.declaredValueZmw,
         riderName: riderName ?? this.riderName,
         riderPhone: riderPhone ?? this.riderPhone,
         lastEvent: lastEvent ?? this.lastEvent,
@@ -402,6 +409,7 @@ class Booking {
         'parcels': parcels,
         'vehicleClass': vehicleClass,
         'branch': branch,
+        'declaredValueZmw': declaredValueZmw,
         'lastEvent': lastEvent,
         'riderName': riderName,
         'riderPhone': riderPhone,
@@ -446,6 +454,7 @@ class Booking {
         parcels: (json['parcels'] as num?)?.toInt() ?? 1,
         vehicleClass: json['vehicleClass'] as String? ?? 'motorcycle',
         branch: json['branch'] as String?,
+        declaredValueZmw: (json['declaredValueZmw'] as num?)?.toDouble(),
         lastEvent: json['lastEvent'] as String?,
         riderName: json['riderName'] as String?,
         riderPhone: json['riderPhone'] as String?,

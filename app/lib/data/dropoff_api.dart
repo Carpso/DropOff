@@ -1309,6 +1309,7 @@ class DropOffApi {
     String payMethod = 'mobile_money',
     String? parcelSize,
     String? collectionReceiptUrl,
+    double? declaredValueZmw,
   }) =>
       post('/collections', {
         'courier_id': courierId,
@@ -1326,6 +1327,7 @@ class DropOffApi {
         'pay_method': payMethod,
         if (collectionReceiptUrl != null && collectionReceiptUrl.isNotEmpty)
           'collection_receipt_url': collectionReceiptUrl,
+        if (declaredValueZmw != null && declaredValueZmw > 0) 'declared_value_zmw': declaredValueZmw,
         if (parcelSize != null && parcelSize.isNotEmpty) 'parcel_size': parcelSize,
         if (parcelSize != null && parcelSize.isNotEmpty)
           'weight_class': switch (parcelSize) {

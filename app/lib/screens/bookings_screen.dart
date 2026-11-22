@@ -583,6 +583,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                   'vehicle_class': booking.vehicleClass,
                   'pickup_window': booking.pickupWindow,
                   if (booking.branch != null && booking.branch!.isNotEmpty) 'branch': booking.branch,
+                  if (booking.declaredValueZmw != null && booking.declaredValueZmw! > 0) 'declared_value_zmw': booking.declaredValueZmw,
                 };
                 Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
               },
@@ -609,6 +610,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                     'parcels': booking.parcels,
                     'vehicle_class': booking.vehicleClass,
                     'pickup_window': booking.pickupWindow,
+                    if (booking.declaredValueZmw != null && booking.declaredValueZmw! > 0) 'declared_value_zmw': booking.declaredValueZmw,
                   };
                   Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const BookingScreen()));
                 },

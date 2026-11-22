@@ -220,6 +220,11 @@ class _BookingScreenState extends State<BookingScreen> {
       }
       final promo = '${pre['promo_code'] ?? ''}'.trim();
       if (promo.isNotEmpty) _promo.text = promo;
+      final declaredRaw = pre['declared_value_zmw'] ?? pre['declaredValueZmw'] ?? pre['declared_value'];
+      final declared = (declaredRaw as num?)?.toDouble() ?? double.tryParse('$declaredRaw');
+      if (declared != null && declared > 0) {
+        _declaredValue.text = declared.toStringAsFixed(declared % 1 == 0 ? 0 : 2);
+      }
     }
     _courierSearchCtl.addListener(() => setState(() {}));
     _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
@@ -697,6 +702,10 @@ class _BookingScreenState extends State<BookingScreen> {
     if (_roundTrip && _returnAddress.text.trim().isEmpty) {
       return _message('Enter the return address for the round trip.');
     }
+    final declaredValueZmw = double.tryParse(_declaredValue.text.replaceAll(RegExp(r'[^0-9.]'), ''));
+    if (declaredValueZmw == null || declaredValueZmw <= 0) {
+      return _message('Enter the item value in ZMW before booking.');
+    }
     setState(() => _saving = true);
     unawaited(SavedPlaces.remember(_pickup.text.trim(), lat: _pickupLat, lng: _pickupLng));
     final store = AppScope.of(context);
@@ -727,7 +736,7 @@ class _BookingScreenState extends State<BookingScreen> {
       pickupLat: _pickupLat,
       pickupLng: _pickupLng,
       parcelPhotoUrl: _parcelPhotoUrl,
-      declaredValueZmw: double.tryParse(_declaredValue.text.replaceAll(RegExp(r'[^0-9.]'), '')),
+      declaredValueZmw: declaredValueZmw,
     );
     if (store.lastBookingError != null && store.lastBookingError != 'network_error') {
       if (!mounted) return;
@@ -1069,8 +1078,8 @@ class _BookingScreenState extends State<BookingScreen> {
             HelpIconButton(topic: HelpTopic.parcelPhoto),
           ]),
         ),
-        // DECLARED VALUE (owner directive 2026-11-17): restored — needed for
-        // the counter receipt at the depot. Optional, NOT the cover value.
+        // DECLARED VALUE: required before booking. Printed on the depot counter
+        // receipt; used for evidence/waybill records. Not insurance cover.
         TextField(
           controller: _declaredValue,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -1082,7 +1091,7 @@ class _BookingScreenState extends State<BookingScreen> {
         ),
         const Padding(
           padding: EdgeInsets.only(top: 4, bottom: 4),
-          child: Text('Optional — printed on the depot counter receipt so the depot knows what it is carrying.', style: AppType.caption),
+          child: Text('Required — enter the item value so it can be recorded on the counter receipt and waybill.', style: AppType.caption),
         ),
         const SizedBox(height: 10),
         // VEHICLE IS SERVER-DECIDED (owner 2026-11-21): motorcycles are the
