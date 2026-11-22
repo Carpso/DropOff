@@ -27,6 +27,7 @@ class StepSounds {
 
   static const String _prefKey = 'step_sounds_enabled';
   static const String _voicePrefKey = 'voice_guidance_enabled';
+  static const String officialSound = 'sounds/step_done.wav';
 
   static bool _enabled = true;
   static bool _voiceGuidance = true;
@@ -73,23 +74,22 @@ class StepSounds {
     } catch (_) {/* preference is a nicety — never break the toggle */}
   }
 
-  /// A step was completed successfully.
-  static Future<void> stepDone() => _play('sounds/step_done.wav');
+  /// The official DropOff app sound — a short, pleasant chime.
+  static Future<void> stepDone() => _play(officialSound);
 
   /// A step was rejected / failed (wrong code, upload error, …).
   static Future<void> stepError() => _play('sounds/step_error.wav');
 
-  /// NEW-ORDER ALERT (owner 2026-11-21): a louder, repeating cue that rides on
-  /// top of the FCM ring so a rider with the app open hears an assignment even
-  /// when media volume is low. Deliberately NOT gated by the step-sound toggle:
-  /// missing a live order is worse than an unwanted chime.
+  /// Incoming-order alert. Uses the official DropOff chime so riders recognize
+  /// it instantly. Deliberately NOT gated by the step-sound toggle: missing a
+  /// live order is worse than an unwanted chime.
   static Future<void> orderAlert() async {
     if (!_loaded) await load();
     try {
       await _player.stop();
       await _player.setVolume(1.0);
       for (var i = 0; i < 3; i++) {
-        await _player.play(AssetSource('sounds/step_done.wav'));
+        await _player.play(AssetSource(officialSound));
         await Future<void>.delayed(const Duration(milliseconds: 700));
         await _player.stop();
       }

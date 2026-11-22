@@ -269,9 +269,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     });
   }
 
-  Future<void> _setShift(bool on) async {
+  Future<void> _setShift(bool on, [StateSetter? setSheetState]) async {
     if (!mounted || _shiftBusy) return;
-    setState(() => _shiftBusy = true);
+    void sync(VoidCallback fn) {
+      if (mounted) setState(fn);
+      setSheetState?.call(() {});
+    }
+    sync(() => _shiftBusy = true);
     bool accepted = _shifts?['terms_accepted'] == true;
     if (on && !accepted) {
       final ok = await showDialog<bool>(
@@ -293,7 +297,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         ),
       );
       if (ok != true) {
-        if (mounted) setState(() => _shiftBusy = false);
+        sync(() => _shiftBusy = false);
         return;
       }
       accepted = true;
@@ -304,9 +308,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       termsAccepted: accepted,
     );
     if (!mounted) return;
-    setState(() => _shiftBusy = false);
+    sync(() => _shiftBusy = false);
     if (res.ok) {
       await _loadShifts();
+      setSheetState?.call(() {});
       if (!mounted) return;
       AppToast.show(context, on ? 'You are ON SHIFT — DropOff jobs will flow in your sweeps.' : 'You are OFF SHIFT — other ride work is unrestricted.');
     } else {
@@ -328,20 +333,22 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           isScrollControlled: true,
           backgroundColor: Colors.white,
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-          builder: (sheetCtx) => Padding(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(sheetCtx).viewInsets.bottom + 20),
-            child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4))),
-              Row(children: [
-                const Icon(Icons.schedule, color: AppColors.forest),
-                const SizedBox(width: 8),
-                const Expanded(child: Text('Sweep shifts', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17))),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(sheetCtx).pop()),
-              ]),
-              const SizedBox(height: 8),
-              _shiftCard(),
-            ])),
+          builder: (sheetCtx) => StatefulBuilder(
+            builder: (sheetCtx, setSheetState) => Padding(
+              padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(sheetCtx).viewInsets.bottom + 20),
+              child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4))),
+                Row(children: [
+                  const Icon(Icons.schedule, color: AppColors.forest),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('Sweep shifts', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17))),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(sheetCtx).pop()),
+                ]),
+                const SizedBox(height: 8),
+                _shiftCard(setSheetState: setSheetState),
+              ])),
+            ),
           ),
         ),
         child: Container(
@@ -353,22 +360,22 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.circle, size: 8, color: on ? AppColors.success : AppColors.muted),
-            const SizedBox(width: 5),
-            Text(on ? 'ON SHIFT' : 'OFF', style: TextStyle(
-                fontSize: 10.5, fontWeight: FontWeight.w900,
-                color: on ? AppColors.forest : AppColors.muted)),
-            if (on && active != null) ...[
-              const SizedBox(width: 4),
-              Text('· ${_shiftLabels[active] ?? active}',
-                  style: const TextStyle(fontSize: 10, color: AppColors.muted)),
-            ],
+            const SizedBox(width: 4),
+            Text(
+              on ? (active != null ? 'ON $active' : 'ON') : 'OFF',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
+                color: on ? AppColors.forest : AppColors.muted,
+              ),
+            ),
           ]),
         ),
       ),
     );
   }
 
-  Widget _shiftCard() {
+  Widget _shiftCard({StateSetter? setSheetState}) {
     final data = _shifts;
     final on = data?['on_shift'] == true;
     final active = data?['active_shift'] as String?;
@@ -398,16 +405,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
               FilterChip(
                 label: Text(entry.value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
                 selected: _selectedShifts.contains(entry.key),
-                onSelected: _shiftBusy ? null : (v) => setState(() {
-                  if (v) { _selectedShifts.add(entry.key); } else { _selectedShifts.remove(entry.key); }
-                }),
+                onSelected: _shiftBusy ? null : (v) {
+                  setState(() {
+                    if (v) { _selectedShifts.add(entry.key); } else { _selectedShifts.remove(entry.key); }
+                  });
+                  setSheetState?.call(() {});
+                },
               ),
           ]),
           const SizedBox(height: 8),
           Row(children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed: _shiftBusy ? null : () => _setShift(!on),
+                onPressed: _shiftBusy ? null : () => _setShift(!on, setSheetState),
                 icon: _shiftBusy
                     ? const AppLogoSpinner(size: 15)
                     : Icon(on ? Icons.pause_circle_outline : Icons.play_circle_outline),
@@ -1732,7 +1742,14 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final store = AppScope.of(context);
     if (!store.linked) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Task Queue', style: TextStyle(fontWeight: FontWeight.w900))),
+        appBar: AppBar(
+          title: const Text(
+            'Task Queue',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
@@ -1760,7 +1777,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       // rider's first screen opens the Account screen — profile, plans and
       // the sign-out path live there.
       appBar: AppBar(
-        title: const Text('Task Queue', style: TextStyle(fontWeight: FontWeight.w900)),
+        title: const Text(
+          'Task Queue',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
         actions: [
           // Compact shift switch — full controls live in a bottom sheet so
           // the Task Queue body (and the stats card) never gets pushed down.
