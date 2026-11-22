@@ -109,6 +109,7 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _parcelPhotoUploading = false;
   String? _tidyPinLabel; // '✨ Tidy pinned ≈ Kabwata — bands apply (±1 km)'
   String? _plusCode;
+  String? _pickupError, _descriptionError, _declaredValueError, _senderNameError, _senderPhoneError, _recipientNameError, _recipientPhoneError, _returnAddressError;
   List<String> _cities = cities;
   double? _promoPct;
   String _promoNote = '';
@@ -591,16 +592,16 @@ class _BookingScreenState extends State<BookingScreen> {
       return;
     }
     if (_step < 1 && target >= 1) {
+      final pickupError = _pickup.text.trim().length < 4 ? 'Enter the home or shop pickup address.' : null;
+      setState(() => _pickupError = pickupError);
       if (_from == _to) return _message('Choose different pickup and destination cities.');
-      if (_pickup.text.trim().length < 4) return _message('Enter the home or shop pickup address.');
-      // Nudge, never block: a pin gives exact dispatch + turn-by-turn stops;
-      // a typed address still books (navigated by its text).
-      if (_pickupLat == null) {
-        _message('Pin for the nearest rider and an exact route.');
-      }
+      if (pickupError != null) return _message(pickupError);
+      if (_pickupLat == null) _message('Pin for the nearest rider and an exact route.');
     }
     if (_step < 2 && target >= 2) {
-      if (_description.text.trim().length < 3) return _message('Briefly describe what is inside the item.');
+      final descError = _description.text.trim().length < 3 ? 'Briefly describe what is inside the item.' : null;
+      setState(() => _descriptionError = descError);
+      if (descError != null) return _message(descError);
     }
     setState(() => _step = target);
   }
@@ -687,22 +688,27 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Future<void> _submit() async {
-      final serverCourierId = courierServerIdOf(_courierId);
+    final serverCourierId = courierServerIdOf(_courierId);
     if (serverCourierId == null) {
       return _message('That courier is unavailable right now — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
     }
-    if (_senderName.text.trim().length < 2 || _recipientName.text.trim().length < 2) {
-      return _message('Enter the sender and recipient names.');
-    }
-    if (!_validPhone(_senderPhone.text) || !_validPhone(_recipientPhone.text)) {
-      return _message('Use valid Zambian phone numbers, e.g. 0971234567.');
-    }
-    if (_roundTrip && _returnAddress.text.trim().isEmpty) {
-      return _message('Enter the return address for the round trip.');
-    }
+    final senderNameErr = _senderName.text.trim().length < 2 ? 'Enter the sender name.' : null;
+    final recipientNameErr = _recipientName.text.trim().length < 2 ? 'Enter the recipient name.' : null;
+    final senderPhoneErr = !_validPhone(_senderPhone.text) ? 'Enter a valid Zambian phone number.' : null;
+    final recipientPhoneErr = !_validPhone(_recipientPhone.text) ? 'Enter a valid Zambian phone number.' : null;
+    final returnErr = _roundTrip && _returnAddress.text.trim().isEmpty ? 'Enter the return address for the round trip.' : null;
     final declaredValueZmw = double.tryParse(_declaredValue.text.replaceAll(RegExp(r'[^0-9.]'), ''));
-    if (declaredValueZmw == null || declaredValueZmw <= 0) {
-      return _message('Enter the item value in ZMW before booking.');
+    final declaredErr = (declaredValueZmw == null || declaredValueZmw <= 0) ? 'Enter the item value in ZMW.' : null;
+    setState(() {
+      _senderNameError = senderNameErr;
+      _recipientNameError = recipientNameErr;
+      _senderPhoneError = senderPhoneErr;
+      _recipientPhoneError = recipientPhoneErr;
+      _returnAddressError = returnErr;
+      _declaredValueError = declaredErr;
+    });
+    if ([senderNameErr, recipientNameErr, senderPhoneErr, recipientPhoneErr, returnErr, declaredErr].any((e) => e != null)) {
+      return _message('Check the highlighted fields before placing the booking.');
     }
     setState(() => _saving = true);
     unawaited(SavedPlaces.remember(_pickup.text.trim(), lat: _pickupLat, lng: _pickupLng));
@@ -897,20 +903,23 @@ class _BookingScreenState extends State<BookingScreen> {
                 Expanded(child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _saving ? null : () => _jumpToStep(i),
-                  child: SizedBox(
-                    height: 26,
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      child: AnimatedContainer(duration: const Duration(milliseconds: 250), height: 4, decoration: BoxDecoration(color: i <= _step ? AppColors.forest : AppColors.line, borderRadius: BorderRadius.circular(4))),
-                    ),
-                  ),
+                  child: Column(children: [
+                    Row(children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 26, height: 26,
+                        decoration: BoxDecoration(color: i <= _step ? AppColors.forest : AppColors.line.withValues(alpha: 0.5), shape: BoxShape.circle),
+                        child: Center(child: i < _step ? const Icon(Icons.check, size: 14, color: Colors.white) : Text('${i + 1}', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: i <= _step ? Colors.white : AppColors.muted))),
+                      ),
+                      if (i < 2) Expanded(child: Container(height: 3, margin: const EdgeInsets.symmetric(horizontal: 6), decoration: BoxDecoration(color: i < _step ? AppColors.forest : AppColors.line, borderRadius: BorderRadius.circular(4)))),
+                    ]),
+                    const SizedBox(height: 6),
+                    Align(alignment: Alignment.centerLeft, child: Text(['Route', 'Item', 'Review'][i], style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: i == _step ? AppColors.forest : AppColors.muted))),
+                  ]),
                 )),
-                if (i < 2) const SizedBox(width: 7),
               ],
             ]),
-            const SizedBox(height: 10),
-            Align(alignment: Alignment.centerLeft, child: Text('STEP ${_step + 1} OF 3  •  ${['ROUTE', 'ITEM & COURIER', 'DETAILS & REVIEW'][_step]}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8, color: AppColors.muted))),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
@@ -940,21 +949,31 @@ class _BookingScreenState extends State<BookingScreen> {
         ),
         _grandTotalBar(),
         Container(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
           decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppColors.line))),
           child: SafeArea(
             top: false,
-            child: Row(children: [
-              if (_step > 0) ...[
-                IconButton.outlined(onPressed: _saving ? null : () => setState(() => _step--), icon: const Icon(Icons.arrow_back)),
-                const SizedBox(width: 12),
-              ],
-              Expanded(child: FilledButton(
-                onPressed: _saving ? null : (_step < 2 ? _next : _submit),
-                child: _saving
-                    ? const AppLogoSpinner(size: 22, color: Colors.white)
-                    : Text(_step < 2 ? (_step == 0 ? 'Continue to item details' : 'Continue to review') : 'Place booking'),
-              )),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(
+                _step < 2
+                    ? 'Next: ${_step == 0 ? 'add item details and courier' : 'review contacts, fee, and place booking'}'
+                    : 'After booking: approve payment if needed, then track your item live in Bookings.',
+                style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.3),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Row(children: [
+                if (_step > 0) ...[
+                  IconButton.outlined(onPressed: _saving ? null : () => setState(() => _step--), icon: const Icon(Icons.arrow_back)),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(child: FilledButton(
+                  onPressed: _saving ? null : (_step < 2 ? _next : _submit),
+                  child: _saving
+                      ? const AppLogoSpinner(size: 22, color: Colors.white)
+                      : Text(_step < 2 ? (_step == 0 ? 'Continue to item details' : 'Continue to review') : 'Place booking'),
+                )),
+              ]),
             ]),
           ),
         ),
@@ -975,7 +994,7 @@ class _BookingScreenState extends State<BookingScreen> {
         const SizedBox(height: 8),
         const InfoPill(icon: Icons.receipt_long, label: 'Your item is dropped at the courier depot. The destination above is for your receipt only — it is not the actual door drop-off.', color: AppColors.amber),
         const SizedBox(height: 18),
-              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market — or a plus code like 8FQ4+J9', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _tidyAddress, child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('✨ Tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const AppLogoSpinner(size: 18) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
+              TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, onChanged: (_) { if (_pickupError != null) setState(() => _pickupError = null); }, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market — or a plus code like 8FQ4+J9', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, errorText: _pickupError, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _tidyAddress, child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('✨ Tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const AppLogoSpinner(size: 18) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
         if (_saved.isNotEmpty) ...[
           const SizedBox(height: 6),
           Wrap(spacing: 6, runSpacing: 2, children: [
@@ -1018,7 +1037,7 @@ class _BookingScreenState extends State<BookingScreen> {
           const SizedBox(height: 10),
           _cityDropdown('Return city', _returnCity, (value) => setState(() => _returnCity = value)),
           const SizedBox(height: 10),
-          TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Return address', hintText: 'Your door — where the item comes back', prefixIcon: Icon(Icons.house_outlined))),
+          TextField(controller: _returnAddress, textCapitalization: TextCapitalization.sentences, onChanged: (_) { if (_returnAddressError != null) setState(() => _returnAddressError = null); }, decoration: InputDecoration(labelText: 'Return address', hintText: 'Your door — where the item comes back', errorText: _returnAddressError, prefixIcon: const Icon(Icons.house_outlined))),
           const SizedBox(height: 6),
           const Text('The return ride (depot → your door) is confirmed at the counter before the return starts.', style: AppType.caption),
         ],
@@ -1041,7 +1060,7 @@ class _BookingScreenState extends State<BookingScreen> {
           }),
         ),
         const SizedBox(height: 16),
-        TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Item contents (required)', hintText: 'e.g. Two boxed phones', helperText: 'Declare what is inside — drugs, weapons, fuel and live animals are forbidden.', prefixIcon: Icon(Icons.inventory_2_outlined))),
+        TextField(controller: _description, textCapitalization: TextCapitalization.sentences, onChanged: (_) { if (_descriptionError != null) setState(() => _descriptionError = null); }, decoration: InputDecoration(labelText: 'Item contents (required)', hintText: 'e.g. Two boxed phones', helperText: 'Declare what is inside — drugs, weapons, fuel and live animals are forbidden.', errorText: _descriptionError, prefixIcon: const Icon(Icons.inventory_2_outlined))),
         const Row(children: [
           Expanded(child: Text('Contents are required — undeclared items are refused at pickup.', style: AppType.caption)),
           HelpIconButton(topic: HelpTopic.forbiddenItems),
@@ -1081,10 +1100,12 @@ class _BookingScreenState extends State<BookingScreen> {
         TextField(
           controller: _declaredValue,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
+          onChanged: (_) { if (_declaredValueError != null) setState(() => _declaredValueError = null); },
+          decoration: InputDecoration(
             labelText: 'Declared value (ZMW)',
             hintText: 'What the item is worth, e.g. 450',
-            prefixIcon: Icon(Icons.payments_outlined),
+            errorText: _declaredValueError,
+            prefixIcon: const Icon(Icons.payments_outlined),
           ),
         ),
         const Padding(
@@ -1238,13 +1259,13 @@ class _BookingScreenState extends State<BookingScreen> {
   List<Widget> _detailsStep(CourierInfo courier) => [
         Text('Nearly ready to roll.', style: TextStyle(fontSize: scaleText(context, 26), fontWeight: FontWeight.w900, letterSpacing: -0.5)),
         const SizedBox(height: 20),
-        TextField(controller: _senderName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Sender name', prefixIcon: Icon(Icons.person_outline))),
+        TextField(controller: _senderName, textCapitalization: TextCapitalization.words, onChanged: (_) { if (_senderNameError != null) setState(() => _senderNameError = null); }, decoration: InputDecoration(labelText: 'Sender name', errorText: _senderNameError, prefixIcon: const Icon(Icons.person_outline))),
         const SizedBox(height: 12),
-        TextField(controller: _senderPhone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Sender mobile number', hintText: '0971234567', prefixIcon: Icon(Icons.phone_outlined))),
+        TextField(controller: _senderPhone, keyboardType: TextInputType.phone, onChanged: (_) { if (_senderPhoneError != null) setState(() => _senderPhoneError = null); }, decoration: InputDecoration(labelText: 'Sender mobile number', hintText: '0971234567', errorText: _senderPhoneError, prefixIcon: const Icon(Icons.phone_outlined))),
         const SizedBox(height: 20),
-        TextField(controller: _recipientName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Recipient name', prefixIcon: Icon(Icons.person_pin_circle_outlined))),
+        TextField(controller: _recipientName, textCapitalization: TextCapitalization.words, onChanged: (_) { if (_recipientNameError != null) setState(() => _recipientNameError = null); }, decoration: InputDecoration(labelText: 'Recipient name', errorText: _recipientNameError, prefixIcon: const Icon(Icons.person_pin_circle_outlined))),
         const SizedBox(height: 12),
-        TextField(controller: _recipientPhone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Recipient mobile number', hintText: '0961234567', prefixIcon: Icon(Icons.phone_outlined))),
+        TextField(controller: _recipientPhone, keyboardType: TextInputType.phone, onChanged: (_) { if (_recipientPhoneError != null) setState(() => _recipientPhoneError = null); }, decoration: InputDecoration(labelText: 'Recipient mobile number', hintText: '0961234567', errorText: _recipientPhoneError, prefixIcon: const Icon(Icons.phone_outlined))),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 4, children: [
           OutlinedButton.icon(

@@ -22,6 +22,7 @@ import '../data/map_services.dart';
 import '../data/analytics_service.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_sheet.dart';
 import '../widgets/common.dart';
 import '../ui/in_app_browser.dart';
 import 'account_screen.dart';
@@ -343,21 +344,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       final targetName = '${target['full_name'] ?? target['phone'] ?? 'this rider'}';
       if (toRiderId <= 0) return;
 
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Confirm transfer', style: TextStyle(fontWeight: FontWeight.w900)),
-          content: Text('Transfer $ref to $targetName?\n\nThey will receive the trip immediately, including the waybill and responsibility for the next steps.'),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.forest),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Transfer ride'),
-            ),
-          ],
-        ),
+      final confirmed = await showConfirmSheet(
+        context,
+        title: 'Confirm transfer',
+        message: 'Transfer $ref to $targetName?\n\nThey will receive the trip immediately, including the waybill and responsibility for the next steps.',
+        confirmLabel: 'Transfer ride',
+        icon: Icons.swap_horiz_rounded,
       );
       if (confirmed != true || !mounted) return;
 
@@ -1246,159 +1238,174 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     String? lastErrCode; // the rejected-code errors unlock the resend helper
     bool resending = false;
     bool submitting = false;
-    final res = await showDialog<ApiResponse>(
+    final res = await showModalBottomSheet<ApiResponse>(
       context: context,
-      barrierDismissible: false,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (dctx) => StatefulBuilder(
-        builder: (dctx, setDialog) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text(_handoverTitle(s, isCollection ? 'COLLECT' : 'PICKUP'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (isCollection) ...[
-                const Row(children: [
-                  Icon(Icons.warehouse_outlined, size: 18, color: AppColors.forest),
-                  SizedBox(width: 8),
-                  Expanded(child: Text('Collect at the depot counter. Show the sender\'s payment receipt, then photograph every item you pick up — no PIN is needed.',
-                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35))),
-                ]),
-                const SizedBox(height: 12),
-              ] else ...[
-              // WHO holds the PIN (owner 2026-11-18): the rider must never
-              // wonder whose code to ask for.
-              Text('Get the 4-digit PICKUP PIN from: ${senderName.isEmpty ? 'the sender' : senderName}${senderPhone.isNotEmpty ? ' · $senderPhone' : ''}',
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35)),
-              const SizedBox(height: 8),
-              const Text('Ask the sender for the 4-digit code from their booking SMS.',
-                style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: otpCtrl,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  counterText: '',
-                  labelText: '4-digit pickup code (from the SENDER)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              ],
-              const SizedBox(height: 12),
-              Text('PICKED UP ITEMS — photograph each of the $parcels item${parcels == 1 ? '' : 's'} ONCE (camera only, time-stamped)',
-                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
-              const SizedBox(height: 6),
-              if (photos.isNotEmpty)
-                SizedBox(
-                  height: 84,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: photos.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    // NO remove button — no repeat captures; a mistake means
-                    // cancel and start the pickup file again.
-                    itemBuilder: (_, i) => ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      // CONTAIN keeps the burned-in DropOff timestamp visible.
-                      child: ColoredBox(
-                        color: AppColors.line.withValues(alpha: 0.18),
-                        child: AuthedImage(photos[i], fit: BoxFit.contain, width: 84, height: 84),
+        builder: (dctx, setDialog) {
+          final photoDone = photos.length >= parcels;
+          final pinDone = isCollection || otpCtrl.text.trim().length == 4;
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + MediaQuery.of(dctx).viewInsets.bottom),
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+                  const SizedBox(height: 14),
+                  Row(children: [
+                    Container(
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+                      child: Icon(isCollection ? Icons.warehouse_outlined : Icons.inventory_2_outlined, color: AppColors.forest),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(_handoverTitle(s, isCollection ? 'COLLECT' : 'PICKUP'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: -0.2)),
+                      Text(isCollection ? 'Collect at the depot counter' : 'Confirm sender PIN and capture proof', style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                    ])),
+                  ]),
+                  const SizedBox(height: 14),
+                  _sheetChecklist([
+                    _SheetCheck(label: isCollection ? 'Depot collection' : 'Sender PIN verified', done: pinDone, detail: isCollection ? 'No sender PIN needed at depot counter' : 'Ask ${senderName.isEmpty ? 'the sender' : senderName} for the 4-digit code'),
+                    _SheetCheck(label: 'Item photos captured', done: photoDone, detail: '${photos.length}/$parcels photo${parcels == 1 ? '' : 's'}'),
+                  ]),
+                  const SizedBox(height: 14),
+                  if (isCollection)
+                    _sheetInfoCard(icon: Icons.receipt_long_outlined, title: 'Collection check', message: 'Show the sender\'s payment receipt, then photograph every item you pick up before leaving the counter.')
+                  else ...[
+                    _sheetSection('Sender PIN'),
+                    const SizedBox(height: 8),
+                    Text('Get the 4-digit PICKUP PIN from: ${senderName.isEmpty ? 'the sender' : senderName}${senderPhone.isNotEmpty ? ' · $senderPhone' : ''}',
+                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: otpCtrl,
+                      keyboardType: TextInputType.number,
+                      maxLength: 4,
+                      autofocus: true,
+                      onChanged: (_) => setDialog(() {}),
+                      decoration: const InputDecoration(counterText: '', labelText: '4-digit pickup code (from the SENDER)', border: OutlineInputBorder()),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  _sheetSection('Proof photos'),
+                  const SizedBox(height: 6),
+                  Text('Photograph each of the $parcels item${parcels == 1 ? '' : 's'} once (camera only, time-stamped).',
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.35)),
+                  const SizedBox(height: 8),
+                  if (photos.isNotEmpty)
+                    SizedBox(
+                      height: 84,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: photos.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (_, i) => ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: ColoredBox(color: AppColors.line.withValues(alpha: 0.18), child: AuthedImage(photos[i], fit: BoxFit.contain, width: 84, height: 84)),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-              if (photos.length < parcels)
-                TextButton.icon(
-                  icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                  label: Text('Capture picked-up item ${photos.length + 1} of $parcels (camera)',
-                      style: const TextStyle(fontSize: 12.5)),
-                  onPressed: submitting ? null : () async {
-                    final url = await _captureParcelPhoto();
-                    if (url != null) setDialog(() { photos.add(url); inlineError = null; });
-                  },
-                )
-              else
-                Row(children: [
-                  const Icon(Icons.check_circle, size: 16, color: AppColors.forest),
-                  const SizedBox(width: 6),
-                  Expanded(child: Text('All $parcels picked-up items photographed — locked (one per item).',
-                      style: const TextStyle(fontSize: 12, color: AppColors.forest, fontWeight: FontWeight.w700))),
+                  if (photos.length < parcels)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                        label: Text('Capture item ${photos.length + 1} of $parcels'),
+                        onPressed: submitting ? null : () async {
+                          final url = await _captureParcelPhoto();
+                          if (url != null) setDialog(() { photos.add(url); inlineError = null; });
+                        },
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Row(children: [
+                        const Icon(Icons.check_circle, size: 16, color: AppColors.forest),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text('All $parcels picked-up items photographed — locked.', style: const TextStyle(fontSize: 12, color: AppColors.forest, fontWeight: FontWeight.w700))),
+                      ]),
+                    ),
+                  if (inlineError != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: AppColors.danger.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.danger.withValues(alpha: 0.2))),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(inlineError!, style: const TextStyle(fontSize: 12.5, color: AppColors.danger, height: 1.35, fontWeight: FontWeight.w600)),
+                        if (!isCollection && !resending && (lastErrCode == 'otp_required' || lastErrCode == 'otp_locked'))
+                          TextButton.icon(
+                            icon: const Icon(Icons.sms_outlined, size: 16),
+                            label: const Text('Sender never got the SMS? Resend a fresh code', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                            onPressed: () async {
+                              setDialog(() => resending = true);
+                              final msg = await _resendPinCode(ref);
+                              if (!dctx.mounted) return;
+                              setDialog(() { resending = false; inlineError = msg; });
+                            },
+                          ),
+                        if (resending) const Padding(padding: EdgeInsets.only(top: 4), child: AppLogoSpinner(size: 16)),
+                      ]),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    Expanded(child: OutlinedButton(onPressed: submitting ? null : () => Navigator.pop(dctx, null), child: const Text('Cancel'))),
+                    const SizedBox(width: 10),
+                    Expanded(child: FilledButton(
+                      onPressed: submitting ? null : () async {
+                        final code = otpCtrl.text.trim();
+                        if (!isCollection && code.length != 4) {
+                          setDialog(() => inlineError = 'Enter the sender\'s 4-digit pickup code.');
+                          return;
+                        }
+                        if (photos.length < parcels) {
+                          setDialog(() => inlineError = 'Photograph each picked-up item once — ${parcels - photos.length} more photo${parcels - photos.length == 1 ? '' : 's'} to take.');
+                          return;
+                        }
+                        submitting = true;
+                        setDialog(() {});
+                        final r = await DropOffApi.jobEvent(
+                          jobRef: ref, status: 'picked_up',
+                          otp: isCollection || code.length != 4 ? null : code,
+                          photoUrl: photos.first, stage: 'pickup',
+                          parcelPhotos: photos,
+                          lat: _riderPos?.latitude, lng: _riderPos?.longitude,
+                        );
+                        if (!dctx.mounted) return;
+                        if (r.ok || r.error == 'already_picked_up') {
+                          Navigator.pop(dctx, r.ok ? r : const ApiResponse(ok: true));
+                          return;
+                        }
+                        submitting = false;
+                        final err = r.error ?? '';
+                        final detail = (r.body['detail'] as String?) ?? '';
+                        await StepSounds.stepError();
+                        setDialog(() {
+                          inlineError = switch (err) {
+                            'otp_required' => 'Code rejected. ${detail.isEmpty ? 'The code is in the sender\'s booking SMS.' : detail}',
+                            'otp_locked' => 'Too many wrong codes — DropOff support has been notified.',
+                            'photo_required' => detail.isEmpty ? 'Photograph every picked-up item before filing.' : detail,
+                            'photo_locked' => 'Pickup photo already on file for $ref — the evidence is locked. Contact DropOff support for a correction.',
+                            _ => 'Could not file the pickup. Check your connection and try again.',
+                          };
+                          lastErrCode = err;
+                        });
+                      },
+                      child: submitting ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Confirm pickup'),
+                    )),
+                  ]),
                 ]),
-              if (inlineError != null) ...[
-                const SizedBox(height: 8),
-                Text(inlineError!, style: const TextStyle(fontSize: 12, color: AppColors.danger, height: 1.35)),
-                // The stuck moment (owner 2026-11-18): the sender never got
-                // a booking SMS, so no code exists to show. One tap re-fires
-                // a fresh code to their phone — no dead-end pickup.
-                if (!isCollection && !resending && (lastErrCode == 'otp_required' || lastErrCode == 'otp_locked'))
-                  TextButton.icon(
-                    icon: const Icon(Icons.sms_outlined, size: 16),
-                    label: const Text('Sender never got the SMS? Resend a fresh code',
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-                    onPressed: () async {
-                      setDialog(() => resending = true);
-                      final msg = await _resendPinCode(ref);
-                      if (!dctx.mounted) return;
-                      setDialog(() { resending = false; inlineError = msg; });
-                    },
-                  ),
-                if (resending)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: AppLogoSpinner(size: 16),
-                  ),
-              ],
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: submitting ? null : () => Navigator.pop(dctx, null), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: submitting ? null : () async {
-                final code = otpCtrl.text.trim();
-                if (!isCollection && code.length != 4) {
-                  setDialog(() => inlineError = 'Enter the sender\'s 4-digit pickup code.');
-                  return;
-                }
-                if (photos.length < parcels) {
-                  setDialog(() => inlineError = 'Photograph each picked-up item once — ${parcels - photos.length} more photo${parcels - photos.length == 1 ? '' : 's'} to take.');
-                  return;
-                }
-                submitting = true;
-                setDialog(() {});
-                final r = await DropOffApi.jobEvent(
-                  jobRef: ref, status: 'picked_up',
-                  otp: isCollection || code.length != 4 ? null : code,
-                  photoUrl: photos.first, stage: 'pickup',
-                  parcelPhotos: photos,
-                  lat: _riderPos?.latitude, lng: _riderPos?.longitude,
-                );
-                if (!dctx.mounted) return;
-                if (r.ok || r.error == 'already_picked_up') {
-                  Navigator.pop(dctx, r.ok ? r : const ApiResponse(ok: true));
-                  return;
-                }
-                submitting = false;
-                final err = r.error ?? '';
-                final detail = (r.body['detail'] as String?) ?? '';
-                await StepSounds.stepError(); // rejected-step tone (owner request 2026-11-20)
-                // Inline errors keep the dialog open so the rider can fix
-                // the code; evidence-lock errors explain that the file is
-                // frozen and ops handles changes.
-                setDialog(() {
-                  inlineError = switch (err) {
-                    'otp_required' => 'Code rejected. ${detail.isEmpty ? 'The code is in the sender\'s booking SMS.' : detail}',
-                    'otp_locked' => 'Too many wrong codes — DropOff support has been notified.',
-                    'photo_required' => detail.isEmpty ? 'Photograph every picked-up item before filing.' : detail,
-                    'photo_locked' => 'Pickup photo already on file for $ref — the evidence is locked. Contact DropOff support for a correction.',
-                    _ => 'Could not file the pickup ($err).',
-                  };
-                  lastErrCode = err; // rejected-code errors unlock the resend helper
-                });
-              },
-              child: const Text('Confirm pickup'),
+              ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
     if (res == null) return null;
@@ -1436,159 +1443,124 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final evMap = (evData?['evidence'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
     if (!mounted) return null;
     final sellerPhoto = '${evMap['booking_photo'] ?? ''}';
-    final res = await showDialog<ApiResponse>(
+    final res = await showModalBottomSheet<ApiResponse>(
       context: context,
-      barrierDismissible: false,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialog) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text('Depot drop — $ref', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Row(children: [
-                Expanded(child: Text('Photograph every item and each depot receipt with its exact amount.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink))),
-                HelpIconButton(topic: HelpTopic.depotReceipts),
-              ]),
-              const SizedBox(height: 12),
-              // ── Sender's booking photo — compare before you drop ──
-              if (sellerPhoto.isNotEmpty) ...[
-                const Text('SENDER PHOTO (FROM BOOKING)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
-                const SizedBox(height: 4),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  // CONTAIN so the sender's burned-in evidence stamp stays visible.
-                  child: ColoredBox(
-                    color: AppColors.line.withValues(alpha: 0.18),
-                    child: AuthedImage(sellerPhoto, fit: BoxFit.contain, width: double.infinity, height: 140),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text('Compare this with the item photos you file below.',
-                    style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.35)),
-                const SizedBox(height: 10),
-              ],
-              // ── Parcel photos (one or more) ──
-              Text('ITEM PHOTOS (${parcelPhotos.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
-              const SizedBox(height: 4),
-              if (parcelPhotos.isNotEmpty)
-                SizedBox(
-                  height: 96,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: parcelPhotos.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (_, i) => Stack(children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        // CONTAIN keeps the burned-in DropOff timestamp visible.
-                        child: ColoredBox(
-                          color: AppColors.line.withValues(alpha: 0.18),
-                          child: AuthedImage(parcelPhotos[i], fit: BoxFit.contain, width: 96, height: 96),
-                        ),
-                      ),
-                      Positioned(
-                        top: 2,
-                        right: 2,
-                        child: InkWell(
-                          onTap: () => setDialog(() => parcelPhotos.removeAt(i)),
-                          child: Container(
-                            padding: const EdgeInsets.all(2),
-                            decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                            child: const Icon(Icons.close, size: 12, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ]),
-                  ),
-                ),
-              TextButton.icon(
-                icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                label: Text(parcelPhotos.isEmpty ? 'Capture first item (required)' : 'Capture next item',
-                    style: const TextStyle(fontSize: 12.5)),
-                onPressed: () async {
-                  final url = await _pickPodPhoto();
-                  if (url != null) setDialog(() => parcelPhotos.add(url));
-                },
-              ),
-              const SizedBox(height: 12),
-              const Text('DEPOT BRANCH', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
-              const SizedBox(height: 4),
-              TextField(
-                controller: branchCtrl,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  hintText: 'e.g. Platinum — Kabwata',
-                  prefixIcon: Icon(Icons.storefront_outlined),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text('Optional — the branch the item landed at. Route stays "to Platinum" until this is filled.',
-                  style: TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.35)),
-              const Divider(height: 20),
-              // ── Depot receipts (one or more, each exact) ──
-              Text('DEPOT RECEIPTS (${receipts.length})', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: AppColors.muted)),
-              const SizedBox(height: 4),
-              for (var i = 0; i < receipts.length; i++) _receiptEntryTile(setDialog, receipts, i),
-              TextButton.icon(
-                icon: const Icon(Icons.receipt_long_outlined, size: 18),
-                label: Text(receipts.isEmpty ? 'Add depot receipt (required)' : 'Add another depot receipt (if the depot split the batch)',
-                    style: const TextStyle(fontSize: 12.5)),
-                onPressed: () => setDialog(() => receipts.add(_ReceiptEntry())),
-              ),
-              const Row(children: [
-                Expanded(child: Text('Photos unlock when the sender pays, and you are reimbursed.', style: AppType.caption)),
-                HelpIconButton(topic: HelpTopic.depotReceipts),
-              ]),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: filing ? null : () async {
-                if (parcelPhotos.isEmpty) {
-                  _snack('At least one item photo is required.');
-                  return;
-                }
-                if (receipts.isEmpty) {
-                  _snack('Add the depot receipt — photo + the exact amount written on it.');
-                  return;
-                }
-                for (var i = 0; i < receipts.length; i++) {
-                  final r = receipts[i];
-                  if (r.url == null) {
-                    _snack('Receipt ${i + 1} needs its photo.');
-                    return;
-                  }
-                  final amt = double.tryParse(r.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
-                  if (amt == null || amt <= 0) {
-                    _snack('Receipt ${i + 1}: type the exact amount written on it.');
-                    return;
-                  }
-                }
-                final branch = branchCtrl.text.trim();
-                setDialog(() => filing = true); // visible progress while filing
-                final r = await DropOffApi.jobEvent(
-                  jobRef: ref, status: 'delivered',
-                  photoUrl: parcelPhotos.first, stage: 'delivery',
-                  parcelPhotos: parcelPhotos,
-                  branch: branch.isEmpty ? null : branch,
-                  receipts: [
-                    for (final e in receipts)
-                      {
-                        'amount_zmw': double.parse(e.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')),
-                        'url': e.url,
-                      }
+        builder: (ctx, setDialog) {
+          final receiptsReady = receipts.isNotEmpty && receipts.every((e) => e.url != null && (double.tryParse(e.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0) > 0);
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+                  const SizedBox(height: 14),
+                  Row(children: [
+                    Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.storefront_outlined, color: AppColors.forest)),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Depot drop — $ref', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: -0.2)),
+                      const Text('Capture item proof and every depot receipt before filing.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                    ])),
+                    const HelpIconButton(topic: HelpTopic.depotReceipts),
+                  ]),
+                  const SizedBox(height: 14),
+                  _sheetChecklist([
+                    _SheetCheck(label: 'Item photos', done: parcelPhotos.isNotEmpty, detail: parcelPhotos.isEmpty ? 'At least one item photo required' : '${parcelPhotos.length} item photo${parcelPhotos.length == 1 ? '' : 's'} captured'),
+                    _SheetCheck(label: 'Depot receipts', done: receiptsReady, detail: receipts.isEmpty ? 'Add each receipt with photo and exact amount' : '${receipts.length} receipt${receipts.length == 1 ? '' : 's'} added'),
+                    _SheetCheck(label: 'Branch name', done: branchCtrl.text.trim().isNotEmpty, detail: branchCtrl.text.trim().isEmpty ? 'Optional, but helpful for tracking' : branchCtrl.text.trim()),
+                  ]),
+                  const SizedBox(height: 14),
+                  if (sellerPhoto.isNotEmpty) ...[
+                    _sheetSection('Sender booking photo'),
+                    const SizedBox(height: 6),
+                    ClipRRect(borderRadius: BorderRadius.circular(12), child: ColoredBox(color: AppColors.line.withValues(alpha: 0.18), child: AuthedImage(sellerPhoto, fit: BoxFit.contain, width: double.infinity, height: 140))),
+                    const SizedBox(height: 4),
+                    const Text('Compare this with the item photos before filing the drop.', style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+                    const SizedBox(height: 14),
                   ],
-                );
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx, r);
-              },
-              child: Text(filing ? 'Filing…' : 'Confirm depot drop'),
+                  _sheetSection('Item photos (${parcelPhotos.length})'),
+                  const SizedBox(height: 6),
+                  if (parcelPhotos.isNotEmpty)
+                    SizedBox(
+                      height: 96,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: parcelPhotos.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (_, i) => Stack(children: [
+                          ClipRRect(borderRadius: BorderRadius.circular(10), child: ColoredBox(color: AppColors.line.withValues(alpha: 0.18), child: AuthedImage(parcelPhotos[i], fit: BoxFit.contain, width: 96, height: 96))),
+                          Positioned(top: 2, right: 2, child: InkWell(onTap: () => setDialog(() => parcelPhotos.removeAt(i)), child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, size: 12, color: Colors.white)))),
+                        ]),
+                      ),
+                    ),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                    label: Text(parcelPhotos.isEmpty ? 'Capture first item (required)' : 'Capture next item'),
+                    onPressed: () async { final url = await _pickPodPhoto(); if (url != null) setDialog(() => parcelPhotos.add(url)); },
+                  ),
+                  const SizedBox(height: 14),
+                  _sheetSection('Depot branch'),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: branchCtrl,
+                    textInputAction: TextInputAction.next,
+                    onChanged: (_) => setDialog(() {}),
+                    decoration: const InputDecoration(hintText: 'e.g. Platinum — Kabwata', prefixIcon: Icon(Icons.storefront_outlined), border: OutlineInputBorder(), isDense: true),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text('Optional — the branch the item landed at.', style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+                  const SizedBox(height: 14),
+                  _sheetSection('Depot receipts (${receipts.length})'),
+                  const SizedBox(height: 6),
+                  for (var i = 0; i < receipts.length; i++) _receiptEntryTile(setDialog, receipts, i),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                    label: Text(receipts.isEmpty ? 'Add depot receipt (required)' : 'Add another receipt'),
+                    onPressed: () => setDialog(() => receipts.add(_ReceiptEntry())),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text('Photos unlock when the sender pays, and you are reimbursed.', style: AppType.caption),
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    Expanded(child: OutlinedButton(onPressed: filing ? null : () => Navigator.pop(ctx, null), child: const Text('Cancel'))),
+                    const SizedBox(width: 10),
+                    Expanded(child: FilledButton(
+                      onPressed: filing ? null : () async {
+                        if (parcelPhotos.isEmpty) { _snack('At least one item photo is required.'); return; }
+                        if (receipts.isEmpty) { _snack('Add the depot receipt — photo + the exact amount written on it.'); return; }
+                        for (var i = 0; i < receipts.length; i++) {
+                          final r = receipts[i];
+                          if (r.url == null) { _snack('Receipt ${i + 1} needs its photo.'); return; }
+                          final amt = double.tryParse(r.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
+                          if (amt == null || amt <= 0) { _snack('Receipt ${i + 1}: type the exact amount written on it.'); return; }
+                        }
+                        final branch = branchCtrl.text.trim();
+                        setDialog(() => filing = true);
+                        final r = await DropOffApi.jobEvent(
+                          jobRef: ref, status: 'delivered',
+                          photoUrl: parcelPhotos.first, stage: 'delivery',
+                          parcelPhotos: parcelPhotos,
+                          branch: branch.isEmpty ? null : branch,
+                          receipts: [for (final e in receipts) {'amount_zmw': double.parse(e.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')), 'url': e.url}],
+                        );
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx, r);
+                      },
+                      child: filing ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Confirm depot drop'),
+                    )),
+                  ]),
+                ]),
+              ),
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
     if (!mounted) return null;
@@ -1629,6 +1601,40 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     });
     return res;
   }
+
+  Widget _sheetSection(String title) => Text(title.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.4, color: AppColors.muted));
+
+  Widget _sheetInfoCard({required IconData icon, required String title, required String message}) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.forest.withValues(alpha: 0.12))),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, size: 18, color: AppColors.forest),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            const SizedBox(height: 2),
+            Text(message, style: const TextStyle(fontSize: 12.5, height: 1.35, color: AppColors.ink)),
+          ])),
+        ]),
+      );
+
+  Widget _sheetChecklist(List<_SheetCheck> items) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.line)),
+        child: Column(children: [
+          for (var i = 0; i < items.length; i++) ...[
+            Row(children: [
+              Icon(items[i].done ? Icons.check_circle : Icons.radio_button_unchecked, size: 18, color: items[i].done ? AppColors.forest : AppColors.muted),
+              const SizedBox(width: 8),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(items[i].label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: items[i].done ? AppColors.ink : AppColors.muted)),
+                Text(items[i].detail, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+              ])),
+            ]),
+            if (i != items.length - 1) const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1)),
+          ],
+        ]),
+      );
 
   /// One filed depot receipt inside the drop dialog: its own photo + its own
   /// exact amount (never summed by the rider).
@@ -1691,88 +1697,94 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final otpCtrl = TextEditingController();
     String? podUrl;
     bool submitting = false;
-    final res = await showDialog<ApiResponse>(
+    final res = await showModalBottomSheet<ApiResponse>(
       context: context,
-      barrierDismissible: false,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialog) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text(_handoverTitle(s, 'COLLECTION'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -0.2)),
-          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Hand this item to: ${recName.isEmpty ? 'the recipient' : recName}${recPhone.isNotEmpty ? ' · $recPhone' : ''}',
-                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest, height: 1.35)),
-            const SizedBox(height: 8),
-            const Text('Intercity items: the recipient shows their 4-digit DropOff code from the handover SMS. Lusaka items carry no SMS PIN — but if the recipient set their own door PIN in the app, ask for it here. Otherwise attach the proof photo; they confirm receipt in their own app.',
-              style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.ink)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: otpCtrl,
-              keyboardType: TextInputType.number,
-              maxLength: 4,
-              decoration: const InputDecoration(
-                counterText: '',
-                labelText: '4-digit door PIN / code (if the recipient has one)',
-                border: OutlineInputBorder(),
+        builder: (ctx, setDialog) {
+          final hasPhoto = podUrl != null;
+          final hasCode = otpCtrl.text.trim().length == 4;
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+                  const SizedBox(height: 14),
+                  Row(children: [
+                    Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.handshake_outlined, color: AppColors.forest)),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(_handoverTitle(s, 'COLLECTION'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: -0.2)),
+                      Text(recName.isEmpty ? 'Confirm recipient handover' : 'Hand over to $recName', style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+                    ])),
+                  ]),
+                  const SizedBox(height: 14),
+                  _sheetChecklist([
+                    _SheetCheck(label: 'Recipient identified', done: true, detail: recName.isEmpty ? 'Recipient at delivery point' : '$recName${recPhone.isNotEmpty ? ' · $recPhone' : ''}'),
+                    _SheetCheck(label: 'Door PIN/code', done: hasCode, detail: hasCode ? 'Code entered' : 'Optional in Lusaka; required when the recipient has a code'),
+                    _SheetCheck(label: 'Proof photo', done: hasPhoto, detail: hasPhoto ? 'Photo attached' : 'Required camera photo of handover'),
+                  ]),
+                  const SizedBox(height: 14),
+                  _sheetInfoCard(icon: Icons.info_outline, title: 'Handover rule', message: 'Intercity items need the recipient’s 4-digit SMS code. Lusaka items may be confirmed with a proof photo; if the recipient set a door PIN, enter it here.'),
+                  const SizedBox(height: 14),
+                  _sheetSection('Door PIN / code'),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: otpCtrl,
+                    keyboardType: TextInputType.number,
+                    maxLength: 4,
+                    onChanged: (_) => setDialog(() {}),
+                    decoration: const InputDecoration(counterText: '', labelText: '4-digit door PIN / code (if the recipient has one)', border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 14),
+                  _sheetSection('Proof photo'),
+                  const SizedBox(height: 6),
+                  OutlinedButton.icon(
+                    icon: Icon(hasPhoto ? Icons.check_circle : Icons.camera_alt_outlined, size: 18),
+                    label: Text(hasPhoto ? 'Proof photo attached ✓' : 'Add proof photo (required)'),
+                    onPressed: submitting ? null : () async {
+                      setDialog(() => podUrl = null);
+                      final url = await _pickPodPhoto();
+                      setDialog(() => podUrl = url);
+                    },
+                  ),
+                  if (podUrl != null) ...[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      PhotoPreview(pathOrUrl: podUrl!, label: 'PROOF', size: 96),
+                      const SizedBox(width: 10),
+                      const Expanded(child: Text('Check this is the item you handed over before you confirm.', style: AppType.caption)),
+                    ]),
+                  ],
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    Expanded(child: OutlinedButton(onPressed: submitting ? null : () => Navigator.pop(ctx, null), child: const Text('Cancel'))),
+                    const SizedBox(width: 10),
+                    Expanded(child: FilledButton(
+                      onPressed: submitting ? null : () async {
+                        final code = otpCtrl.text.trim();
+                        if (podUrl == null) { _snack('Attach the camera photo of the handover to confirm.'); return; }
+                        setDialog(() => submitting = true);
+                        final r = await DropOffApi.jobEvent(jobRef: ref, status: 'delivered', otp: code.length == 4 ? code : null, photoUrl: podUrl, stage: 'delivery');
+                        if (!ctx.mounted) return;
+                        if (r.ok || r.error == 'already_delivered') { Navigator.pop(ctx, r.ok ? r : const ApiResponse(ok: true)); return; }
+                        setDialog(() => submitting = false);
+                        _snack(r.error == 'photo_required' ? 'Attach the camera photo of the handover to confirm.' : 'Handover not filed - check your connection and retry.');
+                      },
+                      child: submitting ? const AppLogoSpinner(size: 18, color: Colors.white) : const Text('Confirm handover'),
+                    )),
+                  ]),
+                ]),
               ),
             ),
-            const SizedBox(height: 8),
-            // CAMERA-CAPTURE POLICY: the photo is required, not recommended —
-            // a door delivery is marked by camera capture like a depot drop.
-            TextButton.icon(
-              icon: Icon(podUrl == null ? Icons.camera_alt_outlined : Icons.check_circle, size: 18),
-              label: Text(podUrl == null ? 'Add proof photo (required)' : 'Proof photo attached ✓',
-                style: const TextStyle(fontSize: 12.5)),
-              onPressed: () async {
-                setDialog(() => podUrl = null); // visual pending state
-                final url = await _pickPodPhoto();
-                setDialog(() => podUrl = url);
-              },
-            ),
-          if (podUrl != null) ...[
-            const SizedBox(height: 8),
-            Row(children: [
-              PhotoPreview(pathOrUrl: podUrl!, label: 'PROOF', size: 96),
-              const SizedBox(width: 10),
-              const Expanded(child: Text('Check this is the item you handed over before you confirm.', style: AppType.caption)),
-            ]),
-          ],
-          ]),
-          actions: [
-            TextButton(onPressed: submitting ? null : () => Navigator.pop(ctx, null), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: submitting ? null : () async {
-                final code = otpCtrl.text.trim();
-                if (podUrl == null) {
-                  _snack('Attach the camera photo of the handover to confirm.');
-                  return;
-                }
-                // ONE-SHOT SUBMIT (owner bug 2026-11-20: "submitting photo for
-                // handover keeps accepting submissions"): lock the button the
-                // instant it is tapped; the server also rejects a replay with
-                // 409 already_delivered, which we treat as success.
-                setDialog(() => submitting = true);
-                // Intercity parcels NEED the code; Lusaka parcels hand over on
-                // the photo alone — the server enforces whichever applies.
-                final r = await DropOffApi.jobEvent(
-                  jobRef: ref, status: 'delivered',
-                  otp: code.length == 4 ? code : null,
-                  photoUrl: podUrl, stage: 'delivery');
-                if (!ctx.mounted) return;
-                if (r.ok || r.error == 'already_delivered') {
-                  Navigator.pop(ctx, r.ok ? r : const ApiResponse(ok: true));
-                  return;
-                }
-                setDialog(() => submitting = false);
-                _snack(r.error == 'photo_required'
-                    ? 'Attach the camera photo of the handover to confirm.'
-                    : 'Handover not filed - check your connection and retry.');
-              },
-              child: submitting
-                  ? const AppLogoSpinner(size: 18, color: Colors.white)
-                  : const Text('Confirm handover'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
     if (!mounted) return null;
@@ -2415,6 +2427,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final h = mins ~/ 60, m = mins % 60;
     return m == 0 ? '$h h' : '$h h $m min';
   }
+}
+
+class _SheetCheck {
+  final String label;
+  final bool done;
+  final String detail;
+  const _SheetCheck({required this.label, required this.done, required this.detail});
 }
 
 /// One depot receipt filed by the rider in the drop dialog: its own photo and

@@ -394,25 +394,34 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
       body: ListView(padding: const EdgeInsets.fromLTRB(20, 6, 20, 28), children: [
         Container(
           padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(20)),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: [AppColors.forest, complete ? const Color(0xFF1B5A48) : const Color(0xFF0F3D2E)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            borderRadius: BorderRadius.circular(24),
+          ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(booking.timeline[booking.stage].toUpperCase(), style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 1)),
-            const SizedBox(height: 12),
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+                child: Text(booking.timeline[booking.stage].toUpperCase(), style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 10.5, letterSpacing: 0.8)),
+              ),
+              const Spacer(),
+              Text(booking.reference, style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11.5, fontWeight: FontWeight.w700)),
+            ]),
+            const SizedBox(height: 14),
             Text(
-              (booking.branch?.isNotEmpty == true)
-                  ? '${booking.fromCity} → ${booking.branch}'
-                  : '${booking.fromCity} → ${booking.toCity}',
-              style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.w900),
+              (booking.branch?.isNotEmpty == true) ? '${booking.fromCity} → ${booking.branch}' : '${booking.fromCity} → ${booking.toCity}',
+              style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w900, height: 1.1, letterSpacing: -0.4),
             ),
             const SizedBox(height: 8),
             Text(
-              (booking.branch?.isNotEmpty == true)
-                  ? '${courier.name} · onward to ${booking.toCity}'
-                  : courier.name,
-              style: const TextStyle(color: Colors.white70),
+              (booking.branch?.isNotEmpty == true) ? '${courier.name} · onward to ${booking.toCity}' : '${courier.name} · ${booking.parcelSize.label}',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.82), fontSize: 13),
             ),
-            const SizedBox(height: 20),
-            ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: (booking.stage + 1) / booking.timeline.length, minHeight: 5, backgroundColor: Colors.white24, color: AppColors.amber)),
+            const SizedBox(height: 16),
+            ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: (booking.stage + 1) / booking.timeline.length, minHeight: 6, backgroundColor: Colors.white24, color: AppColors.amber)),
+            const SizedBox(height: 8),
+            Text('Step ${booking.stage + 1} of ${booking.timeline.length}', style: TextStyle(color: Colors.white.withValues(alpha: 0.72), fontSize: 11.5, fontWeight: FontWeight.w600)),
           ]),
         ),
         const SizedBox(height: 24),
@@ -500,66 +509,54 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
             complete &&
             (booking.counterReceiptUrl?.isNotEmpty == true || booking.counterFareDue))
           _CourierReceiptButton(booking: booking),
-        if (booking.dispatched && DropOffApi.enabled && store.linked) ...[
+        if (booking.dispatched && DropOffApi.enabled) ...[
           const SizedBox(height: 20),
-          Row(children: [
-            Expanded(child: FilledButton.tonalIcon(
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => TicketsScreen(
-                  prefill: 'Issue with booking ${booking.serverRef ?? booking.reference}: ',
-                ),
-              )),
-              icon: const Icon(Icons.support_agent_outlined),
-              label: const Text('Get help with this delivery'),
-            )),
-          ]),
-          // RECIPIENT TRACKING (owner directive 2026-11-15): the share card
-          // exists only once the prepayment is confirmed — a HELD booking
-          // never sends "track this delivery" links.
-          if (!booking.paymentHeld) ...[
+          const SectionTitle('Help & actions'),
+          const SizedBox(height: 8),
+          Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [
+            if (store.linked)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(backgroundColor: Color(0xFFE8F2EC), child: Icon(Icons.support_agent_outlined, color: AppColors.forest)),
+                title: const Text('Get help with this delivery', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Open a support ticket for this booking'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TicketsScreen(prefill: 'Issue with booking ${booking.serverRef ?? booking.reference}: '))),
+              ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const CircleAvatar(backgroundColor: Color(0xFFE8F2EC), child: Icon(Icons.map_outlined, color: AppColors.forest)),
+              title: const Text('Track rider live', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('See live movement on the map'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => RiderMapScreen(jobRef: booking.serverRef!))),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const CircleAvatar(backgroundColor: Color(0xFFE8F2EC), child: Icon(Icons.verified_user_outlined, color: AppColors.forest)),
+              title: const Text('Photos & evidence', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('View booking, pickup, and receipt photos'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showEvidenceLocker(context, booking),
+            ),
+            if (!booking.paymentHeld)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(backgroundColor: Color(0xFFE8F2EC), child: Icon(Icons.receipt_long_outlined, color: AppColors.forest)),
+                title: const Text('Depot receipt / waybill', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('View or share the waybill'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => WaybillScreen(bookingId: booking.id))),
+              ),
+          ]))),
+          if (store.linked && !booking.paymentHeld) ...[
             const SizedBox(height: 20),
             _TrackingLinkCard(jobRef: booking.serverRef!),
           ],
         ],
         if (booking.dispatched && DropOffApi.enabled && complete) ...[
           const SizedBox(height: 20),
-          _RatingCard(
-            jobRef: booking.serverRef!,
-            senderPhone: booking.senderPhone,
-            viewerPhone: store.linkedPhone,
-          ),
-        ],
-        if (booking.dispatched && DropOffApi.enabled) ...[
-          const SizedBox(height: 8),
-          Wrap(spacing: 8, runSpacing: 4, alignment: WrapAlignment.center, children: [
-            TextButton.icon(
-              icon: const Icon(Icons.map_outlined),
-              label: const Text('Track rider live'),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => RiderMapScreen(jobRef: booking.serverRef!),
-              )),
-            ),
-            TextButton.icon(
-              icon: const Icon(Icons.verified_user_outlined),
-              label: const Text('Share evidence'),
-              onPressed: () => _showEvidenceLocker(context, booking),
-            ),
-          ]),
-        ],
-        // Depot counter receipt / waybill — only visible after payment lands.
-        // Before the momo/prepayment settles, there is nothing to print yet and
-        // an empty waybill risks misuse.
-        if (!booking.paymentHeld) ...[
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(
-              icon: const Icon(Icons.receipt_long_outlined),
-              label: const Text('Depot receipt / waybill'),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => WaybillScreen(bookingId: booking.id),
-              )),
-            )),
-          ]),
+          _RatingCard(jobRef: booking.serverRef!, senderPhone: booking.senderPhone, viewerPhone: store.linkedPhone),
         ],
         const SizedBox(height: 8),
         Center(

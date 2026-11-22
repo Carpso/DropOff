@@ -48,6 +48,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   // the goods. The rider later photographs the collected items at pickup.
   String? _receiptUrl;
   bool _receiptBusy = false;
+  String? _pointError, _recipientNameError, _recipientPhoneError, _addressError, _declaredValueError;
 
   /// ✨ Tidy — normalises a free-text address (best-effort; never blocks).
   Future<void> _aiTidy(TextEditingController ctl) async {
@@ -160,17 +161,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     if (serverCourierId == null) {
       return _message('That courier is not available for collection yet — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
     }
-    if (!_point.text.trim().isNotEmpty) {
-      return _message('Enter the courier point where the item is waiting.');
-    }
-    if (_recipientName.text.trim().length < 2) return _message('Enter the recipient name.');
-    if (!RegExp(r'^(?:\+?260|0)?(5[0-9]|7[0-9]|9[1-9])\d{7}$').hasMatch(_recipientPhone.text.replaceAll(RegExp(r'[\s-]'), ''))) {
-      return _message('Use a valid Zambian recipient number, e.g. 0961234567.');
-    }
-    if (_address.text.trim().length < 4) return _message('Enter the door address for delivery.');
+    final pointErr = !_point.text.trim().isNotEmpty ? 'Enter the courier point where the item is waiting.' : null;
+    final recNameErr = _recipientName.text.trim().length < 2 ? 'Enter the recipient name.' : null;
+    final recPhoneErr = !RegExp(r'^(?:\+?260|0)?(5[0-9]|7[0-9]|9[1-9])\d{7}$').hasMatch(_recipientPhone.text.replaceAll(RegExp(r'[\s-]'), '')) ? 'Enter a valid Zambian mobile number.' : null;
+    final addrErr = _address.text.trim().length < 4 ? 'Enter the door address for delivery.' : null;
     final declaredValueZmw = double.tryParse(_declaredValue.text.replaceAll(RegExp(r'[^0-9.]'), ''));
-    if (declaredValueZmw == null || declaredValueZmw <= 0) {
-      return _message('Enter the item value in ZMW before booking the collection.');
+    final valErr = (declaredValueZmw == null || declaredValueZmw <= 0) ? 'Enter the item value in ZMW.' : null;
+    setState(() { _pointError = pointErr; _recipientNameError = recNameErr; _recipientPhoneError = recPhoneErr; _addressError = addrErr; _declaredValueError = valErr; });
+    if ([pointErr, recNameErr, recPhoneErr, addrErr, valErr].any((e) => e != null)) {
+      return _message('Check the highlighted fields before booking the collection.');
     }
     // Plan code entry: pre-redeem before the collection so the plan covers the
     // rider fee for this booking without a separate step.
@@ -301,11 +300,12 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(title: const Text('Book a collection', style: TextStyle(fontWeight: FontWeight.w900))),
-      body: RefreshIndicator(
+      body: Column(children: [
+        Expanded(child: RefreshIndicator(
         onRefresh: () async {
           await AppScope.of(context).syncJobsFromServer();
         },
-        child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
+        child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 16), children: [
         const Text('Where are your items waiting?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.4)),
         const SizedBox(height: 4),
         const Text('Your items are already at the courier depot. A rider brings them to the recipient.', style: TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.4)),
@@ -339,32 +339,36 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         TextField(
           controller: _point,
           textCapitalization: TextCapitalization.words,
+          onChanged: (_) { if (_pointError != null) setState(() => _pointError = null); },
           decoration: InputDecoration(
             labelText: 'Collection point',
             hintText: points.isEmpty ? 'e.g. Longacres counter' : points.first,
             prefixIcon: const Icon(Icons.location_on_outlined),
             helperText: points.isEmpty ? 'Ask the courier which counter holds it.' : 'Popular: ${points.take(2).join(' · ')}',
+            errorText: _pointError,
             suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_point), child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('✨ Tidy')),
           ),
         ),
         const SizedBox(height: 20),
         const Text('Deliver to', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),
-        TextField(controller: _recipientName, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Recipient name', prefixIcon: Icon(Icons.person_pin_circle_outlined))),
+        TextField(controller: _recipientName, textCapitalization: TextCapitalization.words, onChanged: (_) { if (_recipientNameError != null) setState(() => _recipientNameError = null); }, decoration: InputDecoration(labelText: 'Recipient name', errorText: _recipientNameError, prefixIcon: const Icon(Icons.person_pin_circle_outlined))),
         const SizedBox(height: 10),
-        TextField(controller: _recipientPhone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Recipient mobile number', hintText: '0961234567', prefixIcon: Icon(Icons.phone_outlined))),
+        TextField(controller: _recipientPhone, keyboardType: TextInputType.phone, onChanged: (_) { if (_recipientPhoneError != null) setState(() => _recipientPhoneError = null); }, decoration: InputDecoration(labelText: 'Recipient mobile number', hintText: '0961234567', errorText: _recipientPhoneError, prefixIcon: const Icon(Icons.phone_outlined))),
         const SizedBox(height: 10),
-        TextField(controller: _address, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, decoration: InputDecoration(labelText: 'Door address', hintText: 'e.g. 12 Kabwata Site, near the shops', prefixIcon: const Icon(Icons.house_outlined), alignLabelWithHint: true, suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_address), child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('AI tidy')))),
+        TextField(controller: _address, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, onChanged: (_) { if (_addressError != null) setState(() => _addressError = null); }, decoration: InputDecoration(labelText: 'Door address', hintText: 'e.g. 12 Kabwata Site, near the shops', prefixIcon: const Icon(Icons.house_outlined), alignLabelWithHint: true, errorText: _addressError, suffixIcon: TextButton(onPressed: _aiBusy ? null : () => _aiTidy(_address), child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('AI tidy')))),
         const SizedBox(height: 10),
         TextField(controller: _description, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Parcel contents (optional)', hintText: 'e.g. One carton of shoes', prefixIcon: Icon(Icons.inventory_2_outlined))),
         const SizedBox(height: 10),
         TextField(
           controller: _declaredValue,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
+          onChanged: (_) { if (_declaredValueError != null) setState(() => _declaredValueError = null); },
+          decoration: InputDecoration(
             labelText: 'Declared value (ZMW)',
             hintText: 'What the item is worth, e.g. 450',
-            prefixIcon: Icon(Icons.payments_outlined),
+            errorText: _declaredValueError,
+            prefixIcon: const Icon(Icons.payments_outlined),
           ),
         ),
         const Padding(
@@ -587,16 +591,39 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           Expanded(child: Text('Approve the momo prompt on this number. No cash, no hidden charges.', style: AppType.caption)),
           HelpIconButton(topic: HelpTopic.courierFare),
         ]),
-        const SizedBox(height: 18),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const AppLogoSpinner(size: 22, color: Colors.white)
-              : const Text('Book collection'),
+        const SizedBox(height: 16),
+        Card(
+          color: AppColors.forest.withValues(alpha: 0.04),
+          child: const Padding(
+            padding: EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [Icon(Icons.route_outlined, size: 18, color: AppColors.forest), SizedBox(width: 8), Text('What happens next', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13))]),
+              SizedBox(height: 8),
+              Text('1. Book the collection — a rider is assigned to your sweep slot.', style: TextStyle(fontSize: 12.5, height: 1.4)),
+              SizedBox(height: 4),
+              Text('2. Approve the momo prompt if payment is required.', style: TextStyle(fontSize: 12.5, height: 1.4)),
+              SizedBox(height: 4),
+              Text('3. The rider collects at the depot and delivers to the recipient.', style: TextStyle(fontSize: 12.5, height: 1.4)),
+            ]),
+          ),
         ),
       ],
       ),
       ),
+      ),
+      Container(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+        decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppColors.line))),
+        child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('After booking: approve payment if needed, then track the collection in Bookings.', style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.3), textAlign: TextAlign.center),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: FilledButton(
+            onPressed: _saving ? null : _submit,
+            child: _saving ? const AppLogoSpinner(size: 22, color: Colors.white) : const Text('Book collection'),
+          )),
+        ])),
+      ),
+      ]),
     );
   }
 }

@@ -1,4 +1,5 @@
 ﻿import '../ui/app_toast.dart';
+import '../ui/app_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
@@ -752,16 +753,13 @@ class _AdminScreenState extends State<AdminScreen> {
                   ])),
                   TextButton(
                     onPressed: () async {
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Hide this message?'),
-                          content: const Text('It disappears from every view of the chat and the sender gets a strike. 3 strikes auto-suspend chat for 7 days.'),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Hide')),
-                          ],
-                        ),
+                      final ok = await showConfirmSheet(
+                        context,
+                        title: 'Hide this message?',
+                        message: 'It disappears from every view of the chat and the sender gets a strike. 3 strikes auto-suspend chat for 7 days.',
+                        confirmLabel: 'Hide & strike',
+                        danger: true,
+                        icon: Icons.visibility_off_outlined,
                       );
                       if (ok != true) return;
                       await DropOffApi.reviewChatReport((r['id'] as num).toInt(), action: 'confirm');
@@ -1398,20 +1396,13 @@ class _UsersCardState extends State<_UsersCard> {
     final phone = '${user['phone'] ?? ''}';
     if (phone.isEmpty) return;
     final name = '${user['full_name'] ?? user['email'] ?? phone}';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete this account?'),
-        content: Text('Permanently remove $name ($phone) and every device session and push token.\n\nJob history, payments and audit events are kept — this is a compliance de-listing, not a data shred. The owner account cannot be deleted.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete account'),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmSheet(
+      context,
+      title: 'Delete this account?',
+      message: 'Permanently remove $name ($phone) and every device session and push token.\n\nJob history, payments and audit events are kept — this is a compliance de-listing, not a data shred. The owner account cannot be deleted.',
+      confirmLabel: 'Delete account',
+      danger: true,
+      icon: Icons.person_off_outlined,
     );
     if (confirmed != true) return;
     final res = await DropOffApi.deleteUser(phone, confirm: true);
@@ -1674,20 +1665,13 @@ class _BookingDeleteCardState extends State<_BookingDeleteCard> {
   }
 
   Future<void> _deleteRef(String ref, {bool clearField = false}) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete this booking?'),
-        content: Text('Remove $ref from every user-facing list (sender, recipient, rider, dispatch queues). Payments, history and audit events are kept. Collections and courier counter fares are untouched.\n\nThis cannot be undone from the app.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete booking'),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmSheet(
+      context,
+      title: 'Delete this booking?',
+      message: 'Remove $ref from every user-facing list (sender, recipient, rider, dispatch queues). Payments, history and audit events are kept. Collections and courier counter fares are untouched.\n\nThis cannot be undone from the app.',
+      confirmLabel: 'Delete booking',
+      danger: true,
+      icon: Icons.delete_forever_outlined,
     );
     if (confirmed != true) return;
     setState(() => _busy = true);
@@ -1897,16 +1881,13 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
                 IconButton(
                   icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.muted),
                   onPressed: () async {
-                    final ok = await showDialog<bool>(
-                      context: context,
-                      builder: (d) => AlertDialog(
-                        title: const Text('Delete branch?'),
-                        content: Text('Remove "${b['name'] ?? 'this branch'}"? This cannot be undone.'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
-                          FilledButton(style: FilledButton.styleFrom(backgroundColor: AppColors.danger), onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
-                        ],
-                      ),
+                    final ok = await showConfirmSheet(
+                      context,
+                      title: 'Delete branch?',
+                      message: 'Remove "${b['name'] ?? 'this branch'}"? This cannot be undone.',
+                      confirmLabel: 'Delete',
+                      danger: true,
+                      icon: Icons.delete_outline,
                     );
                     if (ok != true) return;
                     await DropOffApi.delete('/admin/branches/${b['id']}', body: {});
@@ -2750,16 +2731,12 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
   Future<void> _clear(Map<String, dynamic> row) async {
     final phone = '${row['phone']}';
     final fullName = '${row['sender_name'] ?? ''}'.trim();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Clear booking strikes?'),
-        content: Text('Wipe ALL booking strikes for $phone${fullName.isNotEmpty ? ' ($fullName)' : ''}?\n\nJobs: ${row['job_refs'] ?? '—'}\n\nStrikes are audit-only now — this removes the warnings, not a booking block.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Clear & unblock')),
-        ],
-      ),
+    final confirmed = await showConfirmSheet(
+      context,
+      title: 'Clear booking strikes?',
+      message: 'Wipe ALL booking strikes for $phone${fullName.isNotEmpty ? ' ($fullName)' : ''}?\n\nJobs: ${row['job_refs'] ?? '—'}\n\nStrikes are audit-only now — this removes the warnings, not a booking block.',
+      confirmLabel: 'Clear strikes',
+      icon: Icons.gavel_outlined,
     );
     if (confirmed != true) return;
     final res = await DropOffApi.clearBookingStrikes(phone);
