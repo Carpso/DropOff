@@ -27,6 +27,29 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (twenty-sixth pass) — blanket waiver of all outstanding depot fares
+
+Owner directive "wave all": waived every remaining unpaid counter fare through
+the new admin endpoint (not hand-written SQL), each with an audit reason and a
+`counter_fare_waived` event plus a push to the sender:
+
+- DRO-261122-QVC6X — K1 (sender 260968551110)
+- DRO-261121-8MWEE — K5 (sender 260968551110)
+- DRO-261121-K8WH9 — K50 (sender 260950654072)
+- DRO-261120-GH2PU — K50 (sender 260968551110)
+- DRO-261118-C3P6R — K50 (sender 260974439722)
+
+Together with the earlier DRO-261121-3ME9J (K5), all 6 receipt jobs are now
+`counter_receipt_paid = 1`. Live `GET /admin/counter-fares` returns zero
+outstanding fares. No momo prompts were fired and no reimbursements were paid.
+
+**Note for money audit:** 4 of the 6 receipts were filed by rider #5 / owner
+account 260976847775 (no real money owed); the other 2 (DRO-261121-K8WH9 and
+DRO-261118-C3P6R, total K100) were filed by rider "Soms 01" / 260779686480.
+Those were waived on the owner's explicit blanket instruction; if that rider
+actually fronted K100 at a depot, a manual salary/float adjustment is owed to
+them outside the app.
+
 ## 2026-11-23 (twenty-fifth pass) — admins can re-send prompts; root-cause honesty
 
 Owner asked whether the "no prompt" bug is truly fixed and wants admins able to
