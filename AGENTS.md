@@ -27,6 +27,47 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (thirty-first pass) — PIN ticks only on real server match
+
+Owner: pickup/door PIN sheets ticked "verified" as soon as 4 digits were typed
+(`otpCtrl.text.trim().length == 4`), and photo capture wasn't gated at all.
+
+**Worker `POST /jobs/:ref/verify-pin`** (side-effect free): assigned rider or
+staff only; `kind=pickup|door`; hashes compared with the same helpers used by
+`/jobs/:ref/events` (`handoverOtpHash` for SMS codes, `hashOtp` for the
+recipient's account door PIN). Empty `otp` returns only `needed` so the door
+sheet knows whether this same-city job has a code. Wrong codes increment the
+EXISTING per-job `pickup_otp_attempts` / `delivery_otp_attempts` (8 -> locked),
+plus `rateLimited('pin_verify', 60, 10)` per IP. No event, status, photo or
+money side effects; the final `jobEvent` still re-verifies server-side.
+
+**App:** both sheets now debounce 350 ms after the 4th digit, call verify-pin,
+and set `_PinCheck.{checking,ok,wrong,locked,notNeeded}`. Checklist ticks only
+on `ok`/`notNeeded`; photo capture AND final Confirm are gated on that state.
+Door sheet pre-checks `needed` (with a "no door PIN — continue with photo
+proof" escape). Wrong codes show the server's own detail + resend helper.
+Full suite 54/54, vitest 24/24, analyze/tsc clean.
+
+## 2026-11-23 (thirtieth pass) — waived fare must never prompt "pay" again
+
+Owner: "the prompt at the booking even when it's already waived keeps saying
+pay". D1 confirms all six waived jobs are `counter_receipt_paid = 1`, so the
+server gate was clear — the phone was acting on a STALE LOCAL booking cache.
+
+**Fix:** added authoritative `GET /counter-fare/status` (returns `due`, `ref`,
+`amount_zmw` using the same `> 0 AND unpaid` predicate as the booking gate).
+`AppStore.counterFareStillDue()` calls it and re-syncs the local cache when the
+answer is "not due"; falls back to the cached flag only when offline. Every
+pay surface now verifies before nagging:
+- Bookings screen advance prompt (`_maybePromptCounterFare` is now async),
+- Booking form and collection form `counter_fare_due` handlers re-check before
+  showing the settle sheet,
+- The locked receipt button's pay handler re-checks before firing a momo prompt.
+- All three settle sheets gained **"Already paid — check again"**, which clears
+  the prompt and tells the sender to tap Book again when the fare is settled.
+
+Worker deployed (`125623ea`); Flutter 54/54, vitest 24/24, analyze/tsc clean.
+
 ## 2026-11-23 (twenty-ninth pass) — Play Console advisories (edge-to-edge + R8)
 
 Play flagged release 84: "Edge-to-edge may not display for all users (deprecated

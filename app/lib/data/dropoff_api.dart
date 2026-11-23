@@ -652,6 +652,12 @@ class DropOffApi {
         if (receiptAmountConfirmed != null) 'receipt_amount_confirmed': receiptAmountConfirmed,
       });
 
+  /// Verify-only PIN check. Ticks the UI only when the code really matches.
+  /// No job step is advanced; the final jobEvent still verifies server-side.
+  /// `kind` is 'pickup' (sender code) or 'door' (recipient code / door PIN).
+  static Future<ApiResponse> verifyPin(String jobRef, String otp, String kind) =>
+      post('/jobs/${Uri.encodeComponent(jobRef)}/verify-pin', {'otp': otp, 'kind': kind});
+
   /// AI parcel photo check: compares the sender's booking capture against the
   /// rider's depot/delivery photo. Returns {same_parcel, confidence, note, flagged}.
   /// 409 when either photo is missing — treat as "no check available", not an error.
@@ -1195,6 +1201,12 @@ class DropOffApi {
         'channel': channel,
         if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
       }, timeout: _paymentTimeout);
+
+  /// Authoritative check: does this account still owe a depot counter fare?
+  /// The booking cache can be stale after an admin waiver, so every pay prompt
+  /// verifies here first (owner bug 2026-11-23).
+  static Future<Map<String, dynamic>?> counterFareStatus() =>
+      get('/counter-fare/status');
 
   /// Depot counter fare (owner directive 2026-11-12): pay the EXACT amount
   /// transcribed off the depot receipt + processing. The receipt photo

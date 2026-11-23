@@ -57,9 +57,12 @@ class _BookingsScreenState extends State<BookingsScreen> {
     _loadIncoming();
   }
 
-  void _maybePromptCounterFare() {
+  Future<void> _maybePromptCounterFare() async {
     if (_counterPromptShown || !mounted) return;
     final store = AppScope.of(context);
+    // Verify with the server FIRST — an admin may have waived the fare while
+    // the app was closed, leaving the local cache stale (owner bug 2026-11-23).
+    if (!await store.counterFareStillDue() || !mounted) return;
     final due = store.bookings.where((b) => b.counterFareDue).toList();
     if (due.isEmpty) return;
     _counterPromptShown = true;
@@ -1831,6 +1834,15 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
       return;
     }
     setState(() => _busy = true);
+    // The fare may have been waived while the app was closed. Verify with the
+    // server before opening a momo prompt for money that is no longer owed
+    // (owner bug 2026-11-23: "still says pay after it was waived").
+    if (!await store.counterFareStillDue()) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      AppToast.success(context, 'This courier bill is already settled — the receipt is unlocked. Pull to refresh if it still looks locked.');
+      return;
+    }
     // One stable key per job: retrying must never open a second prompt.
     final result = await store.settleCounterFare(jobRef: ref, phone: widget.booking.senderPhone);
     if (!mounted) return;

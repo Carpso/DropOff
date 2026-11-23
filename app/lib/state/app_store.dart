@@ -1227,6 +1227,23 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  /// Authoritative re-check before nagging the sender to pay. Returns the
+  /// server's answer and refreshes the local cache when the fare is gone (e.g.
+  /// an admin waived it while the app was closed). Never trust the local
+  /// [counterFareDue] flag alone — that was the "still says pay after waiver"
+  /// bug on 2026-11-23.
+  Future<bool> counterFareStillDue() async {
+    try {
+      final data = await DropOffApi.counterFareStatus();
+      final due = data?['due'] == true;
+      if (!due) await syncJobsFromServer();
+      return due;
+    } catch (_) {
+      // Offline: fall back to the cached flag rather than hiding a real debt.
+      return bookings.any((b) => b.counterFareDue);
+    }
+  }
+
   /// The local booking for a server job ref, if this account has it.
   Booking? bookingForServerRef(String ref) =>
       _bookings.where((b) => b.serverRef == ref).firstOrNull;

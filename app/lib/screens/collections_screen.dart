@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../ui/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -211,11 +213,20 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       // An unpaid depot fare is a hard stop on new jobs. Offer the prompt here
       // so it is never a dead end (owner bug 2026-11-23).
       if (res.error == 'counter_fare_due') {
-        _offerCounterFareSettlement(
-          appStore: store,
-          ref: '${res.body['due_ref'] ?? ''}',
-          amount: ((res.body['due_amount_zmw'] as num?) ?? 0).toDouble(),
-        );
+        // Verify before prompting — the fare may have just been waived by an
+        // admin while this form was open (owner bug 2026-11-23).
+        unawaited(store.counterFareStillDue().then((stillDue) async {
+          if (!mounted) return;
+          if (!stillDue) {
+            _message('Your depot fare is cleared — tap Book collection again.');
+            return;
+          }
+          _offerCounterFareSettlement(
+            appStore: store,
+            ref: '${res.body['due_ref'] ?? ''}',
+            amount: ((res.body['due_amount_zmw'] as num?) ?? 0).toDouble(),
+          );
+        }));
         return;
       }
       final detail = res.body['detail'];
@@ -335,7 +346,24 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                 ? const AppLogoSpinner(size: 18)
                 : Text(amount > 0 ? 'Pay K${amount.toStringAsFixed(2)} now' : 'Pay the courier bill now'),
           )),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          SizedBox(width: double.infinity, child: OutlinedButton.icon(
+            icon: const Icon(Icons.refresh, size: 15),
+            onPressed: busy ? null : () async {
+              setSheetState(() => busy = true);
+              final cleared = !await appStore.counterFareStillDue();
+              if (!ctx.mounted) return;
+              setSheetState(() => busy = false);
+              if (cleared) {
+                Navigator.pop(ctx);
+                _message('Fare already settled — tap Book collection again.');
+              } else {
+                AppToast.show(ctx, 'Still due on the server — pay when ready, or contact support if you already settled it.');
+              }
+            },
+            label: const Text('Already paid — check again'),
+          )),
+          const SizedBox(height: 6),
           SizedBox(width: double.infinity, child: TextButton(
             onPressed: busy ? null : () => Navigator.pop(ctx),
             child: const Text('Not now'),

@@ -483,7 +483,24 @@ class _BookingScreenState extends State<BookingScreen> {
                 ? const AppLogoSpinner(size: 18)
                 : Text(amount > 0 ? 'Pay K${amount.toStringAsFixed(2)} now' : 'Pay the courier bill now'),
           )),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          SizedBox(width: double.infinity, child: OutlinedButton.icon(
+            icon: const Icon(Icons.refresh, size: 15),
+            onPressed: busy ? null : () async {
+              setSheetState(() => busy = true);
+              final cleared = !await store.counterFareStillDue();
+              if (!ctx.mounted) return;
+              setSheetState(() => busy = false);
+              if (cleared) {
+                Navigator.pop(ctx);
+                _message('Fare already settled — tap Book again to place this booking.');
+              } else {
+                AppToast.show(ctx, 'Still due on the server — pay when ready, or contact support if you already settled it.');
+              }
+            },
+            label: const Text('Already paid — check again'),
+          )),
+          const SizedBox(height: 6),
           SizedBox(width: double.infinity, child: TextButton(
             onPressed: busy ? null : () => Navigator.pop(ctx),
             child: const Text('Not now'),
@@ -841,7 +858,16 @@ class _BookingScreenState extends State<BookingScreen> {
       // Offer the momo prompt right here — the old flow only showed a message,
       // so the fare could never be cleared and booking was a dead end.
       if (store.lastBookingError == 'counter_fare_due') {
-        _offerCounterFareSettlement(store);
+        // The fare may have been waived in the admin console a moment ago —
+        // verify before prompting (owner bug 2026-11-23: "still says pay").
+        unawaited(store.counterFareStillDue().then((stillDue) async {
+          if (!mounted) return;
+          if (!stillDue) {
+            _message('Your depot fare is cleared — tap Book again to place this booking.');
+            return;
+          }
+          _offerCounterFareSettlement(store);
+        }));
         return;
       }
       final msg = switch (store.lastBookingError) {

@@ -3276,6 +3276,116 @@ app.post('/jobs/:ref/resend-pin', async (c) => {
   });
 });
 
+// VERIFY-ONLY PIN CHECK (owner 2026-11-23): the rider app needs to tick
+// "PIN verified" ONLY when the code actually matches, and gate photo capture on
+// that — it must not tick merely because 4 digits were typed. This endpoint is
+// deliberately SIDE-EFFECT FREE with respect to the job: no event, no status
+// change, no photo/receipt rules. It shares the existing per-job attempt
+// counters (8 wrong codes -> otp_locked) plus a per-IP rate limit so a device
+// cannot brute-force codes for many jobs. The final step submission still
+// re-verifies server-side; this is instant UI feedback, not a security bypass.
+app.post('/jobs/:ref/verify-pin', async (c) => {
+  const ref = c.req.param('ref') ?? '';
+  const b: any = await c.req.json().catch(() => null);
+  if (!b) return c.json({ error: 'invalid JSON body' }, 400);
+  const kind = b.kind === 'door' ? 'door' : 'pickup';
+  if (await rateLimited(c, 'pin_verify', 60, 10)) {
+    return c.json({ error: 'rate_limited', detail: 'Too many code checks — wait a few minutes before trying again.' }, 429);
+  }
+  const job = await c.env.DB.prepare(
+    `SELECT id, ref, status, service, sender_phone, recipient_phone, rider_id,
+            from_city, dest_city, last_mile, pickup_otp_hash, delivery_otp_hash,
+            pickup_otp_attempts, delivery_otp_attempts
+       FROM jobs WHERE ref = ?1`,
+  ).bind(ref).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  const staff = c.get('role') === 'ops' || isAdmin(c);
+  if (!staff) {
+    const phone = c.get('phone') ?? '';
+    if (!phone) return c.json({ error: 'identity_required' }, 401);
+    const rider = await c.env.DB.prepare('SELECT id FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>();
+    if (!rider || job.rider_id !== rider.id) return c.json({ error: 'not found' }, 404);
+  }
+  const st = String(job.status ?? '');
+  if (['canceled', 'cancelled', 'deleted'].includes(st)) return c.json({ error: 'not_needed', needed: false }, 409);
+  if (kind === 'pickup' && ['picked_up', 'at_depot', 'departed', 'arrived', 'delivered', 'ready_for_collection'].includes(st)) {
+    return c.json({ error: 'not_needed', needed: false, ok: true }, 409);
+  }
+  if (kind === 'door' && ['delivered'].includes(st)) {
+    return c.json({ error: 'not_needed', needed: false, ok: true }, 409);
+  }
+
+  const raw = String(b.otp ?? '').replace(/\D/g, '');
+  const constantMatch = (a: string, b2: string) => a.length === b2.length && a.split('').every((ch, i) => ch === b2[i]);
+  // Empty code = "does this job even need one?" Used by the door sheet to
+  // initialise its checklist without forcing a code on same-city jobs.
+  if (raw.length === 0) {
+    if (kind === 'pickup') {
+      const needed = String(job.service ?? '') !== 'collection' && !!(job.pickup_otp_hash ?? job.delivery_otp_hash);
+      return c.json({ needed, ok: false, detail: needed ? 'Enter the 4-digit code.' : 'No PIN needed for this booking.' });
+    }
+    const rec = Number(job.last_mile) === 1 && job.recipient_phone
+      ? await c.env.DB.prepare('SELECT door_pin_hash FROM auth_users WHERE phone = ?1').bind(job.recipient_phone).first<any>()
+      : null;
+    const needed = Number(job.last_mile) === 1 && !!(job.delivery_otp_hash || rec?.door_pin_hash);
+    return c.json({ needed, ok: false, detail: needed ? 'Enter the 4-digit code.' : 'No door PIN required — proof photo is enough.' });
+  }
+  if (raw.length !== 4) return c.json({ needed: true, ok: false, detail: 'Enter the 4-digit code.' }, 400);
+
+  if (kind === 'pickup') {
+    // Collections have no sender PIN at the depot counter — nothing to verify.
+    if (String(job.service ?? '') === 'collection') return c.json({ needed: false, ok: true });
+    const want = String(job.pickup_otp_hash ?? job.delivery_otp_hash ?? '');
+    if (!want) return c.json({ needed: false, ok: true }); // legacy job: no code minted
+    if (Number(job.pickup_otp_attempts ?? 0) >= 8) {
+      return c.json({ error: 'otp_locked', needed: true, ok: false,
+        detail: 'Too many wrong codes — contact DropOff support.' }, 429);
+    }
+    const got = await handoverOtpHash(c.env, ref, raw);
+    if (!constantMatch(got, want)) {
+      await c.env.DB.prepare('UPDATE jobs SET pickup_otp_attempts = COALESCE(pickup_otp_attempts,0) + 1 WHERE id = ?1').bind(job.id).run();
+      return c.json({ error: 'otp_required', needed: true, ok: false,
+        detail: 'That is not the sender\'s code — ask them to read the SMS again.' }, 403);
+    }
+    await c.env.DB.prepare('UPDATE jobs SET pickup_otp_attempts = 0 WHERE id = ?1').bind(job.id).run();
+    return c.json({ needed: true, ok: true });
+  }
+
+  // Door: intercity SMS code first, then the recipient's own account door PIN.
+  if (Number(job.last_mile) === 1 && job.delivery_otp_hash) {
+    if (Number(job.delivery_otp_attempts ?? 0) >= 8) {
+      return c.json({ error: 'otp_locked', needed: true, ok: false,
+        detail: 'Too many wrong door codes — contact DropOff support.' }, 429);
+    }
+    const got = await handoverOtpHash(c.env, ref, raw);
+    if (!constantMatch(got, String(job.delivery_otp_hash))) {
+      await c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = COALESCE(delivery_otp_attempts,0) + 1 WHERE id = ?1').bind(job.id).run();
+      return c.json({ error: 'otp_required', needed: true, ok: false,
+        detail: 'That is not the recipient\'s door code — ask them to check their SMS.' }, 403);
+    }
+    await c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id).run();
+    return c.json({ needed: true, ok: true });
+  }
+  if (Number(job.last_mile) === 1 && job.recipient_phone) {
+    const rec = await c.env.DB.prepare('SELECT door_pin_hash FROM auth_users WHERE phone = ?1').bind(job.recipient_phone).first<any>();
+    if (rec?.door_pin_hash) {
+      if (Number(job.delivery_otp_attempts ?? 0) >= 8) {
+        return c.json({ error: 'otp_locked', needed: true, ok: false,
+          detail: 'Too many wrong door PINs — contact DropOff support.' }, 429);
+      }
+      if ((await hashOtp(raw, c.env.JWT_SECRET)) !== rec.door_pin_hash) {
+        await c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = COALESCE(delivery_otp_attempts,0) + 1 WHERE id = ?1').bind(job.id).run();
+        return c.json({ error: 'otp_required', needed: true, ok: false,
+          detail: 'That is not the recipient\'s door PIN (set in their account).' }, 403);
+      }
+      await c.env.DB.prepare('UPDATE jobs SET delivery_otp_attempts = 0 WHERE id = ?1').bind(job.id).run();
+      return c.json({ needed: true, ok: true });
+    }
+  }
+  // Same-city Lusaka job with no code minted: photo proof is enough.
+  return c.json({ needed: false, ok: true });
+});
+
 /* ------------------------ admin: live-order seed sweep ---------------------- */
 // SEED SWEEP (owner directive 2026-11-18): old test-era orders miss details
 // the new flows depend on — pickup pins, codes, tracking links, sweep times.
@@ -10243,6 +10353,25 @@ app.post('/admin/jobs/:ref/unpark', async (c) => {
   ).bind(row.rider_id));
   await c.env.DB.batch(statements);
   return c.json({ ok: true, ref: row.ref, window: next.window });
+});
+
+// Authoritative "do I still owe a depot fare?" check for the app. The local
+// booking cache can be stale after an admin waiver (owner bug 2026-11-23), so
+// every pay prompt must verify here before nagging the sender. Mirrors the
+// POST /jobs gate exactly: amount > 0 AND still unpaid.
+app.get('/counter-fare/status', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const due = await c.env.DB.prepare(
+    `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1
+      AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0
+      AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
+  ).bind(phone).first<any>();
+  return c.json({
+    due: !!due,
+    ref: due?.ref ?? null,
+    amount_zmw: due ? Number(due.counter_receipt_zmw ?? 0) : 0,
+  });
 });
 
 // Outstanding depot counter fares — the jobs currently blocking their senders

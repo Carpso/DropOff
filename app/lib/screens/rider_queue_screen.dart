@@ -32,6 +32,11 @@ import 'waybill_screen.dart' show waybillDepotTitle;
 import '../ui/app_spinner.dart';
 import '../services/step_sounds.dart';
 
+/// Result of a server-side, verify-only PIN check. The UI must only tick
+/// "verified" on [ok] (real match) or [notNeeded] (no code exists for this
+/// job) — never merely because 4 digits were typed (owner 2026-11-23).
+enum _PinCheck { idle, checking, ok, wrong, locked, notNeeded }
+
 /// The rider's day as slot-batched task queues:
 ///   BATCH: 10:00—11:30 slot · 6:00—7:30 AM window · 23 min in
 ///   TOTAL PARCELS: 6 · STOPS: 3 (1 picked) · DESTINATION: Mercury — Kabulonga
@@ -1304,6 +1309,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     String? lastErrCode; // the rejected-code errors unlock the resend helper
     bool resending = false;
     bool submitting = false;
+    // Verify the PIN SERVER-SIDE as the code is completed. Only a real match
+    // ticks the checklist and unlocks photo capture (owner 2026-11-23).
+    var pinState = isCollection ? _PinCheck.notNeeded : _PinCheck.idle;
+    Timer? pinDebounce;
     final res = await showModalBottomSheet<ApiResponse>(
       context: context,
       isScrollControlled: true,
@@ -1314,7 +1323,29 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       builder: (dctx) => StatefulBuilder(
         builder: (dctx, setDialog) {
           final photoDone = photos.length >= parcels;
-          final pinDone = isCollection || otpCtrl.text.trim().length == 4;
+          final pinDone = pinState == _PinCheck.ok || pinState == _PinCheck.notNeeded;
+
+          Future<void> verifyPin(String code) async {
+            if (code.length != 4) {
+              setDialog(() => pinState = _PinCheck.idle);
+              return;
+            }
+            setDialog(() => pinState = _PinCheck.checking);
+            final r = await DropOffApi.verifyPin(ref, code, 'pickup');
+            if (!dctx.mounted) return;
+            if (r.ok) {
+              setDialog(() => pinState = r.body['needed'] == true ? _PinCheck.ok : _PinCheck.notNeeded);
+              return;
+            }
+            final err = r.error ?? '';
+            final detail = (r.body['detail'] as String?)?.trim() ?? '';
+            setDialog(() {
+              pinState = err == 'otp_locked' ? _PinCheck.locked : _PinCheck.wrong;
+              lastErrCode = err;
+              inlineError = detail.isNotEmpty ? detail : 'That code did not match — ask the sender to read their SMS again.';
+            });
+          }
+
           return SafeArea(
             top: false,
             child: Padding(
@@ -1337,7 +1368,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   ]),
                   const SizedBox(height: 14),
                   _sheetChecklist([
-                    _SheetCheck(label: isCollection ? 'Depot collection' : 'Sender PIN verified', done: pinDone, detail: isCollection ? 'No sender PIN needed at depot counter' : 'Ask ${senderName.isEmpty ? 'the sender' : senderName} for the 4-digit code'),
+                    _SheetCheck(
+                      label: isCollection ? 'Depot collection' : 'Sender PIN verified',
+                      done: pinDone,
+                      detail: isCollection
+                          ? 'No sender PIN needed at depot counter'
+                          : switch (pinState) {
+                              _PinCheck.ok => 'Code matched on DropOff server',
+                              _PinCheck.notNeeded => 'No PIN required for this booking',
+                              _PinCheck.checking => 'Checking code with DropOff…',
+                              _PinCheck.wrong => 'Code did not match — ask the sender again',
+                              _PinCheck.locked => 'Too many wrong codes — contact support',
+                              _ => 'Ask ${senderName.isEmpty ? 'the sender' : senderName} for the 4-digit code',
+                            }),
                     _SheetCheck(label: 'Item photos captured', done: photoDone, detail: '${photos.length}/$parcels photo${parcels == 1 ? '' : 's'}'),
                   ]),
                   const SizedBox(height: 14),
@@ -1354,8 +1397,26 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       keyboardType: TextInputType.number,
                       maxLength: 4,
                       autofocus: true,
-                      onChanged: (_) => setDialog(() {}),
-                      decoration: const InputDecoration(counterText: '', labelText: '4-digit pickup code (from the SENDER)', border: OutlineInputBorder()),
+                      onChanged: (v) {
+                        pinDebounce?.cancel();
+                        final code = v.trim();
+                        if (code.length != 4) {
+                          setDialog(() => pinState = _PinCheck.idle);
+                          return;
+                        }
+                        pinDebounce = Timer(const Duration(milliseconds: 350), () => unawaited(verifyPin(code)));
+                      },
+                      decoration: InputDecoration(
+                        counterText: '',
+                        labelText: '4-digit pickup code (from the SENDER)',
+                        border: const OutlineInputBorder(),
+                        suffixIcon: switch (pinState) {
+                          _PinCheck.checking => const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))),
+                          _PinCheck.ok => const Icon(Icons.verified, color: AppColors.forest),
+                          _PinCheck.wrong || _PinCheck.locked => const Icon(Icons.error_outline, color: AppColors.danger),
+                          _ => null,
+                        },
+                      ),
                     ),
                   ],
                   const SizedBox(height: 14),
@@ -1383,7 +1444,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                       child: OutlinedButton.icon(
                         icon: const Icon(Icons.camera_alt_outlined, size: 18),
                         label: Text('Capture item ${photos.length + 1} of $parcels'),
-                        onPressed: submitting ? null : () async {
+                        // PIN first, THEN capture (owner 2026-11-23): no photo
+                        // until the server says the sender's code matched.
+                        onPressed: submitting || !pinDone ? null : () async {
                           final url = await _captureParcelPhoto();
                           if (url != null) setDialog(() { photos.add(url); inlineError = null; });
                         },
@@ -1427,8 +1490,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     Expanded(child: FilledButton(
                       onPressed: submitting ? null : () async {
                         final code = otpCtrl.text.trim();
-                        if (!isCollection && code.length != 4) {
-                          setDialog(() => inlineError = 'Enter the sender\'s 4-digit pickup code.');
+                        if (!isCollection && !pinDone) {
+                          setDialog(() => inlineError = pinState == _PinCheck.checking
+                              ? 'Still checking the sender\'s code with DropOff…'
+                              : 'Enter the sender\'s 4-digit pickup code — it must match before pickup.');
                           return;
                         }
                         if (photos.length < parcels) {
@@ -1941,6 +2006,17 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     final otpCtrl = TextEditingController();
     String? podUrl;
     bool submitting = false;
+    // Ask the server whether THIS job has a door code at all (same-city jobs
+    // often don't). With no code, the proof photo is the only requirement.
+    var doorNeedsPin = true;
+    try {
+      final pre = await DropOffApi.verifyPin(ref, '', 'door');
+      if (pre.ok) doorNeedsPin = pre.body['needed'] == true;
+    } catch (_) { /* final confirm still verifies server-side */ }
+    if (!mounted) return null;
+    var pinState = doorNeedsPin ? _PinCheck.idle : _PinCheck.notNeeded;
+    Timer? pinDebounce;
+    String? pinError;
     final res = await showModalBottomSheet<ApiResponse>(
       context: context,
       isScrollControlled: true,
@@ -1951,7 +2027,31 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) {
           final hasPhoto = podUrl != null;
-          final hasCode = otpCtrl.text.trim().length == 4;
+          final pinDone = pinState == _PinCheck.ok || pinState == _PinCheck.notNeeded;
+
+          Future<void> verifyPin(String code) async {
+            if (code.length != 4) {
+              setDialog(() => pinState = _PinCheck.idle);
+              return;
+            }
+            setDialog(() => pinState = _PinCheck.checking);
+            final r = await DropOffApi.verifyPin(ref, code, 'door');
+            if (!ctx.mounted) return;
+            if (r.ok) {
+              setDialog(() {
+                pinState = r.body['needed'] == true ? _PinCheck.ok : _PinCheck.notNeeded;
+                pinError = null;
+              });
+              return;
+            }
+            final err = r.error ?? '';
+            final detail = (r.body['detail'] as String?)?.trim() ?? '';
+            setDialog(() {
+              pinState = err == 'otp_locked' ? _PinCheck.locked : _PinCheck.wrong;
+              pinError = detail.isNotEmpty ? detail : 'That door code did not match — ask the recipient to check it.';
+            });
+          }
+
           return SafeArea(
             top: false,
             child: Padding(
@@ -1971,7 +2071,17 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   const SizedBox(height: 14),
                   _sheetChecklist([
                     _SheetCheck(label: 'Recipient identified', done: true, detail: recName.isEmpty ? 'Recipient at delivery point' : '$recName${recPhone.isNotEmpty ? ' · $recPhone' : ''}'),
-                    _SheetCheck(label: 'Door PIN/code', done: hasCode, detail: hasCode ? 'Code entered' : 'Optional in Lusaka; required when the recipient has a code'),
+                    _SheetCheck(
+                      label: 'Door PIN/code',
+                      done: pinDone,
+                      detail: switch (pinState) {
+                        _PinCheck.ok => 'Code matched on DropOff server',
+                        _PinCheck.notNeeded => 'No door PIN for this booking — photo proof',
+                        _PinCheck.checking => 'Checking code with DropOff…',
+                        _PinCheck.wrong => 'Code did not match — ask the recipient again',
+                        _PinCheck.locked => 'Too many wrong codes — contact support',
+                        _ => doorNeedsPin ? 'Ask the recipient for their 4-digit code' : 'Optional in Lusaka; required when the recipient has a code',
+                      }),
                     _SheetCheck(label: 'Proof photo', done: hasPhoto, detail: hasPhoto ? 'Photo attached' : 'Required camera photo of handover'),
                   ]),
                   const SizedBox(height: 14),
@@ -1983,16 +2093,42 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     controller: otpCtrl,
                     keyboardType: TextInputType.number,
                     maxLength: 4,
-                    onChanged: (_) => setDialog(() {}),
-                    decoration: const InputDecoration(counterText: '', labelText: '4-digit door PIN / code (if the recipient has one)', border: OutlineInputBorder()),
+                    onChanged: (v) {
+                      pinDebounce?.cancel();
+                      final code = v.trim();
+                      if (code.length != 4) {
+                        setDialog(() => pinState = _PinCheck.idle);
+                        return;
+                      }
+                      pinDebounce = Timer(const Duration(milliseconds: 350), () => unawaited(verifyPin(code)));
+                    },
+                    decoration: InputDecoration(
+                      counterText: '',
+                      labelText: '4-digit door PIN / code (if the recipient has one)',
+                      border: const OutlineInputBorder(),
+                      errorText: pinError,
+                      suffixIcon: switch (pinState) {
+                        _PinCheck.checking => const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))),
+                        _PinCheck.ok || _PinCheck.notNeeded => const Icon(Icons.verified, color: AppColors.forest),
+                        _PinCheck.wrong || _PinCheck.locked => const Icon(Icons.error_outline, color: AppColors.danger),
+                        _ => null,
+                      },
+                    ),
                   ),
+                  if (!doorNeedsPin && pinState != _PinCheck.notNeeded)
+                    TextButton(
+                      onPressed: () => setDialog(() => pinState = _PinCheck.notNeeded),
+                      child: const Text('No door PIN for this item — continue with photo proof'),
+                    ),
                   const SizedBox(height: 14),
                   _sheetSection('Proof photo'),
                   const SizedBox(height: 6),
                   OutlinedButton.icon(
                     icon: Icon(hasPhoto ? Icons.check_circle : Icons.camera_alt_outlined, size: 18),
                     label: Text(hasPhoto ? 'Proof photo attached ✓' : 'Add proof photo (required)'),
-                    onPressed: submitting ? null : () async {
+                    // Verify the code BEFORE the proof capture step (owner
+                    // 2026-11-23): a 4-digit entry alone never unlocks it.
+                    onPressed: submitting || !pinDone ? null : () async {
                       setDialog(() => podUrl = null);
                       final url = await _pickPodPhoto();
                       setDialog(() => podUrl = url);
@@ -2013,6 +2149,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     Expanded(child: FilledButton(
                       onPressed: submitting ? null : () async {
                         final code = otpCtrl.text.trim();
+                        if (!pinDone) {
+                          _snack(pinState == _PinCheck.checking
+                              ? 'Still checking the door code with DropOff…'
+                              : 'Confirm the door PIN with DropOff before handover.');
+                          return;
+                        }
                         if (podUrl == null) { _snack('Attach the camera photo of the handover to confirm.'); return; }
                         setDialog(() => submitting = true);
                         final r = await DropOffApi.jobEvent(jobRef: ref, status: 'delivered', otp: code.length == 4 ? code : null, photoUrl: podUrl, stage: 'delivery');
