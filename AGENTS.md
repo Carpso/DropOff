@@ -43,12 +43,11 @@ Together with the earlier DRO-261121-3ME9J (K5), all 6 receipt jobs are now
 `counter_receipt_paid = 1`. Live `GET /admin/counter-fares` returns zero
 outstanding fares. No momo prompts were fired and no reimbursements were paid.
 
-**Note for money audit:** 4 of the 6 receipts were filed by rider #5 / owner
-account 260976847775 (no real money owed); the other 2 (DRO-261121-K8WH9 and
-DRO-261118-C3P6R, total K100) were filed by rider "Soms 01" / 260779686480.
-Those were waived on the owner's explicit blanket instruction; if that rider
-actually fronted K100 at a depot, a manual salary/float adjustment is owed to
-them outside the app.
+**Money audit (owner confirmation 2026-11-23):** ALL six receipts — including
+the two filed under rider "Soms 01" / 260779686480 — were created by our own
+team while testing. No real depot fare was fronted by anyone, so **no
+reimbursement or salary adjustment is owed**. The waivers only cleared test
+data so those sender accounts can book again.
 
 ## 2026-11-23 (twenty-fifth pass) — admins can re-send prompts; root-cause honesty
 
