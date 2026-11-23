@@ -247,8 +247,8 @@ class _BookingScreenState extends State<BookingScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final store = AppScope.of(context);
-      final name = '${store.fullName ?? ''}'.trim();
-      final phone = '${store.linkedPhone ?? ''}'.trim();
+      final name = (store.fullName ?? '').trim();
+      final phone = (store.linkedPhone ?? '').trim();
       var changed = false;
       if (name.isNotEmpty && _senderName.text.trim().isEmpty) {
         _senderName.text = name;
