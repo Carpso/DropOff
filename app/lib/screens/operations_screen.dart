@@ -1437,19 +1437,25 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
       'fail' => (AppColors.danger, 'One clear photo of you is needed - retake it.'),
       _ => (AppColors.warning, 'Check in progress - DropOff will confirm.'),
     };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
+    return ConstrainedBox(
+      // This chip sits in a Wrap (unbounded width). Give it a bounded maximum
+      // so the Expanded label can wrap by words instead of one character per
+      // line when the verdict copy is long.
+      constraints: const BoxConstraints(maxWidth: 260),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(verdict == 'pass' ? Icons.face : verdict == 'fail' ? Icons.no_photography_outlined : Icons.help_outline,
+              size: 14, color: color),
+          const SizedBox(width: 5),
+          Flexible(child: Text(label, softWrap: true, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: color))),
+        ]),
       ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(verdict == 'pass' ? Icons.face : verdict == 'fail' ? Icons.no_photography_outlined : Icons.help_outline,
-            size: 14, color: color),
-        const SizedBox(width: 5),
-        Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: color)),
-      ]),
     );
   }
 

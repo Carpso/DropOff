@@ -347,9 +347,13 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
             color: AppColors.canvas,
             child: Row(children: [
-              Text('Ticket #${ticket['id'] ?? widget.id} · ${ticket['category'] ?? 'other'}', style: AppType.caption),
-              const Spacer(),
-              Text(status.toUpperCase(), style: AppType.bodyStrong.copyWith(color: status == 'closed' ? AppColors.muted : AppColors.success)),
+              // Long identifiers must own their width: a bare Text in a Row
+              // collapses to one character per line on narrow phones.
+              Expanded(child: Text('Ticket #${ticket['id'] ?? widget.id} · ${ticket['category'] ?? 'other'}',
+                  maxLines: 2, softWrap: true, style: AppType.caption)),
+              const SizedBox(width: 8),
+              Text(status.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: AppType.bodyStrong.copyWith(color: status == 'closed' ? AppColors.muted : AppColors.success)),
             ]),
           ),
         if (_error != null)

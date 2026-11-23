@@ -16,6 +16,7 @@ import 'booking_screen.dart';
 import 'coverage_screen.dart';
 import 'track_screen.dart';
 import '../ui/app_spinner.dart';
+import '../widgets/promo_banner.dart';
 
 /// The seller's business dashboard: plan usage, items in flight, delivered
 /// count, referral income — one glance, all server-backed. Shown as a bottom
@@ -270,52 +271,8 @@ class _BusinessScreenState extends State<BusinessScreen> {
     return null;
   }
 
-  Widget _banner({required IconData icon, required String title, required String body, required String cta, required VoidCallback onCta}) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.amber.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.amber.withValues(alpha: 0.35)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Icon rail + title share one line; the BODY sits on its own
-        // full-width line below it. Keeping the body out of the Row means no
-        // sibling (icon, badge, button) can ever squeeze it into a vertical
-        // one-character-per-line ribbon on small phones.
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(
-            width: 36,
-            height: 36,
-            child: Icon(icon, size: 22, color: AppColors.amber),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(title,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                softWrap: true,
-                textAlign: TextAlign.left,
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, height: 1.2)),
-          ),
-        ]),
-        const SizedBox(height: 6),
-        Text(body,
-            softWrap: true,
-            textAlign: TextAlign.left,
-            style: AppType.caption.copyWith(height: 1.4)),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-            onPressed: onCta,
-            child: Text(cta, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
-          ),
-        ),
-      ]),
-    );
-  }
+  Widget _banner({required IconData icon, required String title, required String body, required String cta, required VoidCallback onCta}) =>
+      PromoBanner(icon: icon, title: title, body: body, cta: cta, onCta: onCta);
 
   @override
   Widget build(BuildContext context) {

@@ -27,6 +27,32 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (twenty-first pass) — Business promo card layout pinned by tests
+
+Owner report: the Business promo card body ("Promo adds 25 parcels for K500 —
+pro-rated to…") still rendered one character per line beside a small amber
+piggy-bank icon.
+
+Investigation: the Business `_banner` already had the correct structure
+(fixed 36 px icon rail + `Expanded` title Row, body on its own full-width line,
+full-width CTA) — the symptom comes from builds made before that fix, so the
+real work was making it impossible to regress:
+
+- Extracted the card to `app/lib/widgets/promo_banner.dart`; `business_screen.dart`
+  now delegates to it. Text body has the card's full width, no fixed height,
+  `softWrap: true`, and the CTA sits on its own full-width row.
+- New `app/test/promo_banner_test.dart` renders the card at **320/360/390 px**,
+  measures the painted text (body must be >55% of the viewport width and <150 px
+  tall; title >35%; CTA >60%) and fails on any `FlutterError` (RenderFlex
+  overflow). 3 tests, all passing; full suite 43/43.
+- Repository-wide scan for the same anti-pattern found no high/medium cases;
+  hardened the two residuals: `tickets_screen.dart` ticket header (long ref now
+  `Expanded`, status `maxLines:1`) and `operations_screen.dart` face-check chip
+  (bounded by `ConstrainedBox(maxWidth: 260)` before `Flexible` label, because
+  a `Row` inside a `Wrap` has unbounded width).
+- Permanent rules added under **Layout invariants — never write a vertical-text
+  card again** above. Release `0.5.73+83`.
+
 ## 2026-11-23 (twentieth pass) — exact receipt amount, rider attestation, no zero-amount gate
 
 Owner follow-up: confirm the figure the rider types really is the depot receipt
@@ -734,6 +760,32 @@ button was explicitly parked ("do nothing first") and was NOT changed.
   release build could not complete while pub.dev/Cloudflare DNS was down —
   retry once connectivity returns. Do NOT change `tools/build_release.ps1`
   (owner directive 2026-11-20); the failure was the network, not the script.
+
+## Layout invariants — never write a vertical-text card again (owner 2026-11-23)
+
+A long `Text` placed as a DIRECT child of a `Row` receives only the width left
+over by its siblings. With a fixed icon/button beside it that can be <20 px, so
+the copy renders one character per line down the left edge and clips at the
+bottom. This has happened repeatedly (Business promo/retention banner, Business
+retention banner, depot-drop sheet). Enforce these rules in EVERY UI change:
+
+1. **A long string never sits directly in a `Row`.** Wrap it in `Expanded`
+   (preferred) or `Flexible`, and give fixed siblings a fixed `SizedBox` rail.
+   If the Row is inside a `Wrap` (unbounded width), first bound it with
+   `ConstrainedBox(maxWidth: …)`, then use `Flexible`.
+2. **Body copy goes on its own full-width line** in the parent `Column`, not in
+   the icon/title `Row`. Set `softWrap: true`; keep `maxLines` for headings only.
+3. **No fixed height around multi-line copy.** Icons/photos may use
+   `SizedBox(height: …)`; text may not. Let the card grow with the text.
+4. **Full-width CTAs** use `SizedBox(width: double.infinity)` on their own row,
+   never a trailing slot in a `Row` with the message.
+5. **Regression-test at 320 px, 360 px and 390 px.** Measure the painted text
+   (it must be a large fraction of the card width and only a few lines tall)
+   and fail on any `FlutterError` / RenderFlex overflow. Reference test:
+   `app/test/promo_banner_test.dart`; reference implementation:
+   `app/lib/widgets/promo_banner.dart` (extracted from `business_screen.dart`
+   so the rule is reusable and testable). Before declaring a layout fix done,
+   run `flutter test test/promo_banner_test.dart` and inspect all three widths.
 
 ## Repo conventions
 
