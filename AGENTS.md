@@ -27,6 +27,47 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (twenty-eighth pass) — receipt title unclipped; sentence-case fixes
+
+- The full-screen collection receipt sheet's AppBar title was clipped to
+  "Receipt - show at the depot cou..." on narrow phones. It is now a bounded
+  (width - 72), `maxLines: 2`, `softWrap` Text at 15 px, so the full
+  "Receipt — show at the depot counter" is shown.
+- Sentence-case pass (owner: "first letter of each sentence", NOT Title Case):
+  role menu labels in the admin user editor, the "Jobs:" / "Rider:" / "Pace:"
+  leading labels now start with a capital. "e.g." placeholder hints and the
+  lowercase DB role tokens were left alone intentionally — they are examples
+  and machine values, not sentences. Owner will point out any remaining spots.
+- Build was stopped on request before these edits; full suite re-run 54/54.
+
+## 2026-11-23 (twenty-seventh pass) — map never blanks; navigator title follows destination
+
+Onboarding blocker: the map showed "Map could not load — your position and
+navigation are still shown" but actually rendered a blank green box. Root
+cause class: `_assets` opened the 1.5 GB regional PMTiles archive first and
+ ANY failure killed the whole widget; `HttpAt` requires HTTP 206 ranges, which
+some mobile networks/VPNs/Private DNS strip, and the PMTiles client has NO
+timeout, so a stalled request could spin forever.
+
+**Fix (`widgets/rider_map.dart`):**
+- Open BOTH archives in parallel (regional 12 s, 30 MB Lusaka city 10 s), 2
+  attempts each, with timeouts. Either alone is a usable basemap; both →
+  CityFirst. Lusaka-first matters because onboarding starts there.
+- Basemap and theme are now independently nullable. If neither opens, render
+  a neutral canvas **with all markers, route and compass intact** plus an
+  honest "Basemap offline — your position and route still show" banner with a
+  **Retry** button. No more false claim and dead green screen.
+- Real errors go to `CrashReporting.reportCaught()` (new public wrapper) and
+  `debugPrint`, so support sees why a device fails.
+
+**Navigator title (`in_app_navigator_screen.dart`):** the AppBar now reads
+"Navigate" with a changing suffix: `→ <current destination>` (updates instantly
+when the rider re-routes to a saved place/search result), `≈ <place> ahead`
+within 120 m, `✓ Arrived at <place>` within 40 m. Single-line, bounded width,
+ellipsised — follows the AGENTS.md anti-vertical-text invariant. Pure helper
+`navigatorTitleSuffix()` + 5 tests in `test/navigator_title_test.dart`.
+Full suite 54/54, analyze clean.
+
 ## 2026-11-23 (twenty-sixth pass) — blanket waiver of all outstanding depot fares
 
 Owner directive "wave all": waived every remaining unpaid counter fare through

@@ -39,6 +39,12 @@ class CrashReporting {
     return '${exception.runtimeType}$library: $exception';
   }
 
+  /// Report a caught, non-fatal failure (e.g. the basemap could not open).
+  /// Unhandled errors go through [init]'s handlers; this is the opt-in path.
+  static void reportCaught(String message, [Object? error, StackTrace? stack]) {
+    _report('$message${error == null ? '' : ': $error'}', stack);
+  }
+
   static Future<void> _report(String message, StackTrace? stack) async {
     if (!DropOffApi.enabled) return; // offline demo mode — nothing to report
     try {

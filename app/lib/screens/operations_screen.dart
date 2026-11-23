@@ -872,7 +872,7 @@ class _BatchPickupCardState extends State<_BatchPickupCard> {
                         child: ExpansionTile(
                           leading: const Icon(Icons.route_rounded, color: AppColors.forest),
                           title: Text('Route ${route['route']} — ${(route['stops'] as List).length} stops · ${route['total_km']} km · ~${route['est_minutes']} min', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                          subtitle: Text('rider: ${route['rider_hint']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                          subtitle: Text('Rider: ${route['rider_hint']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 11)),
                           children: [
                             ...(route['stops'] as List).cast<Map<String, dynamic>>().map((stop) => ListTile(
                                   dense: true,
@@ -1087,7 +1087,7 @@ class _RiderTargetsCardState extends State<_RiderTargetsCard> {
             const SizedBox(height: 12),
             Row(children: [
               Expanded(child: Text('Month: $month / $monthTarget', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
-              Text('pace $pace', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+              Text('Pace $pace', style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
             ]),
             const SizedBox(height: 6),
             ClipRRect(

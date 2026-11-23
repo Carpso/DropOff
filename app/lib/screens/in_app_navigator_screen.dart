@@ -16,6 +16,21 @@ import '../services/step_sounds.dart';
 /// (OSRM, turn-by-turn cue sheet in the app) and flies/orbits it fully
 /// in-app. When the routing engine is unreachable the line falls back to a
 /// labelled straight line — never a fake road.
+/// Pure suffix logic (unit-tested in test/navigator_title_test.dart). The
+/// arrow always names the CURRENT destination; approach/arrival replace it
+/// once the rider is within 120 m / 40 m of that point.
+String navigatorTitleSuffix(String rawLabel, LatLng? me, LatLng dest) {
+  var label = rawLabel.trim();
+  if (label.isEmpty) return '→ your next stop';
+  label = label.replaceFirst(RegExp(r'^deliver to ', caseSensitive: false), '').trim();
+  if (me != null) {
+    final metres = const Distance().as(LengthUnit.Meter, me, dest);
+    if (metres <= 40) return '✓ Arrived at $label';
+    if (metres <= 120) return '≈ $label ahead';
+  }
+  return '→ $label';
+}
+
 class InAppNavigatorScreen extends StatefulWidget {
   final double destLat;
   final double destLng;
@@ -376,6 +391,12 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     );
   }
 
+  /// The app-bar suffix follows the CURRENT destination, not a frozen caption:
+  /// it changes when the rider re-routes to a saved place / search result and
+  /// again as she approaches and arrives. Short, arrow-led and single-line so
+  /// it can never collapse into vertical text on a 320 px phone.
+  String _destinationSuffix() => navigatorTitleSuffix(_destLabel, _me, _destPos);
+
   @override
   Widget build(BuildContext context) {
     final me = _me;
@@ -390,7 +411,21 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Navigate', style: TextStyle(fontWeight: FontWeight.w900)),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Navigate', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+            ConstrainedBox(
+              // Bounded width + single line: a long depot/recipient name must
+              // ellipsise, never wrap one character per line (owner layout
+              // invariant, AGENTS.md).
+              constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width - 150),
+              child: Text(_destinationSuffix(), maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.muted)),
+            ),
+          ],
+        ),
         actions: [
           IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: () { _fix(); }),
           IconButton(

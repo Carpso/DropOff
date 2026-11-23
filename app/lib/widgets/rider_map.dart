@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -11,13 +11,14 @@ import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
 import '../data/map_tile_sources.dart';
+import '../services/crash_reporting.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
 import '../ui/saved_place_pin.dart';
 import '../ui/map_vehicle_marker.dart';
 
 /// Live in-app map on the DropOff basemap (Protomaps Zambia/Zimbabwe/Malawi/
-/// Mozambique archive on our R2 bucket — no Google, no MapTiler, no external
+/// Mozambique archive on our R2 bucket � no Google, no MapTiler, no external
 /// navigation app). The map is ours; it grows with the fleet's rider density.
 class RiderMap extends StatefulWidget {
   final LatLng? pickup;
@@ -29,12 +30,12 @@ class RiderMap extends StatefulWidget {
   /// never lies about what the stop is.
   final bool pickupIsDepot;
 
-  /// Optional route to draw as a polyline (e.g. rider → pickup → drop-off).
+  /// Optional route to draw as a polyline (e.g. rider ? pickup ? drop-off).
   /// Road-following when the caller resolved one (OSRM); a straight line is
   /// fine for overview but the caller must label it as such.
   final List<LatLng>? route;
 
-  /// True when [route] is a straight line (routing engine unreachable) —
+  /// True when [route] is a straight line (routing engine unreachable) �
   /// draws it dashed so it never masquerades as a road route.
   final bool routeIsStraightLine;
 
@@ -69,7 +70,7 @@ class RiderMap extends StatefulWidget {
 
   static const String tileUrl =
       'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/region-zm-zw-mw-mz.pmtiles';
-  /// High-detail Lusaka archive from the SAME bucket (z0–16, clipped to the
+  /// High-detail Lusaka archive from the SAME bucket (z0�16, clipped to the
   /// city). Street-level zoom in Lusaka comes from here; the regional file
   /// still covers the rest of Zambia/Zimbabwe/Malawi/Mozambique.
   static const String lusakaTileUrl =
@@ -100,46 +101,97 @@ class RiderMap extends StatefulWidget {
 }
 
 /// Basemap pieces: the PMTiles provider plus the theme (fonts/sprites/urls)
-/// hosted on our own R2 bucket — no external map host at all.
+/// hosted on our own R2 bucket � no external map host at all.
+///
+/// Both are NULLABLE on purpose (owner onboarding bug 2026-11-23): a mobile
+/// network that refuses HTTP Range requests must NOT blank the whole map.
+/// Markers, route, compass and turn navigation render on a neutral background
+/// even with no basemap, and a Retry control is offered.
 class _MapAssets {
-  final VectorTileProvider provider;
+  final VectorTileProvider? provider;
   final dynamic theme;
-  const _MapAssets(this.provider, this.theme);
+  final String? error;
+  const _MapAssets(this.provider, this.theme, this.error);
+
+  bool get hasBasemap => provider != null && theme != null;
 }
 
 class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin {
-  late final Future<_MapAssets> _assets = () async {
-    // Regional archive first (always required), then the Lusaka city archive.
-    // The city file is an upgrade, never a dependency: if it cannot be opened
-    // the map still draws the regional basemap.
-    final regional = await PmTilesVectorTileProvider.fromSource(RiderMap.tileUrl);
-    VectorTileProvider provider = regional;
-    try {
-      final lusaka =
-          await PmTilesVectorTileProvider.fromSource(RiderMap.lusakaTileUrl);
+  late Future<_MapAssets> _assets = _loadAssets();
+
+  /// Open the basemap without ever failing the screen. Each part degrades
+  /// independently, and the real error is reported so onboarding support can
+  /// see it (the old code swallowed everything into a generic message).
+  Future<_MapAssets> _loadAssets() async {
+    String? error;
+    // PMTiles reads via HTTP Range. Some mobile networks / VPNs / Private DNS
+    // setups answer 200 instead of 206 or strip Content-Range. Open BOTH
+    // archives independently and in parallel: the 30 MB Lusaka file is small
+    // enough to work where the 1.5 GB regional file fails, and onboarding is
+    // Lusaka-first. The PMTiles HTTP client has no timeout of its own, so cap
+    // each open - the old code could spin on the spinner forever.
+    Future<VectorTileProvider?> open(String url, Duration timeout) async {
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          return await PmTilesVectorTileProvider.fromSource(url).timeout(timeout);
+        } catch (e) {
+          debugPrint('RiderMap could not open $url (attempt ${attempt + 1}): $e');
+          error = '${error ?? ''} ${Uri.parse(url).pathSegments.last}: $e';
+          if (attempt == 0) await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
+      }
+      return null;
+    }
+
+    final opened = await Future.wait([
+      open(RiderMap.tileUrl, const Duration(seconds: 12)),
+      open(RiderMap.lusakaTileUrl, const Duration(seconds: 10)),
+    ]);
+    final regional = opened[0];
+    final lusaka = opened[1];
+    VectorTileProvider? provider;
+    if (regional != null && lusaka != null) {
       provider = CityFirstTileProvider(
         regional: regional,
         city: lusaka,
         cityBounds: RiderMap.lusakaBounds,
       );
-    } catch (_) {
-      /* Lusaka archive unavailable — regional basemap still renders. */
+    } else {
+      // Either archive alone is a usable basemap: city covers Lusaka (where
+      // onboarding starts), regional covers the rest of the country.
+      provider = lusaka ?? regional;
     }
+    if (provider != null) error = null; // at least one basemap opened
+
     // The theme JSON ships in the app bundle; its glyphs + sprite templates
     // point at OUR R2 bucket, so nothing on the map touches another host.
-    final raw = await rootBundle.loadString('assets/map/theme-light-v4.json');
-    final decoded = jsonDecode(raw) as Map<String, dynamic>;
-    final layers = (decoded['layers'] as List).cast<Map<String, Object>>();
-    final theme = ProtomapsThemes(
-      glyphs: decoded['glyphs'] as String,
-      sprites: decoded['sprite'] as String,
-    ).build(layers);
-    return _MapAssets(provider, theme);
-  }();
+    dynamic theme;
+    try {
+      final raw = await rootBundle.loadString('assets/map/theme-light-v4.json');
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      final layers = (decoded['layers'] as List).cast<Map<String, Object>>();
+      theme = ProtomapsThemes(
+        glyphs: decoded['glyphs'] as String,
+        sprites: decoded['sprite'] as String,
+      ).build(layers);
+    } catch (e) {
+      error = '${error ?? ''} theme: $e';
+      debugPrint('RiderMap theme load failed: $e');
+    }
+    if (error != null) {
+      CrashReporting.reportCaught('RiderMap basemap degraded', error);
+    }
+    return _MapAssets(provider, theme, error);
+  }
+
+  void _retryMap() {
+    if (!mounted) return;
+    setState(() => _assets = _loadAssets());
+  }
   final MapController _mapCtl = MapController();
 
   // BIKE PULSE (owner 2026-11-18: "make the bike icon more 3d or lively"): a
-  // repeating radar ring behind the rider badge — the map reads as live even
+  // repeating radar ring behind the rider badge � the map reads as live even
   // between the 12 s fixes.
   late final AnimationController _pulse =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..repeat();
@@ -168,16 +220,16 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     super.dispose();
   }
 
-  /// Needle angle in radians: the device's heading negated (heading 90° =
-  /// facing east ⇒ north lies 90° to the left of "up"), minus the map's own
+  /// Needle angle in radians: the device's heading negated (heading 90� =
+  /// facing east ? north lies 90� to the left of "up"), minus the map's own
   /// rotation so the needle stays truthful on a rotated map. Camera not
-  /// ready ⇒ rotation contributes nothing.
+  /// ready ? rotation contributes nothing.
   double _needleAngle() {
     var deg = -_headingDeg;
     try {
       deg -= _mapCtl.camera.rotationRad * 180 / math.pi;
     } catch (_) {
-      /* camera not ready — device heading only */
+      /* camera not ready � device heading only */
     }
     return deg * math.pi / 180;
   }
@@ -185,7 +237,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   /// The compass badge: white circle, red needle + N that rotates with the
   /// device so the rider can hold the phone any way and still find north.
   /// TAPPING it snaps the map back to north-up (owner 2026-11-17: the familiar
-  /// tap-to-north behaviour) — a two-finger rotate no longer strands the map
+  /// tap-to-north behaviour) � a two-finger rotate no longer strands the map
   /// sideways.
   Widget _compassBadge() => Tooltip(
         message: 'Tap to switch between heading-up and north-up',
@@ -221,7 +273,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     return const Distance().bearing(widget.rider!, target);
   }
 
-  /// The direction the rider is ACTUALLY travelling — the bearing of the road
+  /// The direction the rider is ACTUALLY travelling � the bearing of the road
   /// segment they are on, not the straight-line bearing to the final pin. The
   /// bike nose follows every bend instead of pointing at the destination while
   /// the road doubles back (owner 2026-11-19: "icon faces elsewhere").
@@ -255,7 +307,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try { return _mapCtl.camera.rotationRad * 180 / math.pi; } catch (_) { return 0; }
   }
 
-  /// The rider's vehicle on the map — just the vehicle, no frame/badge.
+  /// The rider's vehicle on the map � just the vehicle, no frame/badge.
   Widget _riderMarker() {
     return SizedBox(
       width: 64,
@@ -270,12 +322,12 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     );
   }
 
-  /// Compass tap → north-up. flutter_map's rotate(0) is due-north; guarded —
+  /// Compass tap ? north-up. flutter_map's rotate(0) is due-north; guarded �
   /// the camera may not be ready yet, in which case the map is already north.
   bool _headingUp = false; // compass toggles heading-up / north-up
 
-  /// Compass tap → FACE FORWARD (owner 2026-11-18): rotate the map so the
-  /// direction the phone/rider faces is the top of the screen — for riders
+  /// Compass tap ? FACE FORWARD (owner 2026-11-18): rotate the map so the
+  /// direction the phone/rider faces is the top of the screen � for riders
   /// with the phone in a holder, "up" must mean where they are going.
   void _snapNorth() {
     HapticFeedback.selectionClick();
@@ -284,7 +336,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try {
       _mapCtl.rotate(deg * math.pi / 180);
     } catch (_) {
-      /* camera not ready — the map is already north-up */
+      /* camera not ready � the map is already north-up */
     }
     setState(() {}); // repaint the rider badge against the new rotation
   }
@@ -313,7 +365,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   void didUpdateWidget(covariant RiderMap oldWidget) {
     super.didUpdateWidget(oldWidget);
     // SMART NAVIGATION (owner 2026-11-18): as the rider moves, follow the bike
-    // and zoom in nearer the destination — the map scales with the journey.
+    // and zoom in nearer the destination � the map scales with the journey.
     if (widget.rider == null || widget.rider == oldWidget.rider) return;
     final target = widget.route?.isNotEmpty == true ? widget.route!.last : (widget.pickup ?? widget.depot);
     if (target == null) return;
@@ -323,7 +375,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       _mapCtl.move(widget.rider!, zoom);
       if (_headingUp) _mapCtl.rotate(_headingDeg * math.pi / 180);
     } catch (_) {
-      /* camera not ready yet — initialCameraFit takes over */
+      /* camera not ready yet � initialCameraFit takes over */
     }
   }
 
@@ -333,18 +385,22 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       future: _assets,
       builder: (context, snap) {
         if (snap.hasError) {
-          return _offlineFallback('Map could not load — your position and navigation are still shown.');
+          // Defensive: _loadAssets catches its own failures, but a future
+          // regression must never blank the map during onboarding.
+          CrashReporting.reportCaught('RiderMap assets future failed', snap.error, snap.stackTrace);
+          return _offlineFallback('Basemap could not load � retry below.', onRetry: _retryMap);
         }
         if (!snap.hasData) {
           return const Center(child: AppLogoSpinner(size: 26));
         }
+        final assets = snap.data!;
         final firstStop = (widget.stops != null && widget.stops!.isNotEmpty)
             ? LatLng((widget.stops!.first['lat'] as num).toDouble(),
                 (widget.stops!.first['lng'] as num).toDouble())
             : null;
         final center = widget.rider ?? widget.pickup ?? widget.depot ?? firstStop ?? RiderMap.chibolya;
         final bounds = _bounds;
-        // Route casing: dark outline under the green core — the route reads
+        // Route casing: dark outline under the green core � the route reads
         // on any basemap style and on sunny-screen glare.
         final casing = widget.route != null && widget.route!.length > 1
             ? Polyline(points: widget.route!, strokeWidth: 7.5, color: const Color(0xFF0F3B2D))
@@ -359,7 +415,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               initialCenter: center,
               initialZoom: 13.5,
               // Zoom discipline (owner 2026-11-18 "why is the rider map
-              // different"): a tight fit — rider standing on the stop — used
+              // different"): a tight fit � rider standing on the stop � used
               // to zoom past the basemap's detail level and render a bare
               // area. Capped, so the rider map always reads like the sender's
               // tracking view.
@@ -369,11 +425,16 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               maxZoom: 16.5,
             ),
             children: [
-              VectorTileLayer(
-                theme: snap.data!.theme,
-                tileProviders: TileProviders({'protomaps': snap.data!.provider}),
-                fileCacheTtl: const Duration(days: 30),
-              ),
+              if (assets.hasBasemap)
+                VectorTileLayer(
+                  theme: assets.theme,
+                  tileProviders: TileProviders({'protomaps': assets.provider!}),
+                  fileCacheTtl: const Duration(days: 30),
+                )
+              else
+                // Neutral canvas instead of a dead green box: riders still get
+                // their bike, stops, route and compass while the basemap heals.
+                const IgnorePointer(child: ColoredBox(color: Color(0xFFEDF2EC))),
               // Labels are rendered by the PMTiles/Protomaps theme; avoid third-party
               // label overlays that require external API keys.
               if (casing != null && core != null)
@@ -398,7 +459,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                           (widget.stops![i]['lng'] as num).toDouble()),
                       width: '${widget.stops![i]['kind']}' == 'saved' ? 56 : 34,
                       height: '${widget.stops![i]['kind']}' == 'saved' ? 68 : 34,
-                      // Context pins carry a kind → a small icon badge (the
+                      // Context pins carry a kind ? a small icon badge (the
                       // "other half" of the job the rider isn't heading to
                       // right now); unkinded stops stay numbered (batch stops).
                       child: switch (widget.stops![i]['kind']) {
@@ -436,7 +497,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               ]),
             ],
           ),
-          // Zoom + re-fit controls — our map, our chrome.
+          // Zoom + re-fit controls � our map, our chrome.
           Positioned(
             top: 12,
             right: 12,
@@ -464,10 +525,30 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(4))),
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                child: Text('DropOff map · map data © OpenStreetMap contributors', style: TextStyle(color: Colors.white, fontSize: 9)),
+                child: Text('DropOff map � map data � OpenStreetMap contributors', style: TextStyle(color: Colors.white, fontSize: 9)),
               ),
             ),
           ),
+          if (!assets.hasBasemap)
+            Positioned(
+              top: 10,
+              left: 10,
+              right: 60,
+              child: Material(
+                color: Colors.white.withValues(alpha: 0.96),
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  child: Row(children: [
+                    const Icon(Icons.map_outlined, size: 17, color: AppColors.amber),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text('Basemap offline � your position and route still show.',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.ink))),
+                    TextButton(onPressed: _retryMap, child: const Text('Retry')),
+                  ]),
+                ),
+              ),
+            ),
           if (widget.routeIsStraightLine)
             const Positioned(
               left: 8,
@@ -476,7 +557,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(6))),
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Text('Direct line — turn-by-turn unavailable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
+                  child: Text('Direct line � turn-by-turn unavailable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
                 ),
               ),
             ),
@@ -500,7 +581,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try {
       _mapCtl.move(_mapCtl.camera.center, (_mapCtl.camera.zoom + delta).clamp(3, 18).toDouble());
     } catch (_) {
-      /* camera not ready — ignore */
+      /* camera not ready � ignore */
     }
   }
 
@@ -510,19 +591,29 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
           .fit(_mapCtl.camera);
       _mapCtl.move(fitted.center, fitted.zoom);
     } catch (_) {
-      /* camera not ready — ignore */
+      /* camera not ready � ignore */
     }
   }
 
-  Widget _offlineFallback(String message) => Container(
-        color: AppColors.forest,
+  Widget _offlineFallback(String message, {required VoidCallback onRetry}) => Container(
+        // Neutral canvas, never the old solid-green dead end (owner onboarding
+        // report: 'green on maps'). The normal degraded path keeps markers and
+        // route; this is only the rare defensive error path.
+        color: const Color(0xFFEDF2EC),
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.signal_wifi_off_rounded, color: Color(0xFFE8A020), size: 40),
+              const Icon(Icons.map_outlined, color: AppColors.amber, size: 40),
               const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFD8E4D8), height: 1.5)),
+              Text(message, textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.ink, fontWeight: FontWeight.w700, height: 1.5)),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Retry map'),
+              ),
             ]),
           ),
         ),

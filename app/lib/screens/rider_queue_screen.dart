@@ -979,7 +979,17 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         appBar: AppBar(
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
-          title: const Text('Receipt — show at the depot counter'),
+          // Bounded + two lines: the old single-line title was clipped to
+          // "Receipt - show at the depot cou..." on narrow phones.
+          title: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width - 72),
+            child: const Text(
+              'Receipt — show at the depot counter',
+              maxLines: 2,
+              softWrap: true,
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, height: 1.2),
+            ),
+          ),
         ),
         body: InteractiveViewer(
           maxScale: 5,
