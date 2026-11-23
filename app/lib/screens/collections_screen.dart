@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../ui/proof_upload_overlay.dart';
 import '../ui/app_toast.dart';
 import '../ui/receipt_viewer.dart';
 import 'package:flutter/material.dart';
@@ -148,7 +149,12 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     final bytes = await picked.readAsBytes();
     DateTime? capturedAt;
     try { capturedAt = await picked.lastModified(); } catch (_) {}
-    final up = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'receipt.jpg', kind: 'receipt', capturedAt: capturedAt);
+    if (!mounted) return;
+    final up = await ProofUploadOverlay.run(
+      context,
+      title: 'Securing payment receipt',
+      task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'receipt.jpg', kind: 'receipt', capturedAt: capturedAt),
+    );
     if (!mounted) return;
     setState(() => _receiptBusy = false);
     if (!up.ok) return AppToast.error(context, 'Could not upload the receipt. Try again.');
@@ -530,13 +536,16 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             if (_receiptUrl != null) ...[
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                // CONTAIN keeps the burned-in DropOff timestamp visible.
-                child: ColoredBox(
-                  color: AppColors.line.withValues(alpha: 0.18),
-                  // AUTH-GATED + URL-SAFE: AuthedImage normalises /media paths
-                  // and absolute URLs and shows a spinner until the photo loads.
-                  child: AuthedImage(ReceiptViewer.resolve(_receiptUrl!),
-                      height: 120, width: double.infinity, fit: BoxFit.contain),
+                // Tapping the preview OPENS it — it never deletes the receipt.
+                child: GestureDetector(
+                  onTap: () => ReceiptViewer.show(context,
+                      path: _receiptUrl!, title: 'Collection receipt'),
+                  // CONTAIN keeps the burned-in DropOff timestamp visible.
+                  child: ColoredBox(
+                    color: AppColors.line.withValues(alpha: 0.18),
+                    child: AuthedImage(ReceiptViewer.resolve(_receiptUrl!),
+                        height: 120, width: double.infinity, fit: BoxFit.contain),
+                  ),
                 ),
               ),
               const SizedBox(height: 6),

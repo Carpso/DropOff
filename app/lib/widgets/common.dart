@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'courier_logo.dart';
 import '../data/dropoff_api.dart';
 import '../ui/in_app_browser.dart';
 import '../models/booking.dart';
@@ -259,43 +260,19 @@ class StateMessage extends StatelessWidget {
   }
 }
 
-/// Rounded initials chip for a courier operator (used wherever a courier is
-/// shown: directory, booking step 2, collections form).
+/// Courier operator mark wherever a courier is shown (directory, booking
+/// step 2, collections form). Real bundled logo when available, premium
+/// brand-coloured monogram otherwise — never a dead hotlink.
 class CourierAvatar extends StatelessWidget {
   final CourierInfo courier;
   final double size;
   const CourierAvatar({super.key, required this.courier, this.size = 50});
 
-  String get initials {
-    final words = courier.name.split(' ');
-    return words.length == 1 ? words.first.substring(0, 1) : '${words.first[0]}${words[1][0]}';
-  }
-
   @override
-  Widget build(BuildContext context) {
-    final logo = courier.logoUrl;
-    final base = Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(color: Color(courier.colorValue).withValues(alpha: 0.11), borderRadius: BorderRadius.circular(size * 0.3)),
-      child: Text(initials, style: TextStyle(color: Color(courier.colorValue), fontWeight: FontWeight.w900, fontSize: size * 0.32)),
-    );
-    if (logo == null || logo.isEmpty) return base;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.3),
-      child: Container(
-        width: size,
-        height: size,
-        color: Colors.white,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.all(3),
-        child: Image.network(
-          logo,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => base,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => CourierLogo(
+        name: courier.name,
+        logoUrl: courier.logoUrl,
+        colorValue: courier.colorValue,
+        size: size,
+      );
 }

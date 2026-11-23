@@ -48,6 +48,10 @@ class InAppNavigatorScreen extends StatefulWidget {
   final bool otherIsDepot;
   final String? otherLabel;
 
+  /// True when the destination could not be geocoded to a street pin and the
+  /// navigator is using a city-centre anchor. Shown honestly in the UI.
+  final bool approximateLocation;
+
   /// Server-decided vehicle class so the rider navigator shows the same
   /// branded bike/car the sender sees on the tracking map.
   final String vehicleClass;
@@ -63,6 +67,7 @@ class InAppNavigatorScreen extends StatefulWidget {
     this.otherIsDepot = false,
     this.otherLabel,
     this.vehicleClass = 'motorcycle',
+    this.approximateLocation = false,
   });
 
   @override
@@ -446,6 +451,19 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         ],
       ),
       body: Stack(children: [
+        if (widget.approximateLocation)
+          Positioned(
+            top: 10, left: 10, right: 10,
+            child: IgnorePointer(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.95), borderRadius: BorderRadius.circular(10)),
+                child: const Text('Approximate location — exact street pin unavailable',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w800)),
+              ),
+            ),
+          ),
         RiderMap(
           pickup: _dest,
           pickupIsDepot: widget.destIsDepot,

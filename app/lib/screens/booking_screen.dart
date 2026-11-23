@@ -5,6 +5,7 @@
 // All rights reserved — unauthorised copying, resale or rebranding of
 // this source code is prohibited.
 // ─────────────────────────────────────────────────────────────────────
+import '../ui/proof_upload_overlay.dart';
 import '../ui/app_toast.dart';
 import '../ui/pay_job.dart';
 import 'dart:async';
@@ -540,7 +541,12 @@ class _BookingScreenState extends State<BookingScreen> {
     final bytes = await picked.readAsBytes();
     DateTime? capturedAt;
     try { capturedAt = await picked.lastModified(); } catch (_) {}
-    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'item.jpg', kind: 'kyc', capturedAt: capturedAt);
+    if (!mounted) return;
+    final res = await ProofUploadOverlay.run(
+      context,
+      title: 'Securing item photo',
+      task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'item.jpg', kind: 'kyc', capturedAt: capturedAt),
+    );
     if (!mounted) return;
     setState(() {
       _parcelPhotoUploading = false;

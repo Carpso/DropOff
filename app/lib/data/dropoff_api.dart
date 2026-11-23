@@ -1240,6 +1240,16 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> latestJobPayment(String jobRef) async =>
       (await get('/jobs/$jobRef/payments'))?['payment'] as Map<String, dynamic>?;
 
+  /// Courier partner desk (role=partner, pinned to the account's courier_id).
+  static Future<Map<String, dynamic>?> partnerMe() => get('/partner/me');
+
+  static Future<Map<String, dynamic>?> partnerQuotes() => get('/partner/quotes');
+
+  static Future<Map<String, dynamic>?> partnerRides() => get('/partner/rides');
+
+  static Future<ApiResponse> partnerConfirmRide(String ref, {String? waybill}) =>
+      post('/partner/rides/${Uri.encodeComponent(ref)}/confirm', {'waybill': waybill});
+
   /// Seller subscription plans (live prices come from /plans; seeded at Silver
   /// Silver K250 / Gold K500 / Platinum K750, Weekly Sprint K399.
   /// Cycle length comes from the plan (1 / 7 / 30 days); every parcel counts

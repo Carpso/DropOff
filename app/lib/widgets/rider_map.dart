@@ -5,6 +5,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:http/http.dart' as http;
+import 'package:pmtiles/pmtiles.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
@@ -148,7 +150,25 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       open(RiderMap.lusakaTileUrl, const Duration(seconds: 6)),
     ]);
     final regional = opened[0];
-    final lusaka = opened[1];
+    VectorTileProvider? lusaka = opened[1];
+    if (lusaka == null) {
+      // Networks that refuse Range requests (some MTN/Airtel configurations,
+      // VPNs, Private DNS) make PMTiles' byte-range opener fail entirely. The
+      // Lusaka archive is only ~30 MB, so download it once into memory and
+      // read it locally — this is the difference between a map and green box
+      // on those connections (owner onboarding report 2026-11-23).
+      try {
+        final res = await http.get(Uri.parse(RiderMap.lusakaTileUrl))
+            .timeout(const Duration(seconds: 60));
+        if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+          final archive = await PmTilesArchive.fromBytes(res.bodyBytes);
+          lusaka = PmTilesVectorTileProvider.fromArchive(archive);
+          debugPrint('RiderMap: Lusaka archive loaded as a full download (${res.bodyBytes.length} bytes)');
+        }
+      } catch (e) {
+        debugPrint('RiderMap: full-download fallback failed: $e');
+      }
+    }
     VectorTileProvider? provider;
     if (regional != null && lusaka != null) {
       provider = CityFirstTileProvider(

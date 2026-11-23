@@ -10,6 +10,8 @@ import '../main.dart';
 import '../models/booking.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_sheet.dart';
+import '../widgets/courier_logo.dart';
+import '../widgets/courier_status_pill.dart';
 import '../widgets/common.dart';
 import '../widgets/sample_stamp.dart';
 import 'account_screen.dart';
@@ -170,34 +172,12 @@ class _LiveDepotsSection extends StatelessWidget {
   final String query;
   const _LiveDepotsSection({required this.query});
 
-  static String _initialsOf(String name) {
-    final words = name.split(RegExp(r'\s+'));
-    if (words.isEmpty || words.first.isEmpty) return '??';
-    return words.length == 1 ? words.first.substring(0, 1) : '${words.first[0]}${words[1][0]}';
-  }
-
   static Widget _logo(String? url, String name, double size) {
-    if (url == null || url.isEmpty) {
-      return Container(
-        width: size, height: size, alignment: Alignment.center,
-        decoration: BoxDecoration(color: AppColors.forestLight.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(size * 0.3)),
-        child: Text(_initialsOf(name), style: const TextStyle(color: AppColors.forestLight, fontWeight: FontWeight.w900, fontSize: 15)),
-      );
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.3),
-      child: Container(
-        width: size, height: size, color: Colors.white,
-        child: Image.network(
-          url, fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => Container(
-            alignment: Alignment.center,
-            color: AppColors.forestLight.withValues(alpha: 0.1),
-            child: Text(_initialsOf(name), style: TextStyle(color: AppColors.forestLight, fontWeight: FontWeight.w900, fontSize: size * 0.3)),
-          ),
-        ),
-      ),
-    );
+    // Bundled logo or a designed monogram — dead third-party hotlinks used to
+    // render broken images here (owner 2026-11-23).
+    final asset = localCourierLogo(name) ??
+        ((url != null && url.trim().isNotEmpty) ? url : null);
+    return CourierLogo(name: name, logoUrl: asset, colorValue: 0xFF176B87, size: size);
   }
 
   @override
@@ -236,7 +216,10 @@ class _LiveDepotsSection extends StatelessWidget {
           return name.contains(q) || city.contains(q);
         }).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('LIVE PARTNER DEPOTS (${filtered.length})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.ink)),
+          Text('LISTED COURIER DEPOTS (${filtered.length})', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.ink)),
+          const SizedBox(height: 4),
+          const Text('Listed for routing and fare checks. "Partner depot" means a signed DropOff partner; other listings are not yet partnered.',
+              style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.35)),
           const SizedBox(height: 12),
           ...filtered.map<Widget>((c) {
             final isLusaka = '${c['city'] ?? ''}'.trim().toLowerCase() == 'lusaka';
@@ -264,7 +247,11 @@ class _LiveDepotsSection extends StatelessWidget {
                       _logo(c['logo_url'] as String?, '${c['name'] ?? '?'}', 46),
                       const SizedBox(width: 13),
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('${c['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                        Row(children: [
+                          Expanded(child: Text('${c['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          const SizedBox(width: 6),
+                          CourierStatusPill(partnered: c['partnered'] != null, compact: true),
+                        ]),
                         const SizedBox(height: 3),
                         LinkableText(
                           text: '${c['depot_name'] ?? ''} — ${c['city'] ?? ''}${(c['website'] as String?)?.isNotEmpty == true ? ' · ${c['website']}' : ''}',

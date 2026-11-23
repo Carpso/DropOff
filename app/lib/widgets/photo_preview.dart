@@ -14,10 +14,15 @@ class PhotoPreview extends StatelessWidget {
   final double size;
   final String label;
 
+  /// Tapping the photo OPENS it (zoomable). Deletion only ever happens through
+  /// the explicit, labelled remove button — never by tapping the image itself.
+  final VoidCallback? onTap;
+
   const PhotoPreview({
     super.key,
     required this.pathOrUrl,
     this.onRemove,
+    this.onTap,
     this.size = 84,
     this.label = 'Photo',
   });
@@ -44,7 +49,11 @@ class PhotoPreview extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(fit: StackFit.expand, children: [
-        image,
+        Positioned.fill(
+          child: onTap == null
+              ? image
+              : GestureDetector(onTap: onTap, child: image),
+        ),
         Positioned(
           left: 0, right: 0, bottom: 0,
           child: Container(
@@ -57,12 +66,17 @@ class PhotoPreview extends StatelessWidget {
         if (onRemove != null)
           Positioned(
             top: 2, right: 2,
-            child: GestureDetector(
-              onTap: onRemove,
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: const BoxDecoration(color: Color(0xCC000000), shape: BoxShape.circle),
-                child: const Icon(Icons.close, size: 14, color: Colors.white),
+            child: Tooltip(
+              message: 'Remove this photo',
+              child: InkWell(
+                onTap: onRemove,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(color: Color(0xCC000000), shape: BoxShape.circle),
+                  child: const Icon(Icons.close, size: 15, color: Colors.white),
+                ),
               ),
             ),
           ),

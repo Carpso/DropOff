@@ -65,7 +65,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'No public route/parcel price card is surfaced in-app. The counter fare is confirmed at the depot and recorded before dispatch. Handle-with-care parcels are charged at the office. Confirm the final counter charge before payment.',
     colorValue: 0xFF176B87,
-    logoUrl: 'https://www.platinumcourier.co.zm/wp-content/uploads/2023/01/Platinum-Logo.png',
+    logoUrl: null,
     // Rates confirmed at counter — none surfaced/invented in-app.
     rates: [],
     // Depot cities taken from the same published rate board (the towns the
@@ -99,7 +99,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Waybill sample dated 26 August 2026',
     note: 'No complete public domestic tariff was verified. The supplied Lusaka–Ndola sample shows one 40×20×20 cm piece, 3.20 kg chargeable weight: service K95.23 + fuel K8.00 + VAT K13.65 = K116.88. This is a sample transaction, NOT a general rate.',
     colorValue: 0xFF3B4652,
-    logoUrl: 'https://www.mercury.co.zm/wp-content/uploads/2023/01/Mercury-Logo.png',
+    logoUrl: 'assets/couriers/mercury.png',
     receiptAssets: ['assets/images/mercury_waybill.jpeg'],
   ),
   CourierInfo(
@@ -112,7 +112,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'No reliable public Zambia domestic price card was verified. Price depends on route, actual/volumetric weight and service. DropOff records the counter quote before dispatch.',
     colorValue: 0xFFD40511,
-    logoUrl: 'https://www.dhl.com/content/dam/dhl/local/zm/dhl-logo.png',
+    logoUrl: null,
   ),
   CourierInfo(
     id: 'rovert',
@@ -124,7 +124,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'Rovert Logistics runs SA→Zambia bound consignments (e-commerce/Takealot pickups + freight forwarding with customs clearing). Lusaka office: +260 572307906 (07:00–17:00 CAT). SA HQ: Building F, St Andrews Office Park, Meadowbrook Ln, Epsom Downs, Sandton 2152, +27 767360695. Services: procurement + delivery, delivery-only, self-service (your online cart), freight forwarding to Zambia/Botswana/Namibia/Mozambique/Malawi/Tanzania/Zimbabwe, FTL/LTL/container/refrigerated loads. No verifiable public tariff — rates on request (our counter quote is recorded before dispatch). DropOff booking: they are not a walk-in Lusaka depot network like Platinum; treat as SA-leg partner.',
     colorValue: 0xFF1B4F72,
-    logoUrl: 'https://rovertlogistics.co.za/wp-content/uploads/2023/01/Rovert-Logo.png',
+    logoUrl: null,
     branches: [
       CourierBranch(
         name: 'Lusaka office',
@@ -154,7 +154,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'Use a shipment-specific quote for domestic parcels. No fixed fare has been copied into DropOff without a verifiable tariff.',
     colorValue: 0xFF6941C6,
-    logoUrl: 'https://oneworld.co.zm/wp-content/uploads/2023/01/One-World-Logo.png',
+    logoUrl: null,
   ),
   CourierInfo(
     id: 'icypeed',
@@ -166,7 +166,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 4 November 2026',
     note: 'The public rate cards primarily cover UK/South Africa to Zambia forwarding. They must not be presented as Lusaka–Ndola domestic fares. Request a local counter quote instead.',
     colorValue: 0xFF147D92,
-    logoUrl: 'https://icypeed.com/wp-content/uploads/2023/01/Icypeed-Logo.png',
+    logoUrl: 'assets/couriers/icypeed.png',
   ),
   CourierInfo(
     id: 'falcon',
@@ -178,7 +178,7 @@ const couriers = <CourierInfo>[
     sourceDate: 'Checked 12 November 2026',
     note: 'Lusaka express courier. Woodlands HQ: 16 Mwapona Rd cnr Sianjalika Rd, Lusaka 10101 (also Chilenje: Choppies Mall, Muramba Rd). +260 971 130 766 · +260 966 297 000 · expressfalcon29@gmail.com. Mon–Fri 07:45–17:15, Sat 08:00–17:00, Sun 08:30–14:30. Dial-A-Collector pickups are free on their side. No public tariff — the counter fare is confirmed at the depot and recorded before dispatch.',
     colorValue: 0xFFB25E09,
-    logoUrl: 'https://www.izambia.net/falcon-express/logo.png',
+    logoUrl: null,
     branches: [
       CourierBranch(
         name: 'Woodlands HQ',
@@ -201,6 +201,16 @@ const couriers = <CourierInfo>[
 ];
 
 CourierInfo courierById(String id) => couriers.firstWhere((courier) => courier.id == id);
+
+/// Local, self-hosted logo for a courier name when we have one. Always wins
+/// over a D1 `logo_url` — those were third-party hotlinks and most are dead.
+String? localCourierLogo(String name) {
+  final n = name.toLowerCase();
+  if (n.contains('mercury')) return 'assets/couriers/mercury.png';
+  if (n.contains('icypeed')) return 'assets/couriers/icypeed.png';
+  if (n.contains('postdotnet') || n.contains('pdn')) return 'assets/couriers/pdn.png';
+  return null;
+}
 
 /// Built-in catalog filtered to couriers toggled ON by the owner (the public
 /// /couriers endpoint returns only active rows). Unknown/offline → the full
@@ -245,6 +255,10 @@ List<CourierInfo> mergedCouriers(List<Map<String, dynamic>>? serverRows) {
       sourceDate: 'Live',
       note: '${r['note'] ?? ''}'.trim(),
       colorValue: 0xFF176B87,
+      logoUrl: localCourierLogo(name) ??
+          ((r['logo_url'] as String?)?.trim().isNotEmpty == true
+              ? '${r['logo_url']}'
+              : null),
       branches: [
         CourierBranch(name: '${r['depot_name'] ?? name}', city: city,
             lat: lat ?? lusakaAnchor.$1, lng: lng ?? lusakaAnchor.$2),

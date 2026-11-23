@@ -24,6 +24,7 @@ import '../state/app_store.dart';
 import '../ui/app_theme.dart';
 import '../ui/thermal_print.dart';
 import '../widgets/common.dart';
+import '../widgets/courier_logo.dart';
 import '../ui/app_spinner.dart';
 
 /// Owner directive (2026-11-12): the waybill title leads with the sender's
@@ -504,6 +505,15 @@ class _ReceiptCard extends StatelessWidget {
                     'DROPOFF',
                     style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17, letterSpacing: 4, color: AppColors.forest),
                   ),
+                  // Courier mark on the waybill (bundled logo or premium
+                  // monogram) — same identity the sender picked at booking.
+                  CourierLogo(
+                    name: courierName,
+                    logoUrl: localCourierLogo(courierName) ??
+                        (() { try { return courierById(courierId).logoUrl; } catch (_) { return null; } })(),
+                    size: 40,
+                  ),
+                  const SizedBox(height: 6),
                   // The SENDER's chosen depot leads the title — the counter this
                   // waybill is presented at (e.g. "PLATINUM COUNTER WAYBILL").
                   Text(

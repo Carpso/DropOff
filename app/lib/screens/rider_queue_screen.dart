@@ -11,12 +11,15 @@ import '../ui/app_toast.dart';
 import '../widgets/help_sheet.dart';
 import '../widgets/tutorial_sheet.dart';
 import '../widgets/photo_preview.dart';
+import '../ui/receipt_viewer.dart';
+import '../ui/proof_upload_overlay.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../data/map_services.dart';
 import '../data/analytics_service.dart';
@@ -25,7 +28,6 @@ import '../main.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_sheet.dart';
 import '../widgets/common.dart';
-import '../ui/in_app_browser.dart';
 import 'account_screen.dart';
 import 'in_app_navigator_screen.dart';
 import 'waybill_screen.dart' show waybillDepotTitle;
@@ -774,10 +776,16 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   Future<String?> _captureParcelPhoto() async {
     final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return null;
+    if (!mounted) return null;
     final bytes = await picked.readAsBytes();
     DateTime? capturedAt;
     try { capturedAt = await picked.lastModified(); } catch (_) {}
-    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'pickup.jpg', kind: 'kyc', capturedAt: capturedAt);
+    if (!mounted) return null;
+    final res = await ProofUploadOverlay.run(
+      context,
+      title: 'Securing item photo',
+      task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'pickup.jpg', kind: 'kyc', capturedAt: capturedAt),
+    );
     if (!mounted) return null;
     if (!res.ok) {
       AppToast.show(context, 'Photo upload failed. Check your connection and try the capture again.');
@@ -792,10 +800,16 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // is exactly what the pickup evidence policy forbids.
     final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return null;
+    if (!mounted) return null;
     final bytes = await picked.readAsBytes();
     DateTime? capturedAt;
     try { capturedAt = await picked.lastModified(); } catch (_) {}
-    final res = await DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc', capturedAt: capturedAt);
+    if (!mounted) return null;
+    final res = await ProofUploadOverlay.run(
+      context,
+      title: 'Securing proof photo',
+      task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc', capturedAt: capturedAt),
+    );
     if (!mounted) return null;
     if (!res.ok) {
       AppToast.show(context, 'Proof photo did not upload - check your connection and retake it.');
@@ -918,8 +932,33 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             : (picked
                 ? '$depotName depot ${s['from_city'] ?? ''}'.trim()
                 : '$addr${'${s['from_city'] ?? ''}'.trim().isNotEmpty ? ', ${s['from_city']}' : ''}'.trim());
+    // The destination city is ALWAYS known from the booking, so even a total
+    // geocoder outage can open the in-app navigator at a clearly-labelled
+    // approximate point. Never dead-end on a toast (owner 2026-11-23).
+    final targetCity = isDelivery
+        ? doorCity
+        : isCollection
+            ? (picked ? doorCity : '${s['from_city'] ?? ''}'.trim())
+            : '${s['from_city'] ?? ''}'.trim();
+    final anchor = cityCoords[targetCity.toLowerCase()] ??
+        cityCoords['lusaka'] ?? (-15.4255, 28.2805);
+    void openApprox() {
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => InAppNavigatorScreen(
+          destLat: anchor.$1, destLng: anchor.$2,
+          label: label,
+          destIsDepot: isDelivery ? false : isCollection ? !picked : picked,
+          approximateLocation: true,
+          otherLat: otherLat, otherLng: otherLng,
+          otherIsDepot: isDelivery ? true : isCollection ? picked : !picked,
+          vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}',
+        ),
+      ));
+    }
     if (query.isEmpty) {
-      _snack('This stop has no pin yet - pull to refresh or contact DropOff support.');
+      _snack('No street address on the booking — opening $targetCity centre as an approximate point.');
+      openApprox();
       return;
     }
     // Toast wording (owner 2026-11-18): say WHAT is being located and that the
@@ -965,9 +1004,30 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       ));
       return;
     }
-    // Geocode found nothing — silent last resort: the device's default maps
-    // handler. No button label, no brand name; just get the rider there.
-    await openInApp('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}');
+    // Geocoder missed (or Photon was unreachable). Try a CITY-ONLY query once
+    // more, then fall back to the known city centre — still inside DropOff's
+    // map, with an honest "approximate" badge. Never leave the rider staring
+    // at a toast with no map (owner 2026-11-23).
+    if (targetCity.isNotEmpty && targetCity.toLowerCase() != query.toLowerCase()) {
+      final cityHits = await MapServices.search(targetCity);
+      if (!mounted) return;
+      if (cityHits.isNotEmpty) {
+        final hit = cityHits.first;
+        Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => InAppNavigatorScreen(
+            destLat: hit.point.latitude, destLng: hit.point.longitude,
+            label: label, approximateLocation: true,
+            destIsDepot: isDelivery ? false : isCollection ? !picked : picked,
+            otherLat: otherLat, otherLng: otherLng,
+            otherIsDepot: isDelivery ? true : isCollection ? picked : !picked,
+            vehicleClass: '${s['vehicle_class'] ?? 'motorcycle'}',
+          ),
+        ));
+        return;
+      }
+    }
+    _snack('Exact pin unavailable — opening $targetCity centre as an approximate point.');
+    openApprox();
   }
 
   /// Full-screen proof-of-payment receipt — the rider shows this at the
@@ -1340,9 +1400,26 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             final err = r.error ?? '';
             final detail = (r.body['detail'] as String?)?.trim() ?? '';
             setDialog(() {
-              pinState = err == 'otp_locked' ? _PinCheck.locked : _PinCheck.wrong;
-              lastErrCode = err;
-              inlineError = detail.isNotEmpty ? detail : 'That code did not match — ask the sender to read their SMS again.';
+              switch (err) {
+                case 'not_needed':
+                  // Job already moved past pickup or no code was ever minted.
+                  pinState = _PinCheck.notNeeded;
+                  lastErrCode = err;
+                  inlineError = null;
+                case 'network_error' || 'offline_demo_mode':
+                  // NEVER call an unverifiable code "verified" — leave it
+                  // unchecked and ask for a retry (owner 2026-11-23).
+                  pinState = _PinCheck.idle;
+                  inlineError = 'Could not reach DropOff to check the code. Try again.';
+                case 'otp_locked':
+                  pinState = _PinCheck.locked;
+                  lastErrCode = err;
+                  inlineError = detail.isNotEmpty ? detail : 'Too many wrong codes — contact DropOff support.';
+                default:
+                  pinState = _PinCheck.wrong;
+                  lastErrCode = err;
+                  inlineError = detail.isNotEmpty ? detail : 'That code did not match — ask the sender to read their SMS again.';
+              }
             });
           }
 
@@ -1416,6 +1493,20 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                           _PinCheck.wrong || _PinCheck.locked => const Icon(Icons.error_outline, color: AppColors.danger),
                           _ => null,
                         },
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton.icon(
+                        onPressed: pinState == _PinCheck.checking || otpCtrl.text.trim().length != 4
+                            ? null
+                            : () {
+                                pinDebounce?.cancel();
+                                unawaited(verifyPin(otpCtrl.text.trim()));
+                              },
+                        icon: const Icon(Icons.verified_user_outlined, size: 15),
+                        label: const Text('Verify code with DropOff'),
                       ),
                     ),
                   ],
@@ -1738,10 +1829,15 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                         scrollDirection: Axis.horizontal,
                         itemCount: parcelPhotos.length,
                         separatorBuilder: (_, __) => const SizedBox(width: 8),
-                        itemBuilder: (_, i) => Stack(children: [
-                          ClipRRect(borderRadius: BorderRadius.circular(10), child: ColoredBox(color: AppColors.line.withValues(alpha: 0.18), child: AuthedImage(parcelPhotos[i], fit: BoxFit.contain, width: 96, height: 96))),
-                          Positioned(top: 2, right: 2, child: InkWell(onTap: () => setDialog(() => parcelPhotos.removeAt(i)), child: Container(padding: const EdgeInsets.all(2), decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle), child: const Icon(Icons.close, size: 12, color: Colors.white)))),
-                        ]),
+                        itemBuilder: (_, i) => PhotoPreview(
+                          pathOrUrl: parcelPhotos[i],
+                          size: 96,
+                          label: 'ITEM ${i + 1} · TAP TO VIEW',
+                          // Tapping the photo opens it — it NEVER deletes.
+                          onTap: () => ReceiptViewer.show(context,
+                              path: parcelPhotos[i], title: 'Item ${i + 1} proof photo'),
+                          onRemove: () => setDialog(() => parcelPhotos.removeAt(i)),
+                        ),
                       ),
                     ),
                   OutlinedButton.icon(
@@ -2047,8 +2143,20 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             final err = r.error ?? '';
             final detail = (r.body['detail'] as String?)?.trim() ?? '';
             setDialog(() {
-              pinState = err == 'otp_locked' ? _PinCheck.locked : _PinCheck.wrong;
-              pinError = detail.isNotEmpty ? detail : 'That door code did not match — ask the recipient to check it.';
+              switch (err) {
+                case 'not_needed':
+                  pinState = _PinCheck.notNeeded;
+                  pinError = null;
+                case 'network_error' || 'offline_demo_mode':
+                  pinState = _PinCheck.idle;
+                  pinError = 'Could not reach DropOff to check the code. Try again.';
+                case 'otp_locked':
+                  pinState = _PinCheck.locked;
+                  pinError = detail.isNotEmpty ? detail : 'Too many wrong codes — contact DropOff support.';
+                default:
+                  pinState = _PinCheck.wrong;
+                  pinError = detail.isNotEmpty ? detail : 'That door code did not match — ask the recipient to check it.';
+              }
             });
           }
 
@@ -2137,7 +2245,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   if (podUrl != null) ...[
                     const SizedBox(height: 8),
                     Row(children: [
-                      PhotoPreview(pathOrUrl: podUrl!, label: 'PROOF', size: 96),
+                      PhotoPreview(
+                        pathOrUrl: podUrl!,
+                        label: 'PROOF · TAP TO VIEW',
+                        size: 96,
+                        onTap: () => ReceiptViewer.show(context, path: podUrl!, title: 'Handover proof'),
+                      ),
                       const SizedBox(width: 10),
                       const Expanded(child: Text('Check this is the item you handed over before you confirm.', style: AppType.caption)),
                     ]),

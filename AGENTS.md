@@ -27,6 +27,58 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (thirty-seventh pass) — proof loader, photo delete bug, admin/partner
+
+- **Premium proof loader:** new `ui/proof_upload_overlay.dart` shows a pulsing
+  DropOff logo + ring + amber progress bar while a captured photo is stamped
+  and uploaded. Wired into rider pickup/handover proof, sender item photo and
+  collection payment receipt.
+- **Proof photo no longer deletes on tap:** `PhotoPreview` now has an explicit
+  `onTap` (opens the zoomable full-screen viewer) and a separate 28 px labelled
+  "Remove this photo" button. Rider parcel thumbnails use it instead of the
+  tiny X over the image.
+- **Map network fallback:** when PMTiles Range requests fail (the old green
+  screen on some mobile networks), the ~30 MB Lusaka archive is downloaded once
+  into memory and read locally (`PmTilesArchive.fromBytes`), added `pmtiles`
+  as a direct dependency. Green fallback removed in 0.5.77 — still seeing the
+  OLD text means an old APK is installed.
+- **Admin/web/partner audit:** web console now has a premium self-contained
+  design (cards, pills, responsive) and shows each courier's partnership state;
+  app has a real Partner tab backed by `/partner/me|quotes|rides|confirm`
+  instead of sender KPIs. Couriers show "Partner depot" or "Listed ·
+  partnership pending" with a tooltip explaining we list for routing and engage
+  once volume is confirmed. Full suite 58/58, analyze/tsc clean.
+
+## 2026-11-23 (thirty-sixth pass) — PIN truth, route fallback, courier logos/dashboards
+
+- **PIN truth:** pickup/door verify sheets now handle `not_needed` (job advanced
+  or no code minted) and `network_error` honestly. A network failure leaves the
+  code UNVERIFIED — it never ticks on an unanswered request. Added an explicit
+  "Verify code with DropOff" button beside the field; final `jobEvent` still
+  re-verifies server-side.
+- **Route fallback:** when Photon geocoding misses (or is unreachable), the
+  rider now gets the in-app navigator at the destination city's known centre
+  with an "Approximate location — exact street pin unavailable" banner, instead
+  of a toast and a silent external-maps hand-off. Empty address also opens the
+  navigator. External Google Maps fallback removed from that path.
+- **Courier logos:** fetched what remains live (Mercury, Icypeed, PostDotNet)
+  into `app/assets/couriers/`; all other hotlinks were dead (404/timeout).
+  New `CourierLogo` uses bundled assets or a premium brand-coloured monogram —
+  never a broken `Image.network`. Wired into directory, pickers and waybill.
+  `localCourierLogo()` gives bundled assets precedence over stale D1 URLs.
+- **Partnership indicator:** every listed courier now shows "Partner depot" or
+  "Listed · partnership pending" with a tooltip explaining we list operators
+  for routing/fare checks and engage them once volume is confirmed. Worker
+  `/couriers` and `/admin/couriers` expose a `partnered` flag computed from
+  `auth_users.role='partner' AND courier_id`; web console shows the pill.
+- **Partner desk:** real `PartnerScreen` (Partner tab) backed by
+  `/partner/me|quotes|rides|confirm` — the role previously saw sender spend
+  KPIs and had no console. Business tab hidden for partners.
+- **Web console:** modernised self-contained CSS (cards, header, pills, tables,
+  responsive), partnership column + logo in courier table.
+- **App admin:** role-gated partner theory fixed (partner no longer gets sender
+  KPIs). Full suite 58/58, analyze/tsc clean.
+
 ## 2026-11-23 (thirty-third pass) — waived-fare tick, ratings, map audit
 
 Owner: lingering banner on DRO-261123-RRW5B, waived fares not ticking paid,

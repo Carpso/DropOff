@@ -98,6 +98,8 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   String? get role => _role;
   bool get isStaff => _role == 'admin' || _role == 'ops' || _role == 'cfo';
   bool get isRider => _role == 'rider';
+  /// Courier depot owner/manager — gets the partner desk, not sender KPIs.
+  bool get isPartner => _role == 'partner';
   bool get isTeam => isStaff || isRider;
 
   /// True only for role=admin (superadmin included — the owner is always

@@ -8,6 +8,7 @@ import 'business_screen.dart';
 import 'couriers_screen.dart';
 import 'home_screen.dart';
 import 'operations_screen.dart';
+import 'partner_screen.dart';
 import 'rider_queue_screen.dart';
 
 class AppShell extends StatefulWidget {
@@ -38,9 +39,15 @@ class _AppShellState extends State<AppShell> {
     // RIDER LANDING (owner directive 2026-11-17): a rider's FIRST screen is
     // the Task queue — their slot-batched pickups are the whole job. The
     // queue replaces Home as the first tab; Business never shows for riders.
-    final showBusiness = store.linked && !store.isRider;
+    // A partner gets the depot desk instead of sender Business KPIs.
+    final showBusiness = store.linked && !store.isRider && !store.isPartner;
     final screens = <Widget>[
-      if (store.isRider) RiderQueueScreen(phone: store.linkedPhone) else HomeScreen(onOpenCouriers: () => goTo(1), onOpenBookings: () => goTo(2)),
+      if (store.isRider)
+        RiderQueueScreen(phone: store.linkedPhone)
+      else if (store.isPartner)
+        const PartnerScreen()
+      else
+        HomeScreen(onOpenCouriers: () => goTo(1), onOpenBookings: () => goTo(2)),
       const CouriersScreen(),
       const BookingsScreen(),
       if (showBusiness) const BusinessScreen(),
@@ -49,6 +56,8 @@ class _AppShellState extends State<AppShell> {
     final destinations = <NavigationDestination>[
       if (store.isRider)
         const NavigationDestination(icon: Icon(Icons.fact_check_outlined), selectedIcon: Icon(Icons.fact_check), label: 'Task Queue')
+      else if (store.isPartner)
+        const NavigationDestination(icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: 'Partner')
       else
         const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
       const NavigationDestination(icon: Icon(Icons.local_shipping_outlined), selectedIcon: Icon(Icons.local_shipping), label: 'Couriers'),

@@ -1669,7 +1669,7 @@ app.get('/auth/link', async (c) => {
       const m = document.getElementById('msg');
       m.textContent = r.ok ? 'Password saved — you can sign in in the app now.' : 'Link expired. Request a new one in the app.';
       m.style.color = r.ok ? '#17855f' : '#b3261e';
-    };</script></body></html>`);
+    };</script></main></body></html>`);
 });
 
 /** The reset form posts here; guarded by the token itself (sent by email). */
@@ -1853,6 +1853,7 @@ app.get('/couriers', async (c) => {
             (SELECT COUNT(DISTINCT q.from_city || '→' || q.to_city)
                FROM quotes q WHERE q.courier_id = co.id) AS quote_routes,
             (SELECT MAX(q.updated_at) FROM quotes q WHERE q.courier_id = co.id) AS quotes_updated_at,
+            (SELECT 1 FROM auth_users au WHERE au.courier_id = co.id AND au.role = 'partner' LIMIT 1) AS partnered,
             (SELECT ROUND(AVG(stars), 1) FROM ratings r
               WHERE r.target_type = 'courier' AND r.target_key = 'courier:' || co.id AND r.hidden = 0) AS rating_average,
             (SELECT COUNT(*) FROM ratings r
@@ -8919,12 +8920,33 @@ app.post('/recurring/:id/delete', deleteRecurringPlan); // client-friendly alias
 /* ---------------------------- web console pages ---------------------------- */
 // GET /console?key=… (superadmin HTML dashboard) + GET /partner/console (partner
 // panel; the page speaks JSON to /partner/* with the login token it asks for).
-const CONSOLE_CSS = `body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:860px;margin:24px auto;padding:0 16px;color:#10312a}
-h1{font-size:20px} table{border-collapse:collapse;width:100%;margin:12px 0} td,th{padding:6px 10px;border-bottom:1px solid #dde6e2;text-align:left;font-size:14px}
-th{background:#eef4f1} .kpi{display:inline-block;background:#eef4f1;border-radius:10px;padding:10px 16px;margin:4px 8px 4px 0;font-size:13px}
-.kpi b{display:block;font-size:20px} input,button,select{padding:8px;border-radius:8px;border:1px solid #cfd8d4;font-size:14px}
-button{background:#17855f;color:#fff;border:0;font-weight:700}
-.toggle.on{background:#17855f;color:#fff} .toggle.off{background:#c0392b;color:#fff}`;
+const CONSOLE_CSS = `:root{--forest:#10312a;--accent:#17855f;--amber:#B25E09;--line:#dce6e1;--muted:#60746c;--card:#fff;--bg:#f4f7f5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--forest);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{background:linear-gradient(120deg,#10312a,#1c5b48);color:#fff;padding:24px 28px;box-shadow:0 6px 24px #10312a22}
+header h1{margin:0;font-size:24px;letter-spacing:-.4px}header p{margin:6px 0 0;opacity:.82;font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:24px 20px 64px}
+section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin:0 0 20px;box-shadow:0 2px 10px #10312a0a}
+h2{margin:0 0 4px;font-size:17px;letter-spacing:-.2px}h2 span{font-size:11px;color:var(--muted);font-weight:500;margin-left:8px}
+p.hint{margin:4px 0 16px;color:var(--muted);font-size:12.5px}
+table{border-collapse:collapse;width:100%;margin:10px 0}td,th{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+th{background:#eef4f1;color:#33544a;font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+tr:last-child td{border-bottom:0}
+.kpi{display:inline-flex;flex-direction:column;background:#f5f9f7;border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:6px 10px 6px 0;min-width:130px}
+.kpi b{font-size:21px;letter-spacing:-.4px}.kpi small{color:var(--muted);font-size:11px}
+input,button,select{padding:9px 11px;border-radius:9px;border:1px solid #cfd8d4;font:inherit;font-size:13px;background:#fff;color:var(--forest)}
+input:focus,select:focus{outline:2px solid #17855f44;border-color:var(--accent)}
+button{background:var(--accent);color:#fff;border:0;font-weight:700;cursor:pointer;padding:9px 16px}
+button:hover{filter:brightness(1.07)}
+h1,h2,h3{font-weight:800}
+.toggle.on{background:#17855f;color:#fff}.toggle.off{background:#c0392b;color:#fff}
+.pill{display:inline-block;padding:3px 10px;border-radius:20px;font-size:10.5px;font-weight:800;letter-spacing:.3px}
+.pill.partner{background:#e2f5ec;color:#126b48;border:1px solid #bfe6d3}
+.pill.listed{background:#fff3d8;color:#8a5a08;border:1px solid #f0d69c}
+.pill.on{background:#e2f5ec;color:#126b48}.pill.off{background:#fdecea;color:#a52a1e}
+.empty{color:var(--muted);font-size:12.5px;padding:14px 0}
+.avatar{width:30px;height:30px;border-radius:8px;object-fit:contain;background:#fff;border:1px solid var(--line);vertical-align:middle;margin-right:8px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+@media(max-width:700px){main{padding:16px 12px 48px}section{padding:16px}table{font-size:12px}td,th{padding:8px 6px}header{padding:18px}}`;
 
 /** Superadmin console — open as https://<worker>/console#key=<ADMIN_AUTH_KEY>
  *  The FRAGMENT form is preferred: fragments never reach the server, so the
@@ -8943,8 +8965,9 @@ app.get('/console', (c) => {
   }
   return c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">
 <title>DropOff — Admin</title><style>${CONSOLE_CSS}</style></head><body>
-<h1>DropOff — superadmin console</h1>
-<div id="kpis">Loading…</div>
+<header><h1>DropOff · Control room</h1><p>Superadmin console — live operations, money and partner network</p></header>
+<main>
+<section><h2>Operations overview <span>last 30 days</span></h2><p class="hint">Live totals from the production database. Refresh the page for the latest figures.</p><div id="kpis">Loading…</div>
 <table id="tbl"><thead><tr><th>KPI</th><th>Last 30 days</th></tr></thead><tbody></tbody></table>
 <h2>Partner shops</h2>
 <p>Add email + courier id → the partner logs in with that email and confirms prices/rides.</p>
@@ -8967,7 +8990,7 @@ app.get('/console', (c) => {
 <button onclick="saveTier()">Save plan</button><span id="tMsg"></span>
 </div>
 <h2>Couriers — on/off (sellers never see an off courier)</h2>
-<table id="couriersTbl"><thead><tr><th>id</th><th>name</th><th>city</th><th>depot</th><th>on/off</th></tr></thead><tbody></tbody></table>
+<table id="couriersTbl"><thead><tr><th>id</th><th>name</th><th>city</th><th>depot</th><th>partnership</th><th>on/off</th></tr></thead><tbody></tbody></table>
 
 <h2>Promo codes (sellers)</h2>
 <table id="promosTbl"><thead><tr><th>code</th><th>% off</th><th>uses left</th><th>expires</th><th>applies</th><th>note</th></tr></thead><tbody></tbody></table>
@@ -9051,8 +9074,13 @@ async function toggleTier(tier, on) {
 }
 async function loadCouriers() {
   const r = await fetch('/admin/couriers', { headers: H }); const j = await r.json(); const tb = document.querySelector('#couriersTbl tbody'); tb.innerHTML = '';
-  for (const c of j.couriers ?? []) tb.insertAdjacentHTML('beforeend', '<tr><td>' + c.id + '</td><td>' + esc(c.name) + '</td><td>' + esc(c.city) + '</td><td>' + esc(c.depot_name) + '</td>' +
-    '<td><button class="toggle ' + (Number(c.active) === 1 ? 'on' : 'off') + '" onclick="toggleCourier(' + c.id + ',' + (Number(c.active) === 1 ? 0 : 1) + ')">' + (Number(c.active) === 1 ? 'ON' : 'OFF') + '</button></td></tr>');
+  for (const c of j.couriers ?? []) {
+    const partner = Number(c.partnered) === 1;
+    const logo = c.logo_url ? '<img class="avatar" src="' + esc(c.logo_url) + '" onerror="this.style.display=\'none\'">' : '';
+    const status = partner ? '<span class="pill partner">Partner depot</span>' : '<span class="pill listed">Listed · partnership pending</span>';
+    tb.insertAdjacentHTML('beforeend', '<tr><td class="mono">' + c.id + '</td><td>' + logo + esc(c.name) + '</td><td>' + esc(c.city ?? '') + '</td><td>' + esc(c.depot_name ?? '') + '</td><td>' + status + '</td>' +
+      '<td><button class="toggle ' + (Number(c.active) === 1 ? 'on' : 'off') + '" onclick="toggleCourier(' + c.id + ',' + (Number(c.active) === 1 ? 0 : 1) + ')">' + (Number(c.active) === 1 ? 'ON' : 'OFF') + '</button></td></tr>');
+  }
 }
 async function toggleCourier(id, on) {
   const r = await fetch('/admin/couriers', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
@@ -9078,13 +9106,14 @@ async function savePos() {
   const j = await r.json(); posMsg.textContent = r.ok ? ' ✔ saved' : ' ✖ ' + esc(j.error || 'failed'); loadPos();
 }
 loadTiers(); loadPromos(); loadPos(); loadCouriers();
-</script></body></html>`);
+</script></main></body></html>`);
 });
 
 /** Partner console — the partner logs in (email) and pastes the token. */
 app.get('/partner/console', (c) => c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DropOff — Partner</title><style>${CONSOLE_CSS}</style></head><body>
-<h1>DropOff — courier partner console</h1>
+<header><h1>DropOff · Partner desk</h1><p>Your depot's counter prices and incoming rides</p></header>
+<main>
 <p>Paste your login token from the app or one issued to you. In-browser logins keep the token local.</p>
 <input id="token" placeholder="login token" style="width:100%">
 <button onclick="load()">Open</button>
@@ -9412,7 +9441,8 @@ app.use('/admin/*', async (c, next) => {
 app.get('/admin/couriers', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const { results } = await c.env.DB.prepare(
-    `SELECT id, name, city, depot_name, lat, lng, website, price_status, note, active
+    `SELECT id, name, city, depot_name, lat, lng, website, price_status, note, active, logo_url,
+            (SELECT 1 FROM auth_users au WHERE au.courier_id = couriers.id AND au.role = 'partner' LIMIT 1) AS partnered
        FROM couriers ORDER BY active DESC, name`,
   ).all();
   return c.json({ couriers: results });
