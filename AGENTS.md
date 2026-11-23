@@ -27,6 +27,28 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (eighteenth pass) — release 0.5.70+80, sender prefill, PWA cache fix
+
+- **Release `0.5.70+80`** (code 79 was built but never uploaded; 80 keeps the
+  Play upload safe). APK 67.1 MB, AAB 51.8 MB, both built with
+  `--dart-define=DROPOFF_API_URL=https://api.carpsosolutions.store` and
+  `--no-pub` (a pub.dev advisories fetch failed mid-build and killed the first
+  AAB run — always build with `--no-pub` after a successful `pub get`).
+- **Sender prefill (owner 2026-11-22):** the booking form now fills
+  `Sender name` and `Sender mobile number` from the signed-in account
+  (`AppStore.fullName` / `AppStore.linkedPhone`) on first frame, but only when
+  the field is still empty — a repeat-booking snapshot or typed value always
+  wins. Implemented with `addPostFrameCallback` because `AppScope.of` walks an
+  InheritedNotifier and must not be read during `initState`'s build phase.
+- **PWA domain was serving a stale shell (owner 2026-11-22):** `app/web/sw.js`
+  v2 answered `index.html`/shell requests cache-first, so
+  `https://dropoff.carpsosolutions.store/` kept running the pre-deploy build.
+  v3 is **network-first with cache fallback** for shell + navigation, and the
+  cache name changed (`dropoff-web-v3`) so the old cache is dropped on
+  activate. Cross-origin API calls are still never intercepted.
+- Collection coverage added in `test/collection_flow_test.dart` (11 tests) and
+  `AppStore.stageFromJobStatus` made public for it; full suite is 33/33.
+
 ## 2026-11-22 (seventeenth pass) — map fully self-hosted on our R2
 
 - The basemap had two external dependencies left: Protomaps glyphs
