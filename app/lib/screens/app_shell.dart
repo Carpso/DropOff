@@ -65,12 +65,17 @@ class _AppShellState extends State<AppShell> {
       // grey band below the last card ("grey area on bottom scroll"). Wrapping
       // each tab in SizedBox.expand gives it tight constraints so the list
       // always fills the viewport (owner bug 2026-11-20).
-      body: IndexedStack(index: safeIndex, children: [
+      // Edge-to-edge (Android 15+): the app draws under the status bar, so the
+      // tab area must apply the top inset. Bottom is handled by NavigationBar.
+      body: SafeArea(
+        bottom: false,
+        child: IndexedStack(index: safeIndex, children: [
         // White behind EVERY tab: a short list must never show the canvas
         // grey band below its last card (owner bug 2026-11-20).
-        for (final screen in screens)
-          SizedBox.expand(child: ColoredBox(color: Colors.white, child: screen)),
-      ]),
+          for (final screen in screens)
+            SizedBox.expand(child: ColoredBox(color: Colors.white, child: screen)),
+        ]),
+      ),
       // Universal text-scale clamp: EVERY screen in the app lives below this
       // clamp (MaterialApp.builder), so rows can't crush into a vertical
       // ribbon on large-font phones (the "Business tab text reading down",

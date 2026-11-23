@@ -9,6 +9,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'ui/keys.dart';
 import 'data/catalog.dart' as cat;
@@ -191,6 +192,17 @@ void _performDeepLink(AppStore store, Uri uri) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // ANDROID 15+ EDGE-TO-EDGE (Play advisory on release 84): use the modern
+  // inset-based mode instead of the deprecated setSystemUiVisibility flags.
+  // Flutter then reports status/nav bar insets through MediaQuery, and every
+  // screen's SafeArea / AppBar / NavigationBar applies them.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    systemNavigationBarIconBrightness: Brightness.dark,
+  ));
   CrashReporting.init();
   final store = AppStore();
   _rootStore = store;

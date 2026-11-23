@@ -1,10 +1,8 @@
 # Flutter ProGuard rules
--keep class io.flutter.app.** { *; }
--keep class io.flutter.plugin.**  { *; }
--keep class io.flutter.util.**  { *; }
--keep class io.flutter.view.**  { *; }
--keep class io.flutter.**  { *; }
--keep class io.flutter.plugins.**  { *; }
+# Play Advisory (release 84) + R8 full mode: narrowed the old catch-alls.
+# `io.flutter.**` is the official Flutter rule and stays. The redundant
+# `io.flutter.plugin.**` / `io.flutter.plugins.**` were folded into it.
+-keep class io.flutter.** { *; }
 -dontwarn io.flutter.embedding.**
 -dontwarn io.flutter.plugins.embeddedviews.**
 -dontwarn io.flutter.plugins.android.**
@@ -24,5 +22,7 @@
 -dontwarn org.eclipse.jetty.**
 -dontwarn javax.annotation.**
 
-# Keep model classes used by JSON serialization
--keep class zm.dropoff.dropoff.** { *; }
+# Dropped the old `-keep class zm.dropoff.dropoff.** { *; }` catch-all:
+# our models use explicit jsonEncode/jsonDecode (no reflection), so R8 can
+# safely shrink unused app classes. If a plugin ever reflects a model, add a
+# targeted -keep for that one class here, not the whole package.

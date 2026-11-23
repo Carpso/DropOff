@@ -27,6 +27,29 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (twenty-ninth pass) — Play Console advisories (edge-to-edge + R8)
+
+Play flagged release 84: "Edge-to-edge may not display for all users (deprecated
+APIs or parameters)" and "Improve memory/performance with R8 optimization".
+Both are advisories, never upload blockers — but fixed for onboarding quality:
+
+1. **Edge-to-edge:** target SDK is 36 (Flutter 3.35 default). `main()` now calls
+   `SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge)` with
+   transparent status/nav bars before `runApp`, replacing deprecated
+   `setSystemUiVisibility`-era behaviour with MediaQuery insets. Audited
+   SafeArea coverage (40 existing) and wrapped AppShell's IndexedStack in
+   `SafeArea(bottom: false)` so the tab with no AppBar of its own (Business)
+   cannot sit under the status bar; NavigationBar handles the bottom inset.
+2. **R8 full mode:** `android/gradle.properties` now pins
+   `android.enableR8.fullMode=true` (AGP 8.9.1).
+3. **Keep rules narrowed:** removed the catch-all
+   `-keep class zm.dropoff.dropoff.** { *; }` — our models use explicit
+   jsonEncode/jsonDecode, no reflection; MainActivity is kept by the manifest.
+   Folded redundant `io.flutter.plugin.**` / `io.flutter.plugins.**` into the
+   official `io.flutter.**` rule. Flutter/Firebase rules retained.
+
+Full suite 54/54, analyze clean. Release `0.5.78+88`.
+
 ## 2026-11-23 (twenty-eighth pass) — receipt title unclipped; sentence-case fixes
 
 - The full-screen collection receipt sheet's AppBar title was clipped to
