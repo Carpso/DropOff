@@ -248,12 +248,10 @@ void _performTap(AppStore store, Map<String, dynamic>? data) {
   } else if (kind == 'support_reply' || kind == 'support' || kind == 'ticket') {
     routeTo = const TicketsScreen();
   } else if (kind == 'counter_fare_due' || kind == 'counter_fare_paid') {
-    if (jobRef != null && jobRef.isNotEmpty) {
-      final match = store.bookings.where((b) => b.serverRef == jobRef).firstOrNull;
-      routeTo = match != null ? BookingDetailScreen(bookingId: match.id) : const BookingsScreen();
-    } else {
-      routeTo = const BookingsScreen();
-    }
+    // ALWAYS land on Bookings: that screen runs the "courier receipt locked /
+    // Pay now" prompt on entry. BookingDetail has no such prompt, which is why
+    // a rider filing the fare produced no visible ask (owner 2026-11-23).
+    routeTo = const BookingsScreen();
   } else if (kind == 'job_assigned' || kind == 'rider_assigned' || kind == 'trip_transferred' || kind == 'deposit_paid' || kind == 'pickup_reminder' || kind == 'job_delivered' || kind == 'payment_received') {
     // RIDER ROUTING (owner audit 2026-11-21): these pushes are for the rider's
     // job — a sender Bookings screen is useless to them. AppShell index 0 IS
@@ -340,6 +338,8 @@ class _SplashScreenState extends State<_SplashScreen> {
   final _emailCtor = TextEditingController();
   final _passwordCtor = TextEditingController();
 
+  StreamSubscription<Map<String, dynamic>>? _pushSub;
+
   @override
   void initState() {
     super.initState();
@@ -348,13 +348,28 @@ class _SplashScreenState extends State<_SplashScreen> {
       if (!mounted) return;
       if (widget.store.linked && DropOffApi.token != null) {
         unawaited(PushService.register());
+        // Cold start with a fare filed while the app was closed: surface the
+        // prompt instead of waiting for the sender to open Bookings herself.
+        unawaited(DropOffApi.counterFareStatus().then((data) {
+          if (data?['due'] == true) _showCounterFarePrompt();
+        }));
       }
       setState(() {});
     });
+    // Foreground push: the worker fires counter_fare_due the moment a rider
+    // files the depot receipt. Show the prompt immediately, wherever she is.
+    _pushSub = PushService.onForegroundMessage.stream.listen((data) {
+      if ('${data['kind'] ?? ''}' == 'counter_fare_due') _showCounterFarePrompt();
+    });
+  }
+
+  void _showCounterFarePrompt() {
+    _runWhenReady(() => _performTap(widget.store, {'kind': 'counter_fare_due'}));
   }
 
   @override
   void dispose() {
+    _pushSub?.cancel();
     _emailCtor.dispose();
     _passwordCtor.dispose();
     super.dispose();

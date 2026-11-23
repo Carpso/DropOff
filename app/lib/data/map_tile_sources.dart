@@ -87,6 +87,20 @@ class CityFirstTileProvider extends VectorTileProvider {
         // regional archive is always the safety net.
       }
     }
+    // OVERZOOM: outside Lusaka the regional archive stops at z15, but the
+    // camera can reach 16.5 for the city. Asking regional for a z16 tile it
+    // never contained left blank squares across the rest of Zambia. Serve the
+    // nearest available parent tile instead — flutter_map scales it up, which
+    // is far better than an empty map (owner onboarding audit 2026-11-23).
+    if (tile.z > regional.maximumZoom) {
+      final steps = tile.z - regional.maximumZoom;
+      final parent = TileIdentity(
+        regional.maximumZoom,
+        tile.x >> steps,
+        tile.y >> steps,
+      );
+      return regional.provide(parent);
+    }
     return regional.provide(tile);
   }
 }

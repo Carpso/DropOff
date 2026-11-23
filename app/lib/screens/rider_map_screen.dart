@@ -77,14 +77,18 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
 
   /// Road-following rider→pickup route (OSRM). Refetched when the rider
   /// moves >150 m so the line tracks the drive, not a stale snapshot.
+  bool _routeLoading = false;
+
   Future<void> _maybeRoute() async {
     final me = _rider, dest = _pickup;
-    if (me == null || dest == null) return;
+    if (me == null || dest == null || _routeLoading) return;
     if (_route != null && _routeOrigin != null &&
         const Distance().as(LengthUnit.Meter, _routeOrigin!, me) < 150) {
       return;
     }
+    _routeLoading = true;
     final route = await MapServices.route(me, dest);
+    _routeLoading = false;
     if (!mounted) return;
     setState(() {
       _route = route;

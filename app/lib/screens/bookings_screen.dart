@@ -37,13 +37,22 @@ class BookingsScreen extends StatefulWidget {
   State<BookingsScreen> createState() => _BookingsScreenState();
 }
 
-class _BookingsScreenState extends State<BookingsScreen> {
+class _BookingsScreenState extends State<BookingsScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _incoming = const [];
   bool _counterPromptShown = false;
+  Timer? _fareSyncTimer;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      unawaited(AppScope.of(context).syncJobsFromServer());
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AnalyticsService.instance.trackScreenView('bookings');
     // Pull the account's server-side jobs (collections, standing orders,
     // ops-created jobs) into the local list — they would otherwise never
@@ -55,6 +64,18 @@ class _BookingsScreenState extends State<BookingsScreen> {
     });
     _refresh();
     _loadIncoming();
+    // An admin waiver can happen while this screen is open. Re-sync quietly so
+    // the paid tick / unlocked receipt appears without a restart or pull.
+    _fareSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) unawaited(AppScope.of(context).syncJobsFromServer());
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _fareSyncTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _maybePromptCounterFare() async {
@@ -1811,6 +1832,24 @@ class _PrepayCardState extends State<_PrepayCard> {
   }
 }
 
+/// Shared receipt actions: fetch the auth-gated photo, then hand it to the
+/// platform share sheet so the sender can send it straight to the recipient.
+Future<void> shareCourierReceipt(BuildContext context, String url, String ref) async {
+  try {
+    final uri = url.startsWith('http') ? Uri.parse(url) : Uri.parse('${DropOffApi.baseUrl}$url');
+    final res = await http.get(uri, headers: DropOffApi.authHeaders).timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) throw StateError('http_${res.statusCode}');
+    final isPng = uri.path.toLowerCase().endsWith('.png');
+    await Share.shareXFiles(
+      [XFile.fromData(res.bodyBytes, mimeType: isPng ? 'image/png' : 'image/jpeg',
+          name: 'dropoff-courier-receipt-$ref.${isPng ? 'png' : 'jpg'}')],
+      subject: 'DropOff courier receipt',
+    );
+  } catch (_) {
+    if (context.mounted) AppToast.error(context, 'Could not download the receipt — check your connection and try again.');
+  }
+}
+
 /// Post-journey receipt action (owner 2026-11-21). Locked = greyed out with a
 /// lock icon; tapping it starts the momo prompt for the EXACT amount the rider
 /// photographed on the courier's receipt. Once settled, the same button saves
@@ -1857,24 +1896,45 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
 
   Future<void> _download(String url) async {
     setState(() => _busy = true);
-    try {
-      final uri = url.startsWith('http') ? Uri.parse(url) : Uri.parse('${DropOffApi.baseUrl}$url');
-      final res = await http.get(uri, headers: DropOffApi.authHeaders).timeout(const Duration(seconds: 30));
-      if (res.statusCode != 200) throw StateError('http_${res.statusCode}');
-      final isPng = uri.path.toLowerCase().endsWith('.png');
-      await Share.shareXFiles(
-        [XFile.fromData(
-          res.bodyBytes,
-          mimeType: isPng ? 'image/png' : 'image/jpeg',
-          name: 'dropoff-courier-receipt-${widget.booking.serverRef ?? widget.booking.reference}.${isPng ? 'png' : 'jpg'}',
-        )],
-        subject: 'DropOff courier receipt',
-      );
-    } catch (_) {
-      if (mounted) AppToast.error(context, 'Could not download the receipt — check your connection and try again.');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    await shareCourierReceipt(context, url, widget.booking.serverRef ?? widget.booking.reference);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  /// Full-screen receipt the sender can inspect and then share with the
+  /// recipient. Download uses the SAME auth-gated fetch as [ _download ].
+  Future<void> _viewReceipt(String url) async {
+    await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: const Text('Courier receipt', style: TextStyle(fontWeight: FontWeight.w900)),
+          actions: [
+            IconButton(
+              tooltip: 'Download / share receipt',
+              icon: const Icon(Icons.ios_share),
+              onPressed: () => shareCourierReceipt(context, url, widget.booking.serverRef ?? widget.booking.reference),
+            ),
+          ],
+        ),
+        body: InteractiveViewer(
+          maxScale: 5,
+          child: Center(child: AuthedImage(url, fit: BoxFit.contain)),
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: FilledButton.icon(
+              onPressed: _busy ? null : () => shareCourierReceipt(context, url, widget.booking.serverRef ?? widget.booking.reference),
+              icon: const Icon(Icons.download_outlined, size: 17),
+              label: const Text('Download courier receipt'),
+            ),
+          ),
+        ),
+      ),
+    ));
   }
 
   @override
@@ -1974,8 +2034,25 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
                 await _payReceiptBill();
               }
             } : null,
-            icon: _busy ? const AppLogoSpinner(size: 16) : Icon(paid ? Icons.download_outlined : Icons.lock_open_outlined, size: 17),
-            label: Text(paid ? 'Download courier receipt' : 'Pay the courier bill — unlock receipt', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5)),
+            icon: _busy ? const AppLogoSpinner(size: 16) : Icon(paid ? Icons.download_outlined : Icons.lock_outline, size: 17),
+            label: Text(paid ? 'Download courier receipt' : 'Download courier receipt — locked', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5)),
+          ),
+        if (paid && url.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: TextButton.icon(
+              onPressed: () => _viewReceipt(url),
+              icon: const Icon(Icons.visibility_outlined, size: 16),
+              label: const Text('View receipt full screen'),
+            ),
+          ),
+        if (!paid && !awaitingAmount)
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              'Tap the locked receipt to start the momo prompt — paying unlocks the photo so you can download and send it to your recipient.',
+              style: AppType.caption,
+            ),
           ),
         if (!paid && !awaitingAmount)
           Padding(
@@ -2163,6 +2240,16 @@ class _CounterReceiptPaidCard extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => shareCourierReceipt(context, receipts.first.$2,
+                  booking.serverRef ?? booking.reference),
+              icon: const Icon(Icons.ios_share, size: 17),
+              label: const Text('Download & share receipt with recipient'),
+            ),
+          ),
         ]),
       ),
     );

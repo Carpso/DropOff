@@ -137,15 +137,15 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
         } catch (e) {
           debugPrint('RiderMap could not open $url (attempt ${attempt + 1}): $e');
           error = '${error ?? ''} ${Uri.parse(url).pathSegments.last}: $e';
-          if (attempt == 0) await Future<void>.delayed(const Duration(milliseconds: 500));
+          if (attempt == 0) await Future<void>.delayed(const Duration(milliseconds: 250));
         }
       }
       return null;
     }
 
     final opened = await Future.wait([
-      open(RiderMap.tileUrl, const Duration(seconds: 12)),
-      open(RiderMap.lusakaTileUrl, const Duration(seconds: 10)),
+      open(RiderMap.tileUrl, const Duration(seconds: 6)),
+      open(RiderMap.lusakaTileUrl, const Duration(seconds: 6)),
     ]);
     final regional = opened[0];
     final lusaka = opened[1];
@@ -190,12 +190,6 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   }
   final MapController _mapCtl = MapController();
 
-  // BIKE PULSE (owner 2026-11-18: "make the bike icon more 3d or lively"): a
-  // repeating radar ring behind the rider badge � the map reads as live even
-  // between the 12 s fixes.
-  late final AnimationController _pulse =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..repeat();
-
   // COMPASS (owner directive 2026-11-17: "I kept turning the phone in order
   // to track my north of the route direction"): a live needle badge that
   // always points at true north, tracking both the device heading and any
@@ -209,6 +203,9 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     _compassSub = FlutterCompass.events?.listen((event) {
       final h = event.heading;
       if (h == null || !mounted) return;
+      // Sensor noise can stream at 60 Hz; only rebuild the map when the needle
+      // visibly moves. Without this the vector layer rebuilds continuously.
+      if ((h - _headingDeg).abs() < 1.0) return;
       setState(() => _headingDeg = h);
     });
   }
@@ -216,7 +213,6 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     _compassSub?.cancel();
-    _pulse.dispose();
     super.dispose();
   }
 

@@ -1891,7 +1891,7 @@ app.get('/couriers/:id/profile', async (c) => {
   }
   const rating = await c.env.DB.prepare(
     `SELECT COUNT(*) AS count, ROUND(AVG(stars), 2) AS average
-       FROM ratings WHERE target_type = 'courier' AND target_key = ?1`,
+       FROM ratings WHERE target_type = 'courier' AND target_key = ?1 AND hidden = 0`,
   ).bind(`courier:${id}`).first<any>();
   const { results: reviews } = await c.env.DB.prepare(
     `SELECT stars, comment, verified, created_at FROM ratings
@@ -4192,15 +4192,19 @@ app.post('/jobs/:ref/rate', async (c) => {
       return c.json({ error: 'not found' }, 404); // no existence leak
     }
   }
-  // The SENDER is rated by the RECIPIENT only. Riders/couriers cannot score
-  // themselves either (target keys resolve back to their own ids).
-  if (targetType === 'seller' && reviewer === job.sender_phone) {
+  // The SENDER is rated by the RECIPIENT ONLY (owner 2026-11-23). The old
+  // guard merely blocked the sender's own phone, so an assigned rider/courier
+  // could score a sender they never received from. Staff keep their override.
+  if (!staff && targetType === 'seller') {
+    if (reviewer === job.sender_phone) return c.json({ error: 'cannot_rate_self' }, 403);
+    if (reviewer !== job.recipient_phone) {
+      return c.json({ error: 'recipient_only', detail: 'Only the recipient can rate the sender.' }, 403);
+    }
+  }
+  if (!staff && targetType === 'driver' && role === 'rider' && riderId === job.rider_id) {
     return c.json({ error: 'cannot_rate_self' }, 403);
   }
-  if (targetType === 'driver' && role === 'rider' && riderId === job.rider_id) {
-    return c.json({ error: 'cannot_rate_self' }, 403);
-  }
-  if (targetType === 'courier' && courierId != null && courierId === job.courier_id) {
+  if (!staff && targetType === 'courier' && courierId != null && courierId === job.courier_id) {
     return c.json({ error: 'cannot_rate_self' }, 403);
   }
   if (!staff && !RATING_OPEN.has(String(job.status))) {
@@ -4217,11 +4221,11 @@ app.post('/jobs/:ref/rate', async (c) => {
   ).bind(job.ref, job.id, targetType, targetKey, reviewer, role ?? 'customer', stars, comment || null).run();
   const alreadyLogged = await c.env.DB.prepare(
     `SELECT 1 FROM job_events WHERE job_id = ?1 AND status = 'rated' AND note LIKE ?2 LIMIT 1`,
-  ).bind(job.id, `${targetType} rated%`).first<any>();
+  ).bind(job.id, `${targetType} rated% by ${reviewer}%`).first<any>();
   if (!alreadyLogged) {
     await c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rated', ?2)`,
-    ).bind(job.id, `${targetType} rated ${stars}/5`).run();
+    ).bind(job.id, `${targetType} rated ${stars}/5 by ${reviewer}`).run();
   }
 
   return c.json({ ok: true, target_type: targetType, stars });
@@ -4268,8 +4272,19 @@ app.get('/jobs/:ref/ratings', async (c) => {
     `SELECT id, ref, sender_phone, recipient_phone, rider_id, courier_id FROM jobs WHERE ref = ?1`,
   ).bind(c.req.param('ref')).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
-  if (c.get('role') === 'customer' && c.get('phone') !== job.sender_phone && c.get('phone') !== job.recipient_phone) {
-    return c.json({ error: 'not found' }, 404);
+  // PARTICIPANTS ONLY for EVERY role (owner 2026-11-23): the old check applied
+  // to customers only, so any signed-in rider/partner could read any job's
+  // private ratings by guessing the DRO- reference.
+  const roles = c.get('role');
+  const phone = c.get('phone');
+  const riderId = c.get('riderId');
+  const courierId = c.get('courierId');
+  const staff = roles === 'ops' || roles === 'admin' || isAdmin(c);
+  if (!staff) {
+    const isParty = phone === job.sender_phone || phone === job.recipient_phone ||
+      (roles === 'rider' && riderId != null && riderId === job.rider_id) ||
+      (courierId != null && courierId === job.courier_id);
+    if (!isParty) return c.json({ error: 'not found' }, 404);
   }
   const { results } = await c.env.DB.prepare(
     `SELECT target_type, stars, comment, reviewer_phone, verified, hidden, created_at, updated_at
@@ -4290,7 +4305,7 @@ app.get('/jobs/:ref/ratings', async (c) => {
     if (!key) continue;
     const agg = await c.env.DB.prepare(
       `SELECT COUNT(*) AS count, ROUND(AVG(stars), 2) AS average
-         FROM ratings WHERE target_type = ?1 AND target_key = ?2`,
+         FROM ratings WHERE target_type = ?1 AND target_key = ?2 AND hidden = 0`,
     ).bind(t, key).first<any>();
     summary[t] = { count: agg?.count ?? 0, average: agg?.average ?? null };
   }
@@ -4303,7 +4318,7 @@ app.get('/ratings/summary', async (c) => {
   if (!RATING_TARGETS.has(targetType) || !targetKey) return c.json({ error: 'bad target' }, 400);
   const agg = await c.env.DB.prepare(
     `SELECT COUNT(*) AS count, ROUND(AVG(stars), 2) AS average
-       FROM ratings WHERE target_type = ?1 AND target_key = ?2`,
+       FROM ratings WHERE target_type = ?1 AND target_key = ?2 AND hidden = 0`,
   ).bind(targetType, targetKey).first<any>();
   const { results: recent } = await c.env.DB.prepare(
     `SELECT stars, comment, verified, created_at FROM ratings
@@ -4431,7 +4446,7 @@ app.get('/track/:token', async (c) => {
   const row = await c.env.DB.prepare(
     `SELECT t.job_id, t.job_ref,
             j.ref, j.status, j.created_at, j.pickup_address, j.dest_city, j.branch,
-            j.recipient_name, j.eta_minutes, j.courier_id,
+            j.recipient_name, j.eta_minutes, j.courier_id, j.collection_receipt_url, j.service,
             co.name AS courier_name, co.depot_name AS courier_depot,
             r.full_name AS rider_name, r.vehicle AS rider_vehicle,
             r.last_lat, r.last_lng, r.last_seen_at,
@@ -4471,6 +4486,8 @@ app.get('/track/:token', async (c) => {
     predicted,
     pickup_city: (row.pickup_address ?? '').split(',').slice(-1)[0].trim() || null,
     dest_city: row.dest_city,
+    collection_receipt_url: row.collection_receipt_url ?? null,
+    service: row.service ?? 'standard',
     // First mile ends at the depot branch the seller nominated — that is what
     // DropOff is paid for; the final city is only the optional last mile.
     dropoff: {
@@ -4510,7 +4527,7 @@ app.get('/track/incoming', async (c) => {
   if (!phone) return c.json({ error: 'identity_required' }, 401);
   const limit = pageLimit(c.req.query('limit'));
   const { results } = await c.env.DB.prepare(
-    `SELECT j.ref, j.status, j.created_at, j.dest_city, j.recipient_name,
+    `SELECT j.ref, j.status, j.created_at, j.dest_city, j.recipient_name, j.collection_receipt_url, j.service,
             (j.paid = 0 AND EXISTS (
                SELECT 1 FROM job_events e
                 WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))) AS payment_held,
@@ -4537,6 +4554,8 @@ app.get('/track/incoming', async (c) => {
     parcels.push({
       ref: row.ref, status: row.status, created_at: row.created_at,
       dest_city: row.dest_city, recipient_name: row.recipient_name,
+      collection_receipt_url: row.collection_receipt_url ?? null,
+      service: row.service ?? 'standard',
       courier: row.courier_name, depot: row.courier_depot,
       tracking_url: token && !row.payment_held ? `${appPublicUrl}/track/${token}` : null,
     });

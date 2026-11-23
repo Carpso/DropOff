@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../ui/app_toast.dart';
+import '../ui/receipt_viewer.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -532,14 +533,27 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                 // CONTAIN keeps the burned-in DropOff timestamp visible.
                 child: ColoredBox(
                   color: AppColors.line.withValues(alpha: 0.18),
-                  child: Image.network('${DropOffApi.baseUrl}$_receiptUrl',
-                      headers: DropOffApi.authHeaders,
-                      height: 120, width: double.infinity, fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => const SizedBox(
-                          height: 120,
-                          child: Center(child: Icon(Icons.broken_image_outlined, color: AppColors.muted)))),
+                  // AUTH-GATED + URL-SAFE: AuthedImage normalises /media paths
+                  // and absolute URLs and shows a spinner until the photo loads.
+                  child: AuthedImage(ReceiptViewer.resolve(_receiptUrl!),
+                      height: 120, width: double.infinity, fit: BoxFit.contain),
                 ),
               ),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: () => ReceiptViewer.show(context,
+                      path: _receiptUrl!, title: 'Collection receipt', ref: _receiptUrl!),
+                  icon: const Icon(Icons.visibility_outlined, size: 15),
+                  label: const Text('View full screen'),
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: () => ReceiptViewer.share(context, _receiptUrl!, ''),
+                  icon: const Icon(Icons.ios_share, size: 15),
+                  label: const Text('Share receipt'),
+                )),
+              ]),
               const SizedBox(height: 8),
             ],
             OutlinedButton.icon(

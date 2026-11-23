@@ -27,6 +27,53 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (thirty-third pass) — waived-fare tick, ratings, map audit
+
+Owner: lingering banner on DRO-261123-RRW5B, waived fares not ticking paid,
+ratings not working, and "audit all four map issues".
+
+- Waived the NEW K5 fare on DRO-261123-RRW5B (sender 260779686480) with an
+  audit note; all 7 receipt jobs are now paid in D1.
+- Bookings screen now re-syncs every 30 s AND on app resume, so an admin waiver
+  flips the local "paid" tick/unlocked receipt without a restart.
+- **Ratings:** the recipient-only "Rate the sender" card is now gated on
+  `you_are == 'recipient'` — the sender used to see it on her own tracking link
+  and got `cannot_rate_self`. The card loads an existing rating on entry
+  (previously it showed empty stars again after a successful submit), dead
+  `already_rated` handling removed. Worker now enforces recipient-only for
+  `seller` (staff exempt), lets staff rate, logs one `rated` event per reviewer,
+  filters hidden ratings out of ALL averages, and applies the participant guard
+  on `GET /jobs/:ref/ratings` to every role (was customers only → IDOR).
+- **Map audit (all four areas):** fixed blank z16 tiles outside Lusaka by
+  serving the regional z15 parent tile when the city archive doesn't cover the
+  area (overzoom) with a test; cut the worst-case offline spinner from ~25 s to
+  ~13 s; removed a dead 60 Hz `AnimationController`; throttled compass rebuilds
+  to ≥1°; added an in-flight guard to the tracking map's route fetch.
+  Full suite 55/55, analyze/tsc clean.
+
+## 2026-11-23 (thirty-second pass) — receipt prompt, locked label, receiver view/share
+
+Owner reports: no prompt when the rider files the depot receipt; the "Download
+courier receipt — locked" label disappeared; no way to view/share the receipt.
+
+- `main.dart`: `counter_fare_due` push taps now ALWAYS open Bookings (that
+  screen fires the pay prompt on entry) instead of BookingDetail, which had no
+  prompt. Added `PushService.onForegroundMessage` + a listener in the splash
+  state so a foreground "rider filed the fare" push navigates to Bookings
+  immediately; cold start also checks `/counter-fare/status` and surfaces it.
+- `bookings_screen.dart`: restored the locked label **"Download courier
+  receipt — locked"** (tap still starts the momo prompt) and the paid label
+  "Download courier receipt". Added "View receipt full screen" and a shared
+  `ReceiptViewer` (pinch-zoom + OS share sheet). The paid counter-fare card
+  gained "Download & share receipt with recipient".
+- **Collection proof for the receiver:** fixed the broken preview (it prefixed
+  the API host onto absolute URLs and had no spinner) by using `AuthedImage`
+  with `ReceiptViewer.resolve()`. Added View full screen + Share. Worker
+  `/track/:token` and `/track/incoming` now ship `collection_receipt_url`, and
+  TrackScreen renders a "Collection payment receipt" card with view/share.
+
+Full suite 54/54, analyze/tsc clean.
+
 ## 2026-11-23 (thirty-first pass) — PIN ticks only on real server match
 
 Owner: pickup/door PIN sheets ticked "verified" as soon as 4 digits were typed

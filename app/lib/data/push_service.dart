@@ -65,6 +65,12 @@ class PushService {
   /// Emits the tapped-notification payload so main.dart can route by kind.
   static final StreamController<Map<String, dynamic>?> onPayloadTap = StreamController.broadcast();
 
+  /// Every message received while the app is in the foreground. Used to show
+  /// an in-app prompt for a newly-filed depot counter fare even when the
+  /// sender is on another tab (owner 2026-11-23).
+  static final StreamController<Map<String, dynamic>> onForegroundMessage =
+      StreamController<Map<String, dynamic>>.broadcast();
+
   /// Backwards-compatible stream: only the `job_ref` (when the payload carries
   /// one). New code should prefer [onPayloadTap].
   static final Stream<String?> onNotificationTap =
@@ -201,8 +207,10 @@ class PushService {
     } catch (_) {}
   }
 
-  static void _onForegroundMessage(RemoteMessage message) =>
-      _show(message.data, message.notification?.title, message.notification?.body);
+  static void _onForegroundMessage(RemoteMessage message) {
+    _show(message.data, message.notification?.title, message.notification?.body);
+    onForegroundMessage.add(Map<String, dynamic>.from(message.data));
+  }
 
   /// Category of a notification; used to pick channel, icon accent and sound.
   static String _kindOf(Map<String, dynamic> data) => '${data['kind'] ?? ''}'.toLowerCase();

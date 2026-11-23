@@ -1,4 +1,6 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+
+import 'package:flutter/material.dart';
 
 import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
@@ -10,6 +12,60 @@ import 'rider_map_screen.dart';
 import '../screens/account_screen.dart';
 import '../ui/app_spinner.dart';
 import '../ui/app_toast.dart';
+import '../ui/receipt_viewer.dart';
+
+/// Collection proof-of-payment receipt, shown to the recipient in the tracking
+/// screen. Full-screen view + OS share sheet so it can be forwarded anywhere.
+class _CollectionReceiptCard extends StatelessWidget {
+  const _CollectionReceiptCard({required this.path, required this.ref});
+  final String path;
+  final String ref;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: AppColors.amber.withValues(alpha: 0.45))),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.receipt_long_outlined, size: 18, color: Color(0xFF7B5710)),
+            SizedBox(width: 8),
+            Expanded(child: Text('Collection payment receipt',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
+          ]),
+          const SizedBox(height: 4),
+          const Text('The sender paid for these goods at the courier depot. The rider shows this receipt at the counter.',
+              style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: ColoredBox(
+              color: AppColors.line.withValues(alpha: 0.18),
+              child: AuthedImage(ReceiptViewer.resolve(path),
+                  fit: BoxFit.contain, height: 150, width: double.infinity),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              onPressed: () => ReceiptViewer.show(context, path: path, title: 'Collection receipt', ref: ref),
+              icon: const Icon(Icons.visibility_outlined, size: 15),
+              label: const Text('View full screen'),
+            )),
+            const SizedBox(width: 8),
+            Expanded(child: OutlinedButton.icon(
+              onPressed: () => ReceiptViewer.share(context, path, ref),
+              icon: const Icon(Icons.ios_share, size: 15),
+              label: const Text('Share receipt'),
+            )),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
 
 /// Recipient parcel tracking — the same view the SMS link opens, reachable
 /// in-app. Paste the tracking link or the token. The SERVER decides who sees
@@ -151,12 +207,27 @@ class _TrackScreenState extends State<TrackScreen> {
               ),
               // RECIPIENT RATES THE SENDER (owner 2026-11-21): the sender
               // cannot rate himself; only the parcel's recipient can.
-              if (['delivered', 'ready_for_collection']
-                  .contains('${_data?['status'] ?? ''}'))
+              // Only the RECIPIENT rates the sender. The sender can open the
+              // same tracking link (the worker grants both), and used to see
+              // this card, tap it, and get cannot_rate_self — "ratings not
+              // working" (owner 2026-11-23).
+              if ('${_data?['you_are'] ?? ''}' == 'recipient' &&
+                  ['delivered', 'ready_for_collection']
+                      .contains('${_data?['status'] ?? ''}'))
                 _RateSenderCard(jobRef: '${_data?['ref'] ?? ''}'),
             ],
             const SizedBox(height: 8),
             _riderStrip(_data!),
+            // COLLECTION RECEIPT (owner 2026-11-23): the sender's proof of
+            // payment for goods already at the courier depot. The recipient
+            // can SEE it here and share it, not just hear that it exists.
+            if (('${_data!['collection_receipt_url'] ?? ''}').isNotEmpty) ...[
+              const SizedBox(height: 14),
+              _CollectionReceiptCard(
+                path: '${_data!['collection_receipt_url']}',
+                ref: '${_data!['ref'] ?? ''}',
+              ),
+            ],
             const SizedBox(height: 20),
             const SectionTitle('Journey'),
             const SizedBox(height: 8),
@@ -459,6 +530,26 @@ class _RateSenderCardState extends State<_RateSenderCard> {
   bool _busy = false;
   bool _done = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // A successful rating must SURVIVE leaving the screen — otherwise the
+    // empty stars make the sender think it never saved (owner 2026-11-23).
+    unawaited(_loadMine());
+  }
+
+  Future<void> _loadMine() async {
+    try {
+      final data = await DropOffApi.jobRatings(widget.jobRef);
+      if (!mounted) return;
+      final mine = ((data?['my_ratings'] as List?) ?? const [])
+          .whereType<Map>()
+          .firstWhere((m) => '${m['target_type']}' == 'seller', orElse: () => const {});
+      final stars = (mine['stars'] as num?)?.toInt() ?? 0;
+      if (stars > 0) setState(() { _stars = stars; _done = true; });
+    } catch (_) { /* rating is optional — never block tracking */ }
+  }
+
   Future<void> _submit() async {
     if (_stars < 1) {
       AppToast.show(context, 'Tap the stars to rate the sender first.');
@@ -473,10 +564,12 @@ class _RateSenderCardState extends State<_RateSenderCard> {
     if (!mounted) return;
     setState(() {
       _busy = false;
-      if (res.ok || res.error == 'cannot_rate_self' || res.error == 'already_rated') _done = true;
+      if (res.ok) _done = true;
     });
     AppToast.show(context, switch (res.error) {
       'cannot_rate_self' => 'You are the sender — only the recipient can rate you.',
+      'recipient_only' => 'Only the recipient can rate the sender.',
+      'not_complete' => 'You can rate once the item is delivered or ready for collection.',
       _ => res.ok ? 'Done — Thank You for rating the sender. Your rating helps Riders, Couriers and Senders build a good name.' : 'Could not save your rating. Check your connection and try again.',
     });
   }

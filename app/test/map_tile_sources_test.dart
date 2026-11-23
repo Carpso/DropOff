@@ -81,6 +81,15 @@ void main() {
     expect(city.served, isEmpty);
   });
 
+  test('outside the city at z16 the regional parent tile is used (no blank hole)', () async {
+    final regional = _FakeProvider('regional'); // stops at z15
+    final city = _FakeProvider('city', maximum: 16);
+
+    await build(regional, city).provide(tileFor(-12.9587, 28.6366, 16)); // Ndola
+    expect(regional.served.length, 1);
+    expect(regional.served.first, startsWith('regional:z=15,'));
+  });
+
   test('a missing city tile falls back to the regional archive', () async {
     final regional = _FakeProvider('regional');
     final city = _FakeProvider('city', maximum: 16, missing: true);
