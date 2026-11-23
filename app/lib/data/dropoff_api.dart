@@ -817,8 +817,35 @@ class DropOffApi {
   // deliberately NO phone-OTP / anonymous grant path.
 
   static String _trackTokenOf(String input) {
-    final raw = input.trim();
-    return RegExp(r'/(?:track|t)/([A-Za-z0-9_-]+)').firstMatch(raw)?.group(1) ?? raw;
+    final raw = input.replaceAll(RegExp(r'\s+'), '');
+    final m = RegExp(r'(?:track|t)/([A-Za-z0-9_-]{8,})').firstMatch(raw) ??
+        RegExp(r'[?&](?:token|code)=([A-Za-z0-9_-]{8,})').firstMatch(raw);
+    if (m != null) return m.group(1)!.toLowerCase();
+    return raw.toLowerCase();
+  }
+
+  /// Tracking lookup with a REAL error code, so a dead connection is never
+  /// reported as "wrong code" (owner 2026-11-23).
+  static Future<ApiResponse> trackLookup(String input) async {
+    if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
+    final token = _trackTokenOf(input);
+    if (token.length < 8) return const ApiResponse(error: 'invalid_tracking_code');
+    try {
+      final res = await http.get(_uri('/track/$token'), headers: _headers).timeout(_timeout);
+      Map<String, dynamic>? decoded;
+      try { decoded = jsonDecode(res.body) as Map<String, dynamic>; } catch (_) {}
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return ApiResponse(status: res.statusCode, ok: true, body: decoded ?? const {});
+      }
+      return ApiResponse(
+        status: res.statusCode,
+        ok: false,
+        body: decoded ?? const {},
+        error: decoded?['error']?.toString() ?? 'http_${res.statusCode}',
+      );
+    } catch (_) {
+      return const ApiResponse(error: 'network_error');
+    }
   }
 
   /// Live (never cached) tracking fetch — the gate response must not be

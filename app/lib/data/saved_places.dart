@@ -91,6 +91,10 @@ class SavedPlaces {
         // offline: the local mirror is still authoritative enough
       }
     }
+    // An email address is not a place — the owner's email was accidentally
+    // saved as a location during testing (owner 2026-11-23). Drop any such
+    // entry from every device, local and server-merged.
+    _cache = _cache.where((p) => !p.label.contains('@')).toList();
     return _cache;
   }
 

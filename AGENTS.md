@@ -27,6 +27,33 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (thirty-ninth pass) — admin crashes, tracking truth, devices, payroll
+
+- **Admin console:** normalised all 20 worker list casts through `_safeRows()`
+  (no TypeError from a bad row), guarded every `id` cast, stringified
+  note/status/photo fields, wrapped the main `_load()` in try/catch with a
+  branded Retry screen, and set a global `ErrorWidget.builder` so no user ever
+  sees Flutter's red debug screen.
+- **Tracking order:** `/track/incoming` and `/jobs` now ORDER BY
+  `created_at DESC, id DESC`; de-duplicated `tracking_tokens` join so one parcel
+  cannot appear multiple times; app sorts incoming parcels newest-first and
+  sorts synced bookings by `createdAt` (the old `insert(0)` flipped them).
+- **Tracking link/code:** `_trackTokenOf` strips all whitespace, accepts
+  `/t/`, `/track/`, query `token/code`, and lowercases; `dropoff://track/TOKEN`
+  deep links now open TrackScreen (previously parsed as a host and dropped).
+  `trackLookup()` returns a real error so "no connection" is not "wrong code".
+- **Devices sheet:** wrapped the unbounded device Column in a bounded
+  `SingleChildScrollView` (it could not scroll) and hoisted the revoke spinner
+  state out of the per-row builder.
+- **Owner email:** deleted D1 saved_places id 11 and filtered any entry with
+  `@` from saved places and saved recipients on every device.
+- **Payroll:** DropOff logo in the card header and on each row; row title now
+  leads with the rider's name (falls back to phone).
+- **Map:** neutral fallback is now plain white and displays the actual error
+  string with Retry so onboarding reports are diagnostic.
+- No job rows were deleted (destructive cleanup was not explicitly confirmed).
+  Full suite 58/58, analyze/tsc clean.
+
 ## 2026-11-23 (thirty-eighth pass) — block screenshots, share via explicit export
 
 Owner: stop screenshots in the app, but keep the "share" feature on the screen

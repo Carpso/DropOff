@@ -2985,7 +2985,7 @@ app.get('/jobs', async (c) => {
         LEFT JOIN riders r ON r.id = j.rider_id
       WHERE j.sender_phone = ?1 AND j.id < ?2
          AND COALESCE(j.status, '') != 'deleted'
-      ORDER BY j.id DESC LIMIT ?3`,
+      ORDER BY j.created_at DESC, j.id DESC LIMIT ?3`,
   ).bind(phone, afterBind, limit + 1).all();
   const hasMore = results.length > limit;
   const page = hasMore ? results.slice(0, -1) : results;
@@ -4533,13 +4533,13 @@ app.get('/track/incoming', async (c) => {
                SELECT 1 FROM job_events e
                 WHERE e.job_id = j.id AND e.status IN ('advance_pending', 'prepayment_pending'))) AS payment_held,
             co.name AS courier_name, co.depot_name AS courier_depot,
-            t.token AS tracking_token
+            (SELECT t.token FROM tracking_tokens t WHERE t.job_id = j.id
+                ORDER BY t.created_at DESC LIMIT 1) AS tracking_token
        FROM jobs j
        LEFT JOIN couriers co ON co.id = j.courier_id
-       LEFT JOIN tracking_tokens t ON t.job_id = j.id
       WHERE j.recipient_phone = ?1
          AND COALESCE(j.status, '') NOT IN ('deleted', 'canceled', 'cancelled')
-      ORDER BY j.id DESC LIMIT ?2`,
+      ORDER BY j.created_at DESC, j.id DESC LIMIT ?2`,
   ).bind(phone, limit).all();
   const appPublicUrl = publicLinkBase(c.env);
   const parcels = [] as any[];

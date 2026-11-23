@@ -108,12 +108,16 @@ class _TrackScreenState extends State<TrackScreen> {
     final token = _input.text.trim();
     if (token.isEmpty) return;
     setState(() { _loading = true; _error = null; });
-    final data = await DropOffApi.trackByToken(token);
+    final res = await DropOffApi.trackLookup(token);
     if (!mounted) return;
     setState(() {
       _loading = false;
-      _data = data;
-      _error = data == null ? 'Not found — check the link or code from the SMS.' : null;
+      _error = switch (res.error) {
+        'network_error' || 'offline_demo_mode' => 'Could not reach DropOff — check your connection and try again.',
+        'invalid_tracking_code' => 'That does not look like a DropOff tracking link or code.',
+        _ => res.ok ? null : 'Not found — check the link or code from the SMS.',
+      };
+      if (res.ok) _data = res.body;
     });
   }
 
@@ -122,9 +126,10 @@ class _TrackScreenState extends State<TrackScreen> {
   String? _tokenIn(String raw) {
     final v = raw.trim();
     if (v.isEmpty) return null;
-    final m = RegExp(r'/(?:track|t)/([A-Za-z0-9_-]{16,})').firstMatch(v);
+    final m = RegExp(r'(?:track|t)/([A-Za-z0-9_-]{8,})').firstMatch(v) ??
+        RegExp(r'[?&](?:token|code)=([A-Za-z0-9_-]{8,})').firstMatch(v);
     if (m != null) return m.group(1);
-    if (RegExp(r'^[A-Za-z0-9_-]{16,}$').hasMatch(v)) return v;
+    if (RegExp(r'^[A-Za-z0-9_-]{8,}$').hasMatch(v)) return v;
     return null;
   }
 

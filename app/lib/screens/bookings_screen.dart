@@ -130,11 +130,14 @@ class _BookingsScreenState extends State<BookingsScreen> with WidgetsBindingObse
   Future<void> _loadIncoming() async {
     final data = await DropOffApi.trackIncoming();
     if (!mounted) return;
-    final parcels = (((data?['parcels'] as List?) ?? const []))
-        .cast<Map<String, dynamic>>()
+    final seenRefs = <String>{};
+    final parcels = ((data?['parcels'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
         .where((p) => !'${p['status'] ?? ''}'.toLowerCase().contains('cancel'))
-        .take(10)
-        .toList();
+        .where((p) => seenRefs.add('${p['ref'] ?? ''}'))
+        .toList()
+      ..sort((a, b) => '${b['created_at'] ?? ''}'.compareTo('${a['created_at'] ?? ''}'));
     setState(() => _incoming = parcels);
   }
 

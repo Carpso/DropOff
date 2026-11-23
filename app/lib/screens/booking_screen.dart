@@ -723,7 +723,13 @@ class _BookingScreenState extends State<BookingScreen> {
   void _next() => _jumpToStep(_step + 1);
 
   Future<void> _openRecipientsPicker() async {
-      final list = await DropOffApi.recipients();
+      // An email address is not a recipient — skip any test entry that used
+      // the owner's email as a name/address (owner 2026-11-23).
+      final list = (await DropOffApi.recipients())
+          .where((r) => !'${r['name'] ?? ''}'.contains('@') &&
+              !'${r['address'] ?? ''}'.contains('@') &&
+              !'${r['notes'] ?? ''}'.contains('@'))
+          .toList();
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,

@@ -11,6 +11,12 @@ import '../data/analytics_service.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
 
+/// Normalise ANY worker list into real maps. A single malformed element used
+/// to throw a TypeError inside setState and wedge the console on a spinner.
+List<Map<String, dynamic>> _safeRows(Object? value) =>
+    ((value as List?) ?? const []).whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m)).toList();
+
 String _adminError(ApiResponse res, String fallback) {
   return switch (res.error ?? '') {
     'superadmin_required' || 'admin_required' || 'owner_required' => 'You need admin access to do that.',
@@ -46,6 +52,7 @@ class _AdminScreenState extends State<AdminScreen> {
   bool _payrollBusy = false;
   bool _taxBusy = false;
   bool _loading = true;
+  String? _loadError;
   bool _authorized = false;
   bool _superadmin = false;
   String _role = 'admin';
@@ -86,35 +93,41 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _load() async {
-    final me = await DropOffApi.me();
-    final role = '${me?['role'] ?? ''}';
-    if (!['admin', 'ops', 'cfo'].contains(role)) {
-      if (mounted) setState(() { _authorized = false; _loading = false; });
-      return;
+    try {
+      final me = await DropOffApi.me();
+      final role = '${me?['role'] ?? ''}';
+      if (!['admin', 'ops', 'cfo'].contains(role)) {
+        if (mounted) setState(() { _authorized = false; _loading = false; });
+        return;
+      }
+      final stats = await DropOffApi.adminStats();
+      final alerts = await DropOffApi.securityAlerts();
+      final flags = await DropOffApi.fraudFlags();
+      final moderation = await DropOffApi.chatReports();
+      final payroll = await DropOffApi.adminPayroll();
+      final tax = await DropOffApi.adminTax();
+      final runrate = await DropOffApi.adminPayrollRunrate();
+      if (!mounted) return;
+      setState(() {
+        _authorized = true;
+        _superadmin = role == 'admin';
+        _role = role;
+        _runrate = runrate;
+        _stats = stats;
+        _alerts = _safeRows(alerts?['alerts']);
+        _flags = _safeRows(flags?['flags']);
+        _chatReports = _safeRows(moderation?['reports']);
+        _chatStrikes = _safeRows(moderation?['strikes']);
+        _payroll = _safeRows(payroll?['payouts']);
+        _payrollSummary = _safeRows(payroll?['summary']);
+        _tax = _safeRows(tax?['periods']);
+        _loadError = null;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Admin console load failed: $e');
+      if (mounted) setState(() { _loadError = 'Could not load the console. Check your connection and retry.'; _loading = false; });
     }
-    final stats = await DropOffApi.adminStats();
-    final alerts = await DropOffApi.securityAlerts();
-    final flags = await DropOffApi.fraudFlags();
-    final moderation = await DropOffApi.chatReports();
-    final payroll = await DropOffApi.adminPayroll();
-    final tax = await DropOffApi.adminTax();
-    final runrate = await DropOffApi.adminPayrollRunrate();
-    if (!mounted) return;
-    setState(() {
-      _authorized = true;
-      _superadmin = role == 'admin';
-      _role = role;
-      _runrate = runrate;
-      _stats = stats;
-      _alerts = ((alerts?['alerts'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _flags = ((flags?['flags'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _chatReports = ((moderation?['reports'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _chatStrikes = ((moderation?['strikes'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _payroll = ((payroll?['payouts'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _payrollSummary = ((payroll?['summary'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _tax = ((tax?['periods'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _loading = false;
-    });
   }
 
   Future<void> _sendSms({required bool broadcast}) async {
@@ -168,6 +181,20 @@ class _AdminScreenState extends State<AdminScreen> {
       return Scaffold(
         appBar: AppBar(title: const Text('Admin console', style: TextStyle(fontWeight: FontWeight.w900))),
         body: const Center(child: AppLogoSpinner(size: 26)),
+      );
+    }
+    if (_loadError != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Admin console', style: TextStyle(fontWeight: FontWeight.w900))),
+        body: Center(child: Padding(padding: const EdgeInsets.all(32), child: Column(
+          mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.cloud_off_outlined, size: 44, color: AppColors.amber),
+            const SizedBox(height: 14),
+            Text(_loadError!, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            const SizedBox(height: 16),
+            FilledButton.icon(onPressed: () { setState(() { _loading = true; _loadError = null; }); _load(); },
+                icon: const Icon(Icons.refresh, size: 16), label: const Text('Retry')),
+          ]))),
       );
     }
     if (!_authorized) {
@@ -308,7 +335,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final entries = raw.entries
         .where((e) => e.value is num && e.key != 'subs_by_tier')
         .toList();
-    final tiers = ((raw['subs_by_tier'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final tiers = _safeRows(raw['subs_by_tier']);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -380,7 +407,7 @@ class _AdminScreenState extends State<AdminScreen> {
                     Text('${a['detail']}', style: AppType.caption),
                   ])),
                   TextButton(
-                    onPressed: () async { await DropOffApi.ackAlert((a['id'] as num).toInt()); _load(); },
+                    onPressed: () async { await DropOffApi.ackAlert(((a['id'] as num?)?.toInt() ?? 0)); _load(); },
                     child: const Text('Ack'),
                   ),
                 ]),
@@ -412,7 +439,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   ])),
                   TextButton(
                     onPressed: () async {
-                      await DropOffApi.reviewFraud((f['id'] as num).toInt(), status: 'cleared');
+                      await DropOffApi.reviewFraud(((f['id'] as num?)?.toInt() ?? 0), status: 'cleared');
                       AnalyticsService.instance.track(
                         feature: 'fraud', action: 'clear', context: 'admin_fraud_queue',
                         meta: {'fraud_id': f['id']},
@@ -423,7 +450,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   ),
                   TextButton(
                     onPressed: () async {
-                      await DropOffApi.reviewFraud((f['id'] as num).toInt(), status: 'confirmed');
+                      await DropOffApi.reviewFraud(((f['id'] as num?)?.toInt() ?? 0), status: 'confirmed');
                       AnalyticsService.instance.track(
                         feature: 'fraud', action: 'confirm', context: 'admin_fraud_queue',
                         meta: {'fraud_id': f['id']},
@@ -459,8 +486,8 @@ class _AdminScreenState extends State<AdminScreen> {
       final p = await DropOffApi.adminPayroll();
       if (mounted) {
         setState(() {
-          _payroll = ((p?['payouts'] as List?) ?? const []).cast<Map<String, dynamic>>();
-          _payrollSummary = ((p?['summary'] as List?) ?? const []).cast<Map<String, dynamic>>();
+          _payroll = _safeRows(p?['payouts']);
+          _payrollSummary = _safeRows(p?['summary']);
         });
       }
     }
@@ -480,7 +507,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final avgTurn = (r?['avg_monthly_turnover_zmw'] as num?)?.toDouble() ?? 0;
     final share = r?['payroll_share_of_turnover_pct'] as num?;
     final sustain = (r?['self_sustain_trips_per_rider_day'] as num?)?.toInt() ?? 3;
-    final growth = ((r?['growth_planner'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final growth = _safeRows(r?['growth_planner']);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -555,7 +582,7 @@ class _AdminScreenState extends State<AdminScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              const Icon(Icons.badge_outlined, color: AppColors.forest),
+              Image.asset('assets/brand/dropoff_logo.png', width: 26, height: 26, fit: BoxFit.contain),
               const SizedBox(width: 8),
               const Expanded(child: Text('Rider payroll (K3,000/mo)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
               if (financeOnly)
@@ -591,16 +618,19 @@ class _AdminScreenState extends State<AdminScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 5),
                 child: Row(children: [
+                  Image.asset('assets/brand/dropoff_logo.png', width: 22, height: 22, fit: BoxFit.contain),
+                  const SizedBox(width: 8),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(
-                      '#${p['id']} ${p['rider_name'] ?? ''} · ${p['period_kind'] == 'monthly_balance' ? 'month balance' : '${p['period_kind']}'} ${'${p['period_start']}'.split('T').first}',
+                      '${('${p['rider_name'] ?? ''}').isNotEmpty ? '${p['rider_name']}' : '${p['rider_phone'] ?? 'Rider'}'} · ${p['period_kind'] == 'monthly_balance' ? 'month balance' : '${p['period_kind']}'} ${'${p['period_start']}'.split('T').first}',
                       style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 3),
                     Text(
                       '${_kwacha(num.tryParse('${p['amount_zmw']}'))} · ${p['trips'] ?? 0}/${p['period_target'] ?? 0} trips'
                       ' · ${_payrollStatusText('${p['status']}')}'
-                      '${((p['note'] ?? '') as String).isNotEmpty ? ' · ${p['note']}' : ''}',
+                      '${('${p['note'] ?? ''}').isNotEmpty ? ' · ${p['note']}' : ''}',
                       style: const TextStyle(color: AppColors.muted, fontSize: 11.5),
                     ),
                   ])),
@@ -612,7 +642,7 @@ class _AdminScreenState extends State<AdminScreen> {
       );
 
   List<Widget> _payrollRowActions(Map<String, dynamic> p, {bool financeOnly = false}) {
-    final id = (p['id'] as num).toInt();
+    final id = ((p['id'] as num?)?.toInt() ?? 0);
     final status = '${p['status']}';
     final proof = TextButton(onPressed: () async {
       final bytes = await DropOffApi.adminPayrollProof(id);
@@ -671,7 +701,7 @@ class _AdminScreenState extends State<AdminScreen> {
     AppToast.show(context, res.ok ? '$label recorded.' : _adminError(res, '$label could not be recorded. Try again.'));
     if (res.ok) {
       final t = await DropOffApi.adminTax();
-      if (mounted) setState(() { _tax = ((t?['periods'] as List?) ?? const []).cast<Map<String, dynamic>>(); });
+      if (mounted) setState(() { _tax = _safeRows(t?['periods']); });
     }
   }
 
@@ -765,7 +795,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         icon: Icons.visibility_off_outlined,
                       );
                       if (ok != true) return;
-                      await DropOffApi.reviewChatReport((r['id'] as num).toInt(), action: 'confirm');
+                      await DropOffApi.reviewChatReport(((r['id'] as num?)?.toInt() ?? 0), action: 'confirm');
                       AnalyticsService.instance.track(
                         feature: 'chat_moderation', action: 'confirm', context: 'admin_chat_reports',
                         meta: {'report_id': r['id']},
@@ -776,7 +806,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   ),
                   TextButton(
                     onPressed: () async {
-                      await DropOffApi.reviewChatReport((r['id'] as num).toInt(), action: 'dismiss');
+                      await DropOffApi.reviewChatReport(((r['id'] as num?)?.toInt() ?? 0), action: 'dismiss');
                       AnalyticsService.instance.track(
                         feature: 'chat_moderation', action: 'dismiss', context: 'admin_chat_reports',
                         meta: {'report_id': r['id']},
@@ -1390,7 +1420,7 @@ class _UsersCardState extends State<_UsersCard> {
     final data = await DropOffApi.adminUsers();
     if (!mounted) return;
     setState(() {
-      _users = ((data?['users'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _users = _safeRows(data?['users']);
       _loading = false;
     });
   }
@@ -1495,7 +1525,7 @@ class _UsersCardState extends State<_UsersCard> {
     int? courierId;
     if (role == 'partner') {
       final data = await DropOffApi.adminCouriers();
-      final couriers = ((data?['couriers'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      final couriers = _safeRows(data?['couriers']);
       if (!mounted) return;
       if (couriers.isEmpty) {
         AppToast.show(context, 'No courier depots on file — add one under Plans & couriers first.');
@@ -1836,7 +1866,7 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
     if (_courierId == null) return;
     final data = await DropOffApi.get('/admin/branches?courier_id=$_courierId');
     if (!mounted) return;
-    setState(() => _branches = ((data?['branches'] as List?) ?? const []).cast<Map<String, dynamic>>());
+    setState(() => _branches = _safeRows(data?['branches']));
   }
 
   Future<void> _add() async {
@@ -1874,7 +1904,7 @@ class _BranchManagerCardState extends State<_BranchManagerCard> {
           DropdownButtonFormField<int>(
             initialValue: _courierId,
             decoration: const InputDecoration(labelText: 'Courier', prefixIcon: Icon(Icons.local_shipping_outlined)),
-            items: [for (final c in _couriers) DropdownMenuItem(value: (c['id'] as num).toInt(), child: Text('${c['name']} (${c['city']})', overflow: TextOverflow.ellipsis))],
+            items: [for (final c in _couriers) DropdownMenuItem(value: ((c['id'] as num?)?.toInt() ?? 0), child: Text('${c['name']} (${c['city']})', overflow: TextOverflow.ellipsis))],
             onChanged: (v) { setState(() => _courierId = v); _loadBranches(); },
           ),
           const SizedBox(height: 8),
@@ -2239,7 +2269,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
       return;
     }
     final codes = ((res.body['codes'] as List?) ?? const []).map((c) => '$c').toList();
-    final persisted = ((res.body['persisted_codes'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final persisted = _safeRows(res.body['persisted_codes']);
     setState(() {
       _codes = codes;
       if (persisted.isNotEmpty) _history = persisted;
@@ -2347,7 +2377,7 @@ class _PackCodesCardState extends State<_PackCodesCard> {
                 shrinkWrap: true,
                 physics: const ClampingScrollPhysics(),
                 children: _history
-                    .where((c) => _filter == 'all' || (c['status'] as String? ?? '') == _filter)
+                    .where((c) => _filter == 'all' || '${c['status'] ?? ''}' == _filter)
                     .map((c) {
                   final code = '${c['code'] ?? ''}';
                   final status = '${c['status'] ?? ''}';
@@ -2440,8 +2470,8 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
     final settings = await DropOffApi.adminSettings();
     if (!mounted) return;
     setState(() {
-      _plans = ((tiers?['tiers'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      _couriers = ((couriers?['couriers'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _plans = _safeRows(tiers?['tiers']);
+      _couriers = _safeRows(couriers?['couriers']);
       final flags = (settings?['settings'] as Map?) ?? const {};
       _doorToDoor = flags['door_to_door_enabled'] == true;
       _overageDiscount = flags['overage_discount_enabled'] == true;
@@ -2509,7 +2539,7 @@ class _PlansAndCouriersCardState extends State<_PlansAndCouriersCard> {
   }
 
   Future<void> _toggleCourier(Map<String, dynamic> c, bool on) async {
-    final res = await DropOffApi.adminCourierToggle((c['id'] as num).toInt(), on);
+    final res = await DropOffApi.adminCourierToggle(((c['id'] as num?)?.toInt() ?? 0), on);
     if (!mounted) return;
     _snack(res.ok ? 'Courier ${on ? 'ON' : 'OFF'} — ${c['name']}' : _adminError(res, 'Could not update the courier. Try again.'));
     await _load();
@@ -3037,7 +3067,7 @@ class _IncentivePromoCardState extends State<_IncentivePromoCard> {
   }
 
   Future<void> _toggle(Map<String, dynamic> row) async {
-    final id = (row['id'] as num).toInt();
+    final id = ((row['id'] as num?)?.toInt() ?? 0);
     final on = !(row['active'] == 1 || row['active'] == true);
     final res = await DropOffApi.adminIncentiveToggle(id, active: on);
     if (!mounted) return;
@@ -3872,7 +3902,7 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
     final data = await DropOffApi.adminPayouts();
     if (!mounted) return;
     setState(() {
-      _rows = ((data?['payouts'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      _rows = _safeRows(data?['payouts']);
       _loading = false;
     });
   }
@@ -4037,7 +4067,7 @@ class _ClientCrashesCardState extends State<_ClientCrashesCard> {
 
   @override
   Widget build(BuildContext context) {
-    final rows = ((_data?['crashes'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final rows = _safeRows(_data?['crashes']);
     final total = (_data?['crashes_last_24h'] as num?)?.toInt() ?? 0;
     return Card(
       child: Padding(

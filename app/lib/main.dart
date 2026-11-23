@@ -100,6 +100,19 @@ void _performDeepLink(AppStore store, Uri uri) {
     }
     return;
   }
+  // dropoff://track/TOKEN has "track" as the HOST, not a path segment.
+  if (uri.scheme == 'dropoff') {
+    final token = uri.host == 'track'
+        ? (uri.pathSegments.isNotEmpty ? uri.pathSegments.first : '')
+        : (uri.queryParameters['token'] ?? uri.pathSegments.firstOrNull ?? '');
+    if (token.isNotEmpty) {
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => TrackScreen(initialToken: token)));
+      }
+      return;
+    }
+  }
   final seg = uri.pathSegments;
   AnalyticsService.instance.track(feature: 'deeplink', action: 'open', context: uri.path, meta: {'query': uri.queryParameters});
   if (seg.isEmpty) return;
@@ -193,6 +206,28 @@ void _performDeepLink(AppStore store, Uri uri) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Never show Flutter's red debug screen to a user. A bad server row or a
+  // render error becomes a calm, branded recovery screen (owner 2026-11-23).
+  ErrorWidget.builder = (details) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: Material(
+          color: AppColors.canvas,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.error_outline, size: 44, color: AppColors.amber),
+                const SizedBox(height: 14),
+                const Text('Something went wrong', textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19, color: AppColors.ink)),
+                const SizedBox(height: 8),
+                const Text('Close and reopen DropOff — your bookings and data are safe.',
+                    textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted, fontSize: 13)),
+              ]),
+            ),
+          ),
+        ),
+      );
   // Block OS screenshots / recordings of OTPs, waybills, customer addresses
   // and finance data. All sharing exports a real file via the OS share sheet,
   // which is separate system UI and keeps working (owner 2026-11-23).

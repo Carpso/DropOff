@@ -450,7 +450,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               else
                 // Neutral canvas instead of a dead green box: riders still get
                 // their bike, stops, route and compass while the basemap heals.
-                const IgnorePointer(child: ColoredBox(color: Color(0xFFEDF2EC))),
+                const IgnorePointer(child: ColoredBox(color: Colors.white)),
               // Labels are rendered by the PMTiles/Protomaps theme; avoid third-party
               // label overlays that require external API keys.
               if (casing != null && core != null)
@@ -557,9 +557,16 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   child: Row(children: [
                     const Icon(Icons.map_outlined, size: 17, color: AppColors.amber),
-                    const SizedBox(width: 8),
-                    const Expanded(child: Text('Basemap offline � your position and route still show.',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.ink))),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                      const Text('Basemap offline — your position and route still show.',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.ink)),
+                      if ((assets.error ?? '').isNotEmpty)
+                        Padding(padding: const EdgeInsets.only(top: 3), child: Text(
+                          assets.error!.length > 150 ? '${assets.error!.substring(0, 150)}…' : assets.error!,
+                          style: const TextStyle(fontSize: 9.5, color: AppColors.muted),
+                          maxLines: 2, overflow: TextOverflow.ellipsis,
+                        )),
+                    ])),
                     TextButton(onPressed: _retryMap, child: const Text('Retry')),
                   ]),
                 ),

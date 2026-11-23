@@ -1117,6 +1117,9 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
         dirty = true;
       }
       if (dirty) {
+        // Server rows arrive newest-first; inserting each at index 0 flipped
+        // the whole list oldest-first (owner 2026-11-23). Sort explicitly.
+        _bookings.sort((a, b) => b.createdAt.compareTo(a.createdAt));
         await _saveBookings();
         notifyListeners();
       }

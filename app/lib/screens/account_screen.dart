@@ -281,10 +281,14 @@ class _AccountScreenState extends State<AccountScreen> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (ctx, setSheetState) {
           final rows = List<Map<String, dynamic>>.of(list);
+          final revokingIds = <Object>{};
           return SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child: SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.82),
+                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Row(children: [
                   Icon(Icons.devices, color: AppColors.forest),
                   SizedBox(width: 8),
@@ -304,7 +308,6 @@ class _AccountScreenState extends State<AccountScreen> {
                   ...rows.map((d) {
                     final isCurrent = d['is_current_session'] == true;
                     final trusted = d['trusted'] == true;
-                      bool revoking = false;
                     final tz = '${d['last_seen'] ?? ''}';
                     final parts = tz.split(' ');
                     final day = parts.isNotEmpty ? parts.first : tz;
@@ -333,12 +336,12 @@ class _AccountScreenState extends State<AccountScreen> {
                             ]),
                           ),
                           TextButton(
-                            onPressed: isCurrent || revoking
+                            onPressed: isCurrent || revokingIds.contains(d['id'])
                                 ? null
                                 : () async {
-                                    setSheetState(() => revoking = true);
+                                    setSheetState(() => revokingIds.add(d['id']));
                                     final ok = await DropOffApi.post('/me/devices/${d['id']}/revoke', const {});
-                                    setSheetState(() => revoking = false);
+                                    setSheetState(() => revokingIds.remove(d['id']));
                                     if (ok.ok && mounted) {
                                       setSheetState(() {
                                         d['trusted'] = false;
@@ -350,7 +353,7 @@ class _AccountScreenState extends State<AccountScreen> {
                                   },
                             child: isCurrent
                                 ? const Text('current')
-                                : (revoking
+                                : (revokingIds.contains(d['id'])
                                     ? const AppLogoSpinner(size: 16)
                                     : const Text('Revoke')),
                           ),
@@ -372,7 +375,9 @@ class _AccountScreenState extends State<AccountScreen> {
                     label: const Text('Sign out on all other devices'),
                   ),
                 ),
-              ]),
+                  ]),
+                ),
+              ),
             ),
           );
         },
