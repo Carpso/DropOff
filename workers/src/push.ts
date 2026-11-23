@@ -75,18 +75,65 @@ export interface PushPayload {
   data?: Record<string, string>;
 }
 
+/** A fresh order is the ONE alert that must wake a rider: it has to be loud,
+ *  heads-up and shown on the lock screen even when the app is closed. Every
+ *  other push uses a normal channel so riders are not trained to ignore alarm
+ *  sounds (owner 2026-11-23). */
+export function isOrderAlert(kind: string): boolean {
+  return kind === 'rider_assigned' || kind === 'trip_transferred' ||
+    kind === 'job_assigned' || kind === 'new_order' || kind === 'claim_available';
+}
+
 /** Android notification channel — the app pre-creates these channels with
  *  sound enabled (push_service.dart). Routing the FCM message into the
  *  matching channel is what makes an incoming ORDER ping even when the app is
  *  closed: without a channel_id, FCM dumps background notifications into a
  *  silent "Miscellaneous" channel. */
-function androidChannelId(data: Record<string, string> | undefined): string {
-  const kind = `${data?.['kind'] ?? ''}`.toLowerCase();
+export function androidChannelId(kind: string): string {
+  if (isOrderAlert(kind)) return 'dropoff_orders';
   if (kind.startsWith('chat') || kind.includes('support')) return 'dropoff_chat';
   if (kind.includes('payment') || kind.includes('deposit') || kind.includes('plan') || kind.includes('subscription')) return 'dropoff_payments';
   if (kind.includes('marketing') || kind.includes('promo')) return 'dropoff_marketing';
   if (kind.includes('security') || kind.includes('alert') || kind.includes('fraud')) return 'dropoff_alerts';
   return 'dropoff_jobs';
+}
+
+/** Pure FCM v1 payload builder, exported so the alarm behaviour is testable. */
+export function buildFcmMessage(token: string, payload: PushPayload): Record<string, unknown> {
+  const kind = `${payload.data?.['kind'] ?? ''}`.toLowerCase();
+  const orderAlert = isOrderAlert(kind);
+  // AN ORDER MUST RING (owner 2026-11-23): FCM's own notification payload
+  // cannot carry an Android full-screen intent or the `alarm` category, and
+  // its default notification priority is silent-ish. For orders we send a
+  // HIGH-PRIORITY DATA-ONLY message so the app's background isolate renders
+  // it with the max-importance `dropoff_orders` channel, sound, vibration and
+  // full-screen intent. Every other push keeps the system notification
+  // (guaranteed curtain post even if the app is force-stopped).
+  // Title/body travel in data for the local renderer.
+  const data: Record<string, string> = {
+    ...(payload.data ?? {}),
+    ...(orderAlert ? { title: payload.title, body: payload.body } : {}),
+  };
+  return {
+    message: {
+      token,
+      ...(orderAlert ? {} : { notification: { title: payload.title, body: payload.body } }),
+      data,
+      android: {
+        priority: 'high',
+        // A job that arrived 20 minutes ago is not an alarm.
+        ...(orderAlert ? { ttl: '300s' } : {}),
+        notification: {
+          channel_id: androidChannelId(kind),
+          notification_priority: orderAlert ? 'PRIORITY_MAX' : 'PRIORITY_HIGH',
+          visibility: 'PUBLIC',
+          default_sound: true,
+          ...(orderAlert ? { default_vibrate_timings: true } : {}),
+        },
+      },
+      apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
+    },
+  };
 }
 
 /** Sends a notification to every registered device for a phone. Best-effort. */
@@ -114,15 +161,7 @@ export async function sendToPhone(env: Env, phone: string | null | undefined, pa
       const res = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${gToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: {
-            token,
-            notification: { title: payload.title, body: payload.body },
-            data: payload.data ?? {},
-            android: { priority: 'high', notification: { channel_id: androidChannelId(payload.data) } },
-            apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
-          },
-        }),
+        body: JSON.stringify(buildFcmMessage(token, payload)),
       });
       if (res.status === 404 || res.status === 410) {
         // Token unregistered/stale — drop it so the table never grows unbounded.

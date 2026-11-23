@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart' as permission_handler;
 
 import 'dropoff_api.dart';
 
@@ -26,6 +27,40 @@ class PushService {
 
   static bool _ready = false;
   static bool _enabled = false;
+  /// Completes when Firebase/permission/channel setup finishes (success or
+  /// failure). [register] waits on it instead of racing a cold start, without
+  /// holding the splash screen hostage to the OS permission dialog.
+  static final Completer<void> _initDone = Completer<void>();
+  static bool _localReady = false;
+  static bool _permissionGranted = false;
+
+  /// True when Android actually allows notifications. Riders need this to be
+  /// visible: a denied POST_NOTIFICATIONS (Android 13+) makes every FCM send
+  /// silently vanish even though the token is registered server-side.
+  static bool get notificationsEnabled => _permissionGranted;
+
+  /// Web/Windows have no Android notification channel to configure.
+  static bool get supportsPush => !kIsWeb && !Platform.isWindows;
+
+  static bool _granted(AuthorizationStatus status) =>
+      status == AuthorizationStatus.authorized || status == AuthorizationStatus.provisional;
+
+  /// Re-read the OS setting (e.g. the rider just changed it in Settings).
+  static Future<bool> refreshPermission() async {
+    if (kIsWeb || Platform.isWindows) return true;
+    try {
+      final settings = await _fcm.getNotificationSettings();
+      _permissionGranted = _granted(settings.authorizationStatus);
+    } catch (_) {}
+    return _permissionGranted;
+  }
+
+  /// Android 13+ will not re-prompt after the rider tapped "Don't allow" —
+  /// the only recovery is the system settings screen.
+  static Future<void> openNotificationSettings() async {
+    if (kIsWeb || Platform.isWindows) return;
+    await permission_handler.openAppSettings();
+  }
 
   /// Emits the tapped-notification payload so main.dart can route by kind.
   static final StreamController<Map<String, dynamic>?> onPayloadTap = StreamController.broadcast();
@@ -38,58 +73,24 @@ class PushService {
   static String? _str(Object? v) => v == null ? null : '$v';
 
   static Future<void> init() async {
-    if (_ready) return;
+    if (_ready) return _initDone.future;
     _ready = true;
     try {
       if (kIsWeb || Platform.isWindows) return;
 
       await Firebase.initializeApp();
-      await FirebaseMessaging.instance.requestPermission(
+      final permission = await _fcm.requestPermission(
         alert: true,
         badge: true,
         sound: true,
         provisional: false,
       );
+      _permissionGranted = _granted(permission.authorizationStatus);
 
       final androidImpl =
           _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      // Wipe stale generic channel from earlier builds so Android doesn't keep
-      // the legacy importance/priority mix.
-      // NEW-ORDER ALARM CHANNEL (owner 2026-11-21): max importance, loud sound
-      // and vibration — the closest a store build gets to a phone ringing for a
-      // fresh delivery. Ordinary status pushes stay on the quieter jobs channel.
-      await androidImpl?.createNotificationChannel(
-        const AndroidNotificationChannel('dropoff_orders', 'DropOff — New orders',
-            description: 'A new delivery is waiting — opens straight to your Task Queue.',
-            importance: Importance.max));
-      await androidImpl?.createNotificationChannel(
-        const AndroidNotificationChannel('dropoff_jobs', 'DropOff — Parcels & riders',
-            description: 'Booking, dispatch, rider assignment and delivery updates.',
-            importance: Importance.high));
-      await androidImpl?.createNotificationChannel(
-        const AndroidNotificationChannel('dropoff_chat', 'DropOff — Support tickets',
-            description: 'Replies to your support tickets and DropOff updates.',
-            importance: Importance.high));
-      await androidImpl?.createNotificationChannel(
-        const AndroidNotificationChannel('dropoff_payments', 'DropOff — Payments',
-            description: 'Payment receipts and plan renewals.',
-            importance: Importance.high));
-      await androidImpl?.createNotificationChannel(
-        const AndroidNotificationChannel('dropoff_marketing', 'DropOff — Offers',
-            description: 'Occasional offers and updates from DropOff. You control these.',
-            importance: Importance.defaultImportance));
-      await androidImpl?.createNotificationChannel(
-        const AndroidNotificationChannel('dropoff_alerts', 'DropOff — Account & security',
-            description: 'New device, intrusion and account alerts.',
-            importance: Importance.max));
-
-      await _local.initialize(
-        settings: const InitializationSettings(
-          android: AndroidInitializationSettings('@drawable/ic_stat_dropoff'),
-        ),
-        onDidReceiveNotificationResponse: (details) =>
-            onPayloadTap.add(details.payload?.isNotEmpty == true ? _decodePayload(details.payload!) : null),
-      );
+      await _prepareChannels(androidImpl);
+      await _ensureLocalInitialized();
 
       FirebaseMessaging.onBackgroundMessage(_backgroundHandler);
       FirebaseMessaging.onMessage.listen(_onForegroundMessage);
@@ -100,7 +101,74 @@ class PushService {
       _enabled = true;
     } catch (_) {
       // Firebase not configured for this build — push stays off, app still runs.
+    } finally {
+      if (!_initDone.isCompleted) _initDone.complete();
     }
+  }
+
+  static const List<AndroidNotificationChannel> _channels = [
+    // The alarm channel: max importance, sound + vibration, and a best-effort
+    // Do Not Disturb bypass. A new order is the only alert allowed to wake a
+    // rider's locked phone.
+    AndroidNotificationChannel('dropoff_orders', 'DropOff — New orders',
+        description: 'A new delivery is waiting — opens straight to your Task Queue.',
+        importance: Importance.max, bypassDnd: true),
+    AndroidNotificationChannel('dropoff_jobs', 'DropOff — Parcels & riders',
+        description: 'Booking, dispatch, rider assignment and delivery updates.',
+        importance: Importance.high),
+    AndroidNotificationChannel('dropoff_chat', 'DropOff — Support tickets',
+        description: 'Replies to your support tickets and DropOff updates.',
+        importance: Importance.high),
+    AndroidNotificationChannel('dropoff_payments', 'DropOff — Payments',
+        description: 'Payment receipts and plan renewals.',
+        importance: Importance.high),
+    AndroidNotificationChannel('dropoff_marketing', 'DropOff — Offers',
+        description: 'Occasional offers and updates from DropOff. You control these.',
+        importance: Importance.defaultImportance),
+    AndroidNotificationChannel('dropoff_alerts', 'DropOff — Account & security',
+        description: 'New device, intrusion and account alerts.',
+        importance: Importance.max),
+  ];
+
+  /// Channels must be created in the FOREGROUND (Android suppresses the first
+  /// notification if a channel is first created from a background isolate).
+  static Future<void> _prepareChannels(AndroidFlutterLocalNotificationsPlugin? android) async {
+    if (android == null) return;
+    for (final channel in _channels) {
+      await android.createNotificationChannel(channel);
+    }
+    // Importance/sound/vibration are IMMUTABLE once Android has created a
+    // channel. Older builds may have left `dropoff_orders` at a quiet level,
+    // which is why riders heard nothing — rebuild only drifted channels.
+    try {
+      final existing = await android.getNotificationChannels();
+      for (final channel in existing ?? const <AndroidNotificationChannel>[]) {
+        AndroidNotificationChannel? wanted;
+        for (final c in _channels) {
+          if (c.id == channel.id) { wanted = c; break; }
+        }
+        if (wanted != null && channel.importance != wanted.importance) {
+          await android.deleteNotificationChannel(channelId: channel.id);
+          await android.createNotificationChannel(wanted);
+        }
+      }
+    } catch (_) { /* best effort: the channels above already exist */ }
+  }
+
+  /// Dart isolates do not share memory: the background FCM handler has its own
+  /// [FlutterLocalNotificationsPlugin] instance and must initialize it before
+  /// calling `show`. This used to be foreground-only, so background order
+  /// alerts were silently swallowed by a try/catch.
+  static Future<void> _ensureLocalInitialized() async {
+    if (_localReady) return;
+    _localReady = true;
+    await _local.initialize(
+      settings: const InitializationSettings(
+        android: AndroidInitializationSettings('@drawable/ic_stat_dropoff'),
+      ),
+      onDidReceiveNotificationResponse: (details) =>
+          onPayloadTap.add(details.payload?.isNotEmpty == true ? _decodePayload(details.payload!) : null),
+    );
   }
 
   static Map<String, dynamic> _decodePayload(String raw) {
@@ -122,7 +190,14 @@ class PushService {
   static Future<void> _backgroundHandler(RemoteMessage message) async {
     try {
       await Firebase.initializeApp();
-      _show(message.data, message.notification?.title, message.notification?.body);
+      await _ensureLocalInitialized();
+      // The worker sends order alerts as DATA-ONLY (see push.ts) so we render
+      // them here with the max-importance channel, alarm category and
+      // full-screen intent. Other pushes already have a system notification
+      // posted by FCM — showing another here would double-post in the shade.
+      if (message.notification == null) {
+        await _show(message.data, message.notification?.title, message.notification?.body);
+      }
     } catch (_) {}
   }
 
@@ -138,7 +213,7 @@ class PushService {
     if (kind.contains('assign') || kind == 'claim_available' || kind == 'new_order' || kind == 'trip_transferred') {
       return const AndroidNotificationChannel('dropoff_orders', 'DropOff — New orders',
           description: 'A new delivery is waiting — opens straight to your Task Queue.',
-          importance: Importance.max);
+          importance: Importance.max, bypassDnd: true);
     }
     if (kind.startsWith('chat') || kind.contains('support')) {
       return const AndroidNotificationChannel('dropoff_chat', 'DropOff — Support tickets',
@@ -168,9 +243,11 @@ class PushService {
   static Future<void> _show(Map<String, dynamic> data, String? title, String? body) async {
     // Brand in the shade: every notification reads "DropOff · …" even when the
     // worker sends a generic title (owner 2026-11-21).
-    final rawTitle = title ?? _titleFor(data);
+    // Data-only order alerts carry the display text in `data` (the worker
+    // cannot rely on `message.notification` for the alarm path).
+    final rawTitle = title ?? _str(data['title']) ?? _titleFor(data);
     final t = rawTitle.toLowerCase().startsWith('dropoff') ? rawTitle : 'DropOff · $rawTitle';
-    final b = body ?? '';
+    final b = body ?? _str(data['body']) ?? '';
     final kind = _kindOf(data);
     final channel = _channelFor(kind);
     final isOrderAlert = channel.id == 'dropoff_orders';
@@ -239,6 +316,10 @@ class PushService {
   /// Registers this device's FCM token under the signed-in user's phone. Call
   /// after every successful sign-in / link.
   static Future<void> register() async {
+    // A cold-start sign-in can reach here before init() has finished the OS
+    // permission/channel work. Wait for it instead of silently skipping the
+    // token registration (the bug that left riders with no pushes at all).
+    await _initDone.future;
     if (!_enabled) return;
     try {
       // ignore: deprecated_member_use

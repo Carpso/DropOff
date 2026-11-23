@@ -20,6 +20,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../data/dropoff_api.dart';
 import '../data/map_services.dart';
 import '../data/analytics_service.dart';
+import '../data/push_service.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_sheet.dart';
@@ -163,6 +164,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       // The rider may have granted location in Settings while the app was in
       // the background — restart the watch instead of staying silent forever.
       unawaited(_startArrivalWatch());
+      // Same for Android 13+ notification permission: a rider who just turned
+      // alerts on in Settings must not keep seeing the "alerts off" banner.
+      unawaited(PushService.refreshPermission().then((_) {
+        if (mounted) setState(() {});
+      }));
     }
   }
 
@@ -2209,6 +2215,29 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     ? Geolocator.openLocationSettings()
                     : Geolocator.openAppSettings(),
                 child: const Text('Open settings'),
+              ),
+            ]),
+          ),
+        // NEW-ORDER ALERTS (owner 2026-11-23): on Android 13+ notifications are
+        // OFF by default. With permission denied, FCM tokens still register but
+        // every "new order" push vanishes silently — the rider waits forever.
+        if (PushService.supportsPush && !PushService.notificationsEnabled)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            color: AppColors.danger.withValues(alpha: 0.12),
+            child: Row(children: [
+              const Icon(Icons.notifications_off_outlined, size: 16, color: AppColors.danger),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('New-order alerts are off — you will not hear when a job arrives.',
+                  style: TextStyle(fontSize: 11.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
+              TextButton(
+                onPressed: () async {
+                  await PushService.openNotificationSettings();
+                  if (!mounted) return;
+                  await PushService.refreshPermission();
+                  if (mounted) setState(() {});
+                },
+                child: const Text('Turn on'),
               ),
             ]),
           ),

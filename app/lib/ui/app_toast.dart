@@ -8,13 +8,20 @@ import 'keys.dart';
 enum AppToastType { success, info, warning, error }
 
 /// DropOff toast ("snack bar") with icon + rounded pill + behaviour floats.
-/// Every user-facing ephemeral message should be an AppToast: white-on-forest,
-/// 15% bottom inset, swipe-up to dismiss, with an auto-selected severity.
+///
+/// SUCCESS/INFO/WARNING float 22 px above the bottom edge. ERRORS are pinned
+/// under the top app bar instead (owner bug 2026-11-23): on the delivery
+/// details screen the bottom toast covered "Pay K5.00 to unlock" and
+/// "Download courier receipt" in Help & actions, so a sender could not see or
+/// tap the very action the message was about.
 class AppToast {
   const AppToast._();
 
   static const _dur = Duration(seconds: 3);
   static const _durLong = Duration(seconds: 5);
+
+  /// Only one top error is ever visible; a newer one replaces the old one.
+  static OverlayEntry? _topEntry;
 
   static void success(BuildContext context, String message, {Duration? duration}) =>
       _show(context, message, AppToastType.success, duration ?? _dur);
@@ -59,13 +66,55 @@ class AppToast {
     return AppToastType.info;
   }
 
+  static (Color, IconData) _style(AppToastType type) => switch (type) {
+        AppToastType.success => (AppColors.forest, Icons.check_circle_rounded),
+        AppToastType.info => (const Color(0xFF2B5A86), Icons.info_rounded),
+        AppToastType.warning => (AppColors.warning, Icons.warning_amber_rounded),
+        AppToastType.error => (AppColors.danger, Icons.error_rounded),
+      };
+
+  static Widget _content(IconData icon, String message) => Row(
+        mainAxisSize: MainAxisSize.max,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.22),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 10),
+          // Flexible — never Expanded inside a min-size Row: intrinsic sizing
+          // collapsed the text to a 0-width column, which rendered long
+          // messages as VERTICAL text (owner bug 2026-11-20).
+          Flexible(
+            child: Text(message,
+                softWrap: true,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13, height: 1.32)),
+          ),
+        ],
+      );
+
   static void _show(BuildContext context, String message, AppToastType type, Duration duration) {
-    final (bg, icon) = switch (type) {
-      AppToastType.success => (AppColors.forest, Icons.check_circle_rounded),
-      AppToastType.info => (const Color(0xFF2B5A86), Icons.info_rounded),
-      AppToastType.warning => (AppColors.warning, Icons.warning_amber_rounded),
-      AppToastType.error => (AppColors.danger, Icons.error_rounded),
-    };
+    // Errors go to the TOP so they never sit on top of the action they are
+    // complaining about. Root overlay keeps them above sheets and dialogs.
+    if (type == AppToastType.error) {
+      // Prefer the CALLER's context: it is inside a route and therefore has an
+      // Overlay ancestor. The root ScaffoldMessenger context can sit above the
+      // Navigator in MaterialApp, where `Overlay.maybeOf` finds nothing.
+      final overlay = Overlay.maybeOf(context, rootOverlay: true) ??
+          Overlay.maybeOf(context) ??
+          (scaffoldMessengerKey.currentContext == null
+              ? null
+              : Overlay.maybeOf(scaffoldMessengerKey.currentContext!, rootOverlay: true));
+      if (overlay != null) {
+        _showTop(overlay, message, type, duration);
+        return;
+      }
+    }
+    final (bg, icon) = _style(type);
     // Root-scope messenger: renders above sheets, dialogs and route transitions
     // (a nearest-ScaffoldMessenger would be BELOW them).
     final messenger = scaffoldMessengerKey.currentState ?? ScaffoldMessenger.of(context);
@@ -79,26 +128,43 @@ class AppToast {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       backgroundColor: bg,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      content: Row(mainAxisSize: MainAxisSize.max, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.all(5),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.22),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: Colors.white, size: 18),
-        ),
-        const SizedBox(width: 10),
-        // Flexible — never Expanded inside a min-size Row: intrinsic sizing
-        // collapsed the text to a 0-width column, which rendered long messages
-        // (e.g. "Your plan cap is reached — …") as VERTICAL text
-        // (owner bug 2026-11-20).
-        Flexible(
-          child: Text(message,
-              softWrap: true,
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13, height: 1.32)),
-        ),
-      ]),
+      content: _content(icon, message),
     ));
+  }
+
+  static void _showTop(OverlayState overlay, String message, AppToastType type, Duration duration) {
+    _topEntry?.remove();
+    final (bg, icon) = _style(type);
+    late final OverlayEntry entry;
+    entry = OverlayEntry(builder: (ctx) {
+      return Positioned(
+        top: MediaQuery.of(ctx).padding.top + 10,
+        left: 14,
+        right: 14,
+        child: GestureDetector(
+          onTap: () {
+            if (entry.mounted) entry.remove();
+            if (identical(_topEntry, entry)) _topEntry = null;
+          },
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20), boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 12, offset: const Offset(0, 4)),
+              ]),
+              child: _content(icon, message),
+            ),
+          ),
+        ),
+      );
+    });
+    _topEntry = entry;
+    overlay.insert(entry);
+    Future<void>.delayed(duration, () {
+      if (!entry.mounted) return;
+      entry.remove();
+      if (identical(_topEntry, entry)) _topEntry = null;
+    });
   }
 }

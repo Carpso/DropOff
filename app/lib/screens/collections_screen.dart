@@ -297,21 +297,17 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return StatefulBuilder(builder: (ctx, setSheetState) {
         Future<void> pay() async {
           setSheetState(() => busy = true);
-          final status = await appStore.settleCounterFare(
+          final result = await appStore.settleCounterFare(
             jobRef: ref,
             phone: appStore.linkedPhone,
           );
           if (!ctx.mounted) return;
           setSheetState(() => busy = false);
-          if (status == 'success') {
+          if (result.isSuccess) {
             Navigator.pop(ctx);
             _message('Counter fare cleared — tap Book collection again.');
           } else {
-            AppToast.show(ctx, switch (status) {
-              'failed' => 'The momo prompt was rejected. Top up your wallet and try again.',
-              'error' => 'Could not start the prompt — check your connection and try again.',
-              _ => 'Prompt sent — approve it on your phone, then book again.',
-            });
+            AppToast.show(ctx, result.message);
           }
         }
 

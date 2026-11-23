@@ -198,6 +198,9 @@ Future<void> main() async {
   // splash screen shows immediately; events are flushed with the booking
   // outbox and on a timer.
   final initFuture = Future.wait([store.initialize(), AnalyticsService.instance.init()]);
+  // Push setup runs in parallel (the OS permission dialog must not block the
+  // splash), but PushService.register() awaits its completion before sending
+  // the token to the server, so a cold-start rider is never left unregistered.
   PushService.init();
   void handleTap(Map<String, dynamic>? data) {
     // Cold start / lock screen: queue the tap instead of dropping it or

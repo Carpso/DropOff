@@ -5985,13 +5985,28 @@ app.get('/wallet', async (c) => {
 // Lipila collect for: kind=job (settle a job), kind=topup (ride float),
 // kind=subscription (auto-renewal). All settle idempotently below.
 app.post('/payments', async (c) => {
-  if (await rateLimited(c, 'payment_create', 30)) return c.json({ error: 'too_many_requests' }, 429);
+  if (await rateLimited(c, 'payment_create', 30)) {
+    console.error(JSON.stringify({ where: 'payments', event: 'prompt_start_failed', code: 'too_many_requests', status: 429 }));
+    return c.json({ error: 'too_many_requests' }, 429);
+  }
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ error: 'invalid JSON body' }, 400);
   const idemKey = idemKeyOf(c, b);
   const replay = await replayIdempotent(c, idemKey, 'payment', c.get('phone') ?? null);
   if (replay) return replay;
   const kind: string = ['job', 'topup', 'subscription', 'counter_fare'].includes(b.kind) ? b.kind : 'job';
+  // Every refused prompt leaves a structured log so support can see WHY a
+  // sender could not pay (owner bug 2026-11-23). The old app toast flattened
+  // all of these into "check your connection and balance".
+  const paymentFail = (code: string, status: number, extra: Record<string, unknown> = {}) => {
+    console.error(JSON.stringify({
+      where: 'payments', event: 'prompt_start_failed', code, status,
+      kind, ref: b.job_ref ?? null, ...extra,
+    }));
+    // Hono narrows json() to literal status codes; these are fixed literals at
+    // every call site, so the runtime value is always a valid HTTP status.
+    return c.json({ error: code, ...extra }, status as any);
+  };
 
   let phone: string;
   let amount = 0;        // the full prompt: base + our platform fee + Lipila legs
@@ -6108,12 +6123,12 @@ app.post('/payments', async (c) => {
     const job = await c.env.DB.prepare(
       `SELECT id, ref, sender_phone, counter_receipt_zmw, counter_receipt_paid FROM jobs WHERE ref = ?1`,
     ).bind(b.job_ref ?? '').first() as any;
-    if (!job) return c.json({ error: 'job not found' }, 404);
+    if (!job) return paymentFail('job not found', 404);
     if (c.get('role') === 'customer' && c.get('phone') !== job.sender_phone) {
-      return c.json({ error: 'forbidden' }, 403);
+      return paymentFail('forbidden', 403, { expected: 'sender_phone' });
     }
     if (!job.counter_receipt_zmw || Number(job.counter_receipt_zmw) <= 0) {
-      return c.json({ error: 'no_counter_receipt', detail: 'No depot receipt has been submitted for this parcel yet.' }, 409);
+      return paymentFail('no_counter_receipt', 409, { detail: 'No depot receipt has been submitted for this parcel yet.' });
     }
     if (Number(job.counter_receipt_paid) === 1) {
       return c.json({ error: 'counter_fare_already_paid' }, 409);
@@ -6177,7 +6192,9 @@ app.post('/payments', async (c) => {
       : kind === 'subscription' ? 'DropOff pack activation/renewal'
       : kind === 'counter_fare' ? 'DropOff depot counter fare'
       : 'DropOff ride float top-up');
-  if (!init.ok) return c.json({ error: 'lipila_init_failed', detail: init.raw }, 502);
+  if (!init.ok) {
+    return paymentFail('lipila_init_failed', 502, { detail: init.raw, amount, phone });
+  }
 
   const provider: Provider = b.provider ?? providerFromPhone(phone);
   const { meta } = await c.env.DB.prepare(

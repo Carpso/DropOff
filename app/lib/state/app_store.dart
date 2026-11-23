@@ -11,7 +11,31 @@ import '../data/analytics_service.dart';
 import '../data/push_service.dart';
 import '../data/catalog.dart';
 import '../ui/keys.dart';
+import '../ui/money_errors.dart';
 import '../models/booking.dart';
+
+/// Outcome of a courier-bill (depot counter fare) payment attempt. The old API
+/// returned a bare status string, which forced every caller to flatten a
+/// network outage, a wrong-account job and a provider rejection into the same
+/// "check your connection and balance" toast (owner bug 2026-11-23).
+class CounterFareResult {
+  const CounterFareResult({
+    required this.status,
+    required this.message,
+    this.errorCode,
+    this.detail,
+    this.providerReason,
+  });
+
+  /// `success` | `failed` | `pending` | `error` (prompt never started).
+  final String status;
+  /// Ready to show: accurate, actionable, free of raw codes.
+  final String message;
+  final String? errorCode;
+  final String? detail;
+  final String? providerReason;
+  bool get isSuccess => status == 'success';
+}
 
 class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   static const _rememberKey = 'dropoff_remember_v1';
@@ -1210,28 +1234,57 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   /// Settle the DEPOT COUNTER FARE for [jobRef]: start the momo prompt for the
   /// exact amount the rider photographed, then wait for the provider.
   ///
-  /// Returns 'success' | 'failed' | 'pending' | 'error' (prompt never started).
   /// One stable idempotency key per job, so a retry after a dropped prompt can
-  /// never open a second charge. Used by the receipt button, the due card and
-  /// the "you have an unpaid fare" gate on new bookings/collections.
-  Future<String> settleCounterFare({required String jobRef, String? phone}) async {
+  /// never open a second charge. The returned [CounterFareResult] carries the
+  /// real failure reason instead of collapsing everything to "connection or
+  /// balance" — see `counterFareErrorText` in ui/money_errors.dart.
+  Future<CounterFareResult> settleCounterFare({required String jobRef, String? phone}) async {
     final res = await DropOffApi.payCounterFare(
       jobRef: jobRef,
       phone: phone ?? _linkedPhone ?? '',
       idempotencyKey: 'cfare-$jobRef',
     );
     if (!res.ok) {
-      return res.error == 'counter_fare_already_paid' ? 'success' : 'error';
+      final code = res.error ?? 'http_${res.status ?? 0}';
+      final detail = res.body['detail']?.toString();
+      // Log the truth for support: the old generic toast hid provider outages,
+      // wrong-account jobs and stale receipts behind one misleading message.
+      debugPrint('counter_fare prompt_start_failed ref=$jobRef code=$code http=${res.status} detail=$detail');
+      if (code == 'counter_fare_already_paid') {
+        return const CounterFareResult(status: 'success', message: 'Already paid — your receipt is unlocked.');
+      }
+      return CounterFareResult(
+        status: 'error',
+        errorCode: code,
+        detail: detail,
+        message: counterFareErrorText(res),
+      );
     }
     final paymentId = '${res.body['payment_id']}';
     var status = 'pending';
+    String? failReason;
     for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 2));
       final st = await DropOffApi.paymentStatus(paymentId);
       status = st.$1 ?? 'pending';
+      failReason = st.$2;
     }
-    if (status == 'success') await syncJobsFromServer();
-    return status;
+    if (status == 'success') {
+      await syncJobsFromServer();
+      return const CounterFareResult(status: 'success', message: 'Courier bill paid — the receipt is unlocked.');
+    }
+    if (status == 'failed') {
+      final reason = failReason?.trim();
+      debugPrint('counter_fare prompt_rejected ref=$jobRef payment=$paymentId reason=$reason');
+      return CounterFareResult(
+        status: 'failed',
+        providerReason: reason,
+        message: (reason == null || reason.isEmpty)
+            ? 'The momo prompt was rejected. Check your wallet balance and try again.'
+            : 'Payment rejected: $reason — top up your momo wallet and try again.',
+      );
+    }
+    return const CounterFareResult(status: 'pending', message: 'Prompt sent — approve it on your phone to unlock the receipt.');
   }
 
   Future<void> _saveBookings() async {

@@ -27,6 +27,49 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (twenty-third pass) — new-order push alarm + honest payment errors
+
+Owner reports: (a) rider phones do not ring/show a curtain alert for a new
+order; (b) a red toast on delivery details says "Could not start the prompt.
+Check your connection and balance…" (booking DRO-261121-3ME9J, K5 receipt).
+
+**Push alarm — root causes fixed:**
+- `workers/src/push.ts`: `rider_assigned` / `trip_transferred` were routed to
+  the ordinary `dropoff_jobs` channel at default priority. New `isOrderAlert()`
+  maps them to `dropoff_orders`, and `buildFcmMessage()` now sends orders as
+  HIGH-PRIORITY **data-only** with `ttl: 300s` (FCM's own notification payload
+  cannot carry a full-screen intent/alarm category). Title/body travel in data.
+  Other pushes keep the guaranteed system notification, now at PRIORITY_HIGH.
+  Pure helper + 4 vitest tests in `test/push_alerts.test.ts`.
+- `app/lib/data/push_service.dart`: background FCM handler never initialized
+  `FlutterLocalNotificationsPlugin` in its isolate, so local alarm rendering
+  silently failed in a try/catch. Added `_ensureLocalInitialized()` for both
+  isolates (skips duplicate local show when FCM already posted a notification),
+  captured the POST_NOTIFICATIONS result into `notificationsEnabled`, added
+  `refreshPermission()`/`openNotificationSettings()`, and channel repair that
+  deletes/recreates channels whose Android importance drifted (importance is
+  immutable, so the old comment claiming a wipe was a lie). Added
+  `bypassDnd: true` to the alarm channel.
+- Cold-start token race: `register()` now awaits a `Completer` completed when
+  `init()` finishes, instead of checking `_enabled` before Firebase/permission
+  setup. The splash no longer waits on the OS permission dialog.
+- `rider_queue_screen.dart`: red "New-order alerts are off" banner with a
+  Turn on → system settings action; refreshes permission on resume.
+
+**Payment error honesty:** `AppStore.settleCounterFare()` returned only a bare
+status string, flattening network outages, 502 Lipila failures, wrong-account
+jobs and stale receipts into one "connection and balance" toast. It now returns
+`CounterFareResult` (status + actionable `message` + errorCode/detail) built by
+`ui/money_errors.dart: counterFareErrorText()`. All four call sites updated.
+Worker `/payments` logs every refused prompt (`paymentFail()` with code/status/
+ref) so support can see the real reason. `test/money_errors_test.dart` (5).
+
+**Toast placement:** `AppToast.error` now pins under the app bar via a root
+overlay instead of floating at the bottom over the "Pay K5.00 to unlock" /
+"Download courier receipt" actions it refers to; tap dismisses. Test at
+320/360 px in `test/app_toast_test.dart` measures the position and proves the
+lower action stays tappable. Full Flutter suite 49/49, vitest 24/24.
+
 ## 2026-11-23 (twenty-first pass) — Business promo card layout pinned by tests
 
 Owner report: the Business promo card body ("Promo adds 25 parcels for K500 —

@@ -1832,15 +1832,14 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
     }
     setState(() => _busy = true);
     // One stable key per job: retrying must never open a second prompt.
-    final status = await store.settleCounterFare(jobRef: ref, phone: widget.booking.senderPhone);
+    final result = await store.settleCounterFare(jobRef: ref, phone: widget.booking.senderPhone);
     if (!mounted) return;
     setState(() => _busy = false);
-    AppToast.show(context, switch (status) {
-      'success' => 'Courier bill paid — the receipt is unlocked. Tap Download again.',
-      'failed' => 'The momo prompt was rejected. Top up and tap the locked receipt button again.',
-      'error' => 'Could not start the prompt. Check your connection and balance, then try again.',
-      _ => 'Prompt sent — approve it on your phone to unlock the receipt.',
-    });
+    AppToast.show(
+      context,
+      result.isSuccess ? '${result.message} Tap Download again.' : result.message,
+      type: result.isSuccess ? AppToastType.success : null,
+    );
     unawaited(store.syncJobsFromServer());
   }
 
@@ -2004,18 +2003,14 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
       return;
     }
     setState(() => _busy = true);
-    final status = await store.settleCounterFare(jobRef: ref, phone: widget.booking.senderPhone);
+    final result = await store.settleCounterFare(jobRef: ref, phone: widget.booking.senderPhone);
     if (!mounted) return;
     setState(() => _busy = false);
-    final amount = widget.booking.counterReceiptZmw;
-    AppToast.show(context, switch (status) {
-      'success' => 'Counter fare paid — your depot receipt is revealed below.',
-      'failed' => 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.',
-      'error' => 'Payment could not start — check your momo balance and connection, then tap Pay now again.',
-      _ => amount != null && amount > 0
-          ? 'Prompt sent for K${amount.toStringAsFixed(2)} — approve it on your phone to reveal the receipt.'
-          : 'Prompt sent — approve it on your phone to reveal the receipt.',
-    });
+    AppToast.show(
+      context,
+      result.message,
+      type: result.isSuccess ? AppToastType.success : null,
+    );
     unawaited(store.syncJobsFromServer());
   }
 

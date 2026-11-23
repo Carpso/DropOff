@@ -445,21 +445,17 @@ class _BookingScreenState extends State<BookingScreen> {
       return StatefulBuilder(builder: (ctx, setSheetState) {
         Future<void> pay() async {
           setSheetState(() => busy = true);
-          final status = await store.settleCounterFare(
+          final result = await store.settleCounterFare(
             jobRef: ref,
             phone: store.linkedPhone ?? _senderPhone.text.trim(),
           );
           if (!ctx.mounted) return;
           setSheetState(() => busy = false);
-          if (status == 'success') {
+          if (result.isSuccess) {
             Navigator.pop(ctx);
             _message('Counter fare cleared — tap the book button again to place this booking.');
           } else {
-            AppToast.show(ctx, switch (status) {
-              'failed' => 'The momo prompt was rejected. Top up your wallet and try again.',
-              'error' => 'Could not start the prompt — check your connection and try again.',
-              _ => 'Prompt sent — approve it on your phone, then book again.',
-            });
+            AppToast.show(ctx, result.message);
           }
         }
 
