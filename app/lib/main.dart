@@ -30,6 +30,7 @@ import 'data/analytics_service.dart';
 import 'services/crash_reporting.dart';
 import 'ui/app_theme.dart';
 import 'data/push_service.dart';
+import 'services/screen_privacy.dart';
 import 'services/device_lock.dart';
 
 import 'ui/app_spinner.dart';
@@ -192,6 +193,10 @@ void _performDeepLink(AppStore store, Uri uri) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Block OS screenshots / recordings of OTPs, waybills, customer addresses
+  // and finance data. All sharing exports a real file via the OS share sheet,
+  // which is separate system UI and keeps working (owner 2026-11-23).
+  await ScreenPrivacy.enableProtection();
   // ANDROID 15+ EDGE-TO-EDGE (Play advisory on release 84): use the modern
   // inset-based mode instead of the deprecated setSystemUiVisibility flags.
   // Flutter then reports status/nav bar insets through MediaQuery, and every

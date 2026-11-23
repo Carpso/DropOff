@@ -27,6 +27,22 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (thirty-eighth pass) — block screenshots, share via explicit export
+
+Owner: stop screenshots in the app, but keep the "share" feature on the screen
+people used to screenshot.
+
+- Android `FLAG_SECURE` set at startup via `ScreenPrivacy` MethodChannel +
+  `MainActivity.configureFlutterEngine`. Blocks OS screenshots/recordings of
+  OTPs, waybills, customer addresses and finance data. The OS share sheet is a
+  separate system UI and is unaffected. All existing shares already export real
+  files (`Share.shareXFiles`) — none captured the screen.
+- Added the missing direct shares where content was previously only displayable:
+  rider collection receipt viewer (share button in AppBar + bottom bar) and
+  rider order waybill (share details button). Waybill shares strip money fields
+  server-side.
+- Web/desktop no-op; iOS not shipped. Full suite 58/58, analyze/tsc clean.
+
 ## 2026-11-23 (thirty-seventh pass) — proof loader, photo delete bug, admin/partner
 
 - **Premium proof loader:** new `ui/proof_upload_overlay.dart` shows a pulsing

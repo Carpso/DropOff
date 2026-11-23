@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../data/catalog.dart';
@@ -1032,7 +1033,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
 
   /// Full-screen proof-of-payment receipt — the rider shows this at the
   /// courier counter to collect the goods. Pinch to zoom, tap to close.
-  void _showCollectionReceipt(String url) {
+  void _showCollectionReceipt(String url, {String ref = ''}) {
     if (url.isEmpty) return;
     // Absolute paths (/media/...) get the API host; already-absolute URLs are
     // used as-is so a CDN/legacy receipt never becomes "host/media/https://…".
@@ -1047,12 +1048,31 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           // Bounded + two lines: the old single-line title was clipped to
           // "Receipt - show at the depot cou..." on narrow phones.
           title: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width - 72),
+            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width - 110),
             child: const Text(
               'Receipt — show at the depot counter',
               maxLines: 2,
               softWrap: true,
               style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15, height: 1.2),
+            ),
+          ),
+          // Screenshots are blocked app-wide; sharing is an explicit file
+          // export instead (owner 2026-11-23).
+          actions: [
+            IconButton(
+              tooltip: 'Download / share receipt',
+              icon: const Icon(Icons.ios_share),
+              onPressed: () => ReceiptViewer.share(context, uri, ref),
+            ),
+          ],
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: FilledButton.icon(
+              onPressed: () => ReceiptViewer.share(context, uri, ref),
+              icon: const Icon(Icons.ios_share, size: 17),
+              label: const Text('Download & share receipt'),
             ),
           ),
         ),
@@ -1171,7 +1191,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   child: OutlinedButton.icon(
-                    onPressed: () => _showCollectionReceipt('${s['collection_receipt_url']}'),
+                    onPressed: () => _showCollectionReceipt('${s['collection_receipt_url']}', ref: '${s['ref'] ?? ''}'),
                     icon: const Icon(Icons.receipt_long_outlined),
                     label: const Text('Show payment receipt at the counter'),
                   ),
@@ -3090,6 +3110,26 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
         ]),
       );
 
+  /// Screenshots are blocked app-wide, so the waybill is shared explicitly
+  /// as text (money fields are already stripped by the worker).
+  void _shareWaybill() {
+    final wb = _wb;
+    if (wb == null) return;
+    String val(String key) => '${wb[key] ?? ''}'.trim();
+    final lines = <String>[
+      'DropOff order ${widget.ref}',
+      if (val('sender_name').isNotEmpty) 'Sender: ${val('sender_name')} · ${val('sender_phone')}',
+      if (val('recipient_name').isNotEmpty) 'Recipient: ${val('recipient_name')} · ${val('recipient_phone')}',
+      if (val('pickup_address').isNotEmpty) 'Pickup: ${val('pickup_address')}',
+      if (val('dest_address').isNotEmpty) 'Deliver: ${val('dest_address')}',
+      if (val('depot').isNotEmpty) 'Depot: ${val('depot')}',
+      if (val('branch').isNotEmpty) 'Branch: ${val('branch')}',
+      if (val('description').isNotEmpty) 'Item: ${val('description')}',
+      if (val('pickup_window').isNotEmpty) 'Window: ${val('pickup_window')}',
+    ];
+    unawaited(Share.share(lines.join('\n'), subject: 'DropOff order ${widget.ref}'));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -3103,6 +3143,11 @@ class _OrderWaybillSheetState extends State<OrderWaybillSheet> {
             const Expanded(
               child: Text('ORDER WAYBILL',
                   style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.2, color: AppColors.ink)),
+            ),
+            IconButton(
+              tooltip: 'Share waybill details',
+              icon: const Icon(Icons.ios_share, size: 19, color: AppColors.forest),
+              onPressed: _wb == null ? null : _shareWaybill,
             ),
             IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(context)),
           ]),
