@@ -10251,13 +10251,87 @@ app.get('/admin/counter-fares', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
   const { results } = await c.env.DB.prepare(
     `SELECT j.ref, j.sender_phone, j.counter_receipt_zmw, j.counter_receipt_url, j.created_at,
-            r.full_name AS rider_name, r.phone AS rider_phone
-       FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
+            r.full_name AS rider_name, r.phone AS rider_phone,
+            p.status AS last_payment_status, p.amount_zmw AS last_payment_amount,
+            p.created_at AS last_payment_at, p.meta AS last_payment_meta,
+            p.lipila_reference AS last_payment_ref
+       FROM jobs j
+       LEFT JOIN riders r ON r.id = j.rider_id
+       LEFT JOIN payments p ON p.id = (
+         SELECT MAX(id) FROM payments WHERE job_id = j.id AND kind = 'counter_fare')
       WHERE j.counter_receipt_zmw IS NOT NULL AND j.counter_receipt_zmw > 0
         AND j.counter_receipt_paid = 0
       ORDER BY j.id DESC LIMIT 50`,
   ).all<any>();
   return c.json({ fares: results ?? [] });
+});
+
+// RECOVERY: send a FRESH momo prompt for a stuck depot counter fare. The
+// sender's own app prompt can fail for reasons we cannot see after the fact
+// (transport drop, stale idempotency key, provider rejection with no payment
+// row). An admin must be able to re-fire it from the real sender phone and see
+// the provider's raw answer. A fresh Lipila reference is used every time —
+// failed references cannot be retried at the telco (owner bug 2026-11-23).
+app.post('/admin/jobs/:ref/counter-fare-prompt', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const ref = String(c.req.param('ref') ?? '').trim().replace(/^#/, '').toUpperCase();
+  if (!ref) return c.json({ error: 'ref required' }, 400);
+  const body: any = await c.req.json().catch(() => ({}));
+  const reason = String(body?.reason ?? '').trim();
+  const job = await c.env.DB.prepare(
+    `SELECT id, ref, sender_phone, counter_receipt_zmw, counter_receipt_paid FROM jobs WHERE UPPER(ref) = ?1`,
+  ).bind(ref).first<any>();
+  if (!job) return c.json({ error: 'booking_not_found' }, 404);
+  if (Number(job.counter_receipt_paid) === 1) return c.json({ error: 'counter_fare_already_paid' }, 409);
+  const receipt = round2(Number(job.counter_receipt_zmw ?? 0));
+  if (!(receipt > 0)) return c.json({ error: 'no_counter_receipt' }, 409);
+
+  let phone: string;
+  try { phone = normalizeZmPhone(job.sender_phone); } catch {
+    return c.json({ error: 'invalid_sender_phone', detail: 'The booking has no valid sender momo number.' }, 400);
+  }
+  // A pending prompt IS the prompt — never fire a second one.
+  const pending = await c.env.DB.prepare(
+    `SELECT id, amount_zmw, lipila_reference FROM payments
+      WHERE job_id = ?1 AND kind = 'counter_fare' AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+  ).bind(job.id).first<any>();
+  if (pending) {
+    return c.json({
+      ok: true, reused_prompt: true, payment_id: pending.id,
+      amount_zmw: pending.amount_zmw, lipila_reference: pending.lipila_reference,
+    });
+  }
+  const fees = await counterFareFees(c.env, phone, receipt);
+  const amount = fees.total;
+  const failed = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM payments WHERE job_id = ?1 AND kind = 'counter_fare' AND status = 'failed'`,
+  ).bind(job.id).first<any>();
+  const lipilaRef = `cfare-${job.ref}-admin-${Number(failed?.n ?? 0) + 1}`;
+  const init = await lipilaCollect(c.env, phone, amount, lipilaRef, 'DropOff depot counter fare');
+  if (!init.ok) {
+    console.error(JSON.stringify({
+      where: 'admin_counter_fare_prompt', event: 'prompt_start_failed', ref: job.ref,
+      amount, status: init.status, detail: init.raw,
+    }));
+    return c.json({ error: 'lipila_init_failed', detail: init.raw, provider_status: init.status }, 502);
+  }
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO payments (job_id, phone, provider, amount_zmw, platform_fee_zmw, lipila_fee_zmw,
+       lipila_reference, status, channel, kind) VALUES (?1,?2,?3,?4,?5,?6,?7,'pending','merchant','counter_fare')`,
+  ).bind(job.id, phone, providerFromPhone(phone), amount, fees.platformFeeZmw, fees.lipilaFeeZmw,
+    init.lipilaReference ?? lipilaRef).run();
+  const actor = c.get('phone') ?? 'admin';
+  await c.env.DB.prepare(
+    'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
+  ).bind(job.id, 'counter_fare_prompt_sent',
+    `Admin re-sent the depot counter-fare momo prompt for K${amount.toFixed(2)} to ${phone}. Reason: ${reason || 'sender could not complete the in-app prompt'}. By ${actor}.`);
+  console.log(JSON.stringify({ where: 'admin_counter_fare_prompt', event: 'prompt_sent', ref: job.ref, amount, actor, reason }));
+  await sendToPhone(c.env, phone, {
+    title: 'New payment prompt sent',
+    body: `DropOff sent a K${amount.toFixed(2)} momo prompt for the depot receipt on ${job.ref}. Approve it on your phone to unlock the photo.`,
+    data: { job_ref: job.ref, kind: 'counter_fare_prompt' },
+  }).catch(() => {});
+  return c.json({ ok: true, payment_id: meta.last_row_id, amount_zmw: amount, lipila_reference: init.lipilaReference ?? lipilaRef });
 });
 
 // RECOVERY: a sender can be blocked from ALL new bookings by one unpaid depot

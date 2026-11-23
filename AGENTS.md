@@ -27,6 +27,31 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (twenty-fifth pass) — admins can re-send prompts; root-cause honesty
+
+Owner asked whether the "no prompt" bug is truly fixed and wants admins able to
+resolve BOTH unpaid fares and failed prompts.
+
+**Honest root-cause status:** the original dead-end (dead/disabled receipt
+button + counter-fare state never merged into a locally-created booking) IS
+fixed in 0.5.71+ — that is why no prompt could ever be started at all. The
+ONE remaining one-off toast on DRO-261121-3ME9J has **no surviving evidence**:
+no payment row, no `cfare-` idempotency row, no retained log. The structured
+`paymentFail()` logging added in the 23rd pass will capture the real code next
+time. Live check of `GET /admin/counter-fares` confirms **all 5 outstanding
+fares have zero payment rows**, consistent with the pre-0.5.71 broken path.
+
+**Admin prompt recovery (new):** `POST /admin/jobs/:ref/counter-fare-prompt`
+re-fires a fresh prompt to the job's REAL sender phone with a new Lipila
+reference (`cfare-<ref>-admin-N`), reuses any already-pending prompt,
+surfaces the provider's RAW answer on failure (502 + detail), and writes a
+`counter_fare_prompt_sent` audit event. `GET /admin/counter-fares` now includes
+the last payment status/amount/meta so staff can see why a prompt failed.
+The admin card shows "Last prompt: …" and has **Send prompt** + **Waive with
+audit note** actions. Endpoint verified live (waived job correctly returns 409
+`counter_fare_already_paid`, no prompt fired). Worker `6ea71000`.
+Full suite 49/49, tsc clean.
+
 ## 2026-11-23 (twenty-fourth pass) — confirmed DRO-261121-3ME9J, waived K5, recovery path
 
 Owner confirmation: DRO-261121-3ME9J was booked by **0779686480**

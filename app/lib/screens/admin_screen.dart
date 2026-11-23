@@ -3,6 +3,7 @@ import '../ui/app_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/dropoff_api.dart';
@@ -2861,6 +2862,47 @@ class _CounterFareRecoveryCardState extends State<_CounterFareRecoveryCard> {
     });
   }
 
+  /// Human-readable outcome of the last prompt attempt, shown to staff so they
+  /// know whether to re-send, waive, or escalate to the provider.
+  String _lastPrompt(Map<String, dynamic> fare) {
+    final status = '${fare['last_payment_status'] ?? ''}';
+    if (status.isEmpty) return 'No prompt has reached the phone yet.';
+    String? reason;
+    try {
+      final meta = fare['last_payment_meta'];
+      if (meta is String) reason = (jsonDecode(meta) as Map?)?['fail_reason']?.toString();
+      if (meta is Map) reason = meta['fail_reason']?.toString();
+    } catch (_) {}
+    final amount = (fare['last_payment_amount'] as num?)?.toStringAsFixed(2);
+    return 'Last prompt: $status${amount == null ? '' : ' K$amount'}${reason == null || reason.isEmpty ? '' : ' — $reason'}';
+  }
+
+  Future<void> _sendPrompt(Map<String, dynamic> fare) async {
+    final ref = '${fare['ref'] ?? ''}';
+    final amount = (fare['counter_receipt_zmw'] as num?) ?? 0;
+    final ok = await showConfirmSheet(
+      context,
+      title: 'Send a fresh momo prompt?',
+      message: 'Send a K${amount.toStringAsFixed(2)} receipt + processing momo prompt to the sender on $ref. A new payment reference is used, so this is safe after a failed attempt. If a prompt is already waiting it will be reused instead.',
+      confirmLabel: 'Send prompt',
+      icon: Icons.send_outlined,
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    final res = await DropOffApi.adminSendCounterFarePrompt(ref, 'Admin re-send from the outstanding fares card');
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (res.ok) {
+      AppToast.success(context, 'Prompt sent — the sender should see it on their phone now.');
+    } else {
+      final detail = (res.body['detail'] as String?)?.trim() ?? '';
+      AppToast.error(context, detail.isNotEmpty
+          ? 'Provider rejected the prompt: ${detail.length > 110 ? '${detail.substring(0, 110)}…' : detail}'
+          : 'Could not send the prompt — check the provider status and try again.');
+    }
+    await _load();
+  }
+
   Future<void> _waive(Map<String, dynamic> fare) async {
     final ref = '${fare['ref'] ?? ''}';
     final amount = (fare['counter_receipt_zmw'] as num?) ?? 0;
@@ -2936,10 +2978,20 @@ class _CounterFareRecoveryCardState extends State<_CounterFareRecoveryCard> {
                 const SizedBox(height: 2),
                 Text('Sender ${fare['sender_phone'] ?? '?'} · filed by ${fare['rider_name'] ?? fare['rider_phone'] ?? 'rider'}',
                     style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
-                Align(alignment: Alignment.centerRight, child: TextButton(
-                  onPressed: _busy ? null : () => _waive(fare),
-                  child: const Text('Waive with audit note'),
-                )),
+                const SizedBox(height: 2),
+                Text(_lastPrompt(fare),
+                    style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  TextButton(
+                    onPressed: _busy ? null : () => _sendPrompt(fare),
+                    child: const Text('Send prompt'),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton(
+                    onPressed: _busy ? null : () => _waive(fare),
+                    child: const Text('Waive with audit note'),
+                  ),
+                ]),
               ]),
             ),
         ]),

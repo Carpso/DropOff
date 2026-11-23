@@ -963,6 +963,11 @@ class DropOffApi {
   static Future<ApiResponse> adminWaiveCounterFare(String ref, String reason) =>
       post('/admin/jobs/${Uri.encodeComponent(ref)}/waive-counter-fare', {'reason': reason}, admin: true);
 
+  /// Re-fire a stuck depot counter-fare momo prompt from the real sender phone.
+  /// Returns the provider's raw answer on failure so staff can act on it.
+  static Future<ApiResponse> adminSendCounterFarePrompt(String ref, String reason) =>
+      post('/admin/jobs/${Uri.encodeComponent(ref)}/counter-fare-prompt', {'reason': reason}, admin: true);
+
   /// Close a parcel chat: read-only history preserved for everyone.
   static Future<ApiResponse> closeChatThread(int threadId) =>
       post('/chat/threads/$threadId/close', const {});
