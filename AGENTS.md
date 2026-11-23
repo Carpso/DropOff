@@ -27,6 +27,41 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (nineteenth pass) — unpaid depot counter fare was a dead end
+
+Owner bug: a sender owing a depot counter fare tapped **Download courier
+receipt**, got no momo prompt, and could not book another pickup/collection.
+
+Three separate faults, all fixed:
+
+1. **The fare never reached her booking.** `AppStore.syncJobsFromServer` merged
+   only stage/lastEvent/riderName/riderPhone into a booking this app created
+   locally. `counter_receipt_zmw` / `_url` / `_paid` / `counter_receipts` were
+   only read when a job was INSERTED new, so an existing row kept
+   `counterFareDue == false` — no banner, no pay card, no prompt. The merge now
+   mirrors all four fields (and `Booking.copyWith` carries them, keeping the old
+   value when a field is omitted — it used to null them out).
+2. **The receipt button disabled itself.** `_CourierReceiptButton` had
+   `onPressed: _busy || url.isEmpty ? null : …`, so any row whose photo URL
+   hadn't synced — notably a split batch where only `counter_receipts[]` holds
+   the photos — was a permanently dead button. Paying no longer depends on the
+   photo: while a fare is due the button reads **"Pay the courier bill — unlock
+   receipt"** and always starts the prompt; only Download needs the image (with
+   an honest "still being filed" toast if it is missing). The URL falls back to
+   `counterReceipts.first.$2`.
+3. **The booking gate had no way out.** `POST /jobs` returns 409
+   `counter_fare_due` while a fare is unpaid. It now also returns `due_ref` and
+   `due_amount_zmw`, and both the booking form and the collection form turn that
+   error into a **"Settle your depot fare first"** sheet with one
+   "Pay K… now" button (same sheet copy in both, form stays filled so she can
+   retry immediately). Hooked to the new `AppStore.settleCounterFare()`, which
+   uses ONE stable idempotency key per job (`cfare-<ref>`) — the receipt button
+   used to include a timestamp, so a retry could open a second prompt.
+
+Tests: `test/counter_fare_test.dart` (7) pins due-detection, the split-batch
+shape with an empty primary URL, and that `copyWith` never drops the fare.
+Full suite 40/40. Worker deployed; release `0.5.71+81`.
+
 ## 2026-11-23 (eighteenth pass) — release 0.5.70+80, sender prefill, PWA cache fix
 
 - **Release `0.5.70+80`** (code 79 was built but never uploaded; 80 keeps the

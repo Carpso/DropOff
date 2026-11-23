@@ -563,7 +563,8 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         // amount + processing; the receipt photo unlocks after payment.
         if (booking.dispatched && !complete && booking.counterFareDue)
           _CounterReceiptCard(booking: booking),
-        if (booking.dispatched && booking.counterReceiptPaid && booking.counterReceiptUrl?.isNotEmpty == true)
+        if (booking.dispatched && booking.counterReceiptPaid &&
+            (booking.counterReceiptUrl?.isNotEmpty == true || booking.counterReceipts.isNotEmpty))
           _CounterReceiptPaidCard(booking: booking),
         // DISPATCH IS AUTOMATED (owner directive 2026-11-15): the manual
         // "Operator: mark …" status buttons are gone, and there is no rider
@@ -580,7 +581,9 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           const SectionTitle('Help & actions'),
           const SizedBox(height: 8),
           Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [
-            if (complete && (booking.counterReceiptUrl?.isNotEmpty == true || booking.counterFareDue))
+            if (complete && (booking.counterReceiptUrl?.isNotEmpty == true ||
+                booking.counterReceipts.isNotEmpty ||
+                booking.counterFareDue))
               _CourierReceiptButton(booking: booking),
             if (store.linked)
               ListTile(
@@ -1822,33 +1825,20 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
 
   Future<void> _payReceiptBill() async {
     final store = AppScope.of(context);
-    setState(() => _busy = true);
-    final res = await DropOffApi.payCounterFare(
-      jobRef: widget.booking.serverRef!,
-      phone: widget.booking.senderPhone,
-      idempotencyKey: 'cfare-${widget.booking.serverRef}-receipt-${DateTime.now().millisecondsSinceEpoch}',
-    );
-    if (!mounted) return;
-    if (!res.ok) {
-      setState(() => _busy = false);
-      AppToast.show(context, res.error == 'counter_fare_already_paid'
-          ? 'Already paid — your receipt is unlocked.'
-          : 'Could not start the prompt. Check your connection and balance, then try again.');
+    final ref = widget.booking.serverRef ?? '';
+    if (ref.isEmpty) {
+      AppToast.show(context, 'This booking is still syncing — reopen it in a moment and try again.');
       return;
     }
-    final paymentId = '${res.body['payment_id']}';
-    var status = 'pending';
-    for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      if (!mounted) return;
-      final st = await DropOffApi.paymentStatus(paymentId);
-      status = st.$1 ?? 'pending';
-    }
+    setState(() => _busy = true);
+    // One stable key per job: retrying must never open a second prompt.
+    final status = await store.settleCounterFare(jobRef: ref, phone: widget.booking.senderPhone);
     if (!mounted) return;
     setState(() => _busy = false);
     AppToast.show(context, switch (status) {
       'success' => 'Courier bill paid — the receipt is unlocked. Tap Download again.',
       'failed' => 'The momo prompt was rejected. Top up and tap the locked receipt button again.',
+      'error' => 'Could not start the prompt. Check your connection and balance, then try again.',
       _ => 'Prompt sent — approve it on your phone to unlock the receipt.',
     });
     unawaited(store.syncJobsFromServer());
@@ -1878,9 +1868,21 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
 
   @override
   Widget build(BuildContext context) {
-    final url = widget.booking.counterReceiptUrl ?? '';
+    // A batch drop can carry several photographed receipts; the primary column
+    // may be empty while `counterReceipts` holds them, so fall back to the
+    // first filed photo instead of rendering a dead button.
+    final url = (widget.booking.counterReceiptUrl?.isNotEmpty == true)
+        ? widget.booking.counterReceiptUrl!
+        : (widget.booking.counterReceipts.isNotEmpty ? widget.booking.counterReceipts.first.$2 : '');
     final paid = widget.booking.counterReceiptPaid;
+    final due = widget.booking.counterFareDue;
     final amount = widget.booking.counterReceiptZmw;
+    // PAYING NEVER DEPENDS ON THE PHOTO (owner bug 2026-11-23): the old button
+    // was disabled while `url` was empty, so a sender with an unpaid depot fare
+    // tapped it and nothing happened — no prompt, and no way to clear the fare
+    // that blocks her next booking. The pay route is always live while a fare
+    // is due; only the DOWNLOAD needs the image.
+    final canTap = !_busy && (due || (paid && url.isNotEmpty));
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -1917,18 +1919,22 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
             minimumSize: const Size.fromHeight(50),
-            foregroundColor: paid ? AppColors.forest : AppColors.muted,
-            backgroundColor: paid ? null : AppColors.line.withValues(alpha: 0.16),
+            foregroundColor: paid ? AppColors.forest : AppColors.forest,
+            backgroundColor: paid ? null : AppColors.amber.withValues(alpha: 0.22),
           ),
-          onPressed: _busy || url.isEmpty ? null : () async {
+          onPressed: canTap ? () async {
             if (paid) {
+              if (url.isEmpty) {
+                AppToast.show(context, 'The receipt photo is still being filed — check again in a few minutes.');
+                return;
+              }
               await _download(url);
             } else {
               await _payReceiptBill();
             }
-          },
-          icon: _busy ? const AppLogoSpinner(size: 16) : Icon(paid ? Icons.download_outlined : Icons.lock_outline, size: 17),
-          label: Text(paid ? 'Download courier receipt' : 'Download courier receipt — locked', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5)),
+          } : null,
+          icon: _busy ? const AppLogoSpinner(size: 16) : Icon(paid ? Icons.download_outlined : Icons.lock_open_outlined, size: 17),
+          label: Text(paid ? 'Download courier receipt' : 'Pay the courier bill — unlock receipt', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5)),
         ),
         if (!paid)
           Padding(
@@ -1962,42 +1968,22 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
 
   Future<void> _payNow() async {
     final store = AppScope.of(context);
-    setState(() => _busy = true);
-    final res = await DropOffApi.payCounterFare(
-      jobRef: widget.booking.serverRef!,
-      phone: widget.booking.senderPhone,
-      // Stable key: a retry after a dropped prompt must not open a second
-      // momo prompt for the same booking.
-      idempotencyKey: 'cfare-${widget.booking.serverRef}',
-    );
-    if (!mounted) return;
-    if (!res.ok) {
-      setState(() => _busy = false);
-      AppToast.show(context, switch (res.error) {
-        'counter_fare_already_paid' => 'This counter fare is already paid — the receipt is revealed in Bookings.',
-        _ => 'Payment could not start — check your momo balance and connection, then tap Pay now again.',
-      });
+    final ref = widget.booking.serverRef ?? '';
+    if (ref.isEmpty) {
+      AppToast.show(context, 'This booking is still syncing — reopen it in a moment and try again.');
       return;
     }
-    final paymentId = '${res.body['payment_id']}';
-    final total = (res.body['amount_zmw'] as num?)?.toDouble();
-    var status = 'pending';
-    String? failReason;
-    for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      final st = await DropOffApi.paymentStatus(paymentId);
-      status = st.$1 ?? 'pending';
-      failReason = st.$2;
-    }
+    setState(() => _busy = true);
+    final status = await store.settleCounterFare(jobRef: ref, phone: widget.booking.senderPhone);
     if (!mounted) return;
     setState(() => _busy = false);
+    final amount = widget.booking.counterReceiptZmw;
     AppToast.show(context, switch (status) {
       'success' => 'Counter fare paid — your depot receipt is revealed below.',
-      'failed' => (failReason == null || failReason.isEmpty)
-          ? 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.'
-          : 'Payment failed: $failReason — top up your momo wallet, then tap Pay now again.',
-      _ => total != null
-          ? 'Prompt sent for K${total.toStringAsFixed(2)} — approve it on your phone to reveal the receipt.'
+      'failed' => 'The momo prompt was rejected. Verify your momo balance has the funds, then tap Pay now again.',
+      'error' => 'Payment could not start — check your momo balance and connection, then tap Pay now again.',
+      _ => amount != null && amount > 0
+          ? 'Prompt sent for K${amount.toStringAsFixed(2)} — approve it on your phone to reveal the receipt.'
           : 'Prompt sent — approve it on your phone to reveal the receipt.',
     });
     unawaited(store.syncJobsFromServer());

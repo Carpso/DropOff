@@ -523,6 +523,12 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   String? lastBookingError;
   String? lastBookingErrorDetail;
 
+  /// When the server refuses a booking because this sender still owes a depot
+  /// counter fare, it names the job and the exact amount so the app can prompt
+  /// for payment right there instead of leaving her stuck.
+  String? lastBookingDueCounterRef;
+  double? lastBookingDueCounterZmw;
+
   void _captureAuthError(ApiResponse res) {
     lastAuthError = res.ok ? null : authErrorText(res.body['error'] as String? ?? '');
   }
@@ -757,6 +763,8 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
     };
     lastBookingError = null;
     lastBookingErrorDetail = null;
+    lastBookingDueCounterRef = null;
+    lastBookingDueCounterZmw = null;
     lastBookingDeduped = false;
     if (DropOffApi.enabled) {
       response = await DropOffApi.createJob(jobPayload);
@@ -765,6 +773,8 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
       } else if (!response.ok) {
         lastBookingError = response.body['error']?.toString() ?? response.error?.toString();
         lastBookingErrorDetail = response.body['detail']?.toString() ?? response.body['message']?.toString();
+        lastBookingDueCounterRef = response.body['due_ref']?.toString();
+        lastBookingDueCounterZmw = (response.body['due_amount_zmw'] as num?)?.toDouble();
       }
     }
     final serverRef = response.body['ref'] as String?;
@@ -1043,6 +1053,34 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
               _bookings[i] = _bookings[i].copyWith(riderPhone: riderPhone);
               changed = true;
             }
+            // DEPOT COUNTER FARE (owner bug 2026-11-23): a booking created in
+            // this app keeps its own local row, and this merge used to copy
+            // only stage/rider — so the depot receipt the rider filed never
+            // reached it. `counterFareDue` stayed false, the pay banner never
+            // appeared, and the sender could neither pay nor book again (the
+            // worker blocks new jobs while a fare is unpaid). Always mirror
+            // the server's counter-fare state onto the existing row.
+            final crZmw = (j['counter_receipt_zmw'] as num?)?.toDouble();
+            final crUrl = (j['counter_receipt_url'] as String?)?.trim() ?? '';
+            final crPaid = ((j['counter_receipt_paid'] as num?)?.toInt() ?? 0) == 1;
+            final crList = <(double, String)>[
+              for (final r in (j['counter_receipts'] as List?) ?? [])
+                if (r is Map && r['url'] != null)
+                  ((r['amount_zmw'] as num?)?.toDouble() ?? 0, '${r['url']}'),
+            ];
+            final crChanged = (crZmw != null && crZmw > 0 && crZmw != existing.counterReceiptZmw) ||
+                (crUrl.isNotEmpty && crUrl != (existing.counterReceiptUrl ?? '')) ||
+                crPaid != existing.counterReceiptPaid ||
+                (crList.isNotEmpty && crList.length != existing.counterReceipts.length);
+            if (crChanged) {
+              _bookings[i] = _bookings[i].copyWith(
+                counterReceiptZmw: crZmw,
+                counterReceiptUrl: crUrl.isEmpty ? null : crUrl,
+                counterReceiptPaid: crPaid,
+                counterReceipts: crList.isEmpty ? null : crList,
+              );
+              changed = true;
+            }
             if (changed) dirty = true;
           }
           continue;
@@ -1163,6 +1201,37 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
             ((r['amount_zmw'] as num?)?.toDouble() ?? 0, '${r['url']}')
       ],
     );
+  }
+
+  /// The local booking for a server job ref, if this account has it.
+  Booking? bookingForServerRef(String ref) =>
+      _bookings.where((b) => b.serverRef == ref).firstOrNull;
+
+  /// Settle the DEPOT COUNTER FARE for [jobRef]: start the momo prompt for the
+  /// exact amount the rider photographed, then wait for the provider.
+  ///
+  /// Returns 'success' | 'failed' | 'pending' | 'error' (prompt never started).
+  /// One stable idempotency key per job, so a retry after a dropped prompt can
+  /// never open a second charge. Used by the receipt button, the due card and
+  /// the "you have an unpaid fare" gate on new bookings/collections.
+  Future<String> settleCounterFare({required String jobRef, String? phone}) async {
+    final res = await DropOffApi.payCounterFare(
+      jobRef: jobRef,
+      phone: phone ?? _linkedPhone ?? '',
+      idempotencyKey: 'cfare-$jobRef',
+    );
+    if (!res.ok) {
+      return res.error == 'counter_fare_already_paid' ? 'success' : 'error';
+    }
+    final paymentId = '${res.body['payment_id']}';
+    var status = 'pending';
+    for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      final st = await DropOffApi.paymentStatus(paymentId);
+      status = st.$1 ?? 'pending';
+    }
+    if (status == 'success') await syncJobsFromServer();
+    return status;
   }
 
   Future<void> _saveBookings() async {

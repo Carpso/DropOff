@@ -6,6 +6,8 @@ import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
 import '../main.dart';
+import '../state/app_store.dart';
+import '../ui/app_sheet.dart';
 import '../ui/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/help_sheet.dart';
@@ -206,6 +208,16 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     if (!mounted) return;
     if (!res.ok) {
       setState(() => _saving = false);
+      // An unpaid depot fare is a hard stop on new jobs. Offer the prompt here
+      // so it is never a dead end (owner bug 2026-11-23).
+      if (res.error == 'counter_fare_due') {
+        _offerCounterFareSettlement(
+          appStore: store,
+          ref: '${res.body['due_ref'] ?? ''}',
+          amount: ((res.body['due_amount_zmw'] as num?) ?? 0).toDouble(),
+        );
+        return;
+      }
       final detail = res.body['detail'];
       return _message(detail is String && detail.isNotEmpty ? detail : 'Could not book the collection. Try again.');
     }
@@ -268,6 +280,74 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   void _message(String text) => AppToast.show(context, text);
+
+  /// Pay the depot counter fare that is blocking new jobs, right from the
+  /// collection form. Keeps the form filled so she can retry immediately.
+  void _offerCounterFareSettlement({
+    required AppStore appStore,
+    required String ref,
+    required double amount,
+  }) {
+    if (ref.isEmpty) {
+      _message('You still owe a depot counter fare — open Bookings, pay the receipt, then book again.');
+      return;
+    }
+    showAppSheet<void>(context, child: Builder(builder: (ctx) {
+      var busy = false;
+      return StatefulBuilder(builder: (ctx, setSheetState) {
+        Future<void> pay() async {
+          setSheetState(() => busy = true);
+          final status = await appStore.settleCounterFare(
+            jobRef: ref,
+            phone: appStore.linkedPhone,
+          );
+          if (!ctx.mounted) return;
+          setSheetState(() => busy = false);
+          if (status == 'success') {
+            Navigator.pop(ctx);
+            _message('Counter fare cleared — tap Book collection again.');
+          } else {
+            AppToast.show(ctx, switch (status) {
+              'failed' => 'The momo prompt was rejected. Top up your wallet and try again.',
+              'error' => 'Could not start the prompt — check your connection and try again.',
+              _ => 'Prompt sent — approve it on your phone, then book again.',
+            });
+          }
+        }
+
+        return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.receipt_long_outlined, color: Color(0xFF7B5710)),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Settle your depot fare first', style: AppType.subhead)),
+          ]),
+          const SizedBox(height: 14),
+          Text(
+            amount > 0
+                ? 'Your rider fronted K${amount.toStringAsFixed(2)} for the depot counter fare on $ref. Pay it now — one momo prompt — and you can book again right away.'
+                : 'Your rider fronted the depot counter fare on $ref. Pay it now and you can book again right away.',
+            style: const TextStyle(fontSize: 14, height: 1.45, color: AppColors.ink),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(width: double.infinity, child: FilledButton(
+            onPressed: busy ? null : pay,
+            child: busy
+                ? const AppLogoSpinner(size: 18)
+                : Text(amount > 0 ? 'Pay K${amount.toStringAsFixed(2)} now' : 'Pay the courier bill now'),
+          )),
+          const SizedBox(height: 8),
+          SizedBox(width: double.infinity, child: TextButton(
+            onPressed: busy ? null : () => Navigator.pop(ctx),
+            child: const Text('Not now'),
+          )),
+        ]);
+      });
+    }));
+  }
 
   @override
   Widget build(BuildContext context) {

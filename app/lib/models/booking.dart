@@ -344,7 +344,7 @@ class Booking {
 
   double? get total => courierFare == null ? null : courierFare! + riderFee + lastMileFee;
 
-  Booking copyWith({int? stage, String? riderId, double? courierFare, String? serverRef, String? promoCode, double? promoDiscount, int? parcels, String? vehicleClass, String? riderName, String? riderPhone, String? lastEvent, bool? paymentHeld, double? declaredValueZmw}) => Booking(
+  Booking copyWith({int? stage, String? riderId, double? courierFare, String? serverRef, String? promoCode, double? promoDiscount, int? parcels, String? vehicleClass, String? riderName, String? riderPhone, String? lastEvent, bool? paymentHeld, double? declaredValueZmw, double? counterReceiptZmw, String? counterReceiptUrl, bool? counterReceiptPaid, List<(double, String)>? counterReceipts}) => Booking(
         id: id,
         service: service,
         reference: reference,
@@ -382,10 +382,10 @@ class Booking {
         riderPhone: riderPhone ?? this.riderPhone,
         lastEvent: lastEvent ?? this.lastEvent,
         paymentHeld: paymentHeld ?? this.paymentHeld,
-        counterReceiptZmw: counterReceiptZmw,
-        counterReceiptUrl: counterReceiptUrl,
-        counterReceiptPaid: counterReceiptPaid,
-        counterReceipts: counterReceipts,
+        counterReceiptZmw: counterReceiptZmw ?? this.counterReceiptZmw,
+        counterReceiptUrl: counterReceiptUrl ?? this.counterReceiptUrl,
+        counterReceiptPaid: counterReceiptPaid ?? this.counterReceiptPaid,
+        counterReceipts: counterReceipts ?? this.counterReceipts,
         repromptPaused: repromptPaused,
       );
 

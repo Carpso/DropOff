@@ -2081,12 +2081,18 @@ app.post('/jobs', async (c) => {
     // before booking again (prepay, no exceptions — the rider is owed).
     if (!staffEyes) {
       const dueCfare = await c.env.DB.prepare(
-        `SELECT ref FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
+        `SELECT ref, counter_receipt_zmw, counter_receipt_url FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
       ).bind(c.get('phone') ?? '').first<any>();
       if (dueCfare) {
+        // Ship the ref + exact amount so the app can start the momo prompt
+        // straight from this error instead of dead-ending the sender
+        // (owner bug 2026-11-23: an unpaid fare blocked new bookings and the
+        // only place to pay it was a receipt button that did nothing).
         return c.json({
           error: 'counter_fare_due',
-          detail: `You have an unpaid depot counter fare on ${dueCfare.ref}. Open Bookings and pay it first — your rider fronted that money and is reimbursed when you do.`,
+          due_ref: dueCfare.ref,
+          due_amount_zmw: Number(dueCfare.counter_receipt_zmw ?? 0),
+          detail: `You have an unpaid depot counter fare on ${dueCfare.ref}. Pay it below, then book again — your rider fronted that money and is reimbursed when you do.`,
         }, 409);
       }
     }
