@@ -66,7 +66,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
     final b = due.first;
     final amount = b.counterReceiptZmw;
     final msg = amount != null && amount > 0
-        ? 'Your rider filed the depot receipt for ${b.reference}. Pay K${amount.toStringAsFixed(2)} now to unlock the receipt photo and reimburse your rider.'
+        ? 'Your rider filed the depot receipt for ${b.reference}. Pay the K${amount.toStringAsFixed(2)} receipt plus processing to unlock the photo and reimburse your rider.'
         : 'Your rider filed a depot receipt for ${b.reference}. Pay the exact amount written on the receipt to unlock it and reimburse your rider.';
     showAppSheet<void>(context, child: Builder(builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
@@ -327,7 +327,7 @@ class BookingCard extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         booking.counterReceiptZmw != null && booking.counterReceiptZmw! > 0
-                            ? 'Pay K${booking.counterReceiptZmw!.toStringAsFixed(2)} to reveal the depot receipt and reimburse your rider.'
+                            ? 'Pay the K${booking.counterReceiptZmw!.toStringAsFixed(2)} depot receipt (+ processing) to reveal the receipt and reimburse your rider.'
                             : 'Pay the depot fare to reveal the receipt and reimburse your rider.',
                         style: const TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.35),
                       ),
@@ -1916,7 +1916,7 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
                     const SizedBox(height: 4),
                     Text(
                       amount != null && amount > 0
-                          ? 'Pay K${amount.toStringAsFixed(2)} to unlock'
+                          ? 'Receipt K${amount.toStringAsFixed(2)} + processing'
                           : 'Receipt filed — amount pending',
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5),
                     ),
@@ -1970,8 +1970,8 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
             padding: const EdgeInsets.only(top: 6),
             child: Text(
               amount != null && amount > 0
-                  ? 'Pay the K${amount.toStringAsFixed(2)} courier bill written on the receipt to unlock the photo and download it.'
-                  : 'Pay the courier bill written on the receipt to unlock the photo and download it.',
+                  ? 'The rider paid K${amount.toStringAsFixed(2)} at the depot. Your momo prompt adds the K4.98 processing fee and K2.50 mobile-money leg (K${(amount + 7.48).toStringAsFixed(2)} total) — the exact receipt amount is reimbursed to the rider.'
+                  : 'Your momo prompt adds the processing fee and mobile-money leg to the exact amount written on the receipt — the receipt amount is reimbursed to the rider.',
               style: AppType.caption,
             ),
           ),

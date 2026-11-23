@@ -956,6 +956,13 @@ class DropOffApi {
   static Future<ApiResponse> retryPayout(int id) =>
       post('/admin/payouts/$id/retry', const {}, admin: true);
 
+  /// Staff escape hatch (owner bug 2026-11-23): settle a stuck depot counter
+  /// fare with an audit reason so the sender can book again. No money moves.
+  static Future<Map<String, dynamic>?> adminCounterFares() => getAdmin('/admin/counter-fares');
+
+  static Future<ApiResponse> adminWaiveCounterFare(String ref, String reason) =>
+      post('/admin/jobs/${Uri.encodeComponent(ref)}/waive-counter-fare', {'reason': reason}, admin: true);
+
   /// Close a parcel chat: read-only history preserved for everyone.
   static Future<ApiResponse> closeChatThread(int threadId) =>
       post('/chat/threads/$threadId/close', const {});

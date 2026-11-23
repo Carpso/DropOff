@@ -288,6 +288,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _BookingStrikesCard(),
               const SizedBox(height: 18),
+              const _CounterFareRecoveryCard(),
+              const SizedBox(height: 18),
               const _CounterQuoteCard(),
               const SizedBox(height: 18),
               _smsCard(),
@@ -2816,6 +2818,128 @@ class _BookingStrikesCardState extends State<_BookingStrikesCard> {
                     child: const Text('WARNING', style: TextStyle(color: AppColors.warning, fontSize: 9, fontWeight: FontWeight.w900)),
                   ),
                 TextButton(onPressed: () => _clear(row), child: const Text('Clear')),
+              ]),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Admin recovery for stuck depot counter fares (owner bug 2026-11-23).
+/// One unpaid fare blocks the sender from ALL new bookings. If the momo
+/// provider is down (or the filing rider is the owner themselves), staff need
+/// a first-class way to settle it with an audit note — no more manual SQL.
+class _CounterFareRecoveryCard extends StatefulWidget {
+  const _CounterFareRecoveryCard();
+
+  @override
+  State<_CounterFareRecoveryCard> createState() => _CounterFareRecoveryCardState();
+}
+
+class _CounterFareRecoveryCardState extends State<_CounterFareRecoveryCard> {
+  bool _loading = true;
+  bool _busy = false;
+  List<Map<String, dynamic>> _fares = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await DropOffApi.adminCounterFares();
+    if (!mounted) return;
+    setState(() {
+      _fares = ((data?['fares'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+      _loading = false;
+    });
+  }
+
+  Future<void> _waive(Map<String, dynamic> fare) async {
+    final ref = '${fare['ref'] ?? ''}';
+    final amount = (fare['counter_receipt_zmw'] as num?) ?? 0;
+    final reasonCtl = TextEditingController();
+    final confirmed = await showConfirmSheet(
+      context,
+      title: 'Waive K${amount.toStringAsFixed(2)} counter fare?',
+      message: 'This settles the depot counter fare on $ref with an audit note so the sender can book again. NO momo prompt is sent and NO rider reimbursement is created. Only waive when the money is genuinely settled (e.g. the rider filing it is the account owner) or the provider cannot collect.',
+      confirmLabel: 'Waive with audit note',
+      icon: Icons.receipt_long_outlined,
+    );
+    if (confirmed != true || !mounted) return;
+    final reason = await showAppSheet<String>(
+      context,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Why waive $ref?', style: AppType.subhead),
+        const SizedBox(height: 8),
+        const Text('This reason is written to the booking audit trail.', style: AppType.caption),
+        const SizedBox(height: 12),
+        TextField(controller: reasonCtl, maxLines: 3, decoration: const InputDecoration(
+          hintText: 'e.g. filing rider is the account owner — no money owed',
+          border: OutlineInputBorder(),
+        )),
+        const SizedBox(height: 14),
+        SizedBox(width: double.infinity, child: FilledButton(
+          onPressed: () => Navigator.pop(context, reasonCtl.text.trim()),
+          child: const Text('Confirm waiver'),
+        )),
+      ]),
+    );
+    if (!mounted) return;
+    if (reason == null || reason.length < 8) {
+      if (reason != null) AppToast.warning(context, 'Give a short reason (at least 8 characters).');
+      return;
+    }
+    setState(() => _busy = true);
+    final res = await DropOffApi.adminWaiveCounterFare(ref, reason);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppToast.show(context, res.ok ? 'Fare waived — the sender can book again.' : _adminError(res, 'Could not waive this fare. Try again.'));
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.receipt_long_outlined, size: 19, color: AppColors.amber),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Outstanding depot fares', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(
+              tooltip: 'Refresh',
+              icon: _loading ? const AppLogoSpinner(size: 16) : const Icon(Icons.refresh, size: 20),
+              onPressed: _loading ? null : _load,
+            ),
+          ]),
+          const SizedBox(height: 2),
+          const Text('Each unpaid receipt blocks that sender from booking again. Waive only when the money is genuinely settled or uncollectable.', style: AppType.caption),
+          const SizedBox(height: 10),
+          if (_fares.isEmpty && !_loading)
+            const Text('No outstanding counter fares — every sender can book.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+          for (final fare in _fares)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.amber.withValues(alpha: 0.4))),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${fare['ref']} — K${(fare['counter_receipt_zmw'] as num?)?.toStringAsFixed(2) ?? '?'}',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                const SizedBox(height: 2),
+                Text('Sender ${fare['sender_phone'] ?? '?'} · filed by ${fare['rider_name'] ?? fare['rider_phone'] ?? 'rider'}',
+                    style: const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+                Align(alignment: Alignment.centerRight, child: TextButton(
+                  onPressed: _busy ? null : () => _waive(fare),
+                  child: const Text('Waive with audit note'),
+                )),
               ]),
             ),
         ]),

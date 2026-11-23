@@ -10245,6 +10245,62 @@ app.post('/admin/jobs/:ref/unpark', async (c) => {
   return c.json({ ok: true, ref: row.ref, window: next.window });
 });
 
+// Outstanding depot counter fares — the jobs currently blocking their senders
+// from booking again. Drives the admin recovery card.
+app.get('/admin/counter-fares', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT j.ref, j.sender_phone, j.counter_receipt_zmw, j.counter_receipt_url, j.created_at,
+            r.full_name AS rider_name, r.phone AS rider_phone
+       FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
+      WHERE j.counter_receipt_zmw IS NOT NULL AND j.counter_receipt_zmw > 0
+        AND j.counter_receipt_paid = 0
+      ORDER BY j.id DESC LIMIT 50`,
+  ).all<any>();
+  return c.json({ fares: results ?? [] });
+});
+
+// RECOVERY: a sender can be blocked from ALL new bookings by one unpaid depot
+// counter fare. If the momo provider is down, the receipt is mis-filed, or the
+// filing rider is the owner themselves, there must be a staff escape hatch —
+// otherwise support can only fix it with hand-written SQL (owner bug
+// 2026-11-23, DRO-261121-3ME9J). Waiving sets the SAME flag as a settled
+// payment, unlocks the receipt for the sender, and writes an audit event. No
+// money moves and no rider reimbursement is created.
+app.post('/admin/jobs/:ref/waive-counter-fare', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const ref = String(c.req.param('ref') ?? '').trim().replace(/^#/, '').toUpperCase();
+  if (!ref) return c.json({ error: 'ref required' }, 400);
+  const body: any = await c.req.json().catch(() => ({}));
+  const reason = String(body?.reason ?? '').trim();
+  if (reason.length < 8) {
+    return c.json({ error: 'reason_required', detail: 'Give a short audit reason (at least 8 characters).' }, 400);
+  }
+  const job = await c.env.DB.prepare(
+    `SELECT id, ref, sender_phone, counter_receipt_zmw, counter_receipt_paid FROM jobs WHERE UPPER(ref) = ?1`,
+  ).bind(ref).first<any>();
+  if (!job) return c.json({ error: 'booking_not_found' }, 404);
+  const amount = Number(job.counter_receipt_zmw ?? 0);
+  if (Number(job.counter_receipt_paid) === 1 || amount <= 0) {
+    return c.json({ ok: true, already_settled: true, ref: job.ref });
+  }
+  const actor = c.get('phone') ?? 'admin';
+  const note = `Admin waived the K${amount.toFixed(2)} depot counter fare. Reason: ${reason} (by ${actor}). No prompt was issued; no reimbursement is due; receipt unlocked for the sender.`;
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE jobs SET counter_receipt_paid = 1 WHERE id = ?1 AND counter_receipt_paid = 0').bind(job.id),
+    c.env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)').bind(job.id, 'counter_fare_waived', note),
+  ]);
+  console.log(JSON.stringify({ where: 'admin_waive_counter_fare', ref: job.ref, amount, actor, reason }));
+  if (job.sender_phone) {
+    await sendToPhone(c.env, job.sender_phone, {
+      title: 'Courier bill waived',
+      body: `The K${amount.toFixed(2)} depot counter fare on ${job.ref} has been settled by DropOff. Your receipt is unlocked and you can book again.`,
+      data: { job_ref: job.ref, kind: 'counter_fare_paid' },
+    }).catch(() => {});
+  }
+  return c.json({ ok: true, ref: job.ref, waived_zmw: amount });
+});
+
 // Soft-delete a booking: status='deleted' + audit event. Every normal queue /
 // cron / dispatch query filters on status NOT IN (...) so the booking is
 // invisible instantly, with payments & events retained for audit.

@@ -27,6 +27,33 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (twenty-fourth pass) — confirmed DRO-261121-3ME9J, waived K5, recovery path
+
+Owner confirmation: DRO-261121-3ME9J was booked by **0779686480**
+(`260779686480`), delivered by rider **#5 Godfrey Moses Kalambo**
+(`260976847775` — the owner's OWN rider account), K5.00 depot receipt filed at
+2026-11-22 04:33 CAT, still unpaid. No payment row and no `cfare-` idempotency
+row exist → the momo prompt never reached Lipila; the old "connection and
+balance" toast hid the real cause.
+
+**Waiver (owner decision):** set `counter_receipt_paid = 1` on the job with a
+`counter_fare_waived` audit note explaining the filing rider is the account
+owner, so no money is owed and no reimbursement is due. Verified live. She can
+book again immediately.
+
+**Underlying fix — no more manual SQL:** added
+`GET /admin/counter-fares` (lists blocking receipts) and
+`POST /admin/jobs/:ref/waive-counter-fare` (requires an 8+ char audit reason,
+sets the same paid flag as settlement, writes the audit event, pushes the
+sender, no wallet/reimbursement rows). Admin console gained an **"Outstanding
+depot fares"** card with a **"Waive with audit note"** action on each row.
+
+**Amount honesty:** the UI used to say "Pay K5.00 to unlock" when the actual
+momo prompt is **K12.48** — receipt K5.00 + K4.98 platform minimum + K2.50
+momo leg (plan-active senders skip the K4.98). Copy now says "Receipt K5.00 +
+processing" everywhere and shows the real total. Full suite 49/49, tsc clean.
+Worker deployed (`0c385e35`).
+
 ## 2026-11-23 (twenty-third pass) — new-order push alarm + honest payment errors
 
 Owner reports: (a) rider phones do not ring/show a curtain alert for a new
