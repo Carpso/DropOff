@@ -633,6 +633,7 @@ class DropOffApi {
     double? lat,
     double? lng,
     String? branch,
+    bool? receiptAmountConfirmed,
   }) =>
       post('/jobs/$jobRef/events', {
         if (status != null) 'status': status,
@@ -648,6 +649,7 @@ class DropOffApi {
         if (lat != null) 'lat': lat,
         if (lng != null) 'lng': lng,
         if (branch != null) 'branch': branch,
+        if (receiptAmountConfirmed != null) 'receipt_amount_confirmed': receiptAmountConfirmed,
       });
 
   /// AI parcel photo check: compares the sender's booking capture against the

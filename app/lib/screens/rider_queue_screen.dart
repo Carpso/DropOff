@@ -1587,6 +1587,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // be split across receipts by the depot — file them all, one by one.
     final receipts = <_ReceiptEntry>[];
     bool filing = false;
+    // Money attestation (owner 2026-11-23): the figure the rider types is the
+    // EXACT figure the sender is charged. Filing requires an explicit promise
+    // that every amount was copied from the photographed depot receipt.
+    bool amountCopiedFromReceipt = false;
+    String? filedSummary;
     // The SENDER's booking photo travels with the stop (owner directive
     // 2026-11-17): the rider sees the parcel they are collecting next to the
     // one they just photographed, so swaps are caught at the drop, not at
@@ -1604,7 +1609,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) {
-          final receiptsReady = receipts.isNotEmpty && receipts.every((e) => e.url != null && (double.tryParse(e.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0) > 0);
+          final parsedAmounts = receipts
+              .map((e) => double.tryParse(e.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0)
+              .toList();
+          final receiptsReady = receipts.isNotEmpty &&
+              receipts.every((e) => e.url != null) &&
+              parsedAmounts.every((a) => a > 0 && a <= 20000);
+          final filedTotal = parsedAmounts.fold<double>(0, (sum, a) => sum + a);
           return SafeArea(
             top: false,
             child: Padding(
@@ -1671,6 +1682,27 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   const SizedBox(height: 14),
                   _sheetSection('Depot receipts (${receipts.length})'),
                   const SizedBox(height: 6),
+                  // EXACT AMOUNT RULE (owner 2026-11-23): this is money the
+                  // sender pays. The app cannot read the printed figure for the
+                  // rider, so make the rule unmissable at the point of entry.
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF1D2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0x66B3261E)),
+                    ),
+                    child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(Icons.report_problem_outlined, size: 18, color: Color(0xFF7B5710)),
+                      SizedBox(width: 8),
+                      Expanded(child: Text(
+                        'Type ONLY the amount printed on the depot receipt. Never guess, round up, or add your own fee — the sender is charged exactly what you enter, so a wrong figure means a wrong payment.',
+                        style: TextStyle(fontSize: 11.5, color: Color(0xFF4A3400), height: 1.4, fontWeight: FontWeight.w600),
+                      )),
+                    ]),
+                  ),
+                  const SizedBox(height: 8),
                   for (var i = 0; i < receipts.length; i++) _receiptEntryTile(setDialog, receipts, i),
                   OutlinedButton.icon(
                     icon: const Icon(Icons.receipt_long_outlined, size: 18),
@@ -1679,20 +1711,61 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   ),
                   const SizedBox(height: 6),
                   const Text('Photos unlock when the sender pays, and you are reimbursed.', style: AppType.caption),
-                  const SizedBox(height: 20),
+                  if (receiptsReady) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.forest.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        'Total the sender will be asked for: K${filedTotal.toStringAsFixed(2)} (filed receipt${receipts.length == 1 ? '' : 's'}) + the DropOff processing fee. Check every figure against its receipt photo before filing.',
+                        style: const TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.4, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    value: amountCopiedFromReceipt,
+                    onChanged: filing ? null : (v) => setDialog(() => amountCopiedFromReceipt = v ?? false),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('I copied the exact amount printed on every depot receipt',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.ink)),
+                    subtitle: const Text('No estimates, no rounding, no added fees — I checked each figure against its receipt photo.',
+                        style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.35)),
+                  ),
+                  const SizedBox(height: 12),
                   Row(children: [
                     Expanded(child: OutlinedButton(onPressed: filing ? null : () => Navigator.pop(ctx, null), child: const Text('Cancel'))),
                     const SizedBox(width: 10),
                     Expanded(child: FilledButton(
-                      onPressed: filing ? null : () async {
+                      onPressed: filing || !amountCopiedFromReceipt ? null : () async {
                         if (parcelPhotos.isEmpty) { _snack('At least one item photo is required.'); return; }
                         if (receipts.isEmpty) { _snack('Add the depot receipt — photo + the exact amount written on it.'); return; }
+                        var total = 0.0;
                         for (var i = 0; i < receipts.length; i++) {
                           final r = receipts[i];
                           if (r.url == null) { _snack('Receipt ${i + 1} needs its photo.'); return; }
                           final amt = double.tryParse(r.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), ''));
-                          if (amt == null || amt <= 0) { _snack('Receipt ${i + 1}: type the exact amount written on it.'); return; }
+                          if (amt == null || amt <= 0) {
+                            _snack('Receipt ${i + 1}: enter the exact amount printed on the receipt — not a guess.');
+                            return;
+                          }
+                          if (amt > 20000) {
+                            _snack('Receipt ${i + 1}: that amount is too high. Re-read the printed figure before filing.');
+                            return;
+                          }
+                          total += amt;
                         }
+                        if (!amountCopiedFromReceipt) {
+                          _snack('Confirm you copied the exact printed amounts before filing.');
+                          return;
+                        }
+                        filedSummary = 'K${total.toStringAsFixed(2)}';
                         final branch = branchCtrl.text.trim();
                         setDialog(() => filing = true);
                         final r = await DropOffApi.jobEvent(
@@ -1701,6 +1774,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                           parcelPhotos: parcelPhotos,
                           branch: branch.isEmpty ? null : branch,
                           receipts: [for (final e in receipts) {'amount_zmw': double.parse(e.amountCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')), 'url': e.url}],
+                          receiptAmountConfirmed: amountCopiedFromReceipt,
                         );
                         if (!ctx.mounted) return;
                         Navigator.pop(ctx, r);
@@ -1719,7 +1793,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (res == null) return null; // cancelled
     if (res.ok) {
       setState(() => _busyRef = null);
-      await _snack('$ref - dropped at depot');
+      await _snack('$ref - dropped at depot. Sender will be asked for $filedSummary on the filed receipt — check it matches the photo.');
       await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
       AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
       // Best-effort: compare seller's booking photo vs this drop photo.
@@ -1813,11 +1887,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         TextField(
           controller: e.amountCtrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Exact amount written on THIS receipt (K)',
+          decoration: InputDecoration(
+            labelText: 'Amount printed on receipt ${i + 1} (K)',
             prefixText: 'K ',
+            helperText: 'Copy the printed figure exactly — not an estimate',
+            helperMaxLines: 1,
             isDense: true,
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
           ),
         ),
         const SizedBox(height: 6),

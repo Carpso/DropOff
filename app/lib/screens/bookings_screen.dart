@@ -1883,6 +1883,11 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
     // that blocks her next booking. The pay route is always live while a fare
     // is due; only the DOWNLOAD needs the image.
     final canTap = !_busy && (due || (paid && url.isNotEmpty));
+    // A receipt photo with no recorded amount is a legacy/ops-reconciled row:
+    // the rider's own filing flow cannot produce one (client and worker both
+    // require a positive amount). Nothing can be charged yet, so say so plainly
+    // instead of rendering a button that can never work.
+    final awaitingAmount = !paid && !due && url.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -1910,33 +1915,58 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     const Icon(Icons.lock_outline, color: Colors.white),
                     const SizedBox(height: 4),
-                    Text(amount != null && amount > 0 ? 'Pay K${amount.toStringAsFixed(2)} to unlock' : 'Pay receipt to unlock', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                    Text(
+                      amount != null && amount > 0
+                          ? 'Pay K${amount.toStringAsFixed(2)} to unlock'
+                          : 'Receipt filed — amount pending',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5),
+                    ),
                   ]),
                 ),
             ]),
           ),
         const SizedBox(height: 10),
-        OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(50),
-            foregroundColor: paid ? AppColors.forest : AppColors.forest,
-            backgroundColor: paid ? null : AppColors.amber.withValues(alpha: 0.22),
-          ),
-          onPressed: canTap ? () async {
-            if (paid) {
-              if (url.isEmpty) {
-                AppToast.show(context, 'The receipt photo is still being filed — check again in a few minutes.');
-                return;
+        if (awaitingAmount)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            decoration: BoxDecoration(
+              color: AppColors.line.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Row(children: [
+              Icon(Icons.info_outline, size: 18, color: AppColors.muted),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Receipt filed. The depot amount has not reached your account yet — pull to refresh in a minute, or message support and we will reconcile it with your rider.',
+                  style: TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.4),
+                ),
+              ),
+            ]),
+          )
+        else
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(50),
+              foregroundColor: AppColors.forest,
+              backgroundColor: paid ? null : AppColors.amber.withValues(alpha: 0.22),
+            ),
+            onPressed: canTap ? () async {
+              if (paid) {
+                if (url.isEmpty) {
+                  AppToast.show(context, 'The receipt photo is still being filed — check again in a few minutes.');
+                  return;
+                }
+                await _download(url);
+              } else {
+                await _payReceiptBill();
               }
-              await _download(url);
-            } else {
-              await _payReceiptBill();
-            }
-          } : null,
-          icon: _busy ? const AppLogoSpinner(size: 16) : Icon(paid ? Icons.download_outlined : Icons.lock_open_outlined, size: 17),
-          label: Text(paid ? 'Download courier receipt' : 'Pay the courier bill — unlock receipt', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5)),
-        ),
-        if (!paid)
+            } : null,
+            icon: _busy ? const AppLogoSpinner(size: 16) : Icon(paid ? Icons.download_outlined : Icons.lock_open_outlined, size: 17),
+            label: Text(paid ? 'Download courier receipt' : 'Pay the courier bill — unlock receipt', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5)),
+          ),
+        if (!paid && !awaitingAmount)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(

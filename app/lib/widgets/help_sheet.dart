@@ -87,7 +87,7 @@ const _topics = <String, ({String title, List<({String heading, String body})> r
   HelpTopic.depotReceipts: (
     title: 'Depot receipts — filing them',
     rows: [
-      (heading: 'One photo per receipt', body: 'Each receipt needs its own photo and the EXACT amount handwritten on it. Never sum them — DropOff totals the photographed documents.'),
+      (heading: 'One photo per receipt', body: 'Each receipt needs its own photo and ONLY the figure printed on that receipt — never an estimate, a rounded number or a fee of your own. The sender is charged exactly what you type. Never sum the receipts — DropOff totals the photographed documents.'),
       (heading: 'Split batches need separate photos', body: 'If the depot splits your batch across two receipts, file BOTH. One photo and one amount field on each receipt sheet.'),
       (heading: 'Sender repays you', body: 'The exact amounts photographed go to the sender as the repayment request. The sender pays that amount (+ processing) to DropOff; the rider is reimbursed the same amount fee-free.'),
       (heading: 'Documents stay locked', body: 'The photos you file stay masked from the sender until they pay — then they reveal, and the reimbursement triggers automatically.'),

@@ -27,6 +27,45 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-23 (twentieth pass) — exact receipt amount, rider attestation, no zero-amount gate
+
+Owner follow-up: confirm the figure the rider types really is the depot receipt
+figure and warn riders never to enter an arbitrary amount, so the sender pays
+exactly.
+
+**Verified amount flow (no client override):** the only writer of
+`jobs.counter_receipt_zmw` is the rider's `delivered` filing (or ops/admin
+reconciliation) in `workers/src/index.ts`; `/payments` reads that stored total
+verbatim (`receipt = round2(job.counter_receipt_zmw)`), adds only the platform
++ momo processing fees, and the client cannot supply an amount. Each filed
+receipt is one photographed document with its own typed figure; the SERVER sums
+them. Parsing/validation moved to testable `workers/src/receipts.ts`, with
+`test/receipts.test.ts` (5 tests) pinning exact-per-document amounts, 2-decimal
+rounding, zero/negative/over-cap/photo-less rejection, and that a client-sent
+`total_zmw` is ignored.
+
+**Rider guardrails:** the depot-drop sheet now shows an unmissable amber rule
+("Type ONLY the amount printed on the depot receipt. Never guess, round up, or
+add your own fee — the sender is charged exactly what you enter"), per-field
+helper text, a live total the sender will be asked for, and a REQUIRED checkbox
+"I copied the exact amount printed on every depot receipt". Filing is disabled
+until it is ticked; validation snacks and the help sheet repeat the rule; the
+success toast echoes the filed total so the rider can check it against the
+photo. `receipt_amount_confirmed` is sent with the event and recorded in the
+D1 audit note.
+
+**Residual dead ends closed:** the counter-fare gate now also requires
+`counter_receipt_zmw > 0` — a legacy receipt photo with no amount can neither be
+charged nor cleared, so it must never block a booking. The same self-healing
+gate was added to `POST /collections` (with `due_ref`/`due_amount_zmw`), so an
+owed pickup fare cannot be bypassed by booking a collection; both forms already
+turn the 409 into the "Settle your depot fare first" pay sheet. The receipt
+button shows an honest "amount pending" card for a filed-but-unpriced row
+instead of a dead tap.
+
+Tests: Flutter 40/40, vitest 20/20, `dart analyze` + `tsc --noEmit` clean.
+Worker deployed; release `0.5.72+82`.
+
 ## 2026-11-23 (nineteenth pass) — unpaid depot counter fare was a dead end
 
 Owner bug: a sender owing a depot counter fare tapped **Download courier

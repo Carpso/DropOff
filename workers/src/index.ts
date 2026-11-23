@@ -18,6 +18,7 @@ import {
 } from './auth';
 import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
 import { PRIVACY_MD, PRIVACY_TITLE, TERMS_MD, TERMS_TITLE, mdToHtml } from './legal';
+import { filedReceiptTotal, invalidFiledReceipt, parseFiledReceipts } from './receipts';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor, vehicleClassForParcel } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { sendSms } from './sms';
@@ -2080,8 +2081,12 @@ app.post('/jobs', async (c) => {
     // it through DropOff. A sender with an UNPAID depot receipt settles it
     // before booking again (prepay, no exceptions — the rider is owed).
     if (!staffEyes) {
+      // `counter_receipt_zmw > 0` is deliberate: a legacy/ops-reconciled row can
+      // carry a receipt photo with no amount, and `/payments` refuses a zero
+      // amount anyway. Such a row can neither be charged nor cleared, so it must
+      // never block a new booking (it was a permanent dead end).
       const dueCfare = await c.env.DB.prepare(
-        `SELECT ref, counter_receipt_zmw, counter_receipt_url FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
+        `SELECT ref, counter_receipt_zmw, counter_receipt_url FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0 AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
       ).bind(c.get('phone') ?? '').first<any>();
       if (dueCfare) {
         // Ship the ref + exact amount so the app can start the momo prompt
@@ -2668,6 +2673,24 @@ app.post('/collections', async (c) => {
   const role = c.get('role');
   if (!phone) return c.json({ error: 'sign_in_required' }, 401);
   if (role === 'rider') return c.json({ error: 'forbidden' }, 403);
+  // Same depot counter-fare gate as POST /jobs (owner policy: the rider is owed
+  // that money, so it is settled before booking again). Without this, a sender
+  // owing a pickup fare could bypass the debt by booking a collection instead —
+  // the exact trap the owner reported. Returns the ref + amount so the app can
+  // start the prompt from the error; zero-amount legacy rows never gate.
+  if (role !== 'ops' && !isAdmin(c)) {
+    const dueCfare = await c.env.DB.prepare(
+      `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0 AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
+    ).bind(phone).first<any>();
+    if (dueCfare) {
+      return c.json({
+        error: 'counter_fare_due',
+        due_ref: dueCfare.ref,
+        due_amount_zmw: Number(dueCfare.counter_receipt_zmw ?? 0),
+        detail: `You have an unpaid depot counter fare on ${dueCfare.ref}. Pay it below, then book again — your rider fronted that money and is reimbursed when you do.`,
+      }, 409);
+    }
+  }
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ error: 'invalid JSON body' }, 400);
   const courierId = Number(b.courier_id);
@@ -3688,27 +3711,15 @@ app.post('/jobs/:ref/events', async (c) => {
         detail: 'This depot receipt is already paid — its amount and photos are locked. Contact DropOff support if something is wrong.',
       }, 409);
     }
-    const amount = Math.round(Number(b.receipt_amount_zmw) * 100) / 100;
-    const receiptUrl = String(b.receipt_url ?? '').trim();
     // MULTI-RECEIPT DEPOT DROPS (owner request 2026-11-12): a depot may split
     // one batch across several written receipts. The rider files EACH one —
     // photographed with its own exact amount. A submitted receipt is a
     // single, exact, photographed document, never a rider-computed sum; the
     // SERVER sums the documents. The legacy single fields
     // (receipt_amount_zmw/receipt_url) are honoured as a one-receipt list.
-    const filed: { amount_zmw: number; url: string }[] = [];
-    if (Array.isArray(b.receipts)) {
-      for (const r of b.receipts as any[]) {
-        filed.push({
-          amount_zmw: Math.round(Number(r?.amount_zmw) * 100) / 100,
-          url: String(r?.url ?? '').trim(),
-        });
-      }
-    } else if (Number.isFinite(amount) && amount > 0 && receiptUrl) {
-      filed.push({ amount_zmw: amount, url: receiptUrl });
-    }
-    const badReceipt = filed.find((r) => !Number.isFinite(r.amount_zmw) || r.amount_zmw <= 0 || r.amount_zmw > 20000 || !r.url);
-    if (filed.length === 0 || badReceipt) {
+    // Parsing + validation live in ./receipts so the money contract is tested.
+    const filed = parseFiledReceipts(b);
+    if (invalidFiledReceipt(filed)) {
       return c.json({
         error: 'receipt_required',
         detail: 'Every depot receipt needs its photo AND the exact amount written on it (each receipt is a separate photographed document).',
@@ -3727,14 +3738,14 @@ app.post('/jobs/:ref/events', async (c) => {
         detail: 'Parcel photos and depot receipt photos must be separate images.',
       }, 400);
     }
-    const receiptTotal = round2(filed.reduce((s, r) => s + r.amount_zmw, 0));
+    const receiptTotal = filedReceiptTotal(filed);
     dbStatements.push(c.env.DB.prepare(
       `UPDATE jobs SET counter_receipt_url = ?2, counter_receipt_zmw = ?3, counter_receipts_json = ?4, counter_receipt_paid = 0 WHERE id = ?1`,
     ).bind(job.id, filed[0].url, receiptTotal, JSON.stringify(filed)));
     const receiptList = filed.map((r, i) => `#${i + 1} K${r.amount_zmw.toFixed(2)}`).join(', ');
     dbStatements.push(c.env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_receipt_submitted', ?2)`,
-    ).bind(job.id, `Depot receipt${filed.length > 1 ? `s (${filed.length})` : ''} submitted: ${receiptList} as written on the photographed document${filed.length > 1 ? 's' : ''} (${parcelPhotos.length} parcel photo${parcelPhotos.length > 1 ? 's' : ''} + ${filed.length} receipt photo${filed.length > 1 ? 's' : ''} filed). Sender repays the K${receiptTotal.toFixed(2)} total through DropOff (plan members: no processing fee) — the depot receipt photos are revealed on payment.`));
+    ).bind(job.id, `Depot receipt${filed.length > 1 ? `s (${filed.length})` : ''} submitted: ${receiptList} as written on the photographed document${filed.length > 1 ? 's' : ''} (${parcelPhotos.length} parcel photo${parcelPhotos.length > 1 ? 's' : ''} + ${filed.length} receipt photo${filed.length > 1 ? 's' : ''} filed). ${b.receipt_amount_confirmed === true ? 'Rider confirmed each figure was copied exactly from the printed receipt (no estimate or added fee). ' : ''}Sender repays the K${receiptTotal.toFixed(2)} total through DropOff (plan members: no processing fee) — the depot receipt photos are revealed on payment.`));
     counterReceiptDue = receiptTotal;
   }
 
