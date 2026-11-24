@@ -21,7 +21,7 @@ import {
   generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
   verifyJwtClaims, verifyPassword,
 } from './auth';
-import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
+import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, lencoCollectionFee, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
 import { PRIVACY_MD, PRIVACY_TITLE, TERMS_MD, TERMS_TITLE, mdToHtml } from './legal';
 import { filedReceiptTotal, invalidFiledReceipt, parseFiledReceipts } from './receipts';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor, vehicleClassForParcel } from './pricing';
@@ -1991,7 +1991,8 @@ app.get('/quotes', async (c) => {
   const staff = isAdmin(c) || c.get('role') === 'ops';
     const quotes = (results as any[]).map((r) => {
     const base = r.counter_price_zmw + riderFee;
-    const fees = collectionFees(base, riderFee);
+    const feeGw = gatewayPreference(c.env) === 'lenco' ? 'lenco' : 'lipila';
+    const fees = collectionFees(base, riderFee, feeGw);
     const shared = {
       courier_id: r.courier_id,
       courier_name: r.courier_name,
@@ -2008,6 +2009,7 @@ app.get('/quotes', async (c) => {
       dropoff_due_zmw: collectionFees(
         round2(riderFee + leg2Fee + leg2Processing),
         riderFee,
+        feeGw,
       ).prompt_total_zmw,
       // ONE customer-visible fee line: "processing fee" (platform + momo collect).
       processing_fee_zmw: fees.processing_fee_zmw,
@@ -2403,7 +2405,8 @@ app.post('/jobs', async (c) => {
     }
     if (dedupedJob) {
       const dupTotal = Number(dedupedJob.total_zmw ?? 0);
-      const dupPrompt = round2(dupTotal + MOMO_COLLECTION_FEE);
+      const feeGw = gatewayPreference(c.env) === 'lenco' ? 'lenco' : 'lipila';
+      const dupPrompt = round2(dupTotal + (feeGw === 'lenco' ? lencoCollectionFee(dupTotal) : MOMO_COLLECTION_FEE));
       const payload = {
         ok: true, ref: dedupedJob.ref, job_id: dedupedJob.id,
         total_zmw: dupTotal, dropoff_leg_zmw: Number(dedupedJob.rider_fee_zmw ?? 0),
@@ -2504,7 +2507,8 @@ app.post('/jobs', async (c) => {
     // ride-float top-ups carry them once per deposit. The customer NEVER pays
     // for the rider's payout — that lives inside the rider's 10% take. Pack
     // and promo math happens on the DropOff leg ONLY — the partner fare is theirs.
-    const feeBase = collectionFees(dropOffLeg, packInclusion === 'pack' ? null : riderFee);
+    const feeGw = gatewayPreference(c.env) === 'lenco' ? 'lenco' : 'lipila';
+    const feeBase = collectionFees(dropOffLeg, packInclusion === 'pack' ? null : riderFee, feeGw);
 
     // ADVANCE-PAYMENT GATE (owner directive): pay-as-you-go momo senders pay
     // the FULL DropOff leg prompt at booking — rider dispatch waits for the
@@ -2532,7 +2536,7 @@ app.post('/jobs', async (c) => {
              lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 'merchant', 'booking_deposit')`,
         ).bind(meta.last_row_id, senderPhone, providerFromPhone(senderPhone), depositAmount,
-          depositAmount, round2(platformFee(dropOffLeg)), MOMO_COLLECTION_FEE,
+          depositAmount, round2(platformFee(dropOffLeg)), (feeGw === 'lenco' ? lencoCollectionFee(dropOffLeg) : MOMO_COLLECTION_FEE),
           init.providerReference ?? init.reference, init.gateway, init.reference).run();
       } else {
         // PREPAY, NO EXCEPTIONS (owner directive): if the provider is down the
@@ -2838,7 +2842,8 @@ app.post('/collections', async (c) => {
   // the parcel's prepayment directly (job marked paid on approval) and
   // dispatches the rider.
   const depositRequired = !staffEyes && planInclusion !== 'pack' && riderFee > 0;
-  const depositAmount = round2(riderFee + round2(platformFee(riderFee)) + MOMO_COLLECTION_FEE);
+  const depFeeGw = gatewayPreference(c.env) === 'lenco' ? 'lenco' : 'lipila';
+  const depositAmount = round2(riderFee + round2(platformFee(riderFee)) + (depFeeGw === 'lenco' ? lencoCollectionFee(riderFee) : MOMO_COLLECTION_FEE));
   let depositRef: string | null = null;
   let depositInitFailed = false;
   // Handover proof (anti-false-parcel): minted at booking for trips that move
@@ -2902,7 +2907,7 @@ app.post('/collections', async (c) => {
            lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 'merchant', 'booking_deposit')`,
       ).bind(meta.last_row_id, phone, providerFromPhone(phone), depositAmount, depositAmount,
-        round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, depInit.providerReference ?? depInit.reference,
+        round2(platformFee(riderFee)), (depFeeGw === 'lenco' ? lencoCollectionFee(riderFee) : MOMO_COLLECTION_FEE), depInit.providerReference ?? depInit.reference,
         depInit.gateway, depInit.reference).run();
       await c.env.DB.prepare(
         'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
@@ -6226,7 +6231,8 @@ app.post('/payments', async (c) => {
     // server-computed fees — the client never sets an amount. Recorded on the
     // payment row = the CUSTOMER leg only (processing fee). Rider payout costs
     // are absorbed at payout time out of the rider's 10%.
-    const fees = collectionFees(dropoffLeg, job.rider_fee_zmw);
+    const feeGw = gatewayPreference(c.env) === 'lenco' ? 'lenco' : 'lipila';
+    const fees = collectionFees(dropoffLeg, job.rider_fee_zmw, feeGw);
     amount = fees.prompt_total_zmw;
     platformFeeZmw = fees.platform_fee_zmw;
     lipilaFeeZmw = fees.lipila_fee_zmw;
@@ -6250,8 +6256,9 @@ app.post('/payments', async (c) => {
     const plan = (await plans(c.env.DB))[sub.tier as PlanTier];
     if (!plan || plan.fee_zmw <= 0) return c.json({ error: 'invalid_tier' }, 400);
     phone = sub.phone;
+    const feeGw = gatewayPreference(c.env) === 'lenco' ? 'lenco' : 'lipila';
     platformFeeZmw = platformFee(plan.fee_zmw);
-    lipilaFeeZmw = MOMO_COLLECTION_FEE;
+    lipilaFeeZmw = feeGw === 'lenco' ? lencoCollectionFee(plan.fee_zmw) : MOMO_COLLECTION_FEE;
     amount = round2(plan.fee_zmw + platformFeeZmw + lipilaFeeZmw);
     subscriptionId = sub.id;
     lipilaRef = `sub-${sub.id}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
@@ -6323,8 +6330,9 @@ app.post('/payments', async (c) => {
       return c.json({ error: `ride float top-up must be between K10 and K${WALLET_TOPUP_CAP_ZMW}` }, 400);
     }
     // fees collected once per deposit then amortised across many parcels
+    const feeGw = gatewayPreference(c.env) === 'lenco' ? 'lenco' : 'lipila';
     platformFeeZmw = platformFee(creditZmw);
-    lipilaFeeZmw = MOMO_COLLECTION_FEE;
+    lipilaFeeZmw = feeGw === 'lenco' ? lencoCollectionFee(creditZmw) : MOMO_COLLECTION_FEE;
     amount = round2(creditZmw + platformFeeZmw + lipilaFeeZmw);
     lipilaRef = `topup-${phone}-${Date.now().toString(36)}`;
   }
@@ -6427,13 +6435,17 @@ async function counterFareFees(env: Env, phone: string, receipt: number) {
     `SELECT 1 FROM subscriptions WHERE phone = ?1 AND status = 'active'
       AND period_end IS NOT NULL AND period_end > datetime('now') LIMIT 1`,
   ).bind(phone).first();
+  const gateway = gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila';
   const platformFeeZmw = active ? 0 : platformFee(receipt);
-  const lipilaFeeZmw = MOMO_COLLECTION_FEE;
+  const providerFeeZmw = gateway === 'lenco' ? lencoCollectionFee(receipt) : MOMO_COLLECTION_FEE;
   return {
     planWaived: !!active,
     platformFeeZmw,
-    lipilaFeeZmw,
-    total: round2(receipt + platformFeeZmw + lipilaFeeZmw),
+    lipilaFeeZmw: providerFeeZmw,
+    providerFeeZmw,
+    gateway,
+    processing_fee_zmw: round2(platformFeeZmw + providerFeeZmw),
+    total: round2(receipt + platformFeeZmw + providerFeeZmw),
   };
 }
 
@@ -9519,8 +9531,10 @@ app.post('/subscriptions/upgrade', async (c) => {
     return c.json({ ok: true, tier, prorated_zmw: 0, detail: 'Upgraded — nothing extra to pay for the rest of this cycle.' });
   }
 
+  const feeGw = gatewayPreference(c.env) === 'lenco' ? 'lenco' : 'lipila';
   const platformFeeZmw = platformFee(prorated);
-  const amount = round2(prorated + platformFeeZmw + MOMO_COLLECTION_FEE);
+  const providerFeeZmw = feeGw === 'lenco' ? lencoCollectionFee(prorated) : MOMO_COLLECTION_FEE;
+  const amount = round2(prorated + platformFeeZmw + providerFeeZmw);
   const lipilaRef = `upg-${sub.id}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
   const init = await collectWithGateway(c.env, b.gateway, phone, amount, lipilaRef, `DropOff ${tier} upgrade (prorated)`);
   if (!init.ok) {
@@ -9533,10 +9547,11 @@ app.post('/subscriptions/upgrade', async (c) => {
     `INSERT INTO payments (subscription_id, phone, provider, amount_zmw, platform_fee_zmw,
        lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind, meta)
      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending','merchant','upgrade',?10)`,
-  ).bind(sub.id, phone, provider, amount, platformFeeZmw, MOMO_COLLECTION_FEE,
+  ).bind(sub.id, phone, provider, amount, platformFeeZmw, providerFeeZmw,
     init.providerReference ?? init.reference, init.gateway, init.reference,
-    JSON.stringify({ prevTier: sub.tier, newTier: tier, prorated })).run();
+    JSON.stringify({ prevTier: sub.tier, newTier: tier, prorated, providerFeeZmw })).run();
   return c.json({ ok: true, tier, prorated_zmw: prorated, amount_zmw: amount,
+    platform_fee_zmw: platformFeeZmw, provider_fee_zmw: providerFeeZmw,
     gateway: init.gateway, note: 'Approve the mobile-money prompt. Your bigger cap is already live.' });
 });
 
@@ -12489,14 +12504,16 @@ async function billExpiringSubscriptions(env: Env): Promise<{ billed: number; fa
     const ref = `sub-${sub.id}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
     // pack renewals carry the full collection fees (platform cut + Lipila legs)
     const pf = platformFee(plan.fee_zmw);
-    const renewAmount = round2(plan.fee_zmw + pf + MOMO_COLLECTION_FEE);
+    const feeGw = gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila';
+    const providerFee = feeGw === 'lenco' ? lencoCollectionFee(plan.fee_zmw) : MOMO_COLLECTION_FEE;
+    const renewAmount = round2(plan.fee_zmw + pf + providerFee);
     const init = await collectWithGateway(env, undefined, sub.phone, renewAmount, ref, `DropOff ${sub.tier} pack renewal`);
     if (init.ok) {
       await env.DB.prepare(
         `INSERT INTO payments (phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
            lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind, subscription_id)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending','merchant','subscription',?10)`,
-      ).bind(sub.phone, providerFromPhone(sub.phone), renewAmount, plan.fee_zmw, pf, MOMO_COLLECTION_FEE,
+      ).bind(sub.phone, providerFromPhone(sub.phone), renewAmount, plan.fee_zmw, pf, providerFee,
         init.providerReference ?? init.reference, init.gateway, init.reference, sub.id).run();
       billed++;
     } else {
@@ -13150,7 +13167,8 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
               .bind(meta.last_row_id, 'created', 'Standing order created — no verified rider available; the minute cron retries dispatch.').run();
           }
         } else {
-          const depAmount = round2(riderFee + round2(platformFee(riderFee)) + MOMO_COLLECTION_FEE);
+          const feeGw = gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila';
+          const depAmount = round2(riderFee + round2(platformFee(riderFee)) + (feeGw === 'lenco' ? lencoCollectionFee(riderFee) : MOMO_COLLECTION_FEE));
           const collect = await collectWithGateway(env, undefined, plan.phone, depAmount,
             `adv-${ref}`, `DropOff advance ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' '));
           if (collect.ok) {
@@ -13160,7 +13178,7 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
                    lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 'merchant', 'booking_deposit')`,
               ).bind(meta.last_row_id, plan.phone, providerFromPhone(plan.phone), depAmount, depAmount,
-                round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, collect.providerReference ?? collect.reference,
+                round2(platformFee(riderFee)), (feeGw === 'lenco' ? lencoCollectionFee(riderFee) : MOMO_COLLECTION_FEE), collect.providerReference ?? collect.reference,
                 collect.gateway, collect.reference),
               env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
                 .bind(meta.last_row_id, 'advance_pending', 'Advance payment prompt sent for this standing order — dispatch at settlement.'),

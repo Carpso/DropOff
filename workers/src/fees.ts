@@ -70,17 +70,21 @@ export function payoutNet(riderFeeZmw: number): number {
   return round2(share - MOMO_DISBURSEMENT_FEE - platformFee(share));
 }
 
+export type GatewayFeeProvider = 'lipila' | 'lenco';
+
 export interface CollectionFees {
   /** money for goods + rider service, before any processing */
   base: number;
   /** what the RIDER receives at payout (90% − transaction fees) */
   rider_payout_zmw: number;
-  /** the one customer-visible line item: platform cut + momo collect leg */
+  /** the one customer-visible line item: DropOff platform cut + provider collection fee */
   processing_fee_zmw: number;
-  /** DropOff's platform portion of the processing fee (customer leg) */
+  /** DropOff's platform portion of the processing fee (stays the same across gateways) */
   platform_fee_zmw: number;
-  /** Lipila collection leg inside the processing fee */
+  /** Gateway collection fee inside processing fees (Lipila flat / Lenco 1%) */
   lipila_fee_zmw: number;
+  provider_fee_zmw: number;
+  gateway: GatewayFeeProvider;
   /** what the customer authorises on the prompt */
   prompt_total_zmw: number;
 }
@@ -90,8 +94,9 @@ export interface CollectionFees {
  *  - riderFeeZmw set  → normal customer collection.
  *  - riderFeeZmw null → pack parcel / admin stash: no per-parcel fees (the
  *    pack renewal prompt already charges the processing fee on the pack price).
+ * Processing fees = DropOff platform cut (same) + gateway provider collection fee.
  */
-export function collectionFees(base: number, riderFeeZmw?: number | null): CollectionFees {
+export function collectionFees(base: number, riderFeeZmw?: number | null, gateway: GatewayFeeProvider = 'lipila'): CollectionFees {
   const base2 = round2(base);
   const riderPayout = riderFeeZmw != null && riderFeeZmw > 0 ? payoutNet(riderFeeZmw) : 0;
   if (riderFeeZmw == null || riderFeeZmw === 0) {
@@ -101,11 +106,13 @@ export function collectionFees(base: number, riderFeeZmw?: number | null): Colle
       processing_fee_zmw: 0,
       platform_fee_zmw: 0,
       lipila_fee_zmw: 0,
+      provider_fee_zmw: 0,
+      gateway,
       prompt_total_zmw: base2,
     };
   }
   const platform = platformFee(base2);
-  const collectLeg = MOMO_COLLECTION_FEE;
+  const collectLeg = gateway === 'lenco' ? lencoCollectionFee(base2) : MOMO_COLLECTION_FEE;
   const processing = round2(platform + collectLeg);
   return {
     base: base2,
@@ -113,6 +120,8 @@ export function collectionFees(base: number, riderFeeZmw?: number | null): Colle
     processing_fee_zmw: processing,
     platform_fee_zmw: platform,
     lipila_fee_zmw: collectLeg,
+    provider_fee_zmw: collectLeg,
+    gateway,
     prompt_total_zmw: round2(base2 + processing),
   };
 }
