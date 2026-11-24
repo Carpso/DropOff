@@ -6379,6 +6379,24 @@ app.post('/admin/test-collect', async (c) => {
   return c.json({ ok: true, payment_id: meta.last_row_id, lipila_reference: init.lipilaReference, amount_zmw: amount, flavor });
 });
 
+// Superadmin-only live disbursement test. Real money moves; amount capped at K20.
+app.post('/admin/test-disburse', async (c) => {
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const b: any = await c.req.json().catch(() => ({}));
+  let phone: string;
+  try { phone = normalizeZmPhone(String(b?.phone ?? '')); }
+  catch { return c.json({ error: 'valid Zambian phone required' }, 400); }
+  const amount = round2(Math.max(1, Math.min(Number(b?.amount_zmw) || 1, 20)));
+  const payout = await enqueuePayout(c.env, {
+    kind: 'test_settlement',
+    phone,
+    amount,
+    note: 'DropOff live settlement test',
+  });
+  c.executionCtx.waitUntil(runPayoutQueue(c.env));
+  return c.json({ ok: true, payout_id: payout.id, reference: payout.reference, amount_zmw: amount, status: 'queued' }, 202);
+});
+
 // Depot counter fare owed by a sender (owner directive 2026-11-12).
 // PLAN-ACTIVE SENDERS (owner directive) pay ONLY for the receipt reveal:
 // the processing fee is waived because their plan already funds the DropOff
