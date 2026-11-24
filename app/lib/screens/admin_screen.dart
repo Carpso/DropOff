@@ -4132,12 +4132,15 @@ class _MoneyOpsCardState extends State<_MoneyOpsCard> {
   Widget build(BuildContext context) {
     final counts = (_data?['counts'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
     final lenco = (_data?['lenco'] as Map?)?.cast<String, dynamic>();
-    final balance = ((lenco?['balance'] as Map?)?['availableBalance'] as num?)?.toDouble();
+    final balance = ((lenco?['balance'] as Map?)?['availableBalance'] as num?)?.toDouble()
+        ?? (lenco?['available_balance_zmw'] as num?)?.toDouble();
     final pending = (_data?['pending_payments'] as List?)?.length ?? 0;
     final failed = (_data?['failed_payments'] as List?)?.length ?? 0;
     final payouts = (_data?['payouts'] as List?)?.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() ?? const <Map<String, dynamic>>[];
-    final pendingPayoutTotal = payouts.fold<double>(0, (s, p) => s + ((p['amount_zmw'] as num?)?.toDouble() ?? 0));
-    final lowFloat = balance != null && (balance < 1000 || balance < pendingPayoutTotal + 50);
+    final pendingPayoutTotal = (lenco?['pending_payout_total_zmw'] as num?)?.toDouble() ?? payouts.fold<double>(0, (s, p) => s + ((p['amount_zmw'] as num?)?.toDouble() ?? 0));
+    final pendingFeeMax = (lenco?['pending_payout_fee_max_zmw'] as num?)?.toDouble() ?? 0;
+    final threshold = (lenco?['low_balance_threshold_zmw'] as num?)?.toDouble() ?? 1000;
+    final lowFloat = (lenco?['low_float'] as bool?) ?? (balance != null && (balance < threshold || balance < pendingPayoutTotal + pendingFeeMax));
     return Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         const Icon(Icons.monitor_heart_outlined, color: AppColors.forest),
@@ -4160,7 +4163,7 @@ class _MoneyOpsCardState extends State<_MoneyOpsCard> {
           Padding(padding: const EdgeInsets.only(top: 10), child: Container(
             width: double.infinity, padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(color: const Color(0xFFFFF3F0), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0x33B3261E))),
-            child: Text('Low Lenco float warning: balance K${balance.toStringAsFixed(2)} vs pending payouts K${pendingPayoutTotal.toStringAsFixed(2)}. Top up before confirming disbursements.',
+            child: Text('Low Lenco float warning: balance K${balance.toStringAsFixed(2)} vs pending payouts K${pendingPayoutTotal.toStringAsFixed(2)} + est. fees K${pendingFeeMax.toStringAsFixed(2)} (threshold K${threshold.toStringAsFixed(2)}). Top up before confirming disbursements.',
               style: const TextStyle(fontSize: 11.5, color: Color(0xFF8C1D18), height: 1.35)),
           )),
         const SizedBox(height: 10),
@@ -4221,6 +4224,15 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
     _load();
   }
 
+  Future<void> _payNow(int id) async {
+    setState(() => _busyId = id);
+    final res = await DropOffApi.payPayoutNow(id);
+    if (!mounted) return;
+    setState(() => _busyId = null);
+    AppToast.show(context, res.ok ? 'Payout queued to send now.' : _adminError(res, 'Could not queue payout. Try again.'));
+    _load();
+  }
+
   Future<void> _confirm(int id) async {
     setState(() => _busyId = id);
     final res = await DropOffApi.confirmPayout(id);
@@ -4243,7 +4255,7 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
             IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
           ]),
           const SizedBox(height: 4),
-          const Text('Refunds retry every 30 minutes until Lipila confirms. Only you and staff see this ledger.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const Text('Payouts retry with backoff. Batched rider reimbursements can be paid now by admin to avoid payout-fee waste.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
           const SizedBox(height: 10),
           if (_loading)
             const Padding(padding: EdgeInsets.all(12), child: Center(child: AppLogoSpinner(size: 26)))
@@ -4256,6 +4268,13 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
               final needsConfirm = (p['needs_admin_confirm'] as num?)?.toInt() == 1;
               final retryable = status == 'failed' || status == 'queued';
               final error = '${p['last_error'] ?? ''}';
+              final metaRaw = p['meta'];
+              final meta = metaRaw is Map
+                  ? metaRaw.cast<String, dynamic>()
+                  : metaRaw is String
+                      ? ((jsonDecode(metaRaw) as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{})
+                      : const <String, dynamic>{};
+              final batchCount = (meta['payment_ids'] as List?)?.length;
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 5),
                 child: Container(
@@ -4263,7 +4282,7 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
                   decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(10)),
                   child: Row(children: [
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('K${(p['amount_zmw'] as num?)?.toStringAsFixed(2) ?? '0.00'} · ${p['kind']} · #${p['id']}',
+                      Text('K${(p['amount_zmw'] as num?)?.toStringAsFixed(2) ?? '0.00'} · ${p['kind']}${batchCount != null ? ' ($batchCount items)' : ''} · #$id',
                           style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                       Text('${p['reference'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 10, color: AppColors.muted)),
@@ -4275,17 +4294,19 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
                       IconButton(
                         tooltip: 'Confirm rider reimbursement',
                         onPressed: _busyId != null ? null : () => _confirm(id),
-                        icon: _busyId == id
-                            ? const AppLogoSpinner(size: 16)
-                            : const Icon(Icons.verified_outlined, size: 19),
+                        icon: _busyId == id ? const AppLogoSpinner(size: 16) : const Icon(Icons.verified_outlined, size: 19),
+                      ),
+                    if (retryable && !needsConfirm)
+                      IconButton(
+                        tooltip: 'Pay now',
+                        onPressed: _busyId != null ? null : () => _payNow(id),
+                        icon: _busyId == id ? const AppLogoSpinner(size: 16) : const Icon(Icons.send_rounded, size: 18),
                       ),
                     if (retryable && !needsConfirm)
                       IconButton(
                         tooltip: 'Retry now (superadmin)',
                         onPressed: _busyId != null ? null : () => _retry(id),
-                        icon: _busyId == id
-                            ? const AppLogoSpinner(size: 16)
-                            : const Icon(Icons.replay, size: 19),
+                        icon: _busyId == id ? const AppLogoSpinner(size: 16) : const Icon(Icons.replay, size: 19),
                       ),
                   ]),
                 ),

@@ -27,6 +27,14 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-fifth pass) — Step 4 float/risk controls
+
+- **Lenco float guard:** `runPayoutQueue` checks available Lenco balance before sending Lenco payouts; if `amount + lencoDisbursementFeeEstimate.max > available`, payout is deferred with a clear float error and owner alert. Low-balance owner alert added with cooldown (`lenco_low_balance_alerted_at`, threshold setting `lenco_low_balance_threshold_zmw`, default K1000).
+- **Batched counter-fare reimbursements:** `reimburseRider` now records exact receipt reimbursement accounting (payment/wallet ledger/job event) and appends to a per-rider batch payout (`rider_reimbursement_batch`) instead of one payout per small receipt. Batch sends when threshold reached (`reimbursement_batch_threshold_zmw`, default K100) or after window; admin can force **Pay now** (`POST /admin/payouts/:id/pay-now`).
+- **Settlement:** `settlePayoutSuccess` settles batch `meta.payment_ids`/`job_ids` on success. Migration `0082_payout_batching_float.sql` adds `payouts.meta` and batch index (applied remotely).
+- **Money ops/admin:** `/admin/money-ops` reports threshold, pending payout total, estimated max payout fees, and low-float state. Admin payout queue shows batch item count and Pay now action.
+- Worker deployed `be53662e-318f-440c-9193-eec483e25052`; tsc clean, vitest 30/30. Flutter analyze: 3 pre-existing infos in `admin_screen.dart`.
+
 ## 2026-11-24 (forty-fourth pass) — Step 3 idempotency audit/hardening
 
 - **Payout idempotency:** `enqueuePayout` now uses `ON CONFLICT(payment_id, kind) WHERE payment_id IS NOT NULL DO NOTHING` + read-back; added migration `0081_payout_unique.sql` (applied remotely) for a partial unique index on `payouts(payment_id, kind)`.

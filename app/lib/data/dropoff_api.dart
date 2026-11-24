@@ -1001,6 +1001,9 @@ class DropOffApi {
   static Future<ApiResponse> confirmPayout(int id) =>
       post('/admin/payouts/$id/confirm', {});
 
+  static Future<ApiResponse> payPayoutNow(int id) =>
+      post('/admin/payouts/$id/pay-now', {});
+
   static Future<ApiResponse> retryPayout(int id) =>
       post('/admin/payouts/$id/retry', const {}, admin: true);
 

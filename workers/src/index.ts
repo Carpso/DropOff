@@ -21,7 +21,7 @@ import {
   generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
   verifyJwtClaims, verifyPassword,
 } from './auth';
-import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, lencoCollectionFee, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW, DEPOT_QUEUE_FEE_ZMW } from './fees';
+import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, lencoCollectionFee, lencoDisbursementFeeEstimate, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW, DEPOT_QUEUE_FEE_ZMW } from './fees';
 import { PRIVACY_MD, PRIVACY_TITLE, TERMS_MD, TERMS_TITLE, mdToHtml } from './legal';
 import { filedReceiptTotal, invalidFiledReceipt, parseFiledReceipts } from './receipts';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor, vehicleClassForParcel } from './pricing';
@@ -6878,6 +6878,50 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
 // cod_remit) + a job-linked ledger row. Failures raise a job event so ops can
 // pay the rider manually via /admin/payments/:id/refund — the money is owed,
 // it never disappears.
+async function enqueueOrAppendReimbursementBatch(env: Env, input: {
+  riderPhone: string; paymentId: number; jobId: number; jobRef?: string | null; amount: number;
+}): Promise<{ payoutId: number; reference: string; batched: boolean }> {
+  const threshold = await getNumberSetting(env, 'reimbursement_batch_threshold_zmw', 100);
+  const maxBatch = await getNumberSetting(env, 'reimbursement_batch_max_zmw', 1000);
+  const gateway: Gateway = gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila';
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10); // UTC day; good enough for batching window
+
+  // Find active batch for rider (queued/failed, not awaiting admin confirm locked? admin can pay-now by confirming)
+  const active = await env.DB.prepare(
+    `SELECT * FROM payouts WHERE kind = 'rider_reimbursement_batch' AND phone = ?1
+       AND status IN ('queued','failed') ORDER BY id DESC LIMIT 1`,
+  ).bind(input.riderPhone).first<any>();
+
+  const canAppend = active && round2(Number(active.amount_zmw) + input.amount) <= maxBatch;
+  if (canAppend) {
+    const meta = active.meta ? safeParse(active.meta) : {};
+    const paymentIds = Array.isArray(meta?.payment_ids) ? meta.payment_ids.map((n: any) => Number(n)).filter(Number.isFinite) : [];
+    const jobIds = Array.isArray(meta?.job_ids) ? meta.job_ids.map((n: any) => Number(n)).filter(Number.isFinite) : [];
+    if (!paymentIds.includes(input.paymentId)) paymentIds.push(input.paymentId);
+    if (!jobIds.includes(input.jobId)) jobIds.push(input.jobId);
+    const nextAmount = round2(Number(active.amount_zmw) + input.amount);
+    const dueNow = nextAmount >= threshold;
+    await env.DB.prepare(
+      `UPDATE payouts SET amount_zmw = ?2, meta = ?3, updated_at = datetime('now'),
+         next_attempt_at = CASE WHEN ?4 = 1 THEN datetime('now') ELSE next_attempt_at END,
+         last_error = CASE WHEN ?4 = 1 THEN NULL ELSE last_error END
+       WHERE id = ?1 AND status IN ('queued','failed')`,
+    ).bind(active.id, nextAmount, JSON.stringify({ ...meta, payment_ids: paymentIds, job_ids: jobIds, day }), dueNow ? 1 : 0).run();
+    return { payoutId: active.id, reference: active.reference, batched: true };
+  }
+
+  const reference = `RB-${day.replace(/-/g, '')}-${moneyRef('SET').slice(-8)}`;
+  const meta = JSON.stringify({ payment_ids: [input.paymentId], job_ids: [input.jobId], day });
+  const dueNow = round2(input.amount) >= threshold;
+  const nextAttemptAt = dueNow ? "datetime('now')" : "datetime('now', '+6 hours')";
+  const ins = await env.DB.prepare(
+    `INSERT INTO payouts (kind, payment_id, job_id, phone, amount_zmw, reference, gateway, status, next_attempt_at, needs_admin_confirm, meta)
+     VALUES ('rider_reimbursement_batch', NULL, NULL, ?1, ?2, ?3, ?4, 'queued', ${nextAttemptAt}, 0, ?5)`,
+  ).bind(input.riderPhone, round2(input.amount), reference, gateway, meta).run();
+  return { payoutId: ins.meta.last_row_id as number, reference, batched: true };
+}
+
 async function reimburseRider(
   env: Env,
   job: { id: number; ref: string | null; rider_id: number | null },
@@ -6890,40 +6934,41 @@ async function reimburseRider(
   if (!rider?.phone) {
     await env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_failed', ?2)`,
-    ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} could not be sent — no rider on the job. Pay the rider manually via /admin/payments/:id/refund or payroll adjustment.`).run();
+    ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} could not be sent — no rider on the job. Pay the rider manually via admin.`).run().catch(() => {});
     return;
   }
   const ref = `reimb-${job.id}-${Date.now().toString(36)}`;
   try {
-    await env.DB.batch([
+    // Idempotency: if we already recorded this job reimbursement, don't double-bookkeep/batch it.
+    const exists = await env.DB.prepare(
+      `SELECT id FROM payments WHERE job_id = ?1 AND kind = 'rider_reimbursement' AND status IN ('pending','success') LIMIT 1`,
+    ).bind(job.id).first<any>();
+    if (exists) return;
+
+    const batchRes = await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
            lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
          VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, ?6, ?7, 'pending', 'merchant', 'rider_reimbursement')`,
       ).bind(job.id, rider.phone, providerFromPhone(rider.phone), amount, ref,
         gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila', ref),
-      // FK-safe (same bug class as the settle-time wallet_ledger crash): a
-      // rider without a wallets row made this batch throw and the payout was
-      // marked failed before Lipila was ever called.
       env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(rider.phone),
       env.DB.prepare(
         `INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'rider_reimburse', ?3)`,
       ).bind(rider.phone, amount, job.id),
     ]);
-    // ADMIN GATE: reimbursements queue for admin confirmation before money moves.
-    const payout = await enqueuePayout(env, {
-      kind: 'settlement', jobId: job.id, phone: rider.phone, amount,
-      note: `DropOff counter fare reimbursement ${job.ref ?? job.id}`,
-      needsAdminConfirm: true,
+    const paymentId = Number((batchRes?.[0] as any)?.meta?.last_row_id ?? 0);
+    const payout = await enqueueOrAppendReimbursementBatch(env, {
+      riderPhone: rider.phone, paymentId, jobId: job.id, jobRef: job.ref, amount,
     });
     await env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_pending', ?2)`,
-    ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} to the rider is queued and awaiting admin confirmation (${payout.reference}).`);
+    ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} to rider queued in batch ${payout.reference}. It will be sent when batch threshold/window is reached or admin pays now.`).run().catch(() => {});
   } catch {
     try {
       await env.DB.prepare(
         `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursement_failed', ?2)`,
-      ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} bookkeeping failed — pay the rider manually. The money is owed.`);
+      ).bind(job.id, `Counter reimbursement K${amount.toFixed(2)} bookkeeping failed — pay the rider manually. The money is owed.`).run();
     } catch { /* last resort: never break settlement */ }
   }
 }
@@ -7063,6 +7108,11 @@ export async function settlePayoutSuccess(env: Env, id: number, identifier?: str
        settled_at = datetime('now'), updated_at = datetime('now') WHERE id = ?1 AND status <> 'success'`,
   ).bind(id, identifier ?? null).run();
   if (!upd.meta.changes) return;
+
+  const meta = p.meta ? safeParse(p.meta) : null;
+  const batchPaymentIds: number[] = Array.isArray(meta?.payment_ids) ? meta.payment_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)) : [];
+  const batchJobIds: number[] = Array.isArray(meta?.job_ids) ? meta.job_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)) : [];
+
   if (p.payment_id) {
     await env.DB.prepare(
       `UPDATE payments SET status = 'refunded', refunded_at = datetime('now') WHERE id = ?1 AND status <> 'refunded'`,
@@ -7073,6 +7123,24 @@ export async function settlePayoutSuccess(env: Env, id: number, identifier?: str
       ).bind(p.job_id, `Refund ${p.reference} confirmed by ${p.gateway === 'lenco' ? 'Lenco' : 'Lipila'} — K${Number(p.amount_zmw).toFixed(2)} sent to momo.`).run();
     }
   }
+
+  if (batchPaymentIds.length) {
+    for (const pid of batchPaymentIds.slice(0, 100)) {
+      await env.DB.prepare(
+        `UPDATE payments SET status = CASE WHEN kind = 'rider_reimbursement' THEN 'success' ELSE 'refunded' END,
+           paid_at = COALESCE(paid_at, datetime('now')), refunded_at = CASE WHEN kind = 'rider_reimbursement' THEN refunded_at ELSE datetime('now') END
+         WHERE id = ?1 AND status IN ('pending','failed','processing','queued')`,
+      ).bind(pid).run().catch(() => {});
+    }
+  }
+  if (batchJobIds.length) {
+    for (const jid of batchJobIds.slice(0, 100)) {
+      await env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'reimbursed', ?2)`,
+      ).bind(jid, `Rider reimbursement batch ${p.reference} confirmed — K${Number(p.amount_zmw).toFixed(2)} sent (${p.gateway === 'lenco' ? 'Lenco' : 'Lipila'}).`).run().catch(() => {});
+    }
+  }
+
   await logLipila(env, 'disbursement', p.reference, p.phone, Number(p.amount_zmw), 'success', 'confirmed', p.gateway ?? 'lipila');
   await notifyPayout(env, 'Payout sent', `Payout ${p.reference} for K${Number(p.amount_zmw).toFixed(2)} completed.`);
 }
@@ -7116,6 +7184,37 @@ export async function enqueuePayout(env: Env, input: {
   return { id: ins.meta.last_row_id as number, reference, duplicate: false };
 }
 
+const LENCO_FLOAT_LOW_DEFAULT_ZMW = 1000;
+const LENCO_FLOAT_ALERT_COOLDOWN_MIN = 60;
+
+async function getNumberSetting(env: Env, key: string, fallback: number): Promise<number> {
+  const v = await getSetting(env.DB, key);
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+async function maybeAlertLowLencoFloat(env: Env, balance: number, reason: string): Promise<void> {
+  try {
+    const threshold = await getNumberSetting(env, 'lenco_low_balance_threshold_zmw', LENCO_FLOAT_LOW_DEFAULT_ZMW);
+    if (balance >= threshold) return;
+    const last = await getSetting(env.DB, 'lenco_low_balance_alerted_at');
+    const lastMs = last ? Date.parse(last) : 0;
+    if (Date.now() - lastMs < LENCO_FLOAT_ALERT_COOLDOWN_MIN * 60_000) return;
+    await setSetting(env.DB, 'lenco_low_balance_alerted_at', new Date().toISOString(), 'system');
+    await notifyPayout(env, 'Lenco float low', `Lenco available balance is K${balance.toFixed(2)} (threshold K${threshold.toFixed(2)}). ${reason} Top up the Carpso Lenco account before disbursements.`);
+  } catch { /* best effort */ }
+}
+
+async function getLencoAvailableBalance(env: Env): Promise<number | null> {
+  try {
+    const b = await lencoBalance(env);
+    const n = Number((b?.data as any)?.availableBalance ?? (b?.data as any)?.balance ?? NaN);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 async function runPayoutQueue(env: Env): Promise<void> {
   try {
     // 1) Reconcile transfers already handed to a provider — webhook can be lost.
@@ -7136,6 +7235,16 @@ async function runPayoutQueue(env: Env): Promise<void> {
          AND needs_admin_confirm = 0
        ORDER BY id LIMIT 20`,
     ).all<any>();
+    let lencoBalanceCache: number | null | undefined;
+    const lencoBalanceForRun = async () => {
+      if (lencoBalanceCache !== undefined) return lencoBalanceCache;
+      lencoBalanceCache = await getLencoAvailableBalance(env);
+      if (typeof lencoBalanceCache === 'number') {
+        await maybeAlertLowLencoFloat(env, lencoBalanceCache, 'Payout queue check.');
+      }
+      return lencoBalanceCache;
+    };
+
     for (const p of due.results ?? []) {
       // Atomic claim: cron + webhook + admin retry can never act twice.
       const claim = await env.DB.prepare(
@@ -7143,13 +7252,34 @@ async function runPayoutQueue(env: Env): Promise<void> {
           WHERE id = ?1 AND status IN ('queued', 'failed') AND next_attempt_at <= datetime('now')`,
       ).bind(p.id).run();
       if (!claim.meta.changes) continue;
-      const note = p.kind === 'refund' ? `DropOff refund ${p.reference}` : `DropOff settlement ${p.reference}`;
+
+      const amount = round2(Number(p.amount_zmw));
+      const effectiveGateway: Gateway = p.gateway === 'lenco' || gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila';
+      if (effectiveGateway === 'lenco') {
+        const bal = await lencoBalanceForRun();
+        const feeMax = lencoDisbursementFeeEstimate(amount).max;
+        if (typeof bal === 'number' && bal < round2(amount + feeMax)) {
+          const msg = `Insufficient Lenco float: need K${round2(amount + feeMax).toFixed(2)} (amount K${amount.toFixed(2)} + est. fee K${feeMax.toFixed(2)}), available K${bal.toFixed(2)}.`;
+          await env.DB.prepare(
+            `UPDATE payouts SET status = 'failed', last_error = ?2, next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
+             WHERE id = ?1`,
+          ).bind(p.id, msg.slice(0, 300)).run();
+          await logLipila(env, 'disbursement', p.reference, p.phone, amount, 'failed', msg, 'lenco');
+          await maybeAlertLowLencoFloat(env, bal, `Payout ${p.reference} blocked.`);
+          await notifyPayout(env, 'Payout blocked by float', `${p.reference} needs top-up: ${msg}`);
+          continue;
+        }
+      }
+
+      const note = p.kind === 'refund' ? `DropOff refund ${p.reference}`
+        : p.kind === 'rider_reimbursement_batch' ? `DropOff rider reimbursements ${p.reference}`
+        : `DropOff settlement ${p.reference}`;
       const disb = await transferWithGateway(env, p.gateway === 'lenco' ? 'lenco' : undefined,
-        p.phone, Number(p.amount_zmw), p.reference, note);
+        p.phone, amount, p.reference, note);
       const disbError = String(disb.raw ?? '').trim().length === 0
         ? `${disb.gateway === 'lenco' ? 'Lenco' : 'Lipila'} HTTP ${disb.status}${disb.status === 401 ? ' (check API key / account access)' : ''}`
         : String(disb.raw).slice(0, 300);
-      await logLipila(env, 'disbursement', p.reference, p.phone, Number(p.amount_zmw),
+      await logLipila(env, 'disbursement', p.reference, p.phone, amount,
         disb.ok ? 'pending' : 'failed', disbError, disb.gateway);
       if (disb.ok) {
         await env.DB.prepare(
@@ -7164,6 +7294,10 @@ async function runPayoutQueue(env: Env): Promise<void> {
              last_error = ?4, next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
            WHERE id = ?1`,
         ).bind(p.id, disb.gateway, disb.providerReference ?? null, disbError).run();
+        if (disb.gateway === 'lenco') {
+          const bal = await lencoBalanceForRun();
+          if (typeof bal === 'number') await maybeAlertLowLencoFloat(env, bal, `Payout ${p.reference} failed.`);
+        }
         await notifyPayout(env, 'Payout retry scheduled', `Payout ${p.reference} failed — retrying in 30 minutes. Check provider keys/float.`);
       }
     }
@@ -12553,6 +12687,22 @@ app.post('/admin/payouts/:id/retry', async (c) => {
   return c.json({ ok: true, payout_id: id, status: 'queued' });
 });
 
+app.post('/admin/payouts/:id/pay-now', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const id = Number(c.req.param('id'));
+  const p = await c.env.DB.prepare('SELECT id, status, needs_admin_confirm FROM payouts WHERE id = ?1').bind(id).first<any>();
+  if (!p) return c.json({ error: 'not found' }, 404);
+  if (p.status === 'success') return c.json({ error: 'already settled' }, 409);
+  if (p.status === 'processing' || p.status === 'pending') return c.json({ error: 'payout_in_progress' }, 409);
+  await c.env.DB.prepare(
+    `UPDATE payouts SET needs_admin_confirm = 0, admin_confirm_by = COALESCE(admin_confirm_by, ?2), admin_confirm_at = COALESCE(admin_confirm_at, datetime('now')),
+       status = 'queued', next_attempt_at = datetime('now'), last_error = NULL, updated_at = datetime('now')
+     WHERE id = ?1 AND status IN ('queued','failed')`,
+  ).bind(id, c.get('phone') ?? 'admin').run();
+  c.executionCtx.waitUntil(runPayoutQueue(c.env));
+  return c.json({ ok: true, payout_id: id, status: 'queued' });
+});
+
 // Lenco float balance — admin/superadmin can monitor payout float.
 // Top up the Carpso Lenco account externally (mobile money/bank transfer to
 // the Lenco till/account) to facilitate disbursements.
@@ -12583,7 +12733,7 @@ app.get('/admin/money-ops', async (c) => {
       FROM payments WHERE status = 'pending' ORDER BY id DESC LIMIT 50`).all<any>(),
     c.env.DB.prepare(`SELECT id, kind, status, amount_zmw, gateway, gateway_reference, lipila_reference, phone, job_id, created_at, meta
       FROM payments WHERE status = 'failed' ORDER BY id DESC LIMIT 50`).all<any>(),
-    c.env.DB.prepare(`SELECT id, reference, kind, status, amount_zmw, phone, job_id, gateway, gateway_reference, attempts, last_error, next_attempt_at, created_at, needs_admin_confirm
+    c.env.DB.prepare(`SELECT id, reference, kind, status, amount_zmw, phone, job_id, gateway, gateway_reference, attempts, last_error, next_attempt_at, created_at, needs_admin_confirm, meta
       FROM payouts WHERE status IN ('queued','processing','pending','failed') ORDER BY id DESC LIMIT 50`).all<any>(),
     c.env.DB.prepare(`SELECT id, reference, kind, status, amount_zmw, phone, gateway, attempts, last_error, created_at
       FROM payouts WHERE status = 'failed' ORDER BY id DESC LIMIT 20`).all<any>(),
@@ -12596,16 +12746,20 @@ app.get('/admin/money-ops', async (c) => {
     lenco = { ok: true, balance: balance?.data ?? null, accounts: accounts?.data ?? [] };
   } catch (e) { lenco = { ok: false, error: String(e).slice(0, 200) }; }
   const count = async (sql: string) => ((await c.env.DB.prepare(sql).first<any>())?.n ?? 0) as number;
-  const [pendingCount, failedCount, successToday] = await Promise.all([
+  const [pendingCount, failedCount, successToday, threshold] = await Promise.all([
     count(`SELECT COUNT(*) AS n FROM payments WHERE status='pending'`),
     count(`SELECT COUNT(*) AS n FROM payments WHERE status='failed'`),
     count(`SELECT COUNT(*) AS n FROM payments WHERE status='success' AND date(COALESCE(paid_at, created_at)) = date('now')`),
+    getNumberSetting(c.env, 'lenco_low_balance_threshold_zmw', LENCO_FLOAT_LOW_DEFAULT_ZMW),
   ]);
+  const available = Number((lenco?.balance as any)?.availableBalance ?? NaN);
+  const pendingPayoutTotal = (pendingPayouts.results ?? []).reduce((s: number, p: any) => s + (Number(p.amount_zmw) || 0), 0);
+  const pendingPayoutFeeMax = (pendingPayouts.results ?? []).reduce((s: number, p: any) => s + lencoDisbursementFeeEstimate(Number(p.amount_zmw) || 0).max, 0);
   return c.json({
     ok: true,
     gateway: c.env.PAYMENT_GATEWAY ?? 'auto',
     counts: { pending_payments: pendingCount, failed_payments: failedCount, success_today: successToday },
-    lenco,
+    lenco: lenco ? { ...lenco, low_balance_threshold_zmw: threshold, available_balance_zmw: Number.isFinite(available) ? available : null, pending_payout_total_zmw: round2(pendingPayoutTotal), pending_payout_fee_max_zmw: round2(pendingPayoutFeeMax), low_float: Number.isFinite(available) ? available < threshold || available < round2(pendingPayoutTotal + pendingPayoutFeeMax) : false } : lenco,
     pending_payments: pendingPayments.results ?? [],
     failed_payments: failedPayments.results ?? [],
     payouts: pendingPayouts.results ?? [],
