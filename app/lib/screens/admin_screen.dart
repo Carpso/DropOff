@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../data/dropoff_api.dart';
 import '../data/analytics_service.dart';
+import 'bookings_screen.dart' show BookingDetailScreen;
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
 
@@ -2228,7 +2229,7 @@ class _JobSearchCardState extends State<_JobSearchCard> {
   String? _error;
 
   Future<void> _lookup() async {
-    final ref = _ref.text.trim().replace(/^#/, '').toUpperCase();
+    final ref = _ref.text.trim().replaceFirst(RegExp(r'^#'), '').toUpperCase();
     if (ref.isEmpty) {
       setState(() => _error = 'Enter a job ref (e.g. DRO-2026-000123).');
       return;
@@ -2249,6 +2250,62 @@ class _JobSearchCardState extends State<_JobSearchCard> {
       setState(() => _loading = false);
     }
   }
+
+  Widget _buildJobResult(Map<String, dynamic> j) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 8),
+          Text('${j['ref'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+          const SizedBox(height: 4),
+          Text('${j['sender_phone'] ?? ''} → ${j['dest_city'] ?? '—'} · ${j['service'] ?? ''}',
+              style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          const SizedBox(height: 6),
+          Text('status: ${j['status'] ?? '—'}  ·  paid: ${j['paid'] == 1 ? 'yes' : 'no'}  ·  counter fare: ${j['counter_receipt_zmw'] ?? 0} paid=${j['counter_receipt_paid'] == 1 ? 'yes' : 'no'}',
+              style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            FilledButton(
+              onPressed: () async {
+                final ref = '${j['ref'] ?? ''}';
+                final res = await DropOffApi.adminWaiveCounterFare(ref, 'Admin waived via depot fare search.');
+                if (!mounted) return;
+                AppToast.show(context, res.ok ? 'Waived $ref.' : 'Could not waive $ref: ${res.body['detail'] ?? res.error}');
+                if (res.ok) setState(() => _job = null);
+              },
+              child: const Text('Waive counter fare'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final ref = '${j['ref'] ?? ''}';
+                final confirmed = await showConfirmSheet(
+                  context,
+                  title: 'Delete this booking?',
+                  message: 'Remove $ref from every user-facing list. Payments and audit events are kept.',
+                  confirmLabel: 'Delete booking',
+                  danger: true,
+                  icon: Icons.delete_forever_outlined,
+                );
+                if (confirmed != true) return;
+                final res = await DropOffApi.deleteJob(ref);
+                if (!mounted) return;
+                AppToast.show(context, res.ok ? 'Deleted $ref.' : 'Could not delete $ref: ${res.body['detail'] ?? res.error}');
+                if (res.ok) setState(() => _job = null);
+              },
+              icon: const Icon(Icons.delete_forever_outlined, size: 16, color: AppColors.danger),
+              label: const Text('Delete booking'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => BookingDetailScreen(bookingId: '${j['id'] ?? ''}'),
+                ));
+              },
+              icon: const Icon(Icons.receipt_long, size: 16),
+              label: const Text('View booking'),
+            ),
+          ]),
+        ],
+      );
 
   @override
   void dispose() {
@@ -2297,63 +2354,7 @@ class _JobSearchCardState extends State<_JobSearchCard> {
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
             ),
-          if (_job != null) ...[
-            final j = _job!;
-            const SizedBox(height: 8),
-            Text('${j['ref'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-            const SizedBox(height: 4),
-            Text('${j['sender_phone'] ?? ''} → ${j['dest_city'] ?? '—'} · ${j['service'] ?? ''}',
-                style: const TextStyle(color: AppColors.muted, fontSize: 12)),
-            const SizedBox(height: 6),
-            Text('status: ${j['status'] ?? '—'}  ·  paid: ${j['paid'] == 1 ? 'yes' : 'no'}  ·  counter fare: ${j['counter_receipt_zmw'] ?? 0} paid=${j['counter_receipt_paid'] == 1 ? 'yes' : 'no'}',
-                style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(
-                child: FilledButton(
-                  onPressed: () async {
-                    final ref = '${j['ref'] ?? ''}';
-                    final res = await DropOffApi.adminWaiveCounterFare(ref, 'Admin waived via depot fare search.');
-                    if (!mounted) return;
-                    AppToast.show(context, res.ok ? 'Waived $ref.' : 'Could not waive $ref: ${res.body['detail'] ?? res.error}');
-                    if (res.ok) setState(() => _job = null);
-                  },
-                  child: const Text('Waive counter fare'),
-                )),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    final ref = '${j['ref'] ?? ''}';
-                    final confirmed = await showConfirmSheet(
-                      context,
-                      title: 'Delete this booking?',
-                      message: 'Remove $ref from every user-facing list. Payments and audit events are kept.',
-                      confirmLabel: 'Delete booking',
-                      danger: true,
-                      icon: Icons.delete_forever_outlined,
-                    );
-                    if (confirmed != true) return;
-                    final res = await DropOffApi.deleteJob(ref);
-                    if (!mounted) return;
-                    AppToast.show(context, res.ok ? 'Deleted $ref.' : 'Could not delete $ref: ${res.body['detail'] ?? res.error}');
-                    if (res.ok) setState(() => _job = null);
-                  },
-                  icon: const Icon(Icons.delete_forever_outlined, size: 16, color: AppColors.danger),
-                  label: const Text('Delete booking'),
-                )),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => BookingDetailScreen(bookingId: '${j['id'] ?? ''}'),
-                  ));
-                },
-                icon: const Icon(Icons.receipt_long, size: 16),
-                label: const Text('View booking'),
-              ),
-            ]),
-          ],
+          if (_job != null) _buildJobResult(_job!),
         ]),
       ),
     );

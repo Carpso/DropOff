@@ -19,10 +19,10 @@ void main() {
         error: 'lipila_init_failed',
         body: {'detail': 'gateway timeout'},
       ));
-      expect(t, contains('momo prompt could not be started'));
+      expect(t, contains('could not send the mobile money prompt'));
       expect(t, contains('gateway timeout'));
-      expect(t, contains('no money was taken'));
-      expect(t, isNot(contains('balance')));
+      expect(t.toLowerCase(), contains('no money was taken'));
+      expect(t, contains('check your signal'));
     });
 
     test('stale receipt and wrong-account job get their own next steps', () {

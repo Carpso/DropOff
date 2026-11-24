@@ -122,6 +122,22 @@ void main() {
     });
   });
 
+  group('Pickup payment prompt', () {
+    test('a standard pickup charges the DropOff leg plus processing, never the courier counter fare', () {
+      final fees = DropOffApi.collectionFees(45, riderFee: 45);
+      expect(fees['base'], 45);
+      expect(fees['prompt_total_zmw'], DropOffApi.round2(45 + fees['processing_fee_zmw']!));
+      expect(fees['lipila_fee_zmw'], DropOffApi.momoCollectionFee);
+      expect(fees['platform_fee_zmw'], DropOffApi.platformFee(45));
+    });
+
+    test('a plan-covered pickup prompts only the leg', () {
+      final fees = DropOffApi.collectionFees(45);
+      expect(fees['prompt_total_zmw'], 45);
+      expect(fees.containsKey('processing_fee_zmw'), isFalse);
+    });
+  });
+
   group('Collection fee prompt', () {
     test('a plan-covered collection prompts only the leg', () {
       final fees = DropOffApi.collectionFees(45);
