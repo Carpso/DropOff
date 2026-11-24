@@ -1379,6 +1379,45 @@ app.delete('/recipients/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+/* -------- community POI layer (growing map, owner 2026-11-24) ------------ */
+// Shared, named pins that accumulate as riders file real dropoff points.
+// Anyone signed in can read; any rider can add one for a city.
+app.get('/pois', async (c) => {
+  const city = String(c.req.query('city') ?? '').trim();
+  if (!city) return c.json({ pois: [] });
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, city, name, lat, lng, source, upvotes, created_at
+       FROM community_pois WHERE city = ?1 ORDER BY upvotes DESC, created_at DESC LIMIT 200`,
+  ).bind(city).all<any>();
+  return c.json({ pois: results ?? [] });
+});
+
+app.post('/pois', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const name = String(b?.name ?? '').trim().slice(0, 80);
+  const city = String(b?.city ?? '').trim().slice(0, 60);
+  const lat = Number(b?.lat);
+  const lng = Number(b?.lng);
+  if (!name || !city || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return c.json({ error: 'name_city_coords_required' }, 400);
+  }
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO community_pois (city, name, lat, lng, source, created_by) VALUES (?1,?2,?3,?4,'rider',?5)`,
+  ).bind(city, name, lat, lng, phone).run();
+  return c.json({ ok: true, id: meta.last_row_id });
+});
+
+app.post('/pois/:id/upvote', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id'));
+  if (!id) return c.json({ error: 'bad id' }, 400);
+  await c.env.DB.prepare('UPDATE community_pois SET upvotes = upvotes + 1 WHERE id = ?1').bind(id).run();
+  return c.json({ ok: true });
+});
+
 // Density/slot optimization: suggest the least-loaded open slot (simple heuristic).
 app.get('/slots/suggest', async (c) => {
   const fromCity = String(c.req.query('from_city') ?? c.req.query('city') ?? '').trim() || null;

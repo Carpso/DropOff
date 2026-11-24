@@ -121,6 +121,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
             depotName: '${_live?['depot_name'] ?? ''}',
             recipientName: '${_live?['recipient_name'] ?? ''}',
             senderName: '${_live?['sender_name'] ?? ''}',
+            city: '${_live?['from_city'] ?? _live?['city'] ?? 'Lusaka'}',
           ),
           if (_live == null || _live!['lat'] == null)
             Positioned(

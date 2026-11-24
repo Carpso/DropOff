@@ -691,6 +691,15 @@ class DropOffApi {
   }
   static Future<ApiResponse> saveRecipient(Map<String, dynamic> r) => post('/recipients', r);
   static Future<ApiResponse> deleteRecipient(int id) => delete('/recipients/$id');
+
+  /// Community POI layer (growing map): shared, named pins.
+  static Future<List<Map<String, dynamic>>> communityPois(String city) async {
+    final data = await get('/pois', {'city': city});
+    return ((data?['pois'] as List?) ?? const []).cast<Map<String, dynamic>>();
+  }
+  static Future<ApiResponse> saveCommunityPoi({required String name, required String city, required double lat, required double lng}) =>
+      post('/pois', {'name': name, 'city': city, 'lat': lat, 'lng': lng});
+  static Future<ApiResponse> upvoteCommunityPoi(int id) => post('/pois/$id/upvote', const {});
   static Future<ApiResponse> patchMe(Map<String, dynamic> body) => _patchJson('/me', body);
 
   static Future<ApiResponse> _patchJson(String path, Map<String, dynamic> body) async {

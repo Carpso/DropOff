@@ -507,6 +507,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           },
           searchPin: _searchPin,
           searchPinLabel: _searchPinLabel,
+          city: 'Lusaka',
         ),
         // Floating search - search-only (never sets destination). Placed below
         // the compass/basemap banner so it does not obstruct map controls.

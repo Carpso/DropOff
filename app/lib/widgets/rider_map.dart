@@ -12,7 +12,9 @@ import 'package:latlong2/latlong.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
+import '../data/map_tile_cache.dart';
 import '../data/map_tile_sources.dart';
+import '../data/dropoff_api.dart';
 import '../services/crash_reporting.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
@@ -65,6 +67,10 @@ class RiderMap extends StatefulWidget {
   final LatLng? searchPin;
   final String? searchPinLabel;
 
+  /// City used to fetch the community POI layer ("growing location"). When
+  /// null, no POIs are fetched and none are rendered.
+  final String? city;
+
   const RiderMap({
     super.key,
     required this.pickup,
@@ -84,6 +90,7 @@ class RiderMap extends StatefulWidget {
     this.courierName,
     this.searchPin,
     this.searchPinLabel,
+    this.city,
   });
 
   static const String tileUrl =
@@ -180,6 +187,18 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     ];
 
     Future<VectorTileProvider?> openLusakaReliable() async {
+      // OFFLINE-FIRST (owner 2026-11-24): a previously downloaded archive
+      // (MapTileCache) is the best basemap — no network, no Range quirks.
+      try {
+        final cached = await MapTileCache.lusakaArchiveUri();
+        if (cached.scheme == 'file') {
+          final p = await PmTilesVectorTileProvider.fromSource(cached.toString()).timeout(const Duration(seconds: 8));
+          debugPrint('RiderMap: Lusaka from disk cache ($cached)');
+          return p;
+        }
+      } catch (e) {
+        debugPrint('RiderMap: cached Lusaka open failed: $e');
+      }
       // Prefer a full download for Lusaka (30 MB): Range requests often "open"
       // but fail to serve tiles on some mobile networks, causing a blank basemap.
       for (final url in lusakaUrls) {
@@ -188,6 +207,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
           if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
             final archive = await PmTilesArchive.fromBytes(res.bodyBytes);
             debugPrint('RiderMap: Lusaka full download (${res.bodyBytes.length} bytes) from $url');
+            // Persist so the next run is offline-by-default (Mapbox behaviour).
+            unawaited(MapTileCache.persistBytes(res.bodyBytes));
             return PmTilesVectorTileProvider.fromArchive(archive);
           }
         } catch (e) {
@@ -252,6 +273,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   StreamSubscription<CompassEvent>? _compassSub;
   double _headingDeg = 0; // 0 = north-up until the magnetometer speaks
 
+  List<Map<String, dynamic>> _pois = const [];
+
   @override
   void initState() {
     super.initState();
@@ -263,6 +286,18 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       if ((h - _headingDeg).abs() < 1.0) return;
       setState(() => _headingDeg = h);
     });
+    _loadCommunityPois();
+  }
+
+  Future<void> _loadCommunityPois() async {
+    final city = widget.city;
+    if (city == null || city.trim().isEmpty) return;
+    try {
+      final pois = await DropOffApi.communityPois(city.trim());
+      if (mounted) setState(() => _pois = pois);
+    } catch (_) {
+      // POIs are a bonus layer; never fail the map.
+    }
   }
 
   @override
@@ -525,9 +560,16 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                   fileCacheTtl: const Duration(days: 30),
                 )
               else
-                // Neutral canvas instead of a dead green box: riders still get
-                // their bike, stops, route and compass while the basemap heals.
-                const IgnorePointer(child: ColoredBox(color: Colors.white)),
+                // RASTER FALLBACK (owner 2026-11-24): when the PMTiles basemap
+                // cannot load (blocked Range requests, offline outside Lusaka),
+                // fall back to OpenStreetMap raster tiles so the rider still
+                // sees roads and street names. Online-only; silently no-ops
+                // offline (flutter_map shows nothing, markers still render).
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'zm.dropoff.dropoff',
+                  maxZoom: 19,
+                ),
               // Labels are rendered by the PMTiles/Protomaps theme; avoid third-party
               // label overlays that require external API keys.
               if (casing != null && core != null)
@@ -598,6 +640,19 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                       color: AppColors.amber,
                       label: widget.searchPinLabel ?? 'Search result',
                       highlight: true,
+                    ),
+                  ),
+                // Community POI layer ("growing location"): shared named pins
+                // that accumulate as riders file real dropoff points.
+                for (final poi in _pois)
+                  Marker(
+                    point: LatLng((poi['lat'] as num).toDouble(), (poi['lng'] as num).toDouble()),
+                    width: 96,
+                    height: 60,
+                    child: _labeledPin(
+                      icon: Icons.place_outlined,
+                      color: const Color(0xFF1976D2),
+                      label: '${poi['name'] ?? 'Place'}',
                     ),
                   ),
                 if (widget.rider != null)
