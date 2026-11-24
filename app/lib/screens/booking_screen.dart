@@ -523,36 +523,44 @@ class _BookingScreenState extends State<BookingScreen> {
       };
 
   Future<void> _pickParcelPhoto() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take item photo'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
-          ListTile(leading: const Icon(Icons.photo_library), title: const Text('Pick from gallery'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
-        ]),
-      ),
-    );
-    if (source == null || !mounted) return;
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 82, maxWidth: 1600);
-    if (picked == null) return;
-    // Show the shot immediately — before the upload finishes.
-    setState(() => _parcelPhotoPath = picked.path);
-    setState(() => _parcelPhotoUploading = true);
-    final bytes = await picked.readAsBytes();
-    DateTime? capturedAt;
-    try { capturedAt = await picked.lastModified(); } catch (_) {}
-    if (!mounted) return;
-    final res = await ProofUploadOverlay.run(
-      context,
-      title: 'Securing item photo',
-      task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'item.jpg', kind: 'kyc', capturedAt: capturedAt),
-    );
-    if (!mounted) return;
-    setState(() {
-      _parcelPhotoUploading = false;
-      if (res.ok && res.body['url'] is String) _parcelPhotoUrl = res.body['url'] as String;
-    });
-    _message(res.ok ? 'Item photo attached — protects you if the item is disputed.' : 'Photo upload failed. You can still book.');
+    try {
+      final source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take item photo'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+            ListTile(leading: const Icon(Icons.photo_library), title: const Text('Pick from gallery'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+          ]),
+        ),
+      );
+      if (source == null || !mounted) return;
+      final picked = await ImagePicker().pickImage(source: source, imageQuality: 82, maxWidth: 1600);
+      if (picked == null || !mounted) return;
+      // Show the shot immediately - before the upload finishes.
+      setState(() {
+        _parcelPhotoPath = picked.path;
+        _parcelPhotoUploading = true;
+      });
+      final bytes = await picked.readAsBytes();
+      DateTime? capturedAt;
+      try { capturedAt = await picked.lastModified(); } catch (_) {}
+      if (!mounted) return;
+      final res = await ProofUploadOverlay.run(
+        context,
+        title: 'Securing item photo',
+        task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'item.jpg', kind: 'kyc', capturedAt: capturedAt),
+      );
+      if (!mounted) return;
+      setState(() {
+        _parcelPhotoUploading = false;
+        if (res.ok && res.body['url'] is String) _parcelPhotoUrl = res.body['url'] as String;
+      });
+      _message(res.ok ? 'Item photo attached - protects you if the item is disputed.' : 'Photo upload failed. Check your connection and try again.');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _parcelPhotoUploading = false);
+      _message('Could not capture the item photo. Check camera permission and try again.');
+    }
   }
 
   /// ✨ Tidy, the DropOff app AI (server /ai/address + local pin snap).

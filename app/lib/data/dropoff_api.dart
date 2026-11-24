@@ -669,7 +669,12 @@ class DropOffApi {
   /// No job step is advanced; the final jobEvent still verifies server-side.
   /// `kind` is 'pickup' (sender code) or 'door' (recipient code / door PIN).
   static Future<ApiResponse> verifyPin(String jobRef, String otp, String kind) =>
-      post('/jobs/${Uri.encodeComponent(jobRef)}/verify-pin', {'otp': otp, 'kind': kind});
+      post(
+        '/jobs/${Uri.encodeComponent(jobRef)}/verify-pin',
+        {'otp': otp, 'kind': kind},
+        retries: 1,
+        timeout: const Duration(seconds: 12),
+      );
 
   /// AI parcel photo check: compares the sender's booking capture against the
   /// rider's depot/delivery photo. Returns {same_parcel, confidence, note, flagged}.

@@ -27,6 +27,14 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-eighth pass) — PIN/capture/basemap fixes + order cleanup
+
+- **Sender PIN verify:** `DropOffApi.verifyPin` now retries once with a 12s timeout to reduce false "could not reach DropOff" failures; worker verify-pin endpoint unchanged.
+- **Capture item:** hardened rider/booking capture flows with try/catch, empty-url guards, and clearer camera/upload failure messages; pickup capture remains gated on server-verified PIN per owner rule.
+- **Rider map/basemap:** added alternate R2 bucket URL fallbacks and full-download fallback for Lusaka archive when range opens fail; removed mojibakes in rider map strings/comments.
+- **Order cleanup:** soft-deleted all jobs for sender phones `260779686480` and `260974439722` (including requested `07796864080/0974439722` variants) in remote D1 with `admin_deleted` audit events.
+- Worker deployed `0ba3c601-990c-474b-9d7d-ac8eb2fc93a9` (includes Step 6 partial business-account scaffolding already in tree; migration `0085_business_accounts.sql` already applied remotely). tsc clean; Flutter analyze clean on touched files.
+
 ## 2026-11-24 (forty-seventh pass) — counter-fare prompt nag fix
 
 - **Counter-fare nag fix:** `/counter-fare/status` and booking/collection counter-fare gates now ignore `deleted/canceled/cancelled` jobs, preventing past dead jobs from blocking/prompting. Removed redundant BookingDetail auto-prompt (detail already has pay card; caused double prompt). Added 2-minute cooldown + server due-check before foreground/cold-start counter-fare prompt navigation in `main.dart`.

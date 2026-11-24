@@ -20,7 +20,7 @@ import '../ui/saved_place_pin.dart';
 import '../ui/map_vehicle_marker.dart';
 
 /// Live in-app map on the DropOff basemap (Protomaps Zambia/Zimbabwe/Malawi/
-/// Mozambique archive on our R2 bucket ∩┐╜ no Google, no MapTiler, no external
+/// Mozambique archive on our R2 bucket - no Google, no MapTiler, no external
 /// navigation app). The map is ours; it grows with the fleet's rider density.
 class RiderMap extends StatefulWidget {
   final LatLng? pickup;
@@ -37,7 +37,7 @@ class RiderMap extends StatefulWidget {
   /// fine for overview but the caller must label it as such.
   final List<LatLng>? route;
 
-  /// True when [route] is a straight line (routing engine unreachable) ∩┐╜
+  /// True when [route] is a straight line (routing engine unreachable) -
   /// draws it dashed so it never masquerades as a road route.
   final bool routeIsStraightLine;
 
@@ -88,7 +88,7 @@ class RiderMap extends StatefulWidget {
 
   static const String tileUrl =
       'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/region-zm-zw-mw-mz.pmtiles';
-  /// High-detail Lusaka archive from the SAME bucket (z0∩┐╜16, clipped to the
+  /// High-detail Lusaka archive from the SAME bucket (z0-16, clipped to the
   /// city). Street-level zoom in Lusaka comes from here; the regional file
   /// still covers the rest of Zambia/Zimbabwe/Malawi/Mozambique.
   static const String lusakaTileUrl =
@@ -120,7 +120,7 @@ class RiderMap extends StatefulWidget {
 }
 
 /// Basemap pieces: the PMTiles provider plus the theme (fonts/sprites/urls)
-/// hosted on our own R2 bucket ∩┐╜ no external map host at all.
+/// hosted on our own R2 bucket - no external map host at all.
 ///
 /// Both are NULLABLE on purpose (owner onboarding bug 2026-11-23): a mobile
 /// network that refuses HTTP Range requests must NOT blank the whole map.
@@ -149,7 +149,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     // enough to work where the 1.5 GB regional file fails, and onboarding is
     // Lusaka-first. The PMTiles HTTP client has no timeout of its own, so cap
     // each open - the old code could spin on the spinner forever.
-    Future<VectorTileProvider?> open(String url, Duration timeout) async {
+    Future<VectorTileProvider?> openOne(String url, Duration timeout) async {
       for (var attempt = 0; attempt < 2; attempt++) {
         try {
           return await PmTilesVectorTileProvider.fromSource(url).timeout(timeout);
@@ -161,29 +161,47 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       }
       return null;
     }
+    Future<VectorTileProvider?> openWithFallback(List<String> urls, Duration timeout) async {
+      for (final url in urls) {
+        final p = await openOne(url, timeout);
+        if (p != null) return p;
+      }
+      return null;
+    }
 
+    const altAssetsBase = 'https://pub-d23651cb1a9d491f998c73094d54f379.r2.dev';
+    final regionalUrls = <String>[
+      RiderMap.tileUrl,
+      '$altAssetsBase/region-zm-zw-mw-mz.pmtiles',
+    ];
+    final lusakaUrls = <String>[
+      RiderMap.lusakaTileUrl,
+      '$altAssetsBase/tiles/lusaka-z0-16.pmtiles',
+    ];
     final opened = await Future.wait([
-      open(RiderMap.tileUrl, const Duration(seconds: 6)),
-      open(RiderMap.lusakaTileUrl, const Duration(seconds: 6)),
+      openWithFallback(regionalUrls, const Duration(seconds: 8)),
+      openWithFallback(lusakaUrls, const Duration(seconds: 8)),
     ]);
-    final regional = opened[0];
+    VectorTileProvider? regional = opened[0];
     VectorTileProvider? lusaka = opened[1];
     if (lusaka == null) {
       // Networks that refuse Range requests (some MTN/Airtel configurations,
       // VPNs, Private DNS) make PMTiles' byte-range opener fail entirely. The
       // Lusaka archive is only ~30 MB, so download it once into memory and
-      // read it locally ΓÇö this is the difference between a map and green box
+      // read it locally - this is the difference between a map and green box
       // on those connections (owner onboarding report 2026-11-23).
-      try {
-        final res = await http.get(Uri.parse(RiderMap.lusakaTileUrl))
-            .timeout(const Duration(seconds: 60));
-        if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-          final archive = await PmTilesArchive.fromBytes(res.bodyBytes);
-          lusaka = PmTilesVectorTileProvider.fromArchive(archive);
-          debugPrint('RiderMap: Lusaka archive loaded as a full download (${res.bodyBytes.length} bytes)');
+      for (final url in lusakaUrls) {
+        try {
+          final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 60));
+          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+            final archive = await PmTilesArchive.fromBytes(res.bodyBytes);
+            lusaka = PmTilesVectorTileProvider.fromArchive(archive);
+            debugPrint('RiderMap: Lusaka archive loaded as full download (${res.bodyBytes.length} bytes) from $url');
+            break;
+          }
+        } catch (e) {
+          debugPrint('RiderMap: full-download fallback failed for $url: $e');
         }
-      } catch (e) {
-        debugPrint('RiderMap: full-download fallback failed: $e');
       }
     }
     VectorTileProvider? provider;
@@ -253,8 +271,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     super.dispose();
   }
 
-  /// Needle angle in radians: the device's heading negated (heading 90∩┐╜ =
-  /// facing east ? north lies 90∩┐╜ to the left of "up"), minus the map's own
+  /// Needle angle in radians: the device's heading negated (heading 90 deg =
+  /// facing east -> north lies 90 deg to the left of "up"), minus the map's own
   /// rotation so the needle stays truthful on a rotated map. Camera not
   /// ready ? rotation contributes nothing.
   double _needleAngle() {
@@ -262,7 +280,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try {
       deg -= _mapCtl.camera.rotationRad * 180 / math.pi;
     } catch (_) {
-      /* camera not ready ∩┐╜ device heading only */
+      /* camera not ready - device heading only */
     }
     return deg * math.pi / 180;
   }
@@ -270,7 +288,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   /// The compass badge: white circle, red needle + N that rotates with the
   /// device so the rider can hold the phone any way and still find north.
   /// TAPPING it snaps the map back to north-up (owner 2026-11-17: the familiar
-  /// tap-to-north behaviour) ∩┐╜ a two-finger rotate no longer strands the map
+  /// tap-to-north behaviour) - a two-finger rotate no longer strands the map
   /// sideways.
   Widget _compassBadge() => Tooltip(
         message: 'Tap to switch between heading-up and north-up',
@@ -306,7 +324,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     return const Distance().bearing(widget.rider!, target);
   }
 
-  /// The direction the rider is ACTUALLY travelling ∩┐╜ the bearing of the road
+  /// The direction the rider is ACTUALLY travelling - the bearing of the road
   /// segment they are on, not the straight-line bearing to the final pin. The
   /// bike nose follows every bend instead of pointing at the destination while
   /// the road doubles back (owner 2026-11-19: "icon faces elsewhere").
@@ -382,7 +400,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     ]);
   }
 
-  /// The rider's vehicle on the map ∩┐╜ just the vehicle, no frame/badge.
+  /// The rider's vehicle on the map - just the vehicle, no frame/badge.
   Widget _riderMarker() {
     return SizedBox(
       width: 64,
@@ -397,12 +415,12 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     );
   }
 
-  /// Compass tap ? north-up. flutter_map's rotate(0) is due-north; guarded ∩┐╜
+  /// Compass tap -> north-up. flutter_map's rotate(0) is due-north; guarded -
   /// the camera may not be ready yet, in which case the map is already north.
   bool _headingUp = false; // compass toggles heading-up / north-up
 
   /// Compass tap ? FACE FORWARD (owner 2026-11-18): rotate the map so the
-  /// direction the phone/rider faces is the top of the screen ∩┐╜ for riders
+  /// direction the phone/rider faces is the top of the screen - for riders
   /// with the phone in a holder, "up" must mean where they are going.
   void _snapNorth() {
     HapticFeedback.selectionClick();
@@ -411,7 +429,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try {
       _mapCtl.rotate(deg * math.pi / 180);
     } catch (_) {
-      /* camera not ready ∩┐╜ the map is already north-up */
+      /* camera not ready - the map is already north-up */
     }
     setState(() {}); // repaint the rider badge against the new rotation
   }
@@ -440,7 +458,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   void didUpdateWidget(covariant RiderMap oldWidget) {
     super.didUpdateWidget(oldWidget);
     // SMART NAVIGATION (owner 2026-11-18): as the rider moves, follow the bike
-    // and zoom in nearer the destination ∩┐╜ the map scales with the journey.
+    // and zoom in nearer the destination - the map scales with the journey.
     if (widget.rider == null || widget.rider == oldWidget.rider) return;
     final target = widget.route?.isNotEmpty == true ? widget.route!.last : (widget.pickup ?? widget.depot);
     if (target == null) return;
@@ -450,7 +468,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       _mapCtl.move(widget.rider!, zoom);
       if (_headingUp) _mapCtl.rotate(_headingDeg * math.pi / 180);
     } catch (_) {
-      /* camera not ready yet ∩┐╜ initialCameraFit takes over */
+      /* camera not ready yet - initialCameraFit takes over */
     }
   }
 
@@ -463,7 +481,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
           // Defensive: _loadAssets catches its own failures, but a future
           // regression must never blank the map during onboarding.
           CrashReporting.reportCaught('RiderMap assets future failed', snap.error, snap.stackTrace);
-          return _offlineFallback('Basemap could not load ∩┐╜ retry below.', onRetry: _retryMap);
+          return _offlineFallback('Basemap could not load - retry below.', onRetry: _retryMap);
         }
         if (!snap.hasData) {
           return const Center(child: AppLogoSpinner(size: 26));
@@ -475,7 +493,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
             : null;
         final center = widget.rider ?? widget.pickup ?? widget.depot ?? firstStop ?? RiderMap.chibolya;
         final bounds = _bounds;
-        // Route casing: dark outline under the green core ∩┐╜ the route reads
+        // Route casing: dark outline under the green core - the route reads
         // on any basemap style and on sunny-screen glare.
         final casing = widget.route != null && widget.route!.length > 1
             ? Polyline(points: widget.route!, strokeWidth: 7.5, color: const Color(0xFF0F3B2D))
@@ -490,7 +508,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               initialCenter: center,
               initialZoom: 13.5,
               // Zoom discipline (owner 2026-11-18 "why is the rider map
-              // different"): a tight fit ∩┐╜ rider standing on the stop ∩┐╜ used
+              // different"): a tight fit - rider standing on the stop - used
               // to zoom past the basemap's detail level and render a bare
               // area. Capped, so the rider map always reads like the sender's
               // tracking view.
@@ -592,7 +610,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               ]),
             ],
           ),
-          // Zoom + re-fit controls ∩┐╜ our map, our chrome.
+          // Zoom + re-fit controls - our map, our chrome.
           Positioned(
             top: 12,
             right: 12,
@@ -620,7 +638,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(4))),
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                child: Text('DropOff map ∩┐╜ map data ∩┐╜ OpenStreetMap contributors', style: TextStyle(color: Colors.white, fontSize: 9)),
+                child: Text('DropOff map - map data - OpenStreetMap contributors', style: TextStyle(color: Colors.white, fontSize: 9)),
               ),
             ),
           ),
@@ -637,11 +655,11 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                   child: Row(children: [
                     const Icon(Icons.map_outlined, size: 17, color: AppColors.amber),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                      const Text('Basemap offline ΓÇö your position and route still show.',
+                      const Text('Basemap offline - your position and route still show.',
                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.ink)),
                       if ((assets.error ?? '').isNotEmpty)
                         Padding(padding: const EdgeInsets.only(top: 3), child: Text(
-                          assets.error!.length > 150 ? '${assets.error!.substring(0, 150)}ΓÇª' : assets.error!,
+                          assets.error!.length > 150 ? '${assets.error!.substring(0, 150)}...' : assets.error!,
                           style: const TextStyle(fontSize: 9.5, color: AppColors.muted),
                           maxLines: 2, overflow: TextOverflow.ellipsis,
                         )),
@@ -659,7 +677,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(6))),
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Text('Direct line ∩┐╜ turn-by-turn unavailable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
+                  child: Text('Direct line - turn-by-turn unavailable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
                 ),
               ),
             ),
@@ -683,7 +701,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try {
       _mapCtl.move(_mapCtl.camera.center, (_mapCtl.camera.zoom + delta).clamp(3, 18).toDouble());
     } catch (_) {
-      /* camera not ready ∩┐╜ ignore */
+      /* camera not ready - ignore */
     }
   }
 
@@ -693,7 +711,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
           .fit(_mapCtl.camera);
       _mapCtl.move(fitted.center, fitted.zoom);
     } catch (_) {
-      /* camera not ready ∩┐╜ ignore */
+      /* camera not ready - ignore */
     }
   }
 

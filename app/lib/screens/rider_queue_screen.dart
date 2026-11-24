@@ -775,48 +775,66 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// 2026-11-17: "no repeat capture" — a gallery pick could re-file an old
   /// photo, so collection evidence is captured live, one photo per picked-up item).
   Future<String?> _captureParcelPhoto() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
-    if (picked == null) return null;
-    if (!mounted) return null;
-    final bytes = await picked.readAsBytes();
-    DateTime? capturedAt;
-    try { capturedAt = await picked.lastModified(); } catch (_) {}
-    if (!mounted) return null;
-    final res = await ProofUploadOverlay.run(
-      context,
-      title: 'Securing item photo',
-      task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'pickup.jpg', kind: 'kyc', capturedAt: capturedAt),
-    );
-    if (!mounted) return null;
-    if (!res.ok) {
-      AppToast.show(context, 'Photo upload failed. Check your connection and try the capture again.');
+    try {
+      final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
+      if (picked == null || !mounted) return null;
+      final bytes = await picked.readAsBytes();
+      DateTime? capturedAt;
+      try { capturedAt = await picked.lastModified(); } catch (_) {}
+      if (!mounted) return null;
+      final res = await ProofUploadOverlay.run(
+        context,
+        title: 'Securing item photo',
+        task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'pickup.jpg', kind: 'kyc', capturedAt: capturedAt),
+      );
+      if (!mounted) return null;
+      if (!res.ok) {
+        AppToast.show(context, 'Photo upload failed. Check your connection and try the capture again.');
+        return null;
+      }
+      final url = '${res.body['url'] ?? ''}'.trim();
+      if (url.isEmpty) {
+        AppToast.show(context, 'Photo upload failed. Check your connection and try the capture again.');
+        return null;
+      }
+      return url;
+    } catch (_) {
+      if (mounted) AppToast.show(context, 'Could not capture the item photo. Check camera permission and try again.');
       return null;
     }
-    return '${res.body['url'] ?? ''}';
   }
 
   Future<String?> _pickPodPhoto() async {
     // CAMERA-ONLY (owner audit 2026-11-21): handover and depot-receipt proof
     // must be captured live. A gallery pick could re-file an old photo, which
     // is exactly what the pickup evidence policy forbids.
-    final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
-    if (picked == null) return null;
-    if (!mounted) return null;
-    final bytes = await picked.readAsBytes();
-    DateTime? capturedAt;
-    try { capturedAt = await picked.lastModified(); } catch (_) {}
-    if (!mounted) return null;
-    final res = await ProofUploadOverlay.run(
-      context,
-      title: 'Securing proof photo',
-      task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc', capturedAt: capturedAt),
-    );
-    if (!mounted) return null;
-    if (!res.ok) {
-      AppToast.show(context, 'Proof photo did not upload - check your connection and retake it.');
+    try {
+      final picked = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 82);
+      if (picked == null || !mounted) return null;
+      final bytes = await picked.readAsBytes();
+      DateTime? capturedAt;
+      try { capturedAt = await picked.lastModified(); } catch (_) {}
+      if (!mounted) return null;
+      final res = await ProofUploadOverlay.run(
+        context,
+        title: 'Securing proof photo',
+        task: DropOffApi.uploadImage(bytes, picked.name.isNotEmpty ? picked.name : 'proof.jpg', kind: 'kyc', capturedAt: capturedAt),
+      );
+      if (!mounted) return null;
+      if (!res.ok) {
+        AppToast.show(context, 'Proof photo did not upload - check your connection and retake it.');
+        return null;
+      }
+      final url = '${res.body['url'] ?? ''}'.trim();
+      if (url.isEmpty) {
+        AppToast.show(context, 'Proof photo did not upload - check your connection and retake it.');
+        return null;
+      }
+      return url;
+    } catch (_) {
+      if (mounted) AppToast.show(context, 'Could not capture the proof photo. Check camera permission and try again.');
       return null;
     }
-    return '${res.body['url'] ?? ''}';
   }
 
   Future<void> _snack(String msg) async {

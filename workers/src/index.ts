@@ -2057,6 +2057,12 @@ app.post('/jobs', async (c) => {
       ? normalizeZmPhone(b.sender_phone) : normalizeZmPhone(c.get('phone') ?? b.sender_phone ?? '');
     const recipientPhone = normalizeZmPhone(b.recipient_phone);
     if (!senderPhone) return c.json({ error: 'missing sender identity' }, 401);
+    let businessId: number | null = b.business_id == null || b.business_id === '' ? null : Number(b.business_id);
+    if (businessId != null && (!Number.isFinite(businessId) || businessId <= 0)) return c.json({ error: 'invalid_business_id' }, 400);
+    if (businessId != null) {
+      const bm = await bizMember(c.env, businessId, senderPhone);
+      if (!bm) return c.json({ error: 'business_forbidden', detail: 'You are not an active member of this business account.' }, 403);
+    }
     if (c.get('role') !== 'ops') {
       const n24h = (await c.env.DB.prepare(
         `SELECT COUNT(*) AS n FROM jobs WHERE sender_phone = ?1 AND created_at > datetime('now', '-1 day')`,
@@ -2438,8 +2444,8 @@ app.post('/jobs', async (c) => {
          pickup_time, pickup_window, pay_method,
          round_trip, return_city, return_address, return_leg_fee_zmw, pickup_at, last_mile, billable_rides,
           parcels, vehicle_class, needs_car, branch, from_city, parcel_photo_url,
-          declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45)`,
+          declared_value_zmw, cover_opt_in, cover_fee_zmw, cover_status, cover_tos_accepted, cover_tos_version, cover_tos_accepted_at, pack_covered, business_id)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46)`,
     ).bind(
       ref, senderPhone, senderName, pickupAddress, b.pickup_lat ?? null, b.pickup_lng ?? null,
       b.courier_id, b.recipient_name, recipientPhone, b.dest_city, b.dest_leg2 ? 1 : 0,
@@ -2453,7 +2459,7 @@ app.post('/jobs', async (c) => {
       fromCity,
       parcelUrl,
       declaredValueZmw > 0 ? declaredValueZmw : null, coverOptIn ? 1 : 0, cover.fee_zmw, coverStatus,
-      coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt, packCovered,
+      coverTosAccepted ? 1 : 0, coverTosVersion, coverTosAcceptedAt, packCovered, businessId,
     ).run();
 
     if (promoCode) {
@@ -2528,16 +2534,20 @@ app.post('/jobs', async (c) => {
       depositRequired = true;
       depositAmount = feeBase.prompt_total_zmw; // full DropOff leg + processing + momo leg
       depositRef = `adv-${ref}`;
+      if (businessId != null) {
+        const spend = await enforceBusinessSpendLimit(c.env, businessId, senderPhone, depositAmount);
+        if (!spend.ok) return c.json({ error: spend.error, detail: spend.detail, business_id: businessId }, 403);
+      }
       const init = await collectWithGateway(c.env, b.gateway, senderPhone, depositAmount, depositRef,
         `DropOff advance ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' '));
       if (init.ok) {
         await c.env.DB.prepare(
           `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-             lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 'merchant', 'booking_deposit')`,
+             lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind, business_id)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 'merchant', 'booking_deposit', ?11)`,
         ).bind(meta.last_row_id, senderPhone, providerFromPhone(senderPhone), depositAmount,
           depositAmount, round2(platformFee(dropOffLeg)), (feeGw === 'lenco' ? lencoCollectionFee(dropOffLeg) : MOMO_COLLECTION_FEE),
-          init.providerReference ?? init.reference, init.gateway, init.reference).run();
+          init.providerReference ?? init.reference, init.gateway, init.reference, businessId).run();
       } else {
         // PREPAY, NO EXCEPTIONS (owner directive): if the provider is down the
         // booking is HELD, never dispatched on credit. No prompt went out, so
@@ -13894,6 +13904,196 @@ app.onError((err, c) => {
   } catch { /* logging must never throw */ }
   captureError(c.env, err, { method: c.req.method, url: c.req.path }).catch(() => {});
   return c.json({ error: 'internal_error' }, 500);
+});
+
+/* -------------------- Business accounts (Step 6) -------------------------- */
+type BusinessRole = 'owner' | 'admin' | 'member' | 'bookkeeper';
+const BIZ_ROLES = new Set<BusinessRole>(['owner','admin','member','bookkeeper']);
+
+async function bizMember(env: Env, businessId: number, phone: string) {
+  return env.DB.prepare(
+    `SELECT bm.*, ba.name AS business_name, ba.owner_phone FROM business_members bm
+     JOIN business_accounts ba ON ba.id = bm.business_id
+     WHERE bm.business_id = ?1 AND bm.phone = ?2 AND bm.status = 'active' AND ba.status = 'active'`,
+  ).bind(businessId, phone).first<any>();
+}
+async function bizAudit(env: Env, businessId: number, actor: string | null, action: string, targetType?: string, targetId?: string | number, meta?: unknown) {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO business_audit_log (business_id, actor_phone, action, target_type, target_id, meta_json)
+       VALUES (?1,?2,?3,?4,?5,?6)`,
+    ).bind(businessId, actor, action, targetType ?? null, targetId == null ? null : String(targetId), meta ? JSON.stringify(meta).slice(0, 4000) : null).run();
+  } catch {}
+}
+function canManageBiz(role?: string) { return role === 'owner' || role === 'admin'; }
+function canSeeBizMoney(role?: string) { return role === 'owner' || role === 'admin' || role === 'bookkeeper'; }
+
+async function enforceBusinessSpendLimit(env: Env, businessId: number, actorPhone: string, addAmountZmw: number): Promise<{ ok: true } | { ok: false; error: string; detail: string }> {
+  const m = await bizMember(env, businessId, actorPhone);
+  if (!m) return { ok: false, error: 'business_forbidden', detail: 'You are not an active member of this business account.' };
+  const limit = m.spend_limit_zmw == null ? null : Number(m.spend_limit_zmw);
+  if (limit == null || !(limit > 0)) return { ok: true };
+  const month = new Date().toISOString().slice(0, 7);
+  const spent = await env.DB.prepare(
+    `SELECT COALESCE(SUM(amount_zmw),0) AS total FROM payments
+      WHERE business_id=?1 AND phone=?2 AND status IN ('pending','success')
+        AND strftime('%Y-%m', COALESCE(paid_at, created_at)) = ?3`,
+  ).bind(businessId, actorPhone, month).first<any>();
+  const next = round2(Number(spent?.total ?? 0) + Math.max(0, addAmountZmw));
+  if (next > round2(limit)) {
+    await bizAudit(env, businessId, actorPhone, 'spend_limit_blocked', 'payment', actorPhone, { limit_zmw: round2(limit), spent_zmw: round2(Number(spent?.total ?? 0)), attempted_zmw: round2(addAmountZmw) });
+    return { ok: false, error: 'business_spend_limit', detail: `Business spend limit reached: K${round2(limit).toFixed(2)} monthly limit, K${round2(Number(spent?.total ?? 0)).toFixed(2)} used.` };
+  }
+  return { ok: true };
+}
+
+app.get('/business/me', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const { results } = await c.env.DB.prepare(
+    `SELECT ba.*, bm.role, bm.spend_limit_zmw, bm.status AS member_status
+       FROM business_members bm JOIN business_accounts ba ON ba.id = bm.business_id
+      WHERE bm.phone = ?1 AND bm.status = 'active' AND ba.status = 'active'
+      ORDER BY ba.id DESC`,
+  ).bind(phone).all<any>();
+  return c.json({ businesses: results ?? [] });
+});
+
+app.post('/business', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const name = String(b?.name ?? '').trim().slice(0, 80);
+  if (name.length < 2) return c.json({ error: 'name_required' }, 400);
+  const ins = await c.env.DB.prepare(
+    `INSERT INTO business_accounts (name, owner_phone) VALUES (?1, ?2)`,
+  ).bind(name, phone).run();
+  const id = Number(ins.meta.last_row_id);
+  await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO business_members (business_id, phone, role, status, invited_by) VALUES (?1,?2,'owner','active',?2)`,
+  ).bind(id, phone).run();
+  await bizAudit(c.env, id, phone, 'business_created', 'business', id, { name });
+  return c.json({ ok: true, business: { id, name, owner_phone: phone, role: 'owner' } }, 201);
+});
+
+app.get('/business/:id', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id'));
+  const m = await bizMember(c.env, id, phone);
+  if (!m) return c.json({ error: 'forbidden' }, 403);
+  const [members, addresses] = await Promise.all([
+    c.env.DB.prepare(`SELECT id, phone, role, spend_limit_zmw, status, invited_by, created_at FROM business_members WHERE business_id=?1 ORDER BY id ASC`).bind(id).all<any>(),
+    c.env.DB.prepare(`SELECT id, label, lat, lng, address, created_by, created_at, updated_at FROM business_addresses WHERE business_id=?1 ORDER BY id DESC LIMIT 200`).bind(id).all<any>(),
+  ]);
+  return c.json({ business: { id: m.business_id, name: m.business_name, owner_phone: m.owner_phone, my_role: m.role }, members: members.results ?? [], addresses: addresses.results ?? [] });
+});
+
+app.post('/business/:id/members', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id')); const m = await bizMember(c.env, id, phone);
+  if (!m || !canManageBiz(m.role)) return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  let target: string;
+  try { target = normalizeZmPhone(String(b?.phone ?? '')); } catch { return c.json({ error: 'invalid_phone' }, 400); }
+  const role = String(b?.role ?? 'member') as BusinessRole;
+  if (!BIZ_ROLES.has(role) || role === 'owner') return c.json({ error: 'invalid_role' }, 400);
+  const spendLimit = b?.spend_limit_zmw == null ? null : round2(Math.max(0, Number(b.spend_limit_zmw)));
+  await c.env.DB.prepare(
+    `INSERT INTO business_members (business_id, phone, role, spend_limit_zmw, status, invited_by)
+     VALUES (?1,?2,?3,?4,'active',?5)
+     ON CONFLICT(business_id, phone) DO UPDATE SET role=excluded.role, spend_limit_zmw=excluded.spend_limit_zmw, status='active', invited_by=excluded.invited_by`,
+  ).bind(id, target, role, spendLimit, phone).run();
+  await bizAudit(c.env, id, phone, 'member_upserted', 'member', target, { role, spend_limit_zmw: spendLimit });
+  return c.json({ ok: true });
+});
+
+app.post('/business/:id/members/:phone/remove', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id')); const m = await bizMember(c.env, id, phone);
+  if (!m || !canManageBiz(m.role)) return c.json({ error: 'forbidden' }, 403);
+  const target = normalizeZmPhone(String(c.req.param('phone') ?? ''));
+  if (target === m.owner_phone) return c.json({ error: 'cannot_remove_owner' }, 400);
+  await c.env.DB.prepare(`UPDATE business_members SET status='removed' WHERE business_id=?1 AND phone=?2`).bind(id, target).run();
+  await bizAudit(c.env, id, phone, 'member_removed', 'member', target, {});
+  return c.json({ ok: true });
+});
+
+app.get('/business/:id/addresses', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id')); const m = await bizMember(c.env, id, phone);
+  if (!m) return c.json({ error: 'forbidden' }, 403);
+  const { results } = await c.env.DB.prepare(`SELECT * FROM business_addresses WHERE business_id=?1 ORDER BY id DESC LIMIT 300`).bind(id).all<any>();
+  return c.json({ addresses: results ?? [] });
+});
+
+app.post('/business/:id/addresses', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id')); const m = await bizMember(c.env, id, phone);
+  if (!m) return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const label = String(b?.label ?? '').trim().slice(0, 120);
+  if (!label) return c.json({ error: 'label_required' }, 400);
+  const address = String(b?.address ?? '').trim().slice(0, 300) || null;
+  const lat = b?.lat == null ? null : Number(b.lat);
+  const lng = b?.lng == null ? null : Number(b.lng);
+  const ins = await c.env.DB.prepare(
+    `INSERT INTO business_addresses (business_id, label, lat, lng, address, created_by) VALUES (?1,?2,?3,?4,?5,?6)`,
+  ).bind(id, label, Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null, address, phone).run();
+  await bizAudit(c.env, id, phone, 'address_added', 'business_address', ins.meta.last_row_id, { label, address });
+  return c.json({ ok: true, id: ins.meta.last_row_id });
+});
+
+app.delete('/business/:id/addresses/:addrId', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id')); const m = await bizMember(c.env, id, phone);
+  if (!m) return c.json({ error: 'forbidden' }, 403);
+  const addrId = Number(c.req.param('addrId'));
+  await c.env.DB.prepare(`DELETE FROM business_addresses WHERE id=?1 AND business_id=?2`).bind(addrId, id).run();
+  await bizAudit(c.env, id, phone, 'address_deleted', 'business_address', addrId, {});
+  return c.json({ ok: true });
+});
+
+app.get('/business/:id/statement', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id')); const m = await bizMember(c.env, id, phone);
+  if (!m || !canSeeBizMoney(m.role)) return c.json({ error: 'forbidden' }, 403);
+  const month = String(c.req.query('month') ?? '').trim(); // YYYY-MM
+  const whereMonth = month ? `AND strftime('%Y-%m', COALESCE(p.paid_at, p.created_at)) = '${month.replace(/[^0-9-]/g,'')}'` : '';
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.id, p.kind, p.status, p.amount_zmw, p.platform_fee_zmw, p.lipila_fee_zmw, p.paid_at, p.created_at, p.job_id, j.ref AS job_ref, p.phone
+       FROM payments p LEFT JOIN jobs j ON j.id = p.job_id
+      WHERE p.business_id = ?1 ${whereMonth}
+      ORDER BY p.id DESC LIMIT 500`,
+  ).bind(id).all<any>();
+  const rows = results ?? [];
+  const total = round2(rows.reduce((s: number, r: any) => s + (Number(r.amount_zmw) || 0), 0));
+  const successTotal = round2(rows.filter((r: any) => r.status === 'success').reduce((s: number, r: any) => s + (Number(r.amount_zmw) || 0), 0));
+  return c.json({ business_id: id, month: month || null, total_zmw: total, success_total_zmw: successTotal, rows });
+});
+
+app.get('/business/:id/statement.csv', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.text('sign_in_required', 401);
+  const id = Number(c.req.param('id')); const m = await bizMember(c.env, id, phone);
+  if (!m || !canSeeBizMoney(m.role)) return c.text('forbidden', 403);
+  const month = String(c.req.query('month') ?? '').replace(/[^0-9-]/g, '');
+  const whereMonth = month ? `AND strftime('%Y-%m', COALESCE(p.paid_at, p.created_at)) = '${month}'` : '';
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.id, p.created_at, p.paid_at, p.phone, p.kind, p.status, p.amount_zmw, p.platform_fee_zmw, p.lipila_fee_zmw, j.ref AS job_ref
+       FROM payments p LEFT JOIN jobs j ON j.id = p.job_id
+      WHERE p.business_id = ?1 ${whereMonth} ORDER BY p.id DESC LIMIT 1000`,
+  ).bind(id).all<any>();
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const header = ['payment_id','created_at','paid_at','phone','kind','status','amount_zmw','platform_fee_zmw','provider_fee_zmw','job_ref'];
+  const lines = [header.join(',')];
+  for (const r of results ?? []) lines.push([r.id,r.created_at,r.paid_at,r.phone,r.kind,r.status,r.amount_zmw,r.platform_fee_zmw,r.lipila_fee_zmw,r.job_ref].map(esc).join(','));
+  await bizAudit(c.env, id, phone, 'statement_csv_exported', 'business', id, { month, rows: (results ?? []).length });
+  return new Response(lines.join('\n'), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="dropoff-business-${id}-${month || 'all'}.csv"` } });
+});
+
+app.get('/business/:id/audit', async (c) => {
+  const phone = c.get('phone'); if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const id = Number(c.req.param('id')); const m = await bizMember(c.env, id, phone);
+  if (!m || !canManageBiz(m.role)) return c.json({ error: 'forbidden' }, 403);
+  const { results } = await c.env.DB.prepare(`SELECT * FROM business_audit_log WHERE business_id=?1 ORDER BY id DESC LIMIT 200`).bind(id).all<any>();
+  return c.json({ audit: results ?? [] });
 });
 
 export default {
