@@ -91,7 +91,7 @@ class _BookingsScreenState extends State<BookingsScreen> with WidgetsBindingObse
     final amount = b.counterReceiptZmw;
     final msg = amount != null && amount > 0
         ? 'Your rider filed the depot receipt for ${b.reference}. Pay the K${amount.toStringAsFixed(2)} receipt plus processing to unlock the photo and reimburse your rider.'
-        : 'Your rider filed a depot receipt for ${b.reference}. Pay the exact amount written on the receipt to unlock it and reimburse your rider.';
+        : 'Your rider filed a depot receipt for ${b.reference}. Pay the receipt + processing fees + K9 depot queue fee to unlock it and reimburse your rider.';
     showAppSheet<void>(context, child: Builder(builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Container(width: 40, height: 40, decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
@@ -354,8 +354,8 @@ class BookingCard extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         booking.counterReceiptZmw != null && booking.counterReceiptZmw! > 0
-                            ? 'Pay the K${booking.counterReceiptZmw!.toStringAsFixed(2)} depot receipt (+ processing) to reveal the receipt and reimburse your rider.'
-                            : 'Pay the depot fare to reveal the receipt and reimburse your rider.',
+                            ? 'Pay the K${booking.counterReceiptZmw!.toStringAsFixed(2)} depot receipt + processing fees + K9 depot queue fee to reveal the receipt and reimburse your rider.'
+                            : 'Pay the depot receipt + processing fees + K9 depot queue fee to reveal the receipt and reimburse your rider.',
                         style: const TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.35),
                       ),
                     ])),
@@ -451,8 +451,8 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     _counterPromptShown = true;
     final amount = booking.counterReceiptZmw;
     final msg = amount != null && amount > 0
-        ? 'Your rider filed the depot receipt for ${booking.reference}. Pay K${amount.toStringAsFixed(2)} now to unlock the receipt photo and reimburse your rider.'
-        : 'Your rider filed a depot receipt for ${booking.reference}. Pay the exact amount written on the receipt to unlock it and reimburse your rider.';
+        ? 'Your rider filed the depot receipt for ${booking.reference}. Pay the K${amount.toStringAsFixed(2)} receipt + processing fees + K9 depot queue fee to unlock the receipt photo and reimburse your rider.'
+        : 'Your rider filed a depot receipt for ${booking.reference}. Pay the receipt + processing fees + K9 depot queue fee to unlock it and reimburse your rider.';
     showAppSheet<void>(context, child: Builder(builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Container(width: 40, height: 40, decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
@@ -559,7 +559,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
           _detailRow('DropOff rider fee', kwacha(booking.riderFee)),
           _detailRow('Courier fare', kwacha(booking.courierFare)),
           if (booking.lastMileFee > 0) _detailRow('Last-mile fee', kwacha(booking.lastMileFee)),
-          _detailRow('Counter fare', 'Rider pays at the counter — repay the receipt in DropOff'),
+          _detailRow('Counter fare', 'Rider pays at counter — you repay receipt + processing fees + K9 depot queue fee in DropOff'),
           _detailRow('DropOff due', '${kwacha(booking.riderFee + booking.lastMileFee)} + processing — DropOff charge, never partner money'),
           if (booking.promoCode != null)
             _detailRow('Promo', '${booking.promoCode}${booking.promoDiscount != null ? ' — saved ${kwacha(booking.promoDiscount)} on the DropOff leg' : ''}'),

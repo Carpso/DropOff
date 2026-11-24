@@ -21,7 +21,7 @@ import {
   generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
   verifyJwtClaims, verifyPassword,
 } from './auth';
-import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, lencoCollectionFee, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
+import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, lencoCollectionFee, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW, DEPOT_QUEUE_FEE_ZMW } from './fees';
 import { PRIVACY_MD, PRIVACY_TITLE, TERMS_MD, TERMS_TITLE, mdToHtml } from './legal';
 import { filedReceiptTotal, invalidFiledReceipt, parseFiledReceipts } from './receipts';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor, vehicleClassForParcel } from './pricing';
@@ -6438,14 +6438,18 @@ async function counterFareFees(env: Env, phone: string, receipt: number) {
   const gateway = gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila';
   const platformFeeZmw = active ? 0 : platformFee(receipt);
   const providerFeeZmw = gateway === 'lenco' ? lencoCollectionFee(receipt) : MOMO_COLLECTION_FEE;
+  const depotQueueFeeZmw = DEPOT_QUEUE_FEE_ZMW;
+  const processingFeeZmw = round2(platformFeeZmw + providerFeeZmw);
   return {
     planWaived: !!active,
     platformFeeZmw,
     lipilaFeeZmw: providerFeeZmw,
     providerFeeZmw,
     gateway,
-    processing_fee_zmw: round2(platformFeeZmw + providerFeeZmw),
-    total: round2(receipt + platformFeeZmw + providerFeeZmw),
+    processing_fee_zmw: processingFeeZmw,
+    depot_queue_fee_zmw: depotQueueFeeZmw,
+    // Sender pays: receipt + processing fee (DropOff cut + gateway fee) + depot queue fee (K9).
+    total: round2(receipt + processingFeeZmw + depotQueueFeeZmw),
   };
 }
 
@@ -12353,6 +12357,29 @@ app.post('/admin/payouts/:id/retry', async (c) => {
   ).bind(id).run();
   c.executionCtx.waitUntil(runPayoutQueue(c.env));
   return c.json({ ok: true, payout_id: id, status: 'queued' });
+});
+
+// Lenco float balance — admin/superadmin can monitor payout float.
+// Top up the Carpso Lenco account externally (mobile money/bank transfer to
+// the Lenco till/account) to facilitate disbursements.
+app.get('/admin/lenco/balance', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  try {
+    const [accounts, balance] = await Promise.all([lencoAccounts(c.env), lencoBalance(c.env)]);
+    return c.json({
+      ok: true,
+      gateway: c.env.PAYMENT_GATEWAY ?? 'auto',
+      accountId: lencoAccountId(c.env),
+      balance: balance?.data ?? null,
+      accounts: accounts?.data ?? [],
+      top_up: {
+        note: 'Top up externally into the Carpso Lenco account to fund disbursements. Lenco mobile-money payouts cost ~K8.50-K12 in the K0-K1,000 band, so keep enough balance for amount + payout fee.',
+        business_phone: c.env.BUSINESS_PHONE ?? null,
+      },
+    });
+  } catch (e) {
+    return c.json({ error: 'lenco_balance_failed', detail: String(e).slice(0, 300) }, 502);
+  }
 });
 
 // Lipila diagnostic (superadmin): tells us the Worker's egress IP and exactly

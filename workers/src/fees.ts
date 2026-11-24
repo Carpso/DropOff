@@ -29,6 +29,10 @@ export const MOMO_DISBURSEMENT_FEE = 1.5; // Lipila payout leg (rider-side)
 // bearer customer => added on top of amount). We currently use bearer merchant.
 // Payout mobile money: tiered by amount.
 export const LENCO_COLLECTION_PCT = 1.0;
+/** Flat fee charged to sender on every depot counter-fare repayment.
+ *  Covers rider queue/disbursement cost (Lenco payout fees are ~K8.50-K12 for small amounts).
+ *  Total sender pays = receipt + processing_fee + depot_queue_fee. */
+export const DEPOT_QUEUE_FEE_ZMW = 9;
 export const LENCO_PAYOUT_TIERS_ZMW = [
   { max: 1000, minFee: 8.5, maxFee: 12 },
   { max: 50000, minFee: 15, maxFee: 25 },
