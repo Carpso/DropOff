@@ -175,4 +175,25 @@ class MapServices {
     }
   }
 
+  /// Reverse geocode a coordinate to a place name (Photon). Returns null if
+  /// no name is available. Best-effort; never throws.
+  static Future<String?> reverse(LatLng point) async {
+    try {
+      final url = Uri.parse(
+          'https://photon.komoot.io/reverse?lat=${point.latitude}&lon=${point.longitude}&lang=en');
+      final res = await http.get(url).timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final features = (data['features'] as List?) ?? const [];
+      if (features.isEmpty) return null;
+      final p = (features.first as Map<String, dynamic>)['properties'] as Map<String, dynamic>? ?? const {};
+      final name = '${p['name'] ?? ''}'.trim();
+      final city = '${p['city'] ?? p['town'] ?? p['village'] ?? ''}'.trim();
+      if (name.isEmpty) return null;
+      if (city.isNotEmpty && city != name) return '$name, $city';
+      return name;
+    } catch (_) {
+      return null;
+    }
+  }
 }

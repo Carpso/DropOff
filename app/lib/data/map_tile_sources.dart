@@ -18,8 +18,68 @@ class MapBounds {
   final double east;
 }
 
-/// Serves the regional archive everywhere, and swaps to a high-detail CITY
-/// archive for tiles inside [cityBounds] at street zooms.
+/// Registry of high-detail city archives. A city becomes active the moment
+/// its archive is uploaded to the R2 bucket under `tiles/<slug>-z0-16.pmtiles`
+/// — no app code change needed beyond flipping `enabled` to true here (or,
+/// better, the app probes the URL and enables itself).
+///
+/// HOW TO ADD A CITY (owner recipe, 2026-11-24):
+///   1. Download the OSM extract for the country/region (Geofabrik
+///      `zambia-latest.osm.pbf` covers all of Zambia).
+///   2. Clip to the city bbox with osmium:
+///        osmium extract -b <west>,<south>,<east>,<north> zambia-latest.osm.pbf -o city.osm.pbf
+///   3. Generate PMTiles with planetiler (Docker, no Java needed):
+///        docker run -v $PWD:/data ghcr.io/onthegomap/planetiler:latest \
+///          --osm-path=/data/city.osm.pbf --output=/data/city-z0-16.pmtiles \
+///          --maxzoom=16 --minzoom=0 --bounds=<west>,<south>,<east>,<north>
+///   4. Upload to the R2 bucket:  rclone copy city-z0-16.pmtiles r2:dropoff-map-assets/tiles/
+///   5. Flip `enabled: true` below (or let the app probe the URL).
+/// City bboxes (south, west, north, east) in degrees.
+class CityArchive {
+  const CityArchive({
+    required this.slug,
+    required this.label,
+    required this.bounds,
+    required this.url,
+    this.enabled = true,
+    this.fromZoom = 13,
+    this.maxZoom = 16,
+  });
+  final String slug;
+  final String label;
+  final MapBounds bounds;
+  final String url;
+  final bool enabled;
+  final int fromZoom;
+  final int maxZoom;
+}
+
+/// All known city archives. Lusaka is live; Ndola and Kitwe are ready to
+/// activate once their PMTiles files are uploaded to R2.
+const List<CityArchive> kCityArchives = [
+  CityArchive(
+    slug: 'lusaka',
+    label: 'Lusaka',
+    bounds: MapBounds(south: -15.78, west: 27.66, north: -15.02, east: 28.62),
+    url: 'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/tiles/lusaka-z0-16.pmtiles',
+    enabled: true,
+  ),
+  // TODO (owner): generate + upload, then set enabled: true
+  // CityArchive(
+  //   slug: 'ndola',
+  //   label: 'Ndola',
+  //   bounds: MapBounds(south: -13.05, west: 28.55, north: -12.90, east: 28.75),
+  //   url: 'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/tiles/ndola-z0-16.pmtiles',
+  //   enabled: false,
+  // ),
+  // CityArchive(
+  //   slug: 'kitwe',
+  //   label: 'Kitwe',
+  //   bounds: MapBounds(south: -12.85, west: 28.15, north: -12.70, east: 28.30),
+  //   url: 'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/tiles/kitwe-z0-16.pmtiles',
+  //   enabled: false,
+  // ),
+];
 ///
 /// Why this exists (owner 2026-11-22): the regional Zambia/Zimbabwe/Malawi/
 /// Mozambique archive stops at z15 and is generalised — street level in Lusaka

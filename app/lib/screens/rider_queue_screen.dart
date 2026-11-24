@@ -16,6 +16,7 @@ import '../ui/proof_upload_overlay.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -663,6 +664,27 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       return;
     }
     AppToast.error(context, switch (res.error) { 'at_capacity' => 'You are at capacity - finish a stop first.', 'payment_required' => 'Prepayment is still pending for this job.', _ => 'Could not claim this job - check your connection.' });
+  }
+
+  /// Auto-name a depot dropoff point (Waze-style growing location): reverse
+  /// geocode the rider's current position and save it as a shared community
+  /// POI so every rider in the city sees it on the map.
+  Future<void> _autoNameDepotPoi(String ref) async {
+    try {
+      final pos = _riderPos;
+      if (pos == null) return;
+      final name = await MapServices.reverse(LatLng(pos.latitude, pos.longitude));
+      if (name == null || name.trim().isEmpty) return;
+      const city = 'Lusaka';
+      await DropOffApi.saveCommunityPoi(
+        name: name,
+        city: city,
+        lat: pos.latitude,
+        lng: pos.longitude,
+      );
+    } catch (_) {
+      // Best-effort: never fail the depot drop because of POI naming.
+    }
   }
 
   /* ----------------------- live clock + arrival GPS ----------------------- */
@@ -2040,9 +2062,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (res == null) return null; // cancelled
     if (res.ok) {
       setState(() => _busyRef = null);
-      await _snack('$ref - dropped at depot. Sender will be asked for $filedSummary on the filed receipt — check it matches the photo.');
+      await _snack('$ref - dropped at depot. Sender will be asked for $filedSummary on the filed receipt - check it matches the photo.');
       await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
       AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
+      // Auto-name this dropoff point (Waze-style growing location): reverse
+      // geocode the rider's position and save it as a shared community POI.
+      unawaited(_autoNameDepotPoi(ref));
       // Best-effort: compare seller's booking photo vs this drop photo.
       final chk = await DropOffApi.parcelCheck(ref);
       if (!mounted) return res;
