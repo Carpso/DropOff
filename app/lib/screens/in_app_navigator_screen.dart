@@ -98,6 +98,9 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   final _searchFocus = FocusNode();
   bool _searchBusy = false;
   List<MapSearchResult> _results = const [];
+  // Search-only highlight: never changes the active destination/route.
+  LatLng? _searchPin;
+  String? _searchPinLabel;
   List<SavedPlace> _saved = const [];
 
   StreamSubscription<Position>? _guidanceSub;
@@ -312,20 +315,18 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   }
 
   void _pickResult(MapSearchResult r) {
-    // Every place used gets remembered automatically — the book grows.
+    // Search is search-only: highlight the place on the map without changing
+    // the active destination or route (owner request 2026-11-24).
     unawaited(SavedPlaces.remember(r.label, lat: r.point.latitude, lng: r.point.longitude).then((_) => SavedPlaces.load()).then((list) {
       if (mounted) setState(() => _saved = list);
     }));
     setState(() {
-      _destPos = r.point;
-      _destLabel = r.label;
-      _route = null;
+      _searchPin = r.point;
+      _searchPinLabel = r.label;
       _results = const [];
       _search.clear();
-      _engineDown = false;
     });
     _searchFocus.unfocus();
-    _refreshRoute();
   }
 
   IconData _stepIcon(String instruction) {
@@ -499,12 +500,15 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
             if (place?.lat == null || place?.lng == null) return;
             _pickResult(MapSearchResult(label, LatLng(place!.lat!, place.lng!)));
           },
+          searchPin: _searchPin,
+          searchPinLabel: _searchPinLabel,
         ),
-        // Floating search — our own geocoder, biased to Lusaka.
+        // Floating search â search-only (never sets destination). Placed below
+        // the compass/basemap banner so it does not obstruct map controls.
         Positioned(
           left: 12,
           right: 64, // leave the top-right compass badge visible/tappable
-          top: 10,
+          top: 60,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(
               decoration: BoxDecoration(
@@ -524,7 +528,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                   suffixIcon: _searchBusy
                       ? const Padding(padding: EdgeInsets.all(12), child: AppLogoSpinner(size: 18))
                       : (_search.text.isNotEmpty
-                          ? IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close), onPressed: () => setState(() { _search.clear(); _results = const []; }))
+                          ? IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close), onPressed: () => setState(() { _search.clear(); _results = const []; _searchPin = null; _searchPinLabel = null; }))
                           : null),
                   border: InputBorder.none,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),

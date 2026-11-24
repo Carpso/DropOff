@@ -41,7 +41,14 @@ String counterFareErrorText(ApiResponse r) {
     return 'The money service is unreachable right now — check your connection and try again.';
   }
   if (err == 'lipila_init_failed') {
-    return 'The momo prompt could not be started$tail — no money was taken. Try again in a moment.';
+    final raw = r.body['detail']?.toString().toLowerCase() ?? '';
+    if (raw.contains('insufficient') || raw.contains('balance')) {
+      return 'Your mobile money wallet does not have enough balance for this prompt. Top up and try again — no money was taken.';
+    }
+    if (raw.contains('invalid') && raw.contains('phone')) {
+      return 'The mobile money number on this account could not receive the prompt. Check your number and try again.';
+    }
+    return 'We could not send the mobile money prompt right now$tail. No money was taken — please check your signal and balance, then tap Try again.';
   }
   if (err.startsWith('http_')) return 'The payment service returned an error — no money was taken. Try again in a moment.';
   if (detail.isNotEmpty) return detail;

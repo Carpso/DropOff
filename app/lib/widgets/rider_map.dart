@@ -20,7 +20,7 @@ import '../ui/saved_place_pin.dart';
 import '../ui/map_vehicle_marker.dart';
 
 /// Live in-app map on the DropOff basemap (Protomaps Zambia/Zimbabwe/Malawi/
-/// Mozambique archive on our R2 bucket � no Google, no MapTiler, no external
+/// Mozambique archive on our R2 bucket ∩┐╜ no Google, no MapTiler, no external
 /// navigation app). The map is ours; it grows with the fleet's rider density.
 class RiderMap extends StatefulWidget {
   final LatLng? pickup;
@@ -37,7 +37,7 @@ class RiderMap extends StatefulWidget {
   /// fine for overview but the caller must label it as such.
   final List<LatLng>? route;
 
-  /// True when [route] is a straight line (routing engine unreachable) �
+  /// True when [route] is a straight line (routing engine unreachable) ∩┐╜
   /// draws it dashed so it never masquerades as a road route.
   final bool routeIsStraightLine;
 
@@ -55,6 +55,16 @@ class RiderMap extends StatefulWidget {
   /// rider all see the SAME branded marker.
   final String vehicleClass;
 
+  /// Human-readable names shown as labels on map pins.
+  final String? senderName;
+  final String? depotName;
+  final String? recipientName;
+  final String? courierName;
+
+  /// Optional search highlight pin (search-only; does NOT change destination).
+  final LatLng? searchPin;
+  final String? searchPinLabel;
+
   const RiderMap({
     super.key,
     required this.pickup,
@@ -68,11 +78,17 @@ class RiderMap extends StatefulWidget {
     this.frequentSavedLabels = const {},
     this.onSavedTap,
     this.vehicleClass = 'motorcycle',
+    this.senderName,
+    this.depotName,
+    this.recipientName,
+    this.courierName,
+    this.searchPin,
+    this.searchPinLabel,
   });
 
   static const String tileUrl =
       'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/region-zm-zw-mw-mz.pmtiles';
-  /// High-detail Lusaka archive from the SAME bucket (z0�16, clipped to the
+  /// High-detail Lusaka archive from the SAME bucket (z0∩┐╜16, clipped to the
   /// city). Street-level zoom in Lusaka comes from here; the regional file
   /// still covers the rest of Zambia/Zimbabwe/Malawi/Mozambique.
   static const String lusakaTileUrl =
@@ -96,6 +112,7 @@ class RiderMap extends StatefulWidget {
         // Saved places are deliberately NOT in the camera fit: a city-wide
         // address book would zoom the route and rider down to specks.
         ...?stops?.where((s) => s['kind'] != 'saved').map((s) => LatLng((s['lat'] as num).toDouble(), (s['lng'] as num).toDouble())),
+        if (searchPin != null) searchPin!,
       ];
 
   @override
@@ -103,7 +120,7 @@ class RiderMap extends StatefulWidget {
 }
 
 /// Basemap pieces: the PMTiles provider plus the theme (fonts/sprites/urls)
-/// hosted on our own R2 bucket � no external map host at all.
+/// hosted on our own R2 bucket ∩┐╜ no external map host at all.
 ///
 /// Both are NULLABLE on purpose (owner onboarding bug 2026-11-23): a mobile
 /// network that refuses HTTP Range requests must NOT blank the whole map.
@@ -155,7 +172,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       // Networks that refuse Range requests (some MTN/Airtel configurations,
       // VPNs, Private DNS) make PMTiles' byte-range opener fail entirely. The
       // Lusaka archive is only ~30 MB, so download it once into memory and
-      // read it locally — this is the difference between a map and green box
+      // read it locally ΓÇö this is the difference between a map and green box
       // on those connections (owner onboarding report 2026-11-23).
       try {
         final res = await http.get(Uri.parse(RiderMap.lusakaTileUrl))
@@ -236,8 +253,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     super.dispose();
   }
 
-  /// Needle angle in radians: the device's heading negated (heading 90� =
-  /// facing east ? north lies 90� to the left of "up"), minus the map's own
+  /// Needle angle in radians: the device's heading negated (heading 90∩┐╜ =
+  /// facing east ? north lies 90∩┐╜ to the left of "up"), minus the map's own
   /// rotation so the needle stays truthful on a rotated map. Camera not
   /// ready ? rotation contributes nothing.
   double _needleAngle() {
@@ -245,7 +262,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try {
       deg -= _mapCtl.camera.rotationRad * 180 / math.pi;
     } catch (_) {
-      /* camera not ready � device heading only */
+      /* camera not ready ∩┐╜ device heading only */
     }
     return deg * math.pi / 180;
   }
@@ -253,7 +270,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   /// The compass badge: white circle, red needle + N that rotates with the
   /// device so the rider can hold the phone any way and still find north.
   /// TAPPING it snaps the map back to north-up (owner 2026-11-17: the familiar
-  /// tap-to-north behaviour) � a two-finger rotate no longer strands the map
+  /// tap-to-north behaviour) ∩┐╜ a two-finger rotate no longer strands the map
   /// sideways.
   Widget _compassBadge() => Tooltip(
         message: 'Tap to switch between heading-up and north-up',
@@ -289,7 +306,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     return const Distance().bearing(widget.rider!, target);
   }
 
-  /// The direction the rider is ACTUALLY travelling � the bearing of the road
+  /// The direction the rider is ACTUALLY travelling ∩┐╜ the bearing of the road
   /// segment they are on, not the straight-line bearing to the final pin. The
   /// bike nose follows every bend instead of pointing at the destination while
   /// the road doubles back (owner 2026-11-19: "icon faces elsewhere").
@@ -323,7 +340,49 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try { return _mapCtl.camera.rotationRad * 180 / math.pi; } catch (_) { return 0; }
   }
 
-  /// The rider's vehicle on the map � just the vehicle, no frame/badge.
+  /// A map pin with a readable name label beneath it — so riders and senders
+  /// see "where" not just "what icon".
+  Widget _labeledPin({
+    required IconData icon,
+    required Color color,
+    required String label,
+    bool highlight = false,
+  }) {
+    final bg = highlight ? AppColors.amber.withValues(alpha: 0.16) : Colors.white.withValues(alpha: 0.94);
+    final border = highlight ? AppColors.amber : color.withValues(alpha: 0.35);
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: bg,
+          shape: BoxShape.circle,
+          border: Border.all(color: border, width: highlight ? 2 : 1.4),
+          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1))],
+        ),
+        child: Icon(icon, size: 22, color: highlight ? const Color(0xFF7A5200) : color),
+      ),
+      const SizedBox(height: 2),
+      Container(
+        constraints: const BoxConstraints(maxWidth: 110),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: border),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: highlight ? const Color(0xFF7A5200) : AppColors.forest),
+        ),
+      ),
+    ]);
+  }
+
+  /// The rider's vehicle on the map ∩┐╜ just the vehicle, no frame/badge.
   Widget _riderMarker() {
     return SizedBox(
       width: 64,
@@ -338,12 +397,12 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     );
   }
 
-  /// Compass tap ? north-up. flutter_map's rotate(0) is due-north; guarded �
+  /// Compass tap ? north-up. flutter_map's rotate(0) is due-north; guarded ∩┐╜
   /// the camera may not be ready yet, in which case the map is already north.
   bool _headingUp = false; // compass toggles heading-up / north-up
 
   /// Compass tap ? FACE FORWARD (owner 2026-11-18): rotate the map so the
-  /// direction the phone/rider faces is the top of the screen � for riders
+  /// direction the phone/rider faces is the top of the screen ∩┐╜ for riders
   /// with the phone in a holder, "up" must mean where they are going.
   void _snapNorth() {
     HapticFeedback.selectionClick();
@@ -352,7 +411,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try {
       _mapCtl.rotate(deg * math.pi / 180);
     } catch (_) {
-      /* camera not ready � the map is already north-up */
+      /* camera not ready ∩┐╜ the map is already north-up */
     }
     setState(() {}); // repaint the rider badge against the new rotation
   }
@@ -381,7 +440,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
   void didUpdateWidget(covariant RiderMap oldWidget) {
     super.didUpdateWidget(oldWidget);
     // SMART NAVIGATION (owner 2026-11-18): as the rider moves, follow the bike
-    // and zoom in nearer the destination � the map scales with the journey.
+    // and zoom in nearer the destination ∩┐╜ the map scales with the journey.
     if (widget.rider == null || widget.rider == oldWidget.rider) return;
     final target = widget.route?.isNotEmpty == true ? widget.route!.last : (widget.pickup ?? widget.depot);
     if (target == null) return;
@@ -391,7 +450,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       _mapCtl.move(widget.rider!, zoom);
       if (_headingUp) _mapCtl.rotate(_headingDeg * math.pi / 180);
     } catch (_) {
-      /* camera not ready yet � initialCameraFit takes over */
+      /* camera not ready yet ∩┐╜ initialCameraFit takes over */
     }
   }
 
@@ -404,7 +463,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
           // Defensive: _loadAssets catches its own failures, but a future
           // regression must never blank the map during onboarding.
           CrashReporting.reportCaught('RiderMap assets future failed', snap.error, snap.stackTrace);
-          return _offlineFallback('Basemap could not load � retry below.', onRetry: _retryMap);
+          return _offlineFallback('Basemap could not load ∩┐╜ retry below.', onRetry: _retryMap);
         }
         if (!snap.hasData) {
           return const Center(child: AppLogoSpinner(size: 26));
@@ -416,7 +475,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
             : null;
         final center = widget.rider ?? widget.pickup ?? widget.depot ?? firstStop ?? RiderMap.chibolya;
         final bounds = _bounds;
-        // Route casing: dark outline under the green core � the route reads
+        // Route casing: dark outline under the green core ∩┐╜ the route reads
         // on any basemap style and on sunny-screen glare.
         final casing = widget.route != null && widget.route!.length > 1
             ? Polyline(points: widget.route!, strokeWidth: 7.5, color: const Color(0xFF0F3B2D))
@@ -431,7 +490,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               initialCenter: center,
               initialZoom: 13.5,
               // Zoom discipline (owner 2026-11-18 "why is the rider map
-              // different"): a tight fit � rider standing on the stop � used
+              // different"): a tight fit ∩┐╜ rider standing on the stop ∩┐╜ used
               // to zoom past the basemap's detail level and render a bare
               // area. Capped, so the rider map always reads like the sender's
               // tracking view.
@@ -462,11 +521,15 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 if (widget.pickup != null)
                   Marker(
                     point: widget.pickup!,
-                    width: 56,
-                    height: 56,
-                    child: widget.pickupIsDepot
-                        ? const Icon(Icons.warehouse_outlined, size: 36, color: AppColors.forest)
-                        : const Icon(Icons.storefront, size: 36, color: AppColors.forestLight),
+                    width: 100,
+                    height: 72,
+                    child: _labeledPin(
+                      icon: widget.pickupIsDepot ? Icons.warehouse_outlined : Icons.storefront,
+                      color: widget.pickupIsDepot ? AppColors.forest : AppColors.forestLight,
+                      label: widget.pickupIsDepot
+                          ? (widget.depotName ?? 'Depot')
+                          : (widget.senderName ?? 'Pickup'),
+                    ),
                   ),
                 if (widget.stops != null)
                   for (var i = 0; i < widget.stops!.length; i++)
@@ -499,9 +562,25 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 if (widget.depot != null)
                   Marker(
                     point: widget.depot!,
-                    width: 56,
-                    height: 56,
-                    child: const Icon(Icons.warehouse_outlined, size: 36, color: AppColors.forest),
+                    width: 100,
+                    height: 72,
+                    child: _labeledPin(
+                      icon: Icons.warehouse_outlined,
+                      color: AppColors.forest,
+                      label: widget.depotName ?? widget.courierName ?? 'Depot',
+                    ),
+                  ),
+                if (widget.searchPin != null)
+                  Marker(
+                    point: widget.searchPin!,
+                    width: 120,
+                    height: 72,
+                    child: _labeledPin(
+                      icon: Icons.place,
+                      color: AppColors.amber,
+                      label: widget.searchPinLabel ?? 'Search result',
+                      highlight: true,
+                    ),
                   ),
                 if (widget.rider != null)
                   Marker(
@@ -513,7 +592,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               ]),
             ],
           ),
-          // Zoom + re-fit controls � our map, our chrome.
+          // Zoom + re-fit controls ∩┐╜ our map, our chrome.
           Positioned(
             top: 12,
             right: 12,
@@ -541,7 +620,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
               decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(4))),
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                child: Text('DropOff map � map data � OpenStreetMap contributors', style: TextStyle(color: Colors.white, fontSize: 9)),
+                child: Text('DropOff map ∩┐╜ map data ∩┐╜ OpenStreetMap contributors', style: TextStyle(color: Colors.white, fontSize: 9)),
               ),
             ),
           ),
@@ -558,11 +637,11 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                   child: Row(children: [
                     const Icon(Icons.map_outlined, size: 17, color: AppColors.amber),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                      const Text('Basemap offline — your position and route still show.',
+                      const Text('Basemap offline ΓÇö your position and route still show.',
                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.ink)),
                       if ((assets.error ?? '').isNotEmpty)
                         Padding(padding: const EdgeInsets.only(top: 3), child: Text(
-                          assets.error!.length > 150 ? '${assets.error!.substring(0, 150)}…' : assets.error!,
+                          assets.error!.length > 150 ? '${assets.error!.substring(0, 150)}ΓÇª' : assets.error!,
                           style: const TextStyle(fontSize: 9.5, color: AppColors.muted),
                           maxLines: 2, overflow: TextOverflow.ellipsis,
                         )),
@@ -580,7 +659,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(6))),
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Text('Direct line � turn-by-turn unavailable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
+                  child: Text('Direct line ∩┐╜ turn-by-turn unavailable', style: TextStyle(color: Colors.white, fontSize: 9.5)),
                 ),
               ),
             ),
@@ -604,7 +683,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try {
       _mapCtl.move(_mapCtl.camera.center, (_mapCtl.camera.zoom + delta).clamp(3, 18).toDouble());
     } catch (_) {
-      /* camera not ready � ignore */
+      /* camera not ready ∩┐╜ ignore */
     }
   }
 
@@ -614,7 +693,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
           .fit(_mapCtl.camera);
       _mapCtl.move(fitted.center, fitted.zoom);
     } catch (_) {
-      /* camera not ready � ignore */
+      /* camera not ready ∩┐╜ ignore */
     }
   }
 

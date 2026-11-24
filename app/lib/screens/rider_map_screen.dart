@@ -115,6 +115,12 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                 ((_rider != null && _pickup != null) ? [_rider!, _pickup!] : null),
             routeIsStraightLine: _route == null,
             vehicleClass: '${_live?['vehicle_class'] ?? 'motorcycle'}',
+            // Names for labels on map markers (owner: map should show names,
+            // not just icons).
+            courierName: '${_live?['courier_name'] ?? ''}',
+            depotName: '${_live?['depot_name'] ?? ''}',
+            recipientName: '${_live?['recipient_name'] ?? ''}',
+            senderName: '${_live?['sender_name'] ?? ''}',
           ),
           if (_live == null || _live!['lat'] == null)
             Positioned(

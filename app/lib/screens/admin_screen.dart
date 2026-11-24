@@ -314,6 +314,11 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _BookingDeleteCard(),
               const SizedBox(height: 18),
+              const _JobSearchCard(),
+              const SizedBox(height: 18),
+              const _ClearAutoCreatedCard(),
+              const SizedBox(height: 18),
+              const SizedBox(height: 18),
               const _BookingStrikesCard(),
               const SizedBox(height: 18),
               const _CounterFareRecoveryCard(),
@@ -2205,6 +2210,227 @@ class _CounterQuoteCardState extends State<_CounterQuoteCard> {
   }
 }
 
+
+/// Search the server for a single job by its server ref (DRO-…). Admin-only:
+/// lets staff find any booking regardless of which sender/recipient created it,
+/// then delete it, waive its counter fare, or start a settlement prompt.
+class _JobSearchCard extends StatefulWidget {
+  const _JobSearchCard();
+
+  @override
+  State<_JobSearchCard> createState() => _JobSearchCardState();
+}
+
+class _JobSearchCardState extends State<_JobSearchCard> {
+  final _ref = TextEditingController();
+  Map<String, dynamic>? _job;
+  bool _loading = false;
+  String? _error;
+
+  Future<void> _lookup() async {
+    final ref = _ref.text.trim().replace(/^#/, '').toUpperCase();
+    if (ref.isEmpty) {
+      setState(() => _error = 'Enter a job ref (e.g. DRO-2026-000123).');
+      return;
+    }
+    setState(() { _loading = true; _error = null; _job = null; });
+    try {
+      final data = await DropOffApi.job(ref);
+      if (!mounted) return;
+      setState(() {
+        _job = data;
+        _error = data == null ? 'No booking with reference $ref.' : null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not reach the server. Try again.');
+    } finally {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ref.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.search, color: AppColors.forest),
+            SizedBox(width: 8),
+            Expanded(child: Text('Find a job by ref', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          ]),
+          const SizedBox(height: 10),
+          const Text('Paste a DRO-… server reference to find any booking, then settle its counter fare, delete it, or view it.',
+              style: AppType.caption),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _ref,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: 'Job ref',
+                  hintText: 'DRO-2026-000123',
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _lookup(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: _loading ? null : _lookup,
+              icon: const Icon(Icons.search, size: 17),
+              label: const Text('Find'),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          if (_error != null && _error!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
+            ),
+          if (_job != null) ...[
+            final j = _job!;
+            const SizedBox(height: 8),
+            Text('${j['ref'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+            const SizedBox(height: 4),
+            Text('${j['sender_phone'] ?? ''} → ${j['dest_city'] ?? '—'} · ${j['service'] ?? ''}',
+                style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+            const SizedBox(height: 6),
+            Text('status: ${j['status'] ?? '—'}  ·  paid: ${j['paid'] == 1 ? 'yes' : 'no'}  ·  counter fare: ${j['counter_receipt_zmw'] ?? 0} paid=${j['counter_receipt_paid'] == 1 ? 'yes' : 'no'}',
+                style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: FilledButton(
+                  onPressed: () async {
+                    final ref = '${j['ref'] ?? ''}';
+                    final res = await DropOffApi.adminWaiveCounterFare(ref, 'Admin waived via depot fare search.');
+                    if (!mounted) return;
+                    AppToast.show(context, res.ok ? 'Waived $ref.' : 'Could not waive $ref: ${res.body['detail'] ?? res.error}');
+                    if (res.ok) setState(() => _job = null);
+                  },
+                  child: const Text('Waive counter fare'),
+                )),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final ref = '${j['ref'] ?? ''}';
+                    final confirmed = await showConfirmSheet(
+                      context,
+                      title: 'Delete this booking?',
+                      message: 'Remove $ref from every user-facing list. Payments and audit events are kept.',
+                      confirmLabel: 'Delete booking',
+                      danger: true,
+                      icon: Icons.delete_forever_outlined,
+                    );
+                    if (confirmed != true) return;
+                    final res = await DropOffApi.deleteJob(ref);
+                    if (!mounted) return;
+                    AppToast.show(context, res.ok ? 'Deleted $ref.' : 'Could not delete $ref: ${res.body['detail'] ?? res.error}');
+                    if (res.ok) setState(() => _job = null);
+                  },
+                  icon: const Icon(Icons.delete_forever_outlined, size: 16, color: AppColors.danger),
+                  label: const Text('Delete booking'),
+                )),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => BookingDetailScreen(bookingId: '${j['id'] ?? ''}'),
+                  ));
+                },
+                icon: const Icon(Icons.receipt_long, size: 16),
+                label: const Text('View booking'),
+              ),
+            ]),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// Clear all auto-created/unpaid jobs: any job in status='created' with
+/// paid=0 is a leftover test/demo booking that blocks senders with the
+/// counter-fare gate. Admin-only; clears the slate so the app launches clean
+/// for senders (owner 2026-11-23).
+class _ClearAutoCreatedCard extends StatefulWidget {
+  const _ClearAutoCreatedCard();
+
+  @override
+  State<_ClearAutoCreatedCard> createState() => _ClearAutoCreatedCardState();
+}
+
+class _ClearAutoCreatedCardState extends State<_ClearAutoCreatedCard> {
+  bool _busy = false;
+  int? _clearedCount;
+
+  Future<void> _clear() async {
+    final confirmed = await showConfirmSheet(
+      context,
+      title: 'Clear all unpaid counter-fare bookings?',
+      message: 'This marks every unpaid "created" booking (depot counter fare not yet paid) as deleted. Senders will no longer be blocked from booking new parcels. Payments, evidence and audit events are retained. This cannot be undone.',
+      confirmLabel: 'Clear all unpaid fares',
+      danger: true,
+      icon: Icons.delete_forever_outlined,
+    );
+    if (confirmed != true) return;
+    setState(() => _busy = true);
+    final res = await DropOffApi.adminClearAutoCreated(
+      'Owner-initiated clearance of auto-created/unpaid depot counter-fare bookings (${DateTime.now().toIso8601String()}).',
+    );
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (res.ok) {
+        _clearedCount = res.body['cleared'] as int?;
+        AppToast.show(context, 'Cleared ${_clearedCount} unpaid counter-fare bookings.');
+      } else {
+        AppToast.show(context, 'Could not clear fares: ${res.body['detail'] ?? res.error}');
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.clean_hands, color: AppColors.amber),
+            SizedBox(width: 8),
+            Expanded(child: Text('Clear unpaid counter fares', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+          ]),
+          const SizedBox(height: 4),
+          const Text('Clears every "created" booking with no counter-fare paid (K). These are auto-created/demo bookings that block senders from booking new parcels until the fare is paid. Clearing them lets senders book again. No money moves; audit events are retained.',
+              style: AppType.caption),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _busy ? null : _clear,
+              icon: _busy
+                  ? const AppLogoSpinner(size: 16)
+                  : const Icon(Icons.clean_hands, size: 16),
+              label: Text(_clearedCount == null ? 'Clear all unpaid fares' : 'Cleared ${_clearedCount} fare(s)'),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
 
 /// Mint bulk plan codes for offline/agent sale. Codes activate a plan with no
 /// payment prompt when a sender redeems one on their own number.

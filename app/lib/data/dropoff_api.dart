@@ -499,6 +499,19 @@ class DropOffApi {
     }
   }
 
+  /// Look up a single job by server ref (DRO-...). Used by the admin console
+  /// search so staff can find any order by its tracking/reference number.
+  static Future<Map<String, dynamic>?> job(String ref) async {
+    if (!enabled) return null;
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/jobs/${Uri.encodeComponent(ref)}'), headers: _headers).timeout(_timeout);
+      if (res.statusCode != 200) return null;
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Standing orders — recurring parcel plans (weekly/biweekly/monthly).
   static Future<List<Map<String, dynamic>>> recurring() async {
     final data = await get('/recurring');
@@ -1000,6 +1013,11 @@ class DropOffApi {
   /// Returns the provider's raw answer on failure so staff can act on it.
   static Future<ApiResponse> adminSendCounterFarePrompt(String ref, String reason) =>
       post('/admin/jobs/${Uri.encodeComponent(ref)}/counter-fare-prompt', {'reason': reason}, admin: true);
+
+  /// Clear all auto-created/unpaid jobs (status='created' AND paid=0). Admin-only;
+  /// used to clear test/demo leftovers so the app launches clean for senders.
+  static Future<ApiResponse> adminClearAutoCreated(String reason) =>
+      post('/admin/jobs/clear-auto-created', {'reason': reason}, admin: true);
 
   /// Close a parcel chat: read-only history preserved for everyone.
   static Future<ApiResponse> closeChatThread(int threadId) =>

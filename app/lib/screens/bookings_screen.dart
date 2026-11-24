@@ -1867,6 +1867,27 @@ class _CourierReceiptButton extends StatefulWidget {
 
 class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
   bool _busy = false;
+  // Server-truth check: whether this sender currently has ANY unpaid depot
+  // counter fare. Mirrors the server so the pay button appears even when the
+  // locally-synced booking row is stale (owner bug 2026-11-23).
+  bool _serverDue = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_arm());
+  }
+
+  Future<void> _arm() async {
+    final store = AppScope.of(context);
+    try {
+      _serverDue = await store.counterFareStillDue();
+    } catch (_) {
+      _serverDue = false;
+    }
+    if (!mounted) return;
+    setState(() {});
+  }
 
   Future<void> _payReceiptBill() async {
     final store = AppScope.of(context);
@@ -1956,7 +1977,7 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
     // tapped it and nothing happened — no prompt, and no way to clear the fare
     // that blocks her next booking. The pay route is always live while a fare
     // is due; only the DOWNLOAD needs the image.
-    final canTap = !_busy && (due || (paid && url.isNotEmpty));
+    final canTap = !_busy && (_serverDue || due || (paid && url.isNotEmpty));
     // A receipt photo with no recorded amount is a legacy/ops-reconciled row:
     // the rider's own filing flow cannot produce one (client and worker both
     // require a positive amount). Nothing can be charged yet, so say so plainly

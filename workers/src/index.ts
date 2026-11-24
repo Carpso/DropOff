@@ -6317,13 +6317,24 @@ app.post('/payments', async (c) => {
     lipilaRef = `topup-${phone}-${Date.now().toString(36)}`;
   }
 
-  const init = await lipilaCollect(c.env, phone, amount, lipilaRef,
+  let init = await lipilaCollect(c.env, phone, amount, lipilaRef,
     kind === 'job' ? `DropOff ${lipilaRef}`
       : kind === 'subscription' ? 'DropOff pack activation/renewal'
       : kind === 'counter_fare' ? 'DropOff depot counter fare'
       : 'DropOff ride float top-up');
+  // One transient retry for collect (network/provider blip). Safe to reuse the
+  // same reference because the first attempt did not return a confirmed prompt.
+  if (!init.ok && (init.status === 502 || init.status === 503 || (init.raw ?? '').includes('timeout') || (init.raw ?? '').includes('circuit_open'))) {
+    console.warn(JSON.stringify({ where: 'payments', event: 'lipila_collect_retry', kind, ref: lipilaRef, status: init.status, raw: (init.raw ?? '').slice(0, 120) }));
+    await new Promise(r => setTimeout(r, 1200));
+    init = await lipilaCollect(c.env, phone, amount, lipilaRef,
+      kind === 'job' ? `DropOff ${lipilaRef}`
+        : kind === 'subscription' ? 'DropOff pack activation/renewal'
+        : kind === 'counter_fare' ? 'DropOff depot counter fare'
+        : 'DropOff ride float top-up');
+  }
   if (!init.ok) {
-    return paymentFail('lipila_init_failed', 502, { detail: init.raw, amount, phone });
+    return paymentFail('lipila_init_failed', 502, { detail: init.raw, amount, phone, lipila_status: init.status });
   }
 
   const provider: Provider = b.provider ?? providerFromPhone(phone);
@@ -10592,6 +10603,43 @@ app.post('/admin/jobs/:ref/delete', async (c) => {
   } catch { /* ticket hygiene never blocks the deletion */ }
   await c.env.DB.batch(statements);
   return c.json({ ok: true, ref: row.ref });
+});
+
+// Clear auto-created / auto-booked orders: any 'created' job that was never
+// paid (paid = 0) is a leftover test/demo booking that blocks senders with the
+// counter-fare gate. Admin-only; clears the slate so the app launches clean.
+app.post('/admin/jobs/clear-auto-created', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const body: any = await c.req.json().catch(() => ({}));
+  const reason = String(body?.reason ?? '').trim();
+  if (reason.length < 8) {
+    return c.json({ error: 'reason_required', detail: 'Give a short audit reason (at least 8 characters).' }, 400);
+  }
+  const actor = c.get('phone') ?? 'admin';
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, ref, sender_phone, counter_receipt_zmw FROM jobs
+      WHERE status = 'created' AND paid = 0 ORDER BY id DESC`,
+  ).all<any>();
+  const rows = results ?? [];
+  const statements: any[] = [
+    c.env.DB.prepare(`UPDATE jobs SET status = 'deleted' WHERE status = 'created' AND paid = 0`),
+  ];
+  for (const j of rows) {
+    statements.push(
+      c.env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'admin_deleted', ?2)`,
+      ).bind(j.id, `Admin cleared auto-created booking ${j.ref}. Reason: ${reason}. By ${actor}.`),
+    );
+    if (j.sender_phone) {
+      await sendToPhone(c.env, j.sender_phone, {
+        title: 'Booking cleared',
+        body: `Your booking ${j.ref} has been cleared by DropOff.`,
+        data: { job_ref: j.ref, kind: 'booking_deleted' },
+      }).catch(() => {});
+    }
+  }
+  await c.env.DB.batch(statements);
+  return c.json({ ok: true, cleared: rows.length, refs: rows.map((j) => j.ref) });
 });
 
 // Admin DELETE user (superadmin only): wipe the auth row, push tokens and
