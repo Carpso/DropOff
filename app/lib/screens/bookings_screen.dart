@@ -429,8 +429,6 @@ class BookingDetailScreen extends StatefulWidget {
 }
 
 class _BookingDetailScreenState extends State<BookingDetailScreen> {
-  bool _counterPromptShown = false;
-
   @override
   void initState() {
     super.initState();
@@ -440,34 +438,7 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await AppScope.of(context).syncJobsFromServer();
-      if (mounted) _maybePromptCounterFare();
     });
-  }
-
-  void _maybePromptCounterFare() {
-    if (_counterPromptShown || !mounted) return;
-    final store = AppScope.of(context);
-    final booking = store.bookings.where((b) => b.id == widget.bookingId).firstOrNull;
-    if (booking == null || !booking.counterFareDue) return;
-    _counterPromptShown = true;
-    final amount = booking.counterReceiptZmw;
-    final msg = amount != null && amount > 0
-        ? 'Your rider filed the depot receipt for ${booking.reference}. Pay the K${amount.toStringAsFixed(2)} receipt + processing fee + K15 depot queue fee to unlock the receipt photo and reimburse your rider.'
-        : 'Your rider filed a depot receipt for ${booking.reference}. Pay the receipt + processing fee + K15 depot queue fee to unlock it and reimburse your rider.';
-    showAppSheet<void>(context, child: Builder(builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Container(width: 40, height: 40, decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
-          child: const Icon(Icons.lock_clock_outlined, color: Color(0xFF7B5710))),
-        const SizedBox(width: 12),
-        const Expanded(child: Text('Courier receipt locked', style: AppType.subhead)),
-      ]),
-      const SizedBox(height: 14),
-      Text(msg, style: const TextStyle(fontSize: 14, height: 1.45, color: AppColors.ink)),
-      const SizedBox(height: 18),
-      SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Pay now'))),
-      const SizedBox(height: 8),
-      SizedBox(width: double.infinity, child: TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Later'))),
-    ])));
   }
 
   @override

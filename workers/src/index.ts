@@ -2094,7 +2094,7 @@ app.post('/jobs', async (c) => {
       // amount anyway. Such a row can neither be charged nor cleared, so it must
       // never block a new booking (it was a permanent dead end).
       const dueCfare = await c.env.DB.prepare(
-        `SELECT ref, counter_receipt_zmw, counter_receipt_url FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0 AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
+        `SELECT ref, counter_receipt_zmw, counter_receipt_url FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0 AND counter_receipt_paid = 0 AND COALESCE(status,'') NOT IN ('deleted','canceled','cancelled') ORDER BY id DESC LIMIT 1`,
       ).bind(c.get('phone') ?? '').first<any>();
       if (dueCfare) {
         // Ship the ref + exact amount so the app can start the momo prompt
@@ -2690,7 +2690,7 @@ app.post('/collections', async (c) => {
   // start the prompt from the error; zero-amount legacy rows never gate.
   if (role !== 'ops' && !isAdmin(c)) {
     const dueCfare = await c.env.DB.prepare(
-      `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0 AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
+      `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0 AND counter_receipt_paid = 0 AND COALESCE(status,'') NOT IN ('deleted','canceled','cancelled') ORDER BY id DESC LIMIT 1`,
     ).bind(phone).first<any>();
     if (dueCfare) {
       return c.json({
@@ -10981,7 +10981,9 @@ app.get('/counter-fare/status', async (c) => {
   const due = await c.env.DB.prepare(
     `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1
       AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0
-      AND counter_receipt_paid = 0 ORDER BY id DESC LIMIT 1`,
+      AND counter_receipt_paid = 0
+      AND COALESCE(status,'') NOT IN ('deleted','canceled','cancelled')
+      ORDER BY id DESC LIMIT 1`,
   ).bind(phone).first<any>();
   return c.json({
     due: !!due,

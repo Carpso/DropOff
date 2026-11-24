@@ -27,6 +27,11 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-seventh pass) — counter-fare prompt nag fix
+
+- **Counter-fare nag fix:** `/counter-fare/status` and booking/collection counter-fare gates now ignore `deleted/canceled/cancelled` jobs, preventing past dead jobs from blocking/prompting. Removed redundant BookingDetail auto-prompt (detail already has pay card; caused double prompt). Added 2-minute cooldown + server due-check before foreground/cold-start counter-fare prompt navigation in `main.dart`.
+- Worker deployed `07880444-d09f-4f80-b8bd-ef21382b3166`; tsc/vitest clean, Flutter analyze clean on touched files.
+
 ## 2026-11-24 (forty-sixth pass) — Step 5 referral payout + Step 3 follow-ups
 
 - **Referral reward (Step 5):** reward now issues only after referee's **first paid, delivered/completed** job (`rewardReferralOnBooking` checks paid+delivered; triggered on delivery/payment settlement). Added referral qualification/status machine fields (`qualified_at/qualified_job_id/reward_kind/reward_amount_zmw/void_reason`, migration `0084_referral_qualification.sql` applied). Status labels exposed: invited/signed up/qualified/paid. Added fraud/attribution guards: no self-referral, referrer must be active, late claim blocked if referee already completed paid delivery, one reward per referred phone, earlier paid-delivered job blocks later reward.

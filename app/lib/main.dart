@@ -403,8 +403,19 @@ class _SplashScreenState extends State<_SplashScreen> {
     });
   }
 
+  DateTime? _lastCounterFarePromptAt;
   void _showCounterFarePrompt() {
-    _runWhenReady(() => _performTap(widget.store, {'kind': 'counter_fare_due'}));
+    final now = DateTime.now();
+    if (_lastCounterFarePromptAt != null && now.difference(_lastCounterFarePromptAt!) < const Duration(minutes: 2)) return;
+    _lastCounterFarePromptAt = now;
+    _runWhenReady(() async {
+      final due = await DropOffApi.counterFareStatus();
+      if (due?['due'] == true) {
+        if (mounted) _performTap(widget.store, {'kind': 'counter_fare_due'});
+      } else {
+        await widget.store.syncJobsFromServer();
+      }
+    });
   }
 
   @override
