@@ -33,7 +33,8 @@ LENCO_ENV = "production"
 LENCO_ACCOUNT_ID = "340916da-db43-40de-9426-49fa8e0e51e2"
 # auto = Lipila primary, Lenco fallback only on definitive Lipila 401/403.
 # lipila|lenco forces a single gateway. Never fallback on ambiguous timeout.
-PAYMENT_GATEWAY = "auto"
+# Lenco is top priority for now (owner confirmed 2026-11-24).
+PAYMENT_GATEWAY = "lenco"
 # Business momo for ALL platform income (platform fees + processing fees).
 # Scheduled sweeps disburse accumulated income to this number. NEVER commit a
 # different number here — this is the payout account for the whole platform.
