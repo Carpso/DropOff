@@ -1348,8 +1348,8 @@ class _TiersCardState extends State<_TiersCard> {
     if (!pay.ok) {
       setState(() => _busyTier = null);
       AppToast.show(context, _moneyErrorText(pay,
-          pay.error == 'lipila_init_failed'
-              ? 'Mobile-money prompt was rejected by Lipila — payments are down; the plan did not start. Verify your momo balance is enough for the prompt, then tap Pay now again.'
+          pay.error == 'lipila_init_failed' || pay.error == 'lenco_init_failed'
+              ? 'Mobile-money prompt was rejected by the payment provider — payments are down; the plan did not start. Verify your momo balance is enough for the prompt, then tap Pay now again.'
               : 'Could not start the mobile-money prompt'));
       return;
     }

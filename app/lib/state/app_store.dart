@@ -1270,7 +1270,7 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
       final code0 = res.error ?? 'http_${res.status ?? 0}';
       // One silent auto-retry for transient prompt-start failures. The
       // idempotency key is stable so we never create a double charge.
-      if (code0 == 'lipila_init_failed' || code0 == 'network_error' || code0.startsWith('http_5')) {
+      if (code0 == 'lipila_init_failed' || code0 == 'lenco_init_failed' || code0 == 'network_error' || code0.startsWith('http_5')) {
         await Future<void>.delayed(const Duration(milliseconds: 1500));
         res = await DropOffApi.payCounterFare(
           jobRef: jobRef,

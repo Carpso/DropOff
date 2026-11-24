@@ -7,9 +7,10 @@ String moneyErrorText(ApiResponse r, String fallback) {
   final err = r.error ?? '';
   final detail = r.body['detail']?.toString() ?? '';
   if (err == 'network_error') return 'Mobile-money service unreachable right now — check your connection and retry.';
-  if (err == 'lipila_init_failed') {
+  if (err == 'lipila_init_failed' || err == 'lenco_init_failed') {
+    final provider = err == 'lenco_init_failed' ? 'Lenco' : 'Lipila';
     final tail = detail.length > 90 ? '${detail.substring(0, 90)}…' : detail;
-    return 'Lipila rejected the prompt${tail.isEmpty ? '' : ' ($tail)'} — verify your momo balance has the funds, then tap Pay now again. The plan did not start.';
+    return '$provider rejected the prompt${tail.isEmpty ? '' : ' ($tail)'} — verify your momo balance has the funds, then tap Pay now again. The plan did not start.';
   }
   if (err == 'payment_already_pending') return 'A prompt is already waiting on your phone — approve it first.';
   if (err == 'too_many_requests') return 'Too many attempts — wait a minute and try again.';
@@ -40,7 +41,7 @@ String counterFareErrorText(ApiResponse r) {
   if (err == 'network_error' || err == 'offline_demo_mode') {
     return 'The money service is unreachable right now — check your connection and try again.';
   }
-  if (err == 'lipila_init_failed') {
+  if (err == 'lipila_init_failed' || err == 'lenco_init_failed') {
     final raw = r.body['detail']?.toString().toLowerCase() ?? '';
     if (raw.contains('insufficient') || raw.contains('balance')) {
       return 'Your mobile money wallet does not have enough balance for this prompt. Top up and try again — no money was taken.';

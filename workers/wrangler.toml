@@ -26,6 +26,14 @@ crons = ["*/5 * * * *", "0 2 * * *", "* * * * *", "0 19 * * *", "0 14 * * SUN", 
 LIPILA_ENV = "production"
 LIPILA_BASE_URL = "https://blz.lipila.io"
 LIPILA_CALLBACK_URL = "https://dropoff-api.godfreymoseskalambo.workers.dev/webhooks/lipila"
+# Lenco v2 (alternative/fallback gateway). Secrets: LENCO_API_KEY,
+# LENCO_WEBHOOK_KEY (optional; defaults to SHA256 of API token).
+# Carpso Solutions ZMW account (till 1140680).
+LENCO_ENV = "production"
+LENCO_ACCOUNT_ID = "340916da-db43-40de-9426-49fa8e0e51e2"
+# auto = Lipila primary, Lenco fallback only on definitive Lipila 401/403.
+# lipila|lenco forces a single gateway. Never fallback on ambiguous timeout.
+PAYMENT_GATEWAY = "auto"
 # Business momo for ALL platform income (platform fees + processing fees).
 # Scheduled sweeps disburse accumulated income to this number. NEVER commit a
 # different number here — this is the payout account for the whole platform.

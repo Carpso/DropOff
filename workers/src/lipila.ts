@@ -33,6 +33,13 @@ export interface Env {
   FIREBASE_SERVICE_ACCOUNT?: string;          // comma-separated allowed cross-origins ("" = same-origin only)
   SENTRY_DSN?: string;                        // optional error tracking (Sentry)
   LIPILA_WEBHOOK_SECRET?: string;             // optional shared secret for callback headers
+  // Lenco v2 alternative gateway (server-side only).
+  LENCO_ENV?: string;                         // production | sandbox
+  LENCO_BASE_URL?: string;                    // fallback when LENCO_ENV is unset
+  LENCO_API_KEY?: string;                     // secret
+  LENCO_WEBHOOK_KEY?: string;                 // SHA256(API token), or explicit webhook hash key
+  LENCO_ACCOUNT_ID?: string;                  // 36-char Carpso Solutions account UUID
+  PAYMENT_GATEWAY?: string;                   // auto (default) | lipila | lenco
   BACKUPS?: R2Bucket;                         // daily app-data exports land here (optional)
   APPLE_TEAM_ID?: string;                     // set to your Apple Team ID to enable universal links
   /** Workers AI binding: address parsing, support drafts, rider-doc checks. */

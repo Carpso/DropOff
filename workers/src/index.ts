@@ -11,6 +11,11 @@ import {
   Env, Provider, lipilaCollect, lipilaDisburse, lipilaDisburseStatusDetail, lipilaStatus,
   lipilaStatusDetail, normalizeZmPhone, providerFromPhone, lipilaBase, lipilaApiKey,
 } from './lipila';
+import {
+  collectWithGateway, transferWithGateway, collectionStatus, transferStatus,
+  gatewayPreference, type Gateway, type GatewayPreference,
+} from './gateway';
+import { lencoAccounts, lencoBalance, lencoBase, lencoAccountId, verifyLencoWebhook } from './lenco';
 
 import {
   generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
@@ -2519,16 +2524,16 @@ app.post('/jobs', async (c) => {
       depositRequired = true;
       depositAmount = feeBase.prompt_total_zmw; // full DropOff leg + processing + momo leg
       depositRef = `adv-${ref}`;
-      const init = await lipilaCollect(c.env, senderPhone, depositAmount, depositRef,
-        `DropOff advance ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+      const init = await collectWithGateway(c.env, b.gateway, senderPhone, depositAmount, depositRef,
+        `DropOff advance ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' '));
       if (init.ok) {
         await c.env.DB.prepare(
           `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-             lipila_fee_zmw, lipila_reference, status, channel, kind)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 'merchant', 'booking_deposit')`,
+             lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 'merchant', 'booking_deposit')`,
         ).bind(meta.last_row_id, senderPhone, providerFromPhone(senderPhone), depositAmount,
           depositAmount, round2(platformFee(dropOffLeg)), MOMO_COLLECTION_FEE,
-          init.lipilaReference ?? depositRef).run();
+          init.providerReference ?? init.reference, init.gateway, init.reference).run();
       } else {
         // PREPAY, NO EXCEPTIONS (owner directive): if the provider is down the
         // booking is HELD, never dispatched on credit. No prompt went out, so
@@ -2888,16 +2893,17 @@ app.post('/collections', async (c) => {
 
   // Ghost-booking deposit for first ride collections (same as /jobs bookings)
   if (depositRequired) {
-    const depInit = await lipilaCollect(c.env, phone, depositAmount,
-      `dep-${ref}`, `DropOff deposit ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+    const depInit = await collectWithGateway(c.env, b.gateway, phone, depositAmount,
+      `dep-${ref}`, `DropOff deposit ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' '));
     if (depInit.ok) {
       depositRef = `dep-${ref}`;
       await c.env.DB.prepare(
         `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-           lipila_fee_zmw, lipila_reference, status, channel, kind)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 'merchant', 'booking_deposit')`,
+           lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 'merchant', 'booking_deposit')`,
       ).bind(meta.last_row_id, phone, providerFromPhone(phone), depositAmount, depositAmount,
-        round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, depInit.lipilaReference ?? depositRef).run();
+        round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, depInit.providerReference ?? depInit.reference,
+        depInit.gateway, depInit.reference).run();
       await c.env.DB.prepare(
         'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
       ).bind(meta.last_row_id, 'advance_pending',
@@ -6164,7 +6170,7 @@ app.post('/payments', async (c) => {
     // settled it IS this job's payment — never issue a second prompt for the
     // same delivery.
     const pendingAdvance = await c.env.DB.prepare(
-      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status FROM payments
+      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status FROM payments
         WHERE job_id = ?1 AND kind = 'booking_deposit' AND status IN ('pending','success') AND paused_at IS NULL
         ORDER BY id DESC LIMIT 1`,
     ).bind(job.id).first<any>();
@@ -6173,6 +6179,8 @@ app.post('/payments', async (c) => {
         ok: true,
         payment_id: pendingAdvance.id,
         lipila_reference: pendingAdvance.lipila_reference ?? null,
+        gateway: pendingAdvance.gateway ?? 'lipila',
+        gateway_reference: pendingAdvance.gateway_reference ?? pendingAdvance.lipila_reference,
         amount_zmw: pendingAdvance.amount_zmw,
         platform_fee_zmw: pendingAdvance.platform_fee_zmw ?? 0,
         lipila_fee_zmw: pendingAdvance.lipila_fee_zmw ?? 0,
@@ -6185,7 +6193,7 @@ app.post('/payments', async (c) => {
     // double-tap can only ever leave ONE kind='job' prompt live — the second
     // tap reuses it instead of collecting the sender twice.
     const pendingJobPay = await c.env.DB.prepare(
-      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status FROM payments
+      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status FROM payments
         WHERE job_id = ?1 AND kind = 'job' AND status = 'pending'
         ORDER BY id DESC LIMIT 1`,
     ).bind(job.id).first<any>();
@@ -6194,6 +6202,8 @@ app.post('/payments', async (c) => {
         ok: true,
         payment_id: pendingJobPay.id,
         lipila_reference: pendingJobPay.lipila_reference ?? null,
+        gateway: pendingJobPay.gateway ?? 'lipila',
+        gateway_reference: pendingJobPay.gateway_reference ?? pendingJobPay.lipila_reference,
         amount_zmw: pendingJobPay.amount_zmw,
         platform_fee_zmw: pendingJobPay.platform_fee_zmw ?? 0,
         lipila_fee_zmw: pendingJobPay.lipila_fee_zmw ?? 0,
@@ -6265,7 +6275,7 @@ app.post('/payments', async (c) => {
     }
     // Idempotency: a pending prompt for this job IS this payment.
     const pendingCfare = await c.env.DB.prepare(
-      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, status FROM payments
+      `SELECT id, amount_zmw, platform_fee_zmw, lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status FROM payments
         WHERE job_id = ?1 AND kind = 'counter_fare' AND status IN ('pending','success')
         ORDER BY id DESC LIMIT 1`,
     ).bind(job.id).first<any>();
@@ -6275,6 +6285,8 @@ app.post('/payments', async (c) => {
         ok: true,
         payment_id: pendingCfare.id,
         lipila_reference: pendingCfare.lipila_reference ?? null,
+        gateway: pendingCfare.gateway ?? 'lipila',
+        gateway_reference: pendingCfare.gateway_reference ?? pendingCfare.lipila_reference,
         amount_zmw: pendingCfare.amount_zmw,
         platform_fee_zmw: pendingCfare.platform_fee_zmw ?? 0,
         lipila_fee_zmw: pendingCfare.lipila_fee_zmw ?? 0,
@@ -6317,40 +6329,37 @@ app.post('/payments', async (c) => {
     lipilaRef = `topup-${phone}-${Date.now().toString(36)}`;
   }
 
-  let init = await lipilaCollect(c.env, phone, amount, lipilaRef,
-    kind === 'job' ? `DropOff ${lipilaRef}`
-      : kind === 'subscription' ? 'DropOff pack activation/renewal'
-      : kind === 'counter_fare' ? 'DropOff depot counter fare'
-      : 'DropOff ride float top-up');
-  // One transient retry for collect (network/provider blip). Safe to reuse the
-  // same reference because the first attempt did not return a confirmed prompt.
+  const note = kind === 'job' ? `DropOff ${lipilaRef}`
+    : kind === 'subscription' ? 'DropOff pack activation/renewal'
+    : kind === 'counter_fare' ? 'DropOff depot counter fare'
+    : 'DropOff ride float top-up';
+  let init = await collectWithGateway(c.env, b.gateway, phone, amount, lipilaRef, note);
+  // One transient retry on the SAME gateway. An auto-fallback already happened
+  // only for definitive Lipila 401/403; never switch providers after ambiguity.
   if (!init.ok && (init.status === 502 || init.status === 503 || (init.raw ?? '').includes('timeout') || (init.raw ?? '').includes('circuit_open'))) {
-    console.warn(JSON.stringify({ where: 'payments', event: 'lipila_collect_retry', kind, ref: lipilaRef, status: init.status, raw: (init.raw ?? '').slice(0, 120) }));
+    console.warn(JSON.stringify({ where: 'payments', event: 'collect_retry', gateway: init.gateway, kind, ref: lipilaRef, status: init.status, raw: (init.raw ?? '').slice(0, 120) }));
     await new Promise(r => setTimeout(r, 1200));
-    init = await lipilaCollect(c.env, phone, amount, lipilaRef,
-      kind === 'job' ? `DropOff ${lipilaRef}`
-        : kind === 'subscription' ? 'DropOff pack activation/renewal'
-        : kind === 'counter_fare' ? 'DropOff depot counter fare'
-        : 'DropOff ride float top-up');
+    init = await collectWithGateway(c.env, init.gateway, phone, amount, lipilaRef, note);
   }
   if (!init.ok) {
     const detail = init.raw?.trim()
       ? init.raw
-      : `Lipila HTTP ${init.status}${init.status === 401 ? ' (check LIPILA_API_KEY / IP allowlist)' : ''}`;
-    await logLipila(c.env, 'collection', lipilaRef, phone, amount, 'failed', detail);
-    return paymentFail('lipila_init_failed', 502, { detail, amount, phone, lipila_status: init.status });
+      : `${init.gateway === 'lenco' ? 'Lenco' : 'Lipila'} HTTP ${init.status}${init.status === 401 ? ' (check API key / account access)' : ''}`;
+    await logLipila(c.env, 'collection', lipilaRef, phone, amount, 'failed', detail, init.gateway);
+    return paymentFail(`${init.gateway}_init_failed`, 502, { detail, amount, phone, gateway: init.gateway, provider_status: init.status });
   }
 
   const provider: Provider = b.provider ?? providerFromPhone(phone);
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO payments (job_id, subscription_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-       lipila_fee_zmw, lipila_reference, status, channel, kind)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending',?10,?11)`,
+       lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'pending',?12,?13)`,
   ).bind(jobId, subscriptionId, phone, provider, amount, creditZmw, platformFeeZmw, lipilaFeeZmw,
-    init.lipilaReference ?? null, channel, kind).run();
+    init.providerReference ?? init.reference, init.gateway, init.reference, channel, kind).run();
 
   const payload = {
-    ok: true, payment_id: meta.last_row_id, lipila_reference: init.lipilaReference,
+    ok: true, payment_id: meta.last_row_id, lipila_reference: init.providerReference ?? init.reference,
+    gateway: init.gateway, gateway_reference: init.reference,
     amount_zmw: amount, platform_fee_zmw: platformFeeZmw, lipila_fee_zmw: lipilaFeeZmw,
   };
   await saveIdempotent(c.env, idemKey, 'payment', phone, 200, payload);
@@ -6371,22 +6380,20 @@ app.post('/admin/test-collect', async (c) => {
   const amount = round2(Math.max(1, Math.min(Number(b?.amount_zmw ?? 1) || 1, 20)));
   const flavor = b?.kind === 'subscription' ? 'subscription' : 'payg';
   const ref = `test-${flavor}-${randomCode(6)}`;
-  const init = await lipilaCollect(c.env, phone, amount, ref,
-    flavor === 'subscription' ? 'DropOff TEST plan subscription' : 'DropOff TEST prepayment (pay-as-you-go)')
-    .catch(() => ({ ok: false } as any));
+  const init = await collectWithGateway(c.env, b.gateway, phone, amount, ref,
+    flavor === 'subscription' ? 'DropOff TEST plan subscription' : 'DropOff TEST prepayment (pay-as-you-go)');
   if (!init.ok) {
-    const detail = (init as any).raw?.trim()
-      ? (init as any).raw
-      : `Lipila HTTP ${(init as any).status}${(init as any).status === 401 ? ' (check LIPILA_API_KEY / IP allowlist)' : ''}`;
-    await logLipila(c.env, 'collection', ref, phone, amount, 'failed', detail);
-    return c.json({ error: 'lipila_init_failed', detail }, 502);
+    const detail = init.raw?.trim() ? init.raw : `${init.gateway} HTTP ${init.status}`;
+    await logLipila(c.env, 'collection', ref, phone, amount, 'failed', detail, init.gateway);
+    return c.json({ error: `${init.gateway}_init_failed`, detail, gateway: init.gateway }, 502);
   }
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO payments (job_id, subscription_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-       lipila_fee_zmw, lipila_reference, status, channel, kind)
-     VALUES (NULL, NULL, ?1, ?2, ?3, 0, 0, 0, ?4, 'pending', 'merchant', 'test')`,
-  ).bind(phone, providerFromPhone(phone), amount, init.lipilaReference ?? ref).run();
-  return c.json({ ok: true, payment_id: meta.last_row_id, lipila_reference: init.lipilaReference, amount_zmw: amount, flavor });
+       lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
+     VALUES (NULL, NULL, ?1, ?2, ?3, 0, 0, 0, ?4, ?5, ?6, 'pending', 'merchant', 'test')`,
+  ).bind(phone, providerFromPhone(phone), amount, init.providerReference ?? init.reference, init.gateway, init.reference).run();
+  return c.json({ ok: true, payment_id: meta.last_row_id, lipila_reference: init.providerReference ?? init.reference,
+    gateway: init.gateway, gateway_reference: init.reference, amount_zmw: amount, flavor });
 });
 
 // Superadmin-only live disbursement test. Real money moves; amount capped at K20.
@@ -6402,6 +6409,7 @@ app.post('/admin/test-disburse', async (c) => {
     phone,
     amount,
     note: 'DropOff live settlement test',
+    gateway: b.gateway,
   });
   c.executionCtx.waitUntil(runPayoutQueue(c.env));
   return c.json({ ok: true, payout_id: payout.id, reference: payout.reference, amount_zmw: amount, status: 'queued' }, 202);
@@ -6533,21 +6541,22 @@ async function healMissingTrackingSms(env: Env): Promise<void> {
 // /admin/payments/:id/refund.
 async function refundSettledPayment(
   env: Env,
-  pay: { id: number; phone: string; amount_zmw: number; job_id: number | null; kind: string },
+  pay: { id: number; phone: string; amount_zmw: number; job_id: number | null; kind: string; gateway?: Gateway },
   jobRef: string | null,
   reason: string,
 ): Promise<void> {
   const jobId = pay.job_id;
   const refundRef = `refund-${pay.id}-${Date.now().toString(36)}`;
-  const disb = await lipilaDisburse(env, pay.phone, pay.amount_zmw, refundRef,
-    `DropOff ${reason} ${jobRef ?? ''}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+  const disb = await transferWithGateway(env, pay.gateway === 'lenco' ? 'lenco' : undefined, pay.phone, pay.amount_zmw, refundRef,
+    `DropOff ${reason} ${jobRef ?? ''}`.replace(/[^A-Za-z0-9 ]/g, ' '));
   if (disb.ok) {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-           lipila_fee_zmw, lipila_reference, status, channel, kind, refund_of_payment_id, refunded_at)
-         VALUES (?1,?2,?3,?4,0,0,0,?5,'pending','merchant','refund',?6,datetime('now'))`,
-      ).bind(jobId, pay.phone, 'lipila', pay.amount_zmw, refundRef, pay.id),
+           lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind, refund_of_payment_id, refunded_at)
+         VALUES (?1,?2,?3,?4,0,0,0,?5,?6,?7,'pending','merchant','refund',?8,datetime('now'))`,
+      ).bind(jobId, pay.phone, providerFromPhone(pay.phone), pay.amount_zmw, disb.providerReference ?? disb.reference,
+        disb.gateway, disb.reference, pay.id),
       ...(jobId ? [env.DB.prepare(
         `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'payment_refunded', ?2)`,
       ).bind(jobId, `${reason} — K${pay.amount_zmw.toFixed(2)} returned to the sender's momo automatically.`)] : []),
@@ -6648,7 +6657,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
   if (!claim.meta.changes) return; // someone else (webhook/poll) sank it already
 
   const pay = await env.DB.prepare(
-    'SELECT id, phone, amount_zmw, job_id, subscription_id, kind FROM payments WHERE id = ?1',
+    'SELECT id, phone, amount_zmw, job_id, subscription_id, kind, gateway FROM payments WHERE id = ?1',
   ).bind(paymentId).first<any>();
   if (!pay) return;
 
@@ -6876,9 +6885,10 @@ async function reimburseRider(
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-           lipila_fee_zmw, lipila_reference, status, channel, kind)
-         VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, 'pending', 'merchant', 'rider_reimbursement')`,
-      ).bind(job.id, rider.phone, providerFromPhone(rider.phone), amount, ref),
+           lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
+         VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, ?6, ?7, 'pending', 'merchant', 'rider_reimbursement')`,
+      ).bind(job.id, rider.phone, providerFromPhone(rider.phone), amount, ref,
+        gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila', ref),
       // FK-safe (same bug class as the settle-time wallet_ledger crash): a
       // rider without a wallets row made this batch throw and the payout was
       // marked failed before Lipila was ever called.
@@ -6928,20 +6938,22 @@ async function sweepPlatformIncome(env: Env, minZmw = 0): Promise<void> {
   if (open) return; // a sweep is still in flight — never disburse twice
   const ref = `sweep-${Date.now().toString(36)}`;
   const { meta } = await env.DB.prepare(
-    `INSERT INTO platform_disbursements (amount_zmw, business_phone, lipila_reference, status)
-       VALUES (?1, ?2, ?3, 'pending')`,
-  ).bind(pending, businessPhone, ref).run();
-  const disb = await lipilaDisburse(env, businessPhone, pending, ref, 'DropOff platform income sweep');
+    `INSERT INTO platform_disbursements (amount_zmw, business_phone, lipila_reference, gateway, gateway_reference, status)
+       VALUES (?1, ?2, ?3, ?4, ?5, 'pending')`,
+  ).bind(pending, businessPhone, ref, gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila', ref).run();
+  const disb = await transferWithGateway(env, undefined, businessPhone, pending, ref, 'DropOff platform income sweep');
   if (disb.ok) {
-    // pending sweep → success; any other still-'+90d' row resolves through status poll
     await env.DB.prepare(
-      `UPDATE platform_disbursements SET status = 'success', lipila_reference = ?2, paid_at = datetime('now')
-         WHERE id = ?1`,
-    ).bind(meta.last_row_id, disb.lipilaReference ?? ref).run();
+      `UPDATE platform_disbursements SET status = 'success', lipila_reference = ?2,
+         gateway = ?3, gateway_reference = ?4, gateway_identifier = ?5, paid_at = datetime('now')
+        WHERE id = ?1`,
+    ).bind(meta.last_row_id, disb.providerReference ?? ref, disb.gateway, disb.reference, disb.providerReference ?? null).run();
   } else {
     await env.DB.prepare(
-      `UPDATE platform_disbursements SET status = 'failed' WHERE id = ?1`,
-    ).bind(meta.last_row_id).run();
+      `UPDATE platform_disbursements SET status = 'failed', gateway = ?2, gateway_reference = ?3,
+         gateway_identifier = ?4, note = ?5 WHERE id = ?1`,
+    ).bind(meta.last_row_id, disb.gateway, disb.reference, disb.providerReference ?? null,
+      String(disb.raw ?? 'provider rejected sweep').slice(0, 300)).run();
   }
 }
 
@@ -6951,24 +6963,24 @@ async function sweepPlatformIncome(env: Env, minZmw = 0): Promise<void> {
 // actually succeeded. Rows stuck >7 days are closed as failed.
 async function reconcilePayments(env: Env): Promise<void> {  try {
     const { results } = await env.DB.prepare(
-      `SELECT id, lipila_reference, kind FROM payments
-        WHERE status = 'pending' AND lipila_reference IS NOT NULL
+      `SELECT id, gateway, gateway_reference, kind FROM payments
+        WHERE status = 'pending' AND COALESCE(gateway_reference, lipila_reference) IS NOT NULL
           AND created_at < datetime('now', '-2 minutes')
           AND created_at > datetime('now', '-2 days')
         ORDER BY id LIMIT 50`,
     ).all<any>();
     for (const pay of results ?? []) {
-      // Payout kinds settle on the DISBURSEMENT status endpoint (a collect
-      // check-status would never see their reference). Payout rows are only
-      // status-flipped - their ledger/payroll bookkeeping happened at init.
-      if (pay.kind === 'rider_reimbursement' || pay.kind === 'cod_remit') {
-        const d = await lipilaDisburseStatusDetail(env, pay.lipila_reference);
+      const gateway = (pay.gateway ?? 'lipila') as Gateway;
+      const reference = pay.gateway_reference ?? pay.lipila_reference;
+      // Payout kinds settle on the transfer status endpoint.
+      if (pay.kind === 'rider_reimbursement' || pay.kind === 'cod_remit' || pay.kind === 'refund') {
+        const d = await transferStatus(env, gateway, reference);
         if (d.status === 'pending') continue;
         await env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, d.status).run();
         await recordFailReason(env, pay.id, d.reason);
         continue;
       }
-      const { status, reason } = await lipilaStatusDetail(env, pay.lipila_reference);
+      const { status, reason } = await collectionStatus(env, gateway, reference);
       if (status === 'pending') continue;
       await env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
       await recordFailReason(env, pay.id, reason);
@@ -7006,11 +7018,11 @@ function moneyRef(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${randomCode(8)}`;
 }
 
-async function logLipila(env: Env, kind: string, reference: string, phone: string | null, amount: number, status: string, message: string | null): Promise<void> {
+async function logLipila(env: Env, kind: string, reference: string, phone: string | null, amount: number, status: string, message: string | null, gateway: Gateway = 'lipila'): Promise<void> {
   try {
     await env.DB.prepare(
-      `INSERT INTO lipila_logs (kind, reference, phone, amount_zmw, status, message) VALUES (?1,?2,?3,?4,?5,?6)`,
-    ).bind(kind, reference, phone, amount, status, message?.slice(0, 300) ?? null).run();
+      `INSERT INTO lipila_logs (kind, reference, phone, amount_zmw, status, message, gateway) VALUES (?1,?2,?3,?4,?5,?6,?7)`,
+    ).bind(kind, reference, phone, amount, status, message?.slice(0, 300) ?? null, gateway).run();
   } catch { /* audit must never block money movement */ }
 }
 
@@ -7026,6 +7038,7 @@ async function settlePayoutSuccess(env: Env, id: number, identifier?: string | n
   if (!p || p.status === 'success') return; // webhook replay / cron race is a no-op
   await env.DB.prepare(
     `UPDATE payouts SET status = 'success', lipila_identifier = COALESCE(?2, lipila_identifier),
+       gateway_identifier = COALESCE(?2, gateway_identifier),
        settled_at = datetime('now'), updated_at = datetime('now') WHERE id = ?1 AND status <> 'success'`,
   ).bind(id, identifier ?? null).run();
   if (p.payment_id) {
@@ -7035,10 +7048,10 @@ async function settlePayoutSuccess(env: Env, id: number, identifier?: string | n
     if (p.job_id) {
       await env.DB.prepare(
         `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'refunded', ?2)`,
-      ).bind(p.job_id, `Refund ${p.reference} confirmed by Lipila — K${Number(p.amount_zmw).toFixed(2)} sent to momo.`).run();
+      ).bind(p.job_id, `Refund ${p.reference} confirmed by ${p.gateway === 'lenco' ? 'Lenco' : 'Lipila'} — K${Number(p.amount_zmw).toFixed(2)} sent to momo.`).run();
     }
   }
-  await logLipila(env, 'disbursement', p.reference, p.phone, Number(p.amount_zmw), 'success', 'confirmed');
+  await logLipila(env, 'disbursement', p.reference, p.phone, Number(p.amount_zmw), 'success', 'confirmed', p.gateway ?? 'lipila');
   await notifyPayout(env, 'Payout sent', `Payout ${p.reference} for K${Number(p.amount_zmw).toFixed(2)} completed.`);
 }
 
@@ -7047,12 +7060,13 @@ async function failPayout(env: Env, id: number, reason: string): Promise<void> {
     `UPDATE payouts SET status = 'failed', last_error = ?2,
        next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
      WHERE id = ?1 AND status IN ('pending', 'processing')`,
-  ).bind(id, String(reason ?? 'Lipila reported failure').slice(0, 300)).run();
+  ).bind(id, String(reason ?? 'Payment provider reported failure').slice(0, 300)).run();
 }
 
 async function enqueuePayout(env: Env, input: {
   kind: string; paymentId?: number | null; jobId?: number | null;
   phone: string; amount: number; note?: string; needsAdminConfirm?: boolean;
+  gateway?: GatewayPreference;
 }): Promise<{ id: number; reference: string; duplicate: boolean }> {
   // One payout per source payment — a refund webhook replay or a double tap on
   // the admin button can never queue a second transfer.
@@ -7064,26 +7078,27 @@ async function enqueuePayout(env: Env, input: {
   }
   const prefix = input.kind === 'refund' ? 'REF' : input.kind === 'fee_sweep' ? 'SWEEP' : 'SET';
   const reference = moneyRef(prefix);
+  const gateway: Gateway = gatewayPreference(env, input.gateway) === 'lenco' ? 'lenco' : 'lipila';
   const { meta } = await env.DB.prepare(
-    `INSERT INTO payouts (kind, payment_id, job_id, phone, amount_zmw, reference, status, next_attempt_at, needs_admin_confirm)
-     VALUES (?1,?2,?3,?4,?5,?6,'queued',datetime('now'),?7)`,
-  ).bind(input.kind, input.paymentId ?? null, input.jobId ?? null, input.phone, input.amount, reference, input.needsAdminConfirm ? 1 : 0).run();
-  await logLipila(env, 'disbursement', reference, input.phone, input.amount, 'pending', 'queued');
+    `INSERT INTO payouts (kind, payment_id, job_id, phone, amount_zmw, reference, gateway, status, next_attempt_at, needs_admin_confirm)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'queued',datetime('now'),?8)`,
+  ).bind(input.kind, input.paymentId ?? null, input.jobId ?? null, input.phone, input.amount, reference, gateway, input.needsAdminConfirm ? 1 : 0).run();
+  await logLipila(env, 'disbursement', reference, input.phone, input.amount, 'pending', 'queued', gateway);
   return { id: meta.last_row_id as number, reference, duplicate: false };
 }
 
 async function runPayoutQueue(env: Env): Promise<void> {
   try {
-    // 1) Reconcile transfers already handed to Lipila — the webhook can be lost.
+    // 1) Reconcile transfers already handed to a provider — webhook can be lost.
     const pending = await env.DB.prepare(
-      `SELECT id, reference FROM payouts WHERE status = 'pending'
+      `SELECT id, reference, gateway FROM payouts WHERE status = 'pending'
          AND updated_at < datetime('now', '-2 minutes') ORDER BY id LIMIT 20`,
     ).all<any>();
     for (const p of pending.results ?? []) {
-      const d = await lipilaDisburseStatusDetail(env, p.reference);
+      const d = await transferStatus(env, (p.gateway ?? 'lipila') as Gateway, p.reference);
       if (d.status === 'pending') continue;
       if (d.status === 'success') await settlePayoutSuccess(env, p.id);
-      else await failPayout(env, p.id, d.reason ?? 'Lipila reported failed');
+      else await failPayout(env, p.id, d.reason ?? 'Payment provider reported failed');
     }
     // 2) Attempt queued payouts and retry failed ones after their backoff.
     const due = await env.DB.prepare(
@@ -7100,25 +7115,27 @@ async function runPayoutQueue(env: Env): Promise<void> {
       ).bind(p.id).run();
       if (!claim.meta.changes) continue;
       const note = p.kind === 'refund' ? `DropOff refund ${p.reference}` : `DropOff settlement ${p.reference}`;
-      const disb = await lipilaDisburse(env, p.phone, Number(p.amount_zmw), p.reference, note);
+      const disb = await transferWithGateway(env, p.gateway === 'lenco' ? 'lenco' : undefined,
+        p.phone, Number(p.amount_zmw), p.reference, note);
       const disbError = String(disb.raw ?? '').trim().length === 0
-        ? `Lipila HTTP ${disb.status}${disb.status === 401 ? ' (check LIPILA_API_KEY / IP allowlist)' : ''}`
+        ? `${disb.gateway === 'lenco' ? 'Lenco' : 'Lipila'} HTTP ${disb.status}${disb.status === 401 ? ' (check API key / account access)' : ''}`
         : String(disb.raw).slice(0, 300);
       await logLipila(env, 'disbursement', p.reference, p.phone, Number(p.amount_zmw),
-        disb.ok ? 'pending' : 'failed', disbError);
+        disb.ok ? 'pending' : 'failed', disbError, disb.gateway);
       if (disb.ok) {
         await env.DB.prepare(
-          `UPDATE payouts SET status = 'pending', lipila_identifier = COALESCE(?2, lipila_identifier),
-             last_error = NULL, next_attempt_at = datetime('now', '+2 minutes'), updated_at = datetime('now')
+          `UPDATE payouts SET status = 'pending', gateway = ?2, lipila_identifier = COALESCE(?3, lipila_identifier),
+             gateway_identifier = COALESCE(?3, gateway_identifier), last_error = NULL,
+             next_attempt_at = datetime('now', '+2 minutes'), updated_at = datetime('now')
            WHERE id = ?1`,
-        ).bind(p.id, disb.lipilaReference ?? null).run();
+        ).bind(p.id, disb.gateway, disb.providerReference ?? null).run();
       } else {
         await env.DB.prepare(
-          `UPDATE payouts SET status = 'failed', last_error = ?2,
-             next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
+          `UPDATE payouts SET status = 'failed', gateway = ?2, gateway_identifier = COALESCE(?3, gateway_identifier),
+             last_error = ?4, next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
            WHERE id = ?1`,
-        ).bind(p.id, disbError).run();
-        await notifyPayout(env, 'Payout retry scheduled', `Payout ${p.reference} failed — retrying in 30 minutes. Check Lipila float/keys.`);
+        ).bind(p.id, disb.gateway, disb.providerReference ?? null, disbError).run();
+        await notifyPayout(env, 'Payout retry scheduled', `Payout ${p.reference} failed — retrying in 30 minutes. Check provider keys/float.`);
       }
     }
   } catch (e) {
@@ -7129,23 +7146,27 @@ async function runPayoutQueue(env: Env): Promise<void> {
 app.get('/payments/:id/status', async (c) => {
   const id = Number(c.req.param('id'));
   const pay = await c.env.DB.prepare(
-    'SELECT id, job_id, phone, provider, amount_zmw, lipila_reference, status, kind, meta FROM payments WHERE id = ?1',
+    'SELECT id, job_id, phone, provider, amount_zmw, lipila_reference, gateway, gateway_reference, status, kind, meta FROM payments WHERE id = ?1',
   ).bind(id).first<any>();
   if (!pay) return c.json({ error: 'not found' }, 404);
   const isOwner = c.get('phone') === pay.phone || c.get('role') === 'ops';
   if (!isOwner) return c.json({ error: 'forbidden' }, 403);
 
-  if (pay.status === 'pending' && pay.lipila_reference) {
-    const { status, reason } = await lipilaStatusDetail(c.env, pay.lipila_reference);
+  const reference = pay.gateway_reference ?? pay.lipila_reference;
+  if (pay.status === 'pending' && reference) {
+    const gateway = (pay.gateway ?? 'lipila') as Gateway;
+    const { status, reason } = pay.kind === 'cod_remit' || pay.kind === 'rider_reimbursement' || pay.kind === 'refund'
+      ? await transferStatus(c.env, gateway, reference)
+      : await collectionStatus(c.env, gateway, reference);
     if (status !== 'pending') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
       await recordFailReason(c.env, pay.id, reason);
       await settlePaymentSuccess(c.env, pay.id, status);
-      return c.json({ status, fail_reason: reason ?? null });
+      return c.json({ status, fail_reason: reason ?? null, gateway });
     }
-    return c.json({ status, fail_reason: failReasonOf(pay.meta) });
+    return c.json({ status, fail_reason: failReasonOf(pay.meta), gateway });
   }
-  return c.json({ status: pay.status, fail_reason: failReasonOf(pay.meta) });
+  return c.json({ status: pay.status, fail_reason: failReasonOf(pay.meta), gateway: pay.gateway ?? 'lipila' });
 });
 
 // HELD-PAYMENT RECONCILE (owner bug 2026-11-17: "I paid but the payment
@@ -7164,7 +7185,7 @@ app.get('/jobs/:ref/payments', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
   const pay = await c.env.DB.prepare(
-    'SELECT id, phone, amount_zmw, status, kind, lipila_reference, meta, created_at FROM payments WHERE job_id = ?1 ORDER BY id DESC LIMIT 1',
+    'SELECT id, phone, amount_zmw, status, kind, lipila_reference, gateway, gateway_reference, meta, created_at FROM payments WHERE job_id = ?1 ORDER BY id DESC LIMIT 1',
   ).bind(job.id).first<any>();
   // JOB-PAID OVERRIDE (owner bug 2026-11-17: "booking succeeds, money
   // deducted, screen never flips"): the JOB being paid is the truth this
@@ -7180,8 +7201,10 @@ app.get('/jobs/:ref/payments', async (c) => {
     });
   }
   if (!pay) return c.json({ payment: null });
-  if (pay.status === 'pending' && pay.kind !== 'cod_remit' && pay.kind !== 'rider_reimbursement' && pay.lipila_reference) {
-    const { status, reason } = await lipilaStatusDetail(c.env, pay.lipila_reference);
+  const reference = pay.gateway_reference ?? pay.lipila_reference;
+  if (pay.status === 'pending' && pay.kind !== 'cod_remit' && pay.kind !== 'rider_reimbursement' && pay.kind !== 'refund' && reference) {
+    const gateway = (pay.gateway ?? 'lipila') as Gateway;
+    const { status, reason } = await collectionStatus(c.env, gateway, reference);
     if (status !== 'pending') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
       await recordFailReason(c.env, pay.id, reason);
@@ -7197,6 +7220,7 @@ app.get('/jobs/:ref/payments', async (c) => {
       amount_zmw: pay.amount_zmw,
       phone: pay.phone,
       kind: pay.kind,
+      gateway: pay.gateway ?? 'lipila',
       created_at: pay.created_at,
       fail_reason: failReasonOf(pay.meta),
     },
@@ -7242,6 +7266,8 @@ app.get('/payments/:id/receipt', async (c) => {
     refund_of_payment_id: pay.refund_of_payment_id ?? null,
     refunded_at: pay.refunded_at ?? null,
     lipila_reference: pay.lipila_reference ?? null,
+    gateway: pay.gateway ?? 'lipila',
+    gateway_reference: pay.gateway_reference ?? pay.lipila_reference,
   });
 });
 
@@ -7267,14 +7293,14 @@ app.post('/webhooks/lipila', async (c) => {
   const ref = b.reference ?? b.data?.reference;
   if (!ref) return c.json({ ok: true });
 
-  // Our own payouts (REF-/SET-/SWEEP-): never trust the body. Ask Lipila for
-  // the authoritative disbursement status, then settle idempotently.
+  // Our own payouts (REF-/SET-/SWEEP-): never trust the body. Ask the gateway
+  // for the authoritative transfer status, then settle idempotently.
   const payout = await c.env.DB.prepare(
-    'SELECT id, status FROM payouts WHERE reference = ?1',
+    "SELECT id, status, gateway FROM payouts WHERE reference = ?1 AND gateway = 'lipila'",
   ).bind(String(ref)).first<any>();
   if (payout) {
     if (payout.status === 'pending' || payout.status === 'processing') {
-      const d = await lipilaDisburseStatusDetail(c.env, String(ref));
+      const d = await transferStatus(c.env, 'lipila', String(ref));
       if (d.status === 'success') await settlePayoutSuccess(c.env, payout.id);
       else if (d.status === 'failed') await failPayout(c.env, payout.id, d.reason ?? 'Lipila reported failed');
     }
@@ -7282,27 +7308,74 @@ app.post('/webhooks/lipila', async (c) => {
   }
 
   const pay = await c.env.DB.prepare(
-    'SELECT id, status, kind, lipila_reference FROM payments WHERE lipila_reference = ?1 ORDER BY id DESC LIMIT 1',
+    "SELECT id, status, kind, lipila_reference, gateway_reference FROM payments WHERE COALESCE(gateway_reference, lipila_reference) = ?1 AND gateway = 'lipila' ORDER BY id DESC LIMIT 1",
   ).bind(String(ref)).first<any>();
   if (!pay) return c.json({ ok: true });
 
-  if (pay.kind === 'cod_remit' || pay.kind === 'rider_reimbursement') {
-    // Our own disbursements: the body is UNVERIFIED. Without the shared
-    // secret we never flip a payout to success from a bare POST — the
-    // disbursement caller already records the final status from Lipila's
-    // own response. With the secret configured, the origin check at the
-    // top of this handler has passed, so upgrading to success is sound.
-    // ONLY a secret-verified callback may flip these straight to success —
-    // a bare POST is insufficient proof for our own outbound disbursements.
+  if (pay.kind === 'cod_remit' || pay.kind === 'rider_reimbursement' || pay.kind === 'refund') {
     if (verified && pay.status !== 'success') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, 'success').run();
     }
     return c.json({ ok: true });
   }
 
-  if (pay.status === 'pending' && pay.lipila_reference) {
-    // authoritative check straight from Lipila — body status is advisory only
-    const { status, reason } = await lipilaStatusDetail(c.env, pay.lipila_reference);
+  const reference = pay.gateway_reference ?? pay.lipila_reference;
+  if (pay.status === 'pending' && reference) {
+    const { status, reason } = await collectionStatus(c.env, 'lipila', reference);
+    if (status !== 'pending') {
+      await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
+      await recordFailReason(c.env, pay.id, reason);
+      await settlePaymentSuccess(c.env, pay.id, status);
+      return c.json({ ok: true, status });
+    }
+  }
+  return c.json({ ok: true, status: pay.status });
+});
+
+/* ---------------------------- Lenco webhook ------------------------------- */
+// Lenco signs the RAW body with HMAC-SHA512 using SHA256(API token). The body
+// status is advisory only: every match is re-verified against Lenco before any
+// payment/payout is settled.
+app.post('/webhooks/lenco', async (c) => {
+  const raw = await c.req.text();
+  const signature = c.req.header('X-Lenco-Signature') ?? '';
+  if (!await verifyLencoWebhook(c.env, raw, signature)) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+  const b: any = JSON.parse(raw || '{}');
+  const ref = b?.data?.reference ?? b?.reference;
+  if (!ref) return c.json({ ok: true });
+
+  const payout = await c.env.DB.prepare(
+    "SELECT id, status FROM payouts WHERE reference = ?1 AND gateway = 'lenco'",
+  ).bind(String(ref)).first<any>();
+  if (payout) {
+    if (payout.status === 'pending' || payout.status === 'processing') {
+      const d = await transferStatus(c.env, 'lenco', String(ref));
+      if (d.status === 'success') await settlePayoutSuccess(c.env, payout.id);
+      else if (d.status === 'failed') await failPayout(c.env, payout.id, d.reason ?? 'Lenco reported failed');
+    }
+    return c.json({ ok: true });
+  }
+
+  const pay = await c.env.DB.prepare(
+    "SELECT id, status, kind, gateway_reference FROM payments WHERE gateway_reference = ?1 AND gateway = 'lenco' ORDER BY id DESC LIMIT 1",
+  ).bind(String(ref)).first<any>();
+  if (!pay) return c.json({ ok: true });
+
+  if (pay.kind === 'cod_remit' || pay.kind === 'rider_reimbursement' || pay.kind === 'refund') {
+    if (pay.status !== 'success') {
+      const d = await transferStatus(c.env, 'lenco', String(ref));
+      if (d.status !== 'pending') {
+        await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, d.status).run();
+        await recordFailReason(c.env, pay.id, d.reason);
+      }
+    }
+    return c.json({ ok: true });
+  }
+
+  if (pay.status === 'pending') {
+    const { status, reason } = await collectionStatus(c.env, 'lenco', String(ref));
     if (status !== 'pending') {
       await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
       await recordFailReason(c.env, pay.id, reason);
@@ -9449,21 +9522,22 @@ app.post('/subscriptions/upgrade', async (c) => {
   const platformFeeZmw = platformFee(prorated);
   const amount = round2(prorated + platformFeeZmw + MOMO_COLLECTION_FEE);
   const lipilaRef = `upg-${sub.id}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
-  const init = await lipilaCollect(c.env, phone, amount, lipilaRef, `DropOff ${tier} upgrade (prorated)`);
+  const init = await collectWithGateway(c.env, b.gateway, phone, amount, lipilaRef, `DropOff ${tier} upgrade (prorated)`);
   if (!init.ok) {
     // revert the bump so a failed collect never leaves a free upgrade
     await c.env.DB.prepare('UPDATE subscriptions SET tier = ?2 WHERE id = ?1').bind(sub.id, sub.tier).run();
-    return c.json({ error: 'lipila_init_failed', detail: init.raw }, 502);
+    return c.json({ error: `${init.gateway}_init_failed`, detail: init.raw, gateway: init.gateway }, 502);
   }
   const provider: Provider = providerFromPhone(phone);
   await c.env.DB.prepare(
     `INSERT INTO payments (subscription_id, phone, provider, amount_zmw, platform_fee_zmw,
-       lipila_fee_zmw, lipila_reference, status, channel, kind, meta)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'pending','merchant','upgrade',?8)`,
+       lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind, meta)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending','merchant','upgrade',?10)`,
   ).bind(sub.id, phone, provider, amount, platformFeeZmw, MOMO_COLLECTION_FEE,
-    init.lipilaReference ?? null, JSON.stringify({ prevTier: sub.tier, newTier: tier, prorated })).run();
+    init.providerReference ?? init.reference, init.gateway, init.reference,
+    JSON.stringify({ prevTier: sub.tier, newTier: tier, prorated })).run();
   return c.json({ ok: true, tier, prorated_zmw: prorated, amount_zmw: amount,
-    note: 'Approve the Lipila prompt. Your bigger cap is already live.' });
+    gateway: init.gateway, note: 'Approve the mobile-money prompt. Your bigger cap is already live.' });
 });
 
 /* ------------------ admin (superadmin pricebook + ops) -------------------- */
@@ -9936,14 +10010,17 @@ app.post('/admin/payroll/:id/confirm', async (c) => {
       // The owner alone may collapse both steps in one go (small team reality),
       // but the receipt still records both confirmations explicitly.
       const disbRef = `payroll-${row.id}-${Date.now().toString(36)}`;
-      const disb = await lipilaDisburse(c.env, row.rider_phone, row.amount_zmw, disbRef, `DropOff rider payroll ${row.period_kind} ${row.period_start}`);
+      const disb = await transferWithGateway(c.env, row.gateway === 'lenco' ? 'lenco' : undefined,
+        row.rider_phone, row.amount_zmw, disbRef, `DropOff rider payroll ${row.period_kind} ${row.period_start}`);
       await c.env.DB.prepare(
         `UPDATE rider_payroll SET status = ?2, admin_confirm_by = ?3, admin_confirm_at = datetime('now'),
             confirmed_by = ?3, confirmed_at = datetime('now'),
-            lipila_reference = ?4, paid_at = CASE WHEN ?5 = 1 THEN datetime('now') ELSE paid_at END,
+            lipila_reference = ?4, gateway = ?7, gateway_reference = ?8, gateway_identifier = ?9,
+            paid_at = CASE WHEN ?5 = 1 THEN datetime('now') ELSE paid_at END,
             note = COALESCE(?6, note) WHERE id = ?1`,
-      ).bind(id, disb.ok ? 'paid' : 'failed', adminIdentity, disb.lipilaReference ?? disbRef, disb.ok ? 1 : 0,
-        disb.ok ? null : `Lipila disbursement failed: ${String(disb.raw ?? '').slice(0, 200)}`).run();
+      ).bind(id, disb.ok ? 'paid' : 'failed', adminIdentity, disb.providerReference ?? disb.reference, disb.ok ? 1 : 0,
+        disb.ok ? null : `${disb.gateway} disbursement failed: ${String(disb.raw ?? '').slice(0, 200)}`,
+        disb.gateway, disb.reference, disb.providerReference ?? null).run();
       return c.json({ ok: true, status: disb.ok ? 'paid' : 'failed', owner_collapsed: true });
     }
     await c.env.DB.prepare(
@@ -9954,13 +10031,16 @@ app.post('/admin/payroll/:id/confirm', async (c) => {
   if (row.status === 'admin_confirmed') {
     if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
     const disbRef = `payroll-${row.id}-${Date.now().toString(36)}`;
-    const disb = await lipilaDisburse(c.env, row.rider_phone, row.amount_zmw, disbRef, `DropOff rider payroll ${row.period_kind}`);
+    const disb = await transferWithGateway(c.env, row.gateway === 'lenco' ? 'lenco' : undefined,
+      row.rider_phone, row.amount_zmw, disbRef, `DropOff rider payroll ${row.period_kind}`);
     await c.env.DB.prepare(
       `UPDATE rider_payroll SET status = ?2, confirmed_by = ?3, confirmed_at = datetime('now'),
-          lipila_reference = ?4, paid_at = CASE WHEN ?5 = 1 THEN datetime('now') ELSE paid_at END,
+          lipila_reference = ?4, gateway = ?7, gateway_reference = ?8, gateway_identifier = ?9,
+          paid_at = CASE WHEN ?5 = 1 THEN datetime('now') ELSE paid_at END,
           note = COALESCE(?6, note) WHERE id = ?1`,
-    ).bind(id, disb.ok ? 'paid' : 'failed', c.get('phone') ?? 'admin-key', disb.lipilaReference ?? disbRef,
-      disb.ok ? 1 : 0, disb.ok ? null : `Lipila disbursement failed: ${String(disb.raw ?? '').slice(0, 200)}`).run();
+    ).bind(id, disb.ok ? 'paid' : 'failed', c.get('phone') ?? 'admin-key', disb.providerReference ?? disb.reference,
+      disb.ok ? 1 : 0, disb.ok ? null : `${disb.gateway} disbursement failed: ${String(disb.raw ?? '').slice(0, 200)}`,
+      disb.gateway, disb.reference, disb.providerReference ?? null).run();
     return c.json({ ok: true, status: disb.ok ? 'paid' : 'failed' });
   }
   return c.json({ error: 'invalid_state', status: row.status }, 409);
@@ -10471,7 +10551,8 @@ app.get('/admin/counter-fares', async (c) => {
             r.full_name AS rider_name, r.phone AS rider_phone,
             p.status AS last_payment_status, p.amount_zmw AS last_payment_amount,
             p.created_at AS last_payment_at, p.meta AS last_payment_meta,
-            p.lipila_reference AS last_payment_ref
+            p.gateway AS last_payment_gateway,
+            COALESCE(p.gateway_reference, p.lipila_reference) AS last_payment_ref
        FROM jobs j
        LEFT JOIN riders r ON r.id = j.rider_id
        LEFT JOIN payments p ON p.id = (
@@ -10509,13 +10590,15 @@ app.post('/admin/jobs/:ref/counter-fare-prompt', async (c) => {
   }
   // A pending prompt IS the prompt — never fire a second one.
   const pending = await c.env.DB.prepare(
-    `SELECT id, amount_zmw, lipila_reference FROM payments
+    `SELECT id, amount_zmw, lipila_reference, gateway, gateway_reference FROM payments
       WHERE job_id = ?1 AND kind = 'counter_fare' AND status = 'pending' ORDER BY id DESC LIMIT 1`,
   ).bind(job.id).first<any>();
   if (pending) {
     return c.json({
       ok: true, reused_prompt: true, payment_id: pending.id,
       amount_zmw: pending.amount_zmw, lipila_reference: pending.lipila_reference,
+      gateway: pending.gateway ?? 'lipila',
+      gateway_reference: pending.gateway_reference ?? pending.lipila_reference,
     });
   }
   const fees = await counterFareFees(c.env, phone, receipt);
@@ -10524,19 +10607,20 @@ app.post('/admin/jobs/:ref/counter-fare-prompt', async (c) => {
     `SELECT COUNT(*) AS n FROM payments WHERE job_id = ?1 AND kind = 'counter_fare' AND status = 'failed'`,
   ).bind(job.id).first<any>();
   const lipilaRef = `cfare-${job.ref}-admin-${Number(failed?.n ?? 0) + 1}`;
-  const init = await lipilaCollect(c.env, phone, amount, lipilaRef, 'DropOff depot counter fare');
+  const init = await collectWithGateway(c.env, body.gateway, phone, amount, lipilaRef, 'DropOff depot counter fare');
   if (!init.ok) {
     console.error(JSON.stringify({
       where: 'admin_counter_fare_prompt', event: 'prompt_start_failed', ref: job.ref,
-      amount, status: init.status, detail: init.raw,
+      amount, gateway: init.gateway, status: init.status, detail: init.raw,
     }));
-    return c.json({ error: 'lipila_init_failed', detail: init.raw, provider_status: init.status }, 502);
+    return c.json({ error: `${init.gateway}_init_failed`, detail: init.raw, gateway: init.gateway, provider_status: init.status }, 502);
   }
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO payments (job_id, phone, provider, amount_zmw, platform_fee_zmw, lipila_fee_zmw,
-       lipila_reference, status, channel, kind) VALUES (?1,?2,?3,?4,?5,?6,?7,'pending','merchant','counter_fare')`,
+       lipila_reference, gateway, gateway_reference, status, channel, kind)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending','merchant','counter_fare')`,
   ).bind(job.id, phone, providerFromPhone(phone), amount, fees.platformFeeZmw, fees.lipilaFeeZmw,
-    init.lipilaReference ?? lipilaRef).run();
+    init.providerReference ?? init.reference, init.gateway, init.reference).run();
   const actor = c.get('phone') ?? 'admin';
   await c.env.DB.prepare(
     'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
@@ -10548,7 +10632,9 @@ app.post('/admin/jobs/:ref/counter-fare-prompt', async (c) => {
     body: `DropOff sent a K${amount.toFixed(2)} momo prompt for the depot receipt on ${job.ref}. Approve it on your phone to unlock the photo.`,
     data: { job_ref: job.ref, kind: 'counter_fare_prompt' },
   }).catch(() => {});
-  return c.json({ ok: true, payment_id: meta.last_row_id, amount_zmw: amount, lipila_reference: init.lipilaReference ?? lipilaRef });
+  return c.json({ ok: true, payment_id: meta.last_row_id, amount_zmw: amount,
+    lipila_reference: init.providerReference ?? init.reference, gateway: init.gateway,
+    gateway_reference: init.reference });
 });
 
 // RECOVERY: a sender can be blocked from ALL new bookings by one unpaid depot
@@ -12184,7 +12270,7 @@ app.post('/admin/payments/:id/refund', async (c) => {
   if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
   const id = Number(c.req.param('id'));
   const pay = await c.env.DB.prepare(
-    `SELECT id, job_id, phone, provider, amount_zmw, status FROM payments WHERE id = ?1`,
+    `SELECT id, job_id, phone, provider, amount_zmw, status, gateway FROM payments WHERE id = ?1`,
   ).bind(id).first<any>();
   if (!pay) return c.json({ error: 'not found' }, 404);
   if (pay.status !== 'success') return c.json({ error: 'only settled payments can be refunded' }, 409);
@@ -12197,6 +12283,7 @@ app.post('/admin/payments/:id/refund', async (c) => {
   const payout = await enqueuePayout(c.env, {
     kind: 'refund', paymentId: pay.id, jobId: pay.job_id,
     phone: pay.phone, amount, note: `DropOff refund payment ${pay.id}`,
+    gateway: pay.gateway === 'lenco' ? 'lenco' : undefined,
   });
   if (pay.job_id) {
     await c.env.DB.prepare(
@@ -12207,7 +12294,7 @@ app.post('/admin/payments/:id/refund', async (c) => {
   return c.json({
     ok: true, queued: true, payout_id: payout.id, refund_reference: payout.reference,
     amount_zmw: amount, duplicate: payout.duplicate,
-    hint: 'Refund queued. Lipila confirms within minutes; the owner is notified on success or each retry.',
+    hint: 'Refund queued. The payment provider confirms within minutes; the owner is notified on success or each retry.',
   }, 202);
 });
 
@@ -12263,7 +12350,14 @@ app.get('/admin/lipila/diagnose', async (c) => {
     baseUrl: lipilaBase(c.env),
     keyPrefix: lipilaApiKey(c.env) ? `${lipilaApiKey(c.env).slice(0, 8)}...` : 'NOT SET',
     callbackUrl: c.env.LIPILA_CALLBACK_URL ?? null,
+    gateway: c.env.PAYMENT_GATEWAY ?? 'auto',
+    lencoBase: lencoBase(c.env),
+    lencoAccountId: lencoAccountId(c.env),
   };
+  try {
+    out.lencoAccounts = await lencoAccounts(c.env);
+    out.lencoBalance = await lencoBalance(c.env);
+  } catch (e) { out.lencoError = String(e).slice(0, 300); }
   try {
     const r = await fetch('https://ifconfig.me/ip', { signal: AbortSignal.timeout(6000) });
     out.outboundIp = (await r.text()).trim();
@@ -12396,14 +12490,14 @@ async function billExpiringSubscriptions(env: Env): Promise<{ billed: number; fa
     // pack renewals carry the full collection fees (platform cut + Lipila legs)
     const pf = platformFee(plan.fee_zmw);
     const renewAmount = round2(plan.fee_zmw + pf + MOMO_COLLECTION_FEE);
-    const init = await lipilaCollect(env, sub.phone, renewAmount, ref, `DropOff ${sub.tier} pack renewal`);
+    const init = await collectWithGateway(env, undefined, sub.phone, renewAmount, ref, `DropOff ${sub.tier} pack renewal`);
     if (init.ok) {
       await env.DB.prepare(
         `INSERT INTO payments (phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-           lipila_fee_zmw, lipila_reference, status, channel, kind, subscription_id)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,'pending','merchant','subscription',?8)`,
+           lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind, subscription_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending','merchant','subscription',?10)`,
       ).bind(sub.phone, providerFromPhone(sub.phone), renewAmount, plan.fee_zmw, pf, MOMO_COLLECTION_FEE,
-        init.lipilaReference ?? null, sub.id).run();
+        init.providerReference ?? init.reference, init.gateway, init.reference, sub.id).run();
       billed++;
     } else {
       failed++;
@@ -12667,14 +12761,15 @@ async function refundUnspentPrepaid(
   const unspent = round2(prepaid - Math.max(0, spent) - Math.max(0, refunded));
   if (unspent < 0.5) return; // fully spent or already refunded — nothing to return
   const ref = `prepay_refund-${job.id}-${Date.now().toString(36)}`;
-  const disb = await lipilaDisburse(env, job.sender_phone, unspent, ref,
+  const source = await env.DB.prepare('SELECT gateway FROM payments WHERE id = ?1').bind(dep?.first_id ?? 0).first<any>();
+  const disb = await transferWithGateway(env, source?.gateway === 'lenco' ? 'lenco' : undefined, job.sender_phone, unspent, ref,
     `DropOff unspent prepayment ${job.ref ?? job.id}`.replace(/[^A-Za-z0-9 ]/g, ' '));
   if (!disb.ok) {
     // keep the credit exactly as it is; ops refunds it manually (admin refund
     // endpoint pays the sender's momo). Flag it on the job so it can't rot.
     await env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'prepaid_refund_failed', ?2)`,
-    ).bind(job.id, `Auto-cancel: unspent prepayment K${unspent.toFixed(2)} could not be paid back to momo (Lipila payout failed — e.g. insufficient disbursement float or receiver off) — refund manually via /admin/payments/:id/refund.`).run();
+    ).bind(job.id, `Auto-cancel: unspent prepayment K${unspent.toFixed(2)} could not be paid back to momo (payout failed — e.g. insufficient float or receiver off) — refund manually via /admin/payments/:id/refund.`).run();
     return;
   }
   // Audit row only — no balance to drain (customers hold no stored value);
@@ -12684,9 +12779,10 @@ async function refundUnspentPrepaid(
       .bind(job.sender_phone, -unspent, job.id),
     env.DB.prepare(
       `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-         lipila_fee_zmw, lipila_reference, status, channel, kind, refund_of_payment_id, refunded_at)
-       VALUES (?1,?2,?3,?4,0,0,0,?5,'pending','merchant','refund',?6,datetime('now'))`,
-    ).bind(job.id, job.sender_phone, 'lipila', unspent, ref, dep?.first_id ?? null),
+         lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind, refund_of_payment_id, refunded_at)
+       VALUES (?1,?2,?3,?4,0,0,0,?5,?6,?7,'pending','merchant','refund',?8,datetime('now'))`,
+    ).bind(job.id, job.sender_phone, providerFromPhone(job.sender_phone), unspent,
+      disb.providerReference ?? disb.reference, disb.gateway, disb.reference, dep?.first_id ?? null),
   ]);
   await sendSms(env, job.sender_phone,
     `DropOff: ${job.ref ?? ''} was canceled before pickup. Your unspent prepayment of K${unspent.toFixed(2)} has been returned to your momo.`, { transactional: true }).catch(() => {});
@@ -13055,16 +13151,17 @@ async function materializeRecurringJobs(env: Env): Promise<{ created: number; sk
           }
         } else {
           const depAmount = round2(riderFee + round2(platformFee(riderFee)) + MOMO_COLLECTION_FEE);
-          const collect = await lipilaCollect(env, plan.phone, depAmount,
-            `adv-${ref}`, `DropOff advance ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' ')).catch(() => ({ ok: false } as any));
+          const collect = await collectWithGateway(env, undefined, plan.phone, depAmount,
+            `adv-${ref}`, `DropOff advance ${ref}`.replace(/[^A-Za-z0-9 ]/g, ' '));
           if (collect.ok) {
             await env.DB.batch([
               env.DB.prepare(
                 `INSERT INTO payments (job_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
-                   lipila_fee_zmw, lipila_reference, status, channel, kind)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 'merchant', 'booking_deposit')`,
+                   lipila_fee_zmw, lipila_reference, gateway, gateway_reference, status, channel, kind)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', 'merchant', 'booking_deposit')`,
               ).bind(meta.last_row_id, plan.phone, providerFromPhone(plan.phone), depAmount, depAmount,
-                round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, collect.lipilaReference ?? `adv-${ref}`),
+                round2(platformFee(riderFee)), MOMO_COLLECTION_FEE, collect.providerReference ?? collect.reference,
+                collect.gateway, collect.reference),
               env.DB.prepare('INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)')
                 .bind(meta.last_row_id, 'advance_pending', 'Advance payment prompt sent for this standing order — dispatch at settlement.'),
             ]);
