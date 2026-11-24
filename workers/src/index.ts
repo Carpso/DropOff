@@ -8943,6 +8943,41 @@ app.post('/jobs/:ref/decline', async (c) => {
   return c.json({ ok: true, ref, returned_to_board: true });
 });
 
+/* -------- SOS: a rider in trouble pings every other rider (2026-11-24) -- */
+app.post('/rider/sos', async (c) => {
+  const phone = c.get('phone');
+  if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
+  const rider = await c.env.DB.prepare(
+    'SELECT id, full_name, last_lat, last_lng FROM riders WHERE phone = ?1',
+  ).bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_required' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const lat = Number(b?.lat ?? rider.last_lat ?? 0);
+  const lng = Number(b?.lng ?? rider.last_lng ?? 0);
+  const note = String(b?.note ?? '').trim().slice(0, 200);
+  const city = String(b?.city ?? '').trim().slice(0, 60) || null;
+  await c.env.DB.prepare(
+    `INSERT INTO sos_events (rider_phone, rider_name, lat, lng, city, note) VALUES (?1,?2,?3,?4,?5,?6)`,
+  ).bind(phone, rider.full_name ?? phone, lat || null, lng || null, city, note || null).run();
+
+  // Ping every OTHER active rider. High-priority data-only so it rings like
+  // an incoming order even with the app closed.
+  const { results } = await c.env.DB.prepare(
+    `SELECT phone FROM riders WHERE active = 1 AND phone != ?1`,
+  ).bind(phone).all<{ phone: string }>();
+  const body = `SOS from ${rider.full_name ?? 'a rider'}${lat && lng ? ` near ${lat.toFixed(4)},${lng.toFixed(4)}` : ''}. Open the Task Queue and help if you can.`;
+  c.executionCtx.waitUntil(
+    Promise.all((results ?? []).map((r) =>
+      sendToPhone(c.env, r.phone, {
+        title: 'SOS - rider needs help',
+        body,
+        data: { kind: 'sos', lat: String(lat), lng: String(lng), rider_phone: phone },
+      }).catch(() => {}),
+    )),
+  );
+  return c.json({ ok: true, alerted: (results ?? []).length });
+});
+
 // RIDER TRIP TRANSFER (owner 2026-11-21): at ANY active stage (including stuck
 // in a depot queue), an assigned rider (or staff) can hand the job to another
 // active rider. Everything that shows the rider reads jobs.rider_id at request

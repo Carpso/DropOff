@@ -579,6 +579,39 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// vibrate the phone and keep the screen awake so the rider sees a new
   /// order even with the phone idle — the worker's FCM push is the loudest
   /// alert, but the queue screen catching one alerts the rider immediately.
+  Future<void> _triggerSos() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send SOS?'),
+        content: const Text(
+          'This alerts every other DropOff rider with your location and asks for help. '
+          'Only use in a real emergency.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Send SOS'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final pos = _riderPos;
+    final res = await DropOffApi.riderSos(
+      lat: pos?.latitude,
+      lng: pos?.longitude,
+    );
+    if (!mounted) return;
+    if (res.ok) {
+      AppToast.show(context, 'SOS sent to ${res.body['alerted'] ?? 'all'} riders. Help is on the way.');
+    } else {
+      AppToast.error(context, 'Could not send SOS - check your connection and try again.');
+    }
+  }
+
   Future<void> _ringForNewJobs(dynamic batches) async {
     if (!mounted) return;
     final refs = <String>{};
@@ -2537,6 +2570,13 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen())),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _triggerSos,
+        backgroundColor: AppColors.danger,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.sos_rounded),
+        label: const Text('SOS', style: TextStyle(fontWeight: FontWeight.w900)),
       ),
       body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (_offline)

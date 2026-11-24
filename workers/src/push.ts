@@ -81,7 +81,8 @@ export interface PushPayload {
  *  sounds (owner 2026-11-23). */
 export function isOrderAlert(kind: string): boolean {
   return kind === 'rider_assigned' || kind === 'trip_transferred' ||
-    kind === 'job_assigned' || kind === 'new_order' || kind === 'claim_available';
+    kind === 'job_assigned' || kind === 'new_order' || kind === 'claim_available' ||
+    kind === 'sos';
 }
 
 /** Android notification channel — the app pre-creates these channels with

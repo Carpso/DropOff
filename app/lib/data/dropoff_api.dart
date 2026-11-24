@@ -1213,6 +1213,14 @@ class DropOffApi {
   /// Claim one available-order. 409 already_claimed when another rider won.
   static Future<ApiResponse> claimJob(String ref) => post('/jobs/$ref/claim', const {});
 
+  /// SOS: a rider in trouble pings every other rider (high-priority alert).
+  static Future<ApiResponse> riderSos({double? lat, double? lng, String? note}) =>
+      post('/rider/sos', {
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      });
+
   /// inDrive-style answer to an incoming order: acknowledge it (idempotent) or
   /// hand it back to the order board for another rider.
   static Future<ApiResponse> acceptJob(String ref) => post('/jobs/$ref/accept', const {});

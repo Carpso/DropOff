@@ -366,6 +366,7 @@ class PushService {
         'chat' => 'New message',
         'support_reply' => 'DropOff support replied',
         'security_alert' => 'DropOff security alert',
+        'sos' => 'SOS - rider needs help',
         'push_test' => 'DropOff — push test',
         _ => 'DropOff',
       };
