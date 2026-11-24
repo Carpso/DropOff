@@ -76,6 +76,7 @@ class InAppNavigatorScreen extends StatefulWidget {
 
 class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   LatLng? _me;
+  double _speedKmh = 0;
   LatLng _destPos = const LatLng(0, 0);
   String _destLabel = '';
   RouteResult? _route;
@@ -152,7 +153,8 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     ).listen((pos) {
       if (!mounted) return;
       final me = LatLng(pos.latitude, pos.longitude);
-      setState(() => _me = me);
+      final kmh = (pos.speed * 3.6).clamp(0.0, 200.0);
+      setState(() { _me = me; _speedKmh = kmh; });
       final moved = _lastRouteFix == null ||
           const Distance().as(LengthUnit.Meter, _lastRouteFix!, me) > 150;
       if (_route == null || moved) unawaited(_refreshRoute());
@@ -508,6 +510,20 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           searchPin: _searchPin,
           searchPinLabel: _searchPinLabel,
           city: 'Lusaka',
+        ),
+        // SPEEDOMETER (owner 2026-11-24, Yango parity): live km/h badge.
+        Positioned(
+          top: 12,
+          left: 12,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Text('${_speedKmh.round()} km/h',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+          ),
         ),
         // Floating search - search-only (never sets destination). Placed below
         // the compass/basemap banner so it does not obstruct map controls.

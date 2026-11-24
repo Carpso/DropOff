@@ -913,7 +913,7 @@ app.get('/maps/route', async (c) => {
     if (upstream) {
       // Self-hosted OSRM (open-source, ours — see infra/router/README.md).
       const res = await fetch(
-        `${upstream}/route/v1/driving/${f};${t}?overview=full&geometries=geojson&steps=true&continue_straight=true`,
+        `${upstream}/route/v1/driving/${f};${t}?overview=full&geometries=geojson&steps=true&continue_straight=true&alternatives=3`,
         { headers: { 'User-Agent': 'DropOff/1.0' }, signal: AbortSignal.timeout(9000) },
       );
       if (!res.ok) return c.json({ error: 'router_upstream_failed', status: res.status }, 502);

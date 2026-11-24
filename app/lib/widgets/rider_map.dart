@@ -683,6 +683,8 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                   const SizedBox(height: 6),
                   _mapBtn(icon: Icons.fit_screen, onTap: () => _refit(bounds)),
                 ],
+                const SizedBox(height: 6),
+                _mapBtn(icon: Icons.refresh, onTap: _retryMap),
               ]),
             ),
           ),
