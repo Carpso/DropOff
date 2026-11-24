@@ -1204,6 +1204,11 @@ class DropOffApi {
   /// Claim one available-order. 409 already_claimed when another rider won.
   static Future<ApiResponse> claimJob(String ref) => post('/jobs/$ref/claim', const {});
 
+  /// inDrive-style answer to an incoming order: acknowledge it (idempotent) or
+  /// hand it back to the order board for another rider.
+  static Future<ApiResponse> acceptJob(String ref) => post('/jobs/$ref/accept', const {});
+  static Future<ApiResponse> declineJob(String ref) => post('/jobs/$ref/decline', const {});
+
   /// Transfer an assigned-but-not-collected trip to another rider.
   static Future<ApiResponse> transferJob(String ref, int toRiderId) =>
       post('/jobs/${Uri.encodeComponent(ref)}/transfer', {'to_rider_id': toRiderId});

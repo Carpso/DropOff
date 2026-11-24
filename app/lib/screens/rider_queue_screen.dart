@@ -35,6 +35,8 @@ import 'in_app_navigator_screen.dart';
 import 'waybill_screen.dart' show waybillDepotTitle;
 import '../ui/app_spinner.dart';
 import '../services/step_sounds.dart';
+import '../services/order_alert.dart';
+import 'incoming_order_screen.dart';
 
 /// Result of a server-side, verify-only PIN check. The UI must only tick
 /// "verified" on [ok] (real match) or [notNeeded] (no code exists for this
@@ -98,6 +100,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   // First queue load only PRIMES the seen set — a rider opening the app must
   // not get an alarm for every job already assigned to them.
   bool _alarmPrimed = false;
+  String? _alertRef; // guards against pushing duplicate incoming-order sheets
 
   // LIVE ARRIVAL WATCH (owner directive 2026-11-17): a GPS position stream
   // marks stops ARRIVED within [_arrivalMetres]; a manual tap marks too.
@@ -579,7 +582,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (!mounted) return;
     final refs = <String>{};
     for (final b in (batches as List?) ?? const <dynamic>[]) {
-      for (final s in ((b as Map)['stops'] as List?) ?? const <dynamic>[]) {
+      for (final s in ((b as Map<String, dynamic>)['stops'] as List?) ?? const <dynamic>[]) {
         refs.add('${(s as Map)['ref'] ?? ''}');
       }
     }
@@ -592,10 +595,35 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       return;
     }
     if (newRefs.isEmpty) return;
+    final navigator = Navigator.of(context);
     HapticFeedback.heavyImpact();
-    unawaited(StepSounds.orderAlert());
+    final first = newRefs.first;
+    Map<String, dynamic>? detail;
+    for (final b in batches ?? const <dynamic>[]) {
+      for (final s in ((b as Map<String, dynamic>)['stops'] as List?) ?? const <dynamic>[]) {
+        if ('${(s as Map)['ref'] ?? ''}' == first) {
+          detail = Map<String, dynamic>.from(s);
+          break;
+        }
+      }
+    }
+    unawaited(OrderAlert.start(
+      ref: first,
+      title: 'New delivery assigned',
+      body: 'Job $first — ${detail?['pickup_address'] ?? 'open your Task Queue'}',
+      address: '${detail?['pickup_address'] ?? ''}',
+      eta: '${detail?['eta_minutes'] ?? ''}',
+      fee: '${detail?['rider_fee_zmw'] ?? ''}',
+    ));
     await WakelockPlus.enable();
     Future<void>.delayed(_alarmWindow, () async => await WakelockPlus.disable());
+    if (_alertRef == first) return;
+    _alertRef = first;
+    await navigator.push(MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => IncomingOrderScreen(jobRef: first, detail: detail),
+    ));
+    _alertRef = null;
   }
 
   /// Leftovers after automated dispatch. Refreshed with the queue — a claim by

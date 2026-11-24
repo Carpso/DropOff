@@ -27,6 +27,14 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (fifty-second pass) — inDrive-style incoming order alerts + accept/decline
+
+- **Looping alarm:** new native `OrderAlertService` foreground service (looping alarm ringtone + vibration pattern, partial wake lock, 60 s timeout) + Dart `OrderAlert` service with non-Android fallback. Notification now carries **Accept / Decline** actions that relaunch the app and replay the tap.
+- **Full-screen answer card:** `IncomingOrderScreen` with job details, 45 s countdown, big ACCEPT/DECLINE buttons, "Open Task Queue" escape. Opened from foreground pushes and from the rider queue's new-job ring.
+- **Worker:** `POST /jobs/:ref/accept` + `/decline` (idempotent, releases to claim board); rider assignment pushes now carry pickup/destination/parcels/ETA details. Decline requires `rider_assigned` only.
+- **Battery honesty:** MainActivity exposes battery-optimisation status + system-exemption dialog; rider queue can prompt riders to exempt DropOff so OEM managers stop killing order pushes.
+- **Checks:** `npx tsc --noEmit` clean; `flutter analyze` clean on all touched files. Worker deployed `923f4078-ad04-4ca9-b48b-551682bc714f`. Commit + push per standing checklist.
+
 ## 2026-11-24 (fifty-first pass) — admin standing orders + booking/contact diagnostics
 
 - **Standing orders (0968551110):** no `recurring_plans` row exists for `260968551110` (checked remote D1). Added admin management: `GET /admin/recurring?phone=`, admin can list/cancel any recurring plan, and existing `/recurring` GET/toggle/delete now allow admin (not only ops/owner).

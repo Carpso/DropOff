@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart' as permission_handler;
 
 import 'dropoff_api.dart';
+import '../services/order_alert.dart';
 
 /// Firebase Cloud Messaging for DropOff — fully optional.
 ///
@@ -173,8 +174,16 @@ class PushService {
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@drawable/ic_stat_dropoff'),
       ),
-      onDidReceiveNotificationResponse: (details) =>
-          onPayloadTap.add(details.payload?.isNotEmpty == true ? _decodePayload(details.payload!) : null),
+      onDidReceiveNotificationResponse: (details) {
+        final payload = details.payload?.isNotEmpty == true
+            ? _decodePayload(details.payload!)
+            : <String, dynamic>{};
+        // Accept / Decline tapped on an incoming-order notification: relay the
+        // action so main.dart performs the API call with the signed-in session.
+        final actionId = details.actionId;
+        if (actionId != null && actionId.isNotEmpty) payload['order_action'] = actionId;
+        onPayloadTap.add(payload.isEmpty ? null : payload);
+      },
     );
     // Background isolates must also have channels; otherwise data-only order
     // alerts are dropped silently on Android 8+.
@@ -290,6 +299,18 @@ class PushService {
       fullScreenIntent: isOrderAlert || kind.contains('job') || kind.contains('assign'),
       visibility: NotificationVisibility.public,
       autoCancel: true,
+      // ANSWER FROM THE SHADE (owner 2026-11-24, inDrive parity): a rider must
+      // not have to unlock, find the app and open the queue to answer an order.
+      // Both actions relaunch DropOff, which performs the call with the real
+      // session (the tap is replayed through `order_action`).
+      actions: isOrderAlert
+          ? const <AndroidNotificationAction>[
+              AndroidNotificationAction('accept', 'Accept',
+                  showsUserInterface: true, cancelNotification: true),
+              AndroidNotificationAction('decline', 'Decline',
+                  showsUserInterface: true, cancelNotification: true),
+            ]
+          : null,
       styleInformation: BigTextStyleInformation(b, contentTitle: t, htmlFormatBigText: false),
       groupKey: 'dropoff',
     );
@@ -309,6 +330,21 @@ class PushService {
       notificationDetails: NotificationDetails(android: android, iOS: darwin),
       payload: _encodePayload({...data, 'title': t, 'body': b}),
     );
+    // LOOPING ALARM (owner 2026-11-24): one chime is easy to miss on a bike.
+    // Start the native ring service so the phone keeps ringing until the rider
+    // accepts, declines, opens the app, or 60 s pass. Harmless no-op in a
+    // background isolate (no plugin channel there) — the notification and its
+    // full-screen intent still bring the rider in.
+    if (isOrderAlert) {
+      unawaited(OrderAlert.start(
+        ref: _str(data['job_ref']) ?? '',
+        title: t,
+        body: b,
+        address: _str(data['pickup_address']) ?? _str(data['address']) ?? '',
+        eta: _str(data['eta_minutes']) ?? '',
+        fee: _str(data['fee']) ?? '',
+      ));
+    }
   }
 
   /// Compact k=v serialization for the tap payload (e.g. job_ref=DRO-1;kind=rider_assigned).

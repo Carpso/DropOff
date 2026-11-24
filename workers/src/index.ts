@@ -8551,12 +8551,28 @@ async function dispatchToNearestRider(
     await sendToPhone(env, job.sender_phone, {
       title: 'Rider assigned',
       body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to ${String(job.service ?? '') === 'collection' ? 'the depot to collect your item' : 'your pickup'} — track live in Bookings.`,
-      data: { job_ref: job.ref, kind: 'rider_assigned' },
+      data: {
+      job_ref: job.ref,
+      kind: 'rider_assigned',
+      service: String(job.service ?? ''),
+      pickup_address: String(job.pickup_address ?? ''),
+      dest_city: String(job.to_city ?? job.dest_city ?? ''),
+      parcels: String(job.parcels ?? job.item_count ?? ''),
+      eta_minutes: String(etaMin),
+    },
     });
     await sendToPhone(env, pick.rider.phone, {
       title: 'New delivery assigned',
       body: `Job ${job.ref} — ${String(job.service ?? '') === 'collection' ? 'collect at the depot counter' : `pickup at ${job?.pickup_address ?? 'sender address'}`}. Open the Task Queue for details.`,
-      data: { job_ref: job.ref, kind: 'rider_assigned' },
+      data: {
+      job_ref: job.ref,
+      kind: 'rider_assigned',
+      service: String(job.service ?? ''),
+      pickup_address: String(job.pickup_address ?? ''),
+      dest_city: String(job.to_city ?? job.dest_city ?? ''),
+      parcels: String(job.parcels ?? job.item_count ?? ''),
+      eta_minutes: String(etaMin),
+    },
     });
     return { rider: pick.rider, eta_minutes: etaMin, km: pick.km, fallback, excludedAtDepot: collectExcluded ?? [] };
   } catch {
@@ -8832,10 +8848,60 @@ app.post('/jobs/:ref/claim', async (c) => {
     sendToPhone(c.env, job.sender_phone, {
       title: 'Rider assigned',
       body: `Rider ${rider.full_name} (${rider.vehicle}) is heading to ${String(job.service ?? '') === 'collection' ? 'the depot to collect your item' : 'your pickup'} — track live in Bookings.`,
-      data: { job_ref: ref, kind: 'rider_assigned' },
+      data: {
+      job_ref: ref,
+      kind: 'rider_assigned',
+      service: String(job.service ?? ''),
+      pickup_address: String(job.pickup_address ?? ''),
+      dest_city: String(job.to_city ?? job.dest_city ?? ''),
+      parcels: String(job.parcels ?? job.item_count ?? ''),
+      eta_minutes: String(etaMin),
+    },
     }).catch(() => {}),
   );
   return c.json({ ok: true, ref, rider_id: rider.id, rider: rider.full_name, eta_minutes: etaMin, km: round2(km) });
+});
+
+/* -------- rider answers to an incoming order (inDrive parity) ---------- */
+// A rider may ACKNOWLEDGE (accept) an order that was auto-assigned to them,
+// or HAND IT BACK to the order board (decline) so another rider can claim it.
+// Both are idempotent and never move money — they only change ownership/state.
+app.post('/jobs/:ref/accept', async (c) => {
+  const phone = c.get('phone');
+  if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
+  const rider = await c.env.DB.prepare('SELECT id, full_name FROM riders WHERE phone = ?1').bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_required' }, 403);
+  const ref = c.req.param('ref');
+  const job = await c.env.DB.prepare('SELECT id, ref, rider_id, status FROM jobs WHERE ref = ?1').bind(ref).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (Number(job.rider_id) !== Number(rider.id)) return c.json({ error: 'not_your_job' }, 403);
+  const already = await c.env.DB.prepare("SELECT id FROM job_events WHERE job_id = ?1 AND status = 'rider_accepted' LIMIT 1").bind(job.id).first<any>();
+  if (!already) {
+    await c.env.DB.prepare("INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rider_accepted', ?2)").bind(job.id, `Rider ${rider.full_name} accepted the order.`).run();
+  }
+  return c.json({ ok: true, ref, already_accepted: !!already });
+});
+
+app.post('/jobs/:ref/decline', async (c) => {
+  const phone = c.get('phone');
+  if (!phone || c.get('role') !== 'rider') return c.json({ error: 'rider_required' }, 403);
+  const rider = await c.env.DB.prepare('SELECT id, full_name FROM riders WHERE phone = ?1').bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider_required' }, 403);
+  const ref = c.req.param('ref');
+  const job = await c.env.DB.prepare('SELECT id, ref, rider_id, status FROM jobs WHERE ref = ?1').bind(ref).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (Number(job.rider_id) !== Number(rider.id)) return c.json({ error: 'not_your_job' }, 403);
+  if (!['rider_assigned'].includes(String(job.status))) {
+    return c.json({ error: 'already_started', detail: 'This delivery already moved past assignment.' }, 409);
+  }
+  const upd = await c.env.DB.prepare(
+    `UPDATE jobs SET rider_id = NULL, status = 'created', assigned_at = NULL, eta_minutes = NULL
+      WHERE id = ?1 AND rider_id = ?2 AND status = 'rider_assigned'`,
+  ).bind(job.id, rider.id).run();
+  if (!upd.meta.changes) return c.json({ error: 'already_started' }, 409);
+  await c.env.DB.prepare('UPDATE riders SET current_load = CASE WHEN current_load > 0 THEN current_load - 1 ELSE 0 END WHERE id = ?1').bind(rider.id).run();
+  await c.env.DB.prepare("INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rider_declined', ?2)").bind(job.id, `Rider ${rider.full_name} declined the order; returned to the order board.`).run();
+  return c.json({ ok: true, ref, returned_to_board: true });
 });
 
 // RIDER TRIP TRANSFER (owner 2026-11-21): at ANY active stage (including stuck
@@ -8892,7 +8958,15 @@ app.post('/jobs/:ref/transfer', async (c) => {
     await sendToPhone(c.env, target.phone, {
       title: 'Trip transferred to you',
       body: `${job.ref} has been transferred to you. Open the Task Queue for the waybill and navigate.`,
-      data: { job_ref: job.ref, kind: 'rider_assigned' },
+      data: {
+      job_ref: job.ref,
+      kind: 'rider_assigned',
+      service: String(job.service ?? ''),
+      pickup_address: String(job.pickup_address ?? ''),
+      dest_city: String(job.to_city ?? job.dest_city ?? ''),
+      parcels: String(job.parcels ?? job.item_count ?? ''),
+      eta_minutes: String(etaMin),
+    },
     }).catch(() => {});
     if (from?.phone) await sendToPhone(c.env, from.phone, {
       title: 'Trip transferred away',

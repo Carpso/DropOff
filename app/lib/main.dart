@@ -30,6 +30,9 @@ import 'data/analytics_service.dart';
 import 'services/crash_reporting.dart';
 import 'ui/app_theme.dart';
 import 'data/push_service.dart';
+import 'services/order_alert.dart';
+import 'screens/incoming_order_screen.dart';
+import 'ui/app_toast.dart';
 
 import 'services/device_lock.dart';
 
@@ -256,6 +259,9 @@ Future<void> main() async {
   // splash), but PushService.register() awaits its completion before sending
   // the token to the server, so a cold-start rider is never left unregistered.
   PushService.init();
+  // inDrive-style order alerts: channel wiring + replay of an Accept/Decline
+  // tap that relaunched the app while it was closed (owner 2026-11-24).
+  OrderAlert.init();
   void handleTap(Map<String, dynamic>? data) {
     // Cold start / lock screen: queue the tap instead of dropping it or
     // navigating above the biometric gate.
@@ -280,6 +286,13 @@ Future<void> main() async {
 void _performTap(AppStore store, Map<String, dynamic>? data) {
   final ctx = navigatorKey.currentContext;
   if (ctx == null || !ctx.mounted) return;
+  // Accept / Decline tapped on an incoming-order notification (owner
+  // 2026-11-24). Answered with the signed-in session, then the queue refreshes.
+  final orderAction = '${data?['order_action'] ?? ''}'.toLowerCase();
+  if (orderAction.isNotEmpty) {
+    _performOrderAction(store, '${data?['job_ref'] ?? data?['ref'] ?? ''}', orderAction);
+    return;
+  }
   final jobRef = data?['job_ref']?.toString();
   final kind = '${data?['kind'] ?? ''}'.toLowerCase();
   AnalyticsService.instance.track(feature: 'push', action: 'tap', context: kind.isEmpty ? 'unknown' : kind);
@@ -314,6 +327,48 @@ void _performTap(AppStore store, Map<String, dynamic>? data) {
 
   routeTo ??= store.isRider ? const AppShell() : const BookingsScreen();
   Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => routeTo!));
+}
+
+/// Details of the last order push per ref, so Accept/Decline tapped straight
+/// from the notification still shows the real pickup address and fee.
+final Map<String, Map<String, dynamic>> _orderDetails = {};
+
+/// Answers an incoming order (accept / decline / open). Runs only after the
+/// store is ready and the biometric lock is cleared, so the API call always
+/// carries the signed-in rider's session.
+void _performOrderAction(AppStore store, String rawRef, String action) {
+  if (!store.isRider) return;
+  final ref = rawRef.trim();
+  final ctx = navigatorKey.currentContext;
+  if (ref.isEmpty) {
+    if (ctx != null && ctx.mounted) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const AppShell()));
+    }
+    return;
+  }
+  if (action == 'open') {
+    unawaited(OrderAlert.stop());
+    if (ctx != null && ctx.mounted) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => IncomingOrderScreen(jobRef: ref, detail: _orderDetails[ref]),
+      ));
+    }
+    return;
+  }
+  unawaited(() async {
+    final res = action == 'decline'
+        ? await DropOffApi.declineJob(ref)
+        : await DropOffApi.acceptJob(ref);
+    await store.syncJobsFromServer();
+    final c = navigatorKey.currentContext;
+    if (c == null || !c.mounted) return;
+    AppToast.show(c, res.ok
+        ? (action == 'decline'
+            ? 'Declined $ref — it went back to the order board.'
+            : 'Order $ref accepted — it is in your Task Queue.')
+        : 'Could not answer $ref — open your Task Queue.');
+  }());
 }
 
 class AppScope extends InheritedNotifier<AppStore> {
@@ -381,6 +436,8 @@ class _SplashScreenState extends State<_SplashScreen> {
   final _passwordCtor = TextEditingController();
 
   StreamSubscription<Map<String, dynamic>>? _pushSub;
+  StreamSubscription<Map<String, dynamic>>? _orderActionSub;
+  String? _incomingOrderRef;
   OverlayEntry? _pushBannerEntry;
   Timer? _pushBannerTimer;
 
@@ -403,8 +460,60 @@ class _SplashScreenState extends State<_SplashScreen> {
     // Foreground push: show an in-app heads-up banner and handle urgent flows.
     _pushSub = PushService.onForegroundMessage.stream.listen((data) {
       final kind = '${data['kind'] ?? ''}';
+      final isOrder = kind.contains('assign') || kind == 'new_order' ||
+          kind == 'trip_transferred' || kind == 'claim_available';
+      if (isOrder) {
+        final ref = '${data['job_ref'] ?? ''}';
+        if (ref.isNotEmpty) _orderDetails[ref] = Map<String, dynamic>.from(data);
+        // inDrive parity (owner 2026-11-24): a rider sees the full-screen
+        // Accept / Decline card, not a small banner.
+        if (widget.store.isRider) {
+          _openIncomingOrder(data);
+          return;
+        }
+      }
       if (kind == 'counter_fare_due') _showCounterFarePrompt();
       _showForegroundPushBanner(data);
+    });
+    // Accept / Decline answered from the ring service or a notification action.
+    _orderActionSub = OrderAlert.onAction.listen((action) {
+      _runWhenReady(() => _performOrderAction(
+            widget.store,
+            '${action['ref'] ?? ''}',
+            '${action['action'] ?? ''}'.toLowerCase(),
+          ));
+    });
+    final pendingAction = OrderAlert.takePending();
+    if (pendingAction != null) {
+      unawaited(widget.initFuture.whenComplete(() {
+        _runWhenReady(() => _performOrderAction(
+              widget.store,
+              '${pendingAction['ref'] ?? ''}',
+              '${pendingAction['action'] ?? ''}'.toLowerCase(),
+            ));
+      }));
+    }
+  }
+
+  /// Full-screen incoming-order card + looping alarm for a rider.
+  void _openIncomingOrder(Map<String, dynamic> data) {
+    final ref = '${data['job_ref'] ?? ''}';
+    if (ref.isEmpty || _incomingOrderRef == ref) return;
+    _incomingOrderRef = ref;
+    unawaited(OrderAlert.start(
+      ref: ref,
+      title: (data['title'] ?? 'New delivery').toString(),
+      body: (data['body'] ?? '').toString(),
+      address: '${data['pickup_address'] ?? data['address'] ?? ''}',
+      eta: '${data['eta_minutes'] ?? ''}',
+      fee: '${data['fee'] ?? ''}',
+    ));
+    _runWhenReady(() {
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => IncomingOrderScreen(jobRef: ref, detail: data),
+      )).whenComplete(() => _incomingOrderRef = null);
     });
   }
 
@@ -518,6 +627,7 @@ class _SplashScreenState extends State<_SplashScreen> {
     _pushBannerTimer?.cancel();
     _pushBannerEntry?.remove();
     _pushSub?.cancel();
+    _orderActionSub?.cancel();
     _emailCtor.dispose();
     _passwordCtor.dispose();
     super.dispose();
