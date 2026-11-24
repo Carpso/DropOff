@@ -23,6 +23,29 @@ export const PLATFORM_FIXED_FEE = 0.98;  // + K0.98 per collection (was 0.48 —
 export const PLATFORM_MIN_FEE = 4.0;     // minimum platform portion (K4.00, was K3.00 — same raise)
 export const MOMO_COLLECTION_FEE = 2.5;  // Lipila collect leg (passed to customer)
 export const MOMO_DISBURSEMENT_FEE = 1.5; // Lipila payout leg (rider-side)
+
+// Lenco (Zambia, lenco.co/zm/pricing, checked 2026-11-24):
+// Collections mobile money: 1% (bearer merchant => deducted from settlement;
+// bearer customer => added on top of amount). We currently use bearer merchant.
+// Payout mobile money: tiered by amount.
+export const LENCO_COLLECTION_PCT = 1.0;
+export const LENCO_PAYOUT_TIERS_ZMW = [
+  { max: 1000, minFee: 8.5, maxFee: 12 },
+  { max: 50000, minFee: 15, maxFee: 25 },
+  { max: 100000000, minFee: 35, maxFee: 35 },
+] as const;
+
+export function lencoCollectionFee(amountZmw: number): number {
+  return round2(Math.max(0, amountZmw) * (LENCO_COLLECTION_PCT / 100));
+}
+
+/** Conservative upper-bound estimate for budgeting; actual Lenco fee is tiered
+ *  within the band. Use maxFee for safety until Lenco exposes exact fee. */
+export function lencoDisbursementFeeEstimate(amountZmw: number): { min: number; max: number } {
+  const amt = Math.max(0, amountZmw);
+  const tier = LENCO_PAYOUT_TIERS_ZMW.find((t) => amt <= t.max) ?? LENCO_PAYOUT_TIERS_ZMW[LENCO_PAYOUT_TIERS_ZMW.length - 1];
+  return { min: tier.minFee, max: tier.maxFee };
+}
 /** Platform revenue sweep: minimum undistributed balance before the cron
  *  disburses to the business momo. Keeps the Lipila wallet healthy without
  *  paying a disbursement fee on dust. */
