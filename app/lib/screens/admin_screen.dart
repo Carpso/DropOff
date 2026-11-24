@@ -295,6 +295,8 @@ class _AdminScreenState extends State<AdminScreen> {
             if (!_financeOnly) ...[
               const _SupportInboxCard(),
               const SizedBox(height: 18),
+              const _MoneyOpsCard(),
+              const SizedBox(height: 18),
               const _PayoutQueueCard(),
               const SizedBox(height: 18),
               const _ClientCrashesCard(),
@@ -4104,6 +4106,82 @@ class _DemandForecastCardState extends State<_DemandForecastCard> {
       ),
     );
   }
+}
+
+class _MoneyOpsCard extends StatefulWidget {
+  const _MoneyOpsCard();
+  @override
+  State<_MoneyOpsCard> createState() => _MoneyOpsCardState();
+}
+
+class _MoneyOpsCardState extends State<_MoneyOpsCard> {
+  bool _loading = true;
+  Map<String, dynamic>? _data;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await DropOffApi.adminMoneyOps();
+    if (!mounted) return;
+    setState(() { _data = data; _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final counts = (_data?['counts'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+    final lenco = (_data?['lenco'] as Map?)?.cast<String, dynamic>();
+    final balance = ((lenco?['balance'] as Map?)?['availableBalance'] as num?)?.toDouble();
+    final pending = (_data?['pending_payments'] as List?)?.length ?? 0;
+    final failed = (_data?['failed_payments'] as List?)?.length ?? 0;
+    final payouts = (_data?['payouts'] as List?)?.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() ?? const <Map<String, dynamic>>[];
+    final pendingPayoutTotal = payouts.fold<double>(0, (s, p) => s + ((p['amount_zmw'] as num?)?.toDouble() ?? 0));
+    final lowFloat = balance != null && (balance < 1000 || balance < pendingPayoutTotal + 50);
+    return Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        const Icon(Icons.monitor_heart_outlined, color: AppColors.forest),
+        const SizedBox(width: 8),
+        const Expanded(child: Text('Money ops', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+        IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+      ]),
+      const SizedBox(height: 4),
+      const Text('Pending/failed payments, payouts, and Lenco float. Reconcile before manual retries.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+      const SizedBox(height: 10),
+      if (_loading) const Padding(padding: EdgeInsets.all(12), child: Center(child: AppLogoSpinner(size: 26)))
+      else ...[
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _chip('Pending', '${counts['pending_payments'] ?? pending}', pending > 0 ? AppColors.warning : AppColors.success),
+          _chip('Failed', '${counts['failed_payments'] ?? failed}', failed > 0 ? AppColors.danger : AppColors.success),
+          _chip('Success today', '${counts['success_today'] ?? 0}', AppColors.forest),
+          _chip('Lenco', balance == null ? 'unavailable' : 'K${balance.toStringAsFixed(2)}', lowFloat ? AppColors.danger : AppColors.forest),
+        ]),
+        if (lowFloat)
+          Padding(padding: const EdgeInsets.only(top: 10), child: Container(
+            width: double.infinity, padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: const Color(0xFFFFF3F0), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0x33B3261E))),
+            child: Text('Low Lenco float warning: balance K${balance.toStringAsFixed(2)} vs pending payouts K${pendingPayoutTotal.toStringAsFixed(2)}. Top up before confirming disbursements.',
+              style: const TextStyle(fontSize: 11.5, color: Color(0xFF8C1D18), height: 1.35)),
+          )),
+        const SizedBox(height: 10),
+        if (((_data?['failed_payments'] as List?) ?? const []).isNotEmpty)
+          ...((_data?['failed_payments'] as List).whereType<Map>().take(3).map((p) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text('Failed ${p['kind']} #${p['id']} K${((p['amount_zmw'] as num?)?.toStringAsFixed(2) ?? '0.00')} ${p['gateway'] ?? ''} ${p['gateway_reference'] ?? p['lipila_reference'] ?? ''}',
+              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+          ))),
+      ],
+    ])));
+  }
+
+  Widget _chip(String label, String value, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+      Text(value, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900, color: color)),
+    ]),
+  );
 }
 
 /// Refund / settlement payout ledger — the Chisomo-style guarded retry engine.

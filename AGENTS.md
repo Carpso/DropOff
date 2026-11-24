@@ -27,6 +27,12 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-third pass) — payment timeline UI + admin money-ops card
+
+- **Payment timeline UI:** `/jobs/:ref/payments` now returns `payments`, `payouts`, and `timeline` (prompt sent/awaiting approval/settled/failed/receipt unlocked/reimbursement queued/sent/failed) while keeping backward-compatible `payment`. Booking detail shows a "Payment timeline" card with refs/reasons and receipt download buttons for settled payments.
+- **Admin money-ops UI:** `GET /admin/money-ops` surfaced in admin console as a `Money ops` card showing pending/failed/success-today counts, Lenco float, low-float warning, and recent failed payment refs. Payout queue remains below it.
+- Worker deployed `bce1267f-4d52-4dce-b2af-925febb96240`; tsc clean, vitest 30/30, flutter analyze 3 pre-existing admin_screen infos.
+
 ## 2026-11-24 (forty-second pass) — unified receipts, money-ops, dispute prefill
 
 - **Unified receipts:** `GET /me/receipts` lists all payment kinds for the signed-in user; `PlanReceiptScreen` now renders generic payment receipts (plan/upgrade/counter_fare/booking_deposit/job/topup/refund etc.) with logo and PNG share/download. Account screen shows "Receipts" for all payments.

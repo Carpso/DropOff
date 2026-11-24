@@ -7199,52 +7199,95 @@ app.get('/payments/:id/status', async (c) => {
 // Gated to the job's sender phone + ops/admin.
 app.get('/jobs/:ref/payments', async (c) => {
   const job = await c.env.DB.prepare(
-    'SELECT id, sender_phone, paid FROM jobs WHERE ref = ?1',
+    'SELECT id, sender_phone, paid, counter_receipt_zmw, counter_receipt_paid, counter_receipt_url FROM jobs WHERE ref = ?1',
   ).bind(c.req.param('ref')).first<any>();
   if (!job) return c.json({ error: 'not found' }, 404);
   if (c.get('phone') !== job.sender_phone && c.get('role') !== 'ops' && !isAdmin(c)) {
     return c.json({ error: 'forbidden' }, 403);
   }
-  const pay = await c.env.DB.prepare(
-    'SELECT id, phone, amount_zmw, status, kind, lipila_reference, gateway, gateway_reference, meta, created_at FROM payments WHERE job_id = ?1 ORDER BY id DESC LIMIT 1',
-  ).bind(job.id).first<any>();
-  // JOB-PAID OVERRIDE (owner bug 2026-11-17: "booking succeeds, money
-  // deducted, screen never flips"): the JOB being paid is the truth this
-  // endpoint sells. A newer PENDING row (a retried "Pay now" prompt) used to
-  // shadow an earlier settled payment and keep the held-watch spinning — and
-  // a settlement whose side-effects threw (the wallet_ledger FK bug) left
-  // the job paid while the screen stayed HELD. If the job is paid, the
-  // screen flips — no Lipila round-trip, no shadowing row, no stuck watch.
-  if (Number(job.paid) === 1) {
-    return c.json({
-      payment: pay ? { ...pay, status: 'success' } : null,
-      job_paid: true,
-    });
-  }
-  if (!pay) return c.json({ payment: null });
-  const reference = pay.gateway_reference ?? pay.lipila_reference;
-  if (pay.status === 'pending' && pay.kind !== 'cod_remit' && pay.kind !== 'rider_reimbursement' && pay.kind !== 'refund' && reference) {
-    const gateway = (pay.gateway ?? 'lipila') as Gateway;
-    const { status, reason } = await collectionStatus(c.env, gateway, reference);
-    if (status !== 'pending') {
-      await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, status).run();
-      await recordFailReason(c.env, pay.id, reason);
-      await settlePaymentSuccess(c.env, pay.id, status);
-      pay.status = status;
-      if (reason) pay.meta = JSON.stringify({ ...(pay.meta ? safeParse(pay.meta) : {}), fail_reason: reason });
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, phone, amount_zmw, credit_zmw, platform_fee_zmw, lipila_fee_zmw, status, kind,
+            lipila_reference, gateway, gateway_reference, meta, created_at, paid_at
+       FROM payments WHERE job_id = ?1 ORDER BY id DESC LIMIT 20`,
+  ).bind(job.id).all<any>();
+  const payments = (results ?? []) as any[];
+
+  // Inline reconciliation for latest pending collection (legacy behavior).
+  const latest = payments[0];
+  if (latest && latest.status === 'pending' && !['cod_remit','rider_reimbursement','refund'].includes(latest.kind)) {
+    const reference = latest.gateway_reference ?? latest.lipila_reference;
+    if (reference) {
+      const gateway = (latest.gateway ?? 'lipila') as Gateway;
+      const { status, reason } = await collectionStatus(c.env, gateway, reference);
+      if (status !== 'pending') {
+        await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(latest.id, status).run();
+        await recordFailReason(c.env, latest.id, reason);
+        await settlePaymentSuccess(c.env, latest.id, status);
+        latest.status = status;
+        if (reason) latest.meta = JSON.stringify({ ...(latest.meta ? safeParse(latest.meta) : {}), fail_reason: reason });
+      }
     }
   }
+
+  const payoutRows = await c.env.DB.prepare(
+    `SELECT id, reference, kind, status, amount_zmw, phone, gateway, gateway_reference, attempts, last_error, needs_admin_confirm, created_at, updated_at
+       FROM payouts WHERE job_id = ?1 ORDER BY id DESC LIMIT 20`,
+  ).bind(job.id).all<any>().catch(() => ({ results: [] as any[] }));
+
+  const mapPayment = (p: any) => ({
+    payment_id: p.id,
+    status: Number(job.paid) === 1 && p.kind !== 'counter_fare' && p.kind !== 'refund' ? (p.status === 'failed' ? p.status : 'success') : p.status,
+    amount_zmw: round2(Number(p.amount_zmw ?? 0)),
+    phone: p.phone,
+    kind: p.kind,
+    gateway: p.gateway ?? 'lipila',
+    reference: p.gateway_reference ?? p.lipila_reference ?? null,
+    created_at: p.created_at,
+    paid_at: p.paid_at ?? null,
+    fail_reason: failReasonOf(p.meta),
+  });
+
+  const timeline: any[] = [];
+  for (const p of payments.slice().reverse()) {
+    const ref = p.gateway_reference ?? p.lipila_reference ?? null;
+    timeline.push({ at: p.created_at, state: 'prompt_sent', label: 'Prompt sent', kind: p.kind, payment_id: p.id, amount_zmw: round2(Number(p.amount_zmw ?? 0)), gateway: p.gateway ?? 'lipila', reference: ref });
+    if (p.status === 'success') {
+      timeline.push({ at: p.paid_at ?? p.created_at, state: 'settled', label: 'Settled', kind: p.kind, payment_id: p.id, amount_zmw: round2(Number(p.amount_zmw ?? 0)), gateway: p.gateway ?? 'lipila', reference: ref });
+      if (p.kind === 'counter_fare' && Number(job.counter_receipt_paid) === 1) {
+        timeline.push({ at: p.paid_at ?? p.created_at, state: 'receipt_unlocked', label: 'Receipt unlocked', kind: p.kind, payment_id: p.id });
+      }
+    } else if (p.status === 'failed') {
+      timeline.push({ at: p.paid_at ?? p.created_at, state: 'failed', label: 'Failed', kind: p.kind, payment_id: p.id, reason: failReasonOf(p.meta), reference: ref });
+    } else {
+      timeline.push({ at: p.created_at, state: 'awaiting_approval', label: 'Awaiting approval', kind: p.kind, payment_id: p.id, reference: ref });
+    }
+  }
+  for (const po of (payoutRows.results ?? []).slice().reverse()) {
+    timeline.push({
+      at: po.created_at,
+      state: po.status === 'success' ? 'reimbursement_sent' : po.status === 'failed' ? 'reimbursement_failed' : 'reimbursement_queued',
+      label: po.status === 'success' ? 'Reimbursement sent' : po.status === 'failed' ? 'Reimbursement failed' : (po.needs_admin_confirm ? 'Reimbursement awaiting admin confirm' : 'Reimbursement queued'),
+      kind: po.kind,
+      payout_id: po.id,
+      reference: po.gateway_reference ?? po.reference ?? null,
+      amount_zmw: round2(Number(po.amount_zmw ?? 0)),
+      reason: po.last_error ?? null,
+    });
+  }
+  timeline.sort((a, b) => String(a.at ?? '').localeCompare(String(b.at ?? '')));
+
+  const pay = latest ?? null;
+  const jobPaid = Number(job.paid) === 1;
   return c.json({
-    payment: {
-      payment_id: pay.id,
-      status: pay.status,
-      amount_zmw: pay.amount_zmw,
-      phone: pay.phone,
-      kind: pay.kind,
-      gateway: pay.gateway ?? 'lipila',
-      created_at: pay.created_at,
-      fail_reason: failReasonOf(pay.meta),
-    },
+    payment: pay ? { ...mapPayment(pay), status: (jobPaid && pay.kind !== 'counter_fare' && pay.kind !== 'refund' && pay.status !== 'failed') ? 'success' : pay.status } : null,
+    job_paid: jobPaid,
+    payments: payments.map(mapPayment),
+    payouts: (payoutRows.results ?? []).map((po: any) => ({
+      payout_id: po.id, reference: po.gateway_reference ?? po.reference ?? null, kind: po.kind, status: po.status,
+      amount_zmw: round2(Number(po.amount_zmw ?? 0)), gateway: po.gateway ?? null, attempts: po.attempts ?? 0,
+      last_error: po.last_error ?? null, needs_admin_confirm: !!po.needs_admin_confirm, created_at: po.created_at,
+    })),
+    timeline,
   });
 });
 

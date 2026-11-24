@@ -25,6 +25,7 @@ import '../widgets/common.dart';
 import 'account_screen.dart';
 import 'booking_screen.dart';
 import 'tickets_screen.dart';
+import 'plan_receipt_screen.dart';
 import 'rider_map_screen.dart';
 import 'track_screen.dart';
 import 'waybill_screen.dart';
@@ -593,6 +594,12 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         if (booking.dispatched && booking.counterReceiptPaid &&
             (booking.counterReceiptUrl?.isNotEmpty == true || booking.counterReceipts.isNotEmpty))
           _CounterReceiptPaidCard(booking: booking),
+        if (booking.dispatched && (booking.serverRef ?? '').isNotEmpty) ...[
+          const SizedBox(height: 20),
+          const SectionTitle('Payment timeline'),
+          const SizedBox(height: 8),
+          _PaymentTimelineCard(jobRef: booking.serverRef!),
+        ],
         // DISPATCH IS AUTOMATED (owner directive 2026-11-15): the manual
         // "Operator: mark …" status buttons are gone, and there is no rider
         // dropdown defaulting to the owner. Staff may only ask the server to
@@ -2223,8 +2230,6 @@ class _CounterReceiptPaidCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Full filed list when the job carried multiple receipts; otherwise the
-    // single primary photo.
     final receipts = booking.counterReceipts.isNotEmpty
         ? booking.counterReceipts
         : (booking.counterReceiptUrl?.isNotEmpty == true
@@ -2260,10 +2265,7 @@ class _CounterReceiptPaidCard extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 260),
                 child: Stack(alignment: Alignment.topRight, children: [
-                  AuthedImage(
-                    receipts[i].$2,
-                    fit: BoxFit.contain,
-                  ),
+                  AuthedImage(receipts[i].$2, fit: BoxFit.contain),
                   if (receipts.length > 1)
                     Container(
                       margin: const EdgeInsets.all(6),
@@ -2288,6 +2290,95 @@ class _CounterReceiptPaidCard extends StatelessWidget {
           ),
         ]),
       ),
+    );
+  }
+}
+
+class _PaymentTimelineCard extends StatefulWidget {
+  final String jobRef;
+  const _PaymentTimelineCard({required this.jobRef});
+  @override
+  State<_PaymentTimelineCard> createState() => _PaymentTimelineCardState();
+}
+
+class _PaymentTimelineCardState extends State<_PaymentTimelineCard> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _timeline = const [];
+  List<Map<String, dynamic>> _payments = const [];
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final b = await DropOffApi.get('/jobs/${widget.jobRef}/payments');
+    if (!mounted) return;
+    final tl = (b?['timeline'] as List?)?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? const <Map<String, dynamic>>[];
+    final pays = (b?['payments'] as List?)?.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() ?? const <Map<String, dynamic>>[];
+    setState(() { _timeline = tl; _payments = pays; _loading = false; });
+  }
+
+  String _fmt(dynamic raw) {
+    final s = '$raw'.trim();
+    final dt = DateTime.tryParse(s.endsWith('Z') ? s : '${s}Z');
+    if (dt == null) return s.isEmpty ? '—' : s;
+    final cat = dt.toUtc().add(const Duration(hours: 2));
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(cat.day)}/${two(cat.month)} ${two(cat.hour)}:${two(cat.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        const Icon(Icons.receipt_long_outlined, size: 18, color: AppColors.forest),
+        const SizedBox(width: 8),
+        const Expanded(child: Text('Payment status', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5))),
+        IconButton(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18), tooltip: 'Refresh'),
+      ]),
+      if (_loading) const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Center(child: AppLogoSpinner(size: 18)))
+      else if (_timeline.isEmpty)
+        const Text('No payment events yet. A payment prompt, settlement, or reimbursement will appear here.', style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.4))
+      else ...[
+        for (var i = 0; i < _timeline.length; i++) _step(_timeline[i], i == _timeline.length - 1),
+        if (_payments.any((p) => p['status'] == 'success'))
+          Padding(padding: const EdgeInsets.only(top: 8), child: Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final p in _payments.where((p) => p['status'] == 'success'))
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlanReceiptScreen(paymentId: '${p['payment_id']}'))),
+                icon: const Icon(Icons.download_outlined, size: 16),
+                label: Text('Receipt ${p['payment_id']}'),
+              ),
+          ])),
+      ],
+    ])));
+  }
+
+  Widget _step(Map<String, dynamic> e, bool last) {
+    final state = '${e['state'] ?? ''}';
+    final failed = state.contains('failed');
+    final pending = state.contains('awaiting') || state.contains('queued');
+    final color = failed ? const Color(0xFFB3261E) : pending ? const Color(0xFFB45309) : AppColors.forest;
+    final icon = failed ? Icons.error_outline : pending ? Icons.hourglass_top_rounded : Icons.check_circle_outline;
+    final ref = '${e['reference'] ?? ''}'.trim();
+    final reason = '${e['reason'] ?? ''}'.trim();
+    final amount = e['amount_zmw'];
+    return Padding(
+      padding: EdgeInsets.only(bottom: last ? 0 : 10),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Column(children: [
+          Icon(icon, size: 18, color: color),
+          if (!last) Container(width: 2, height: 28, margin: const EdgeInsets.only(top: 2), color: AppColors.line),
+        ]),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${e['label'] ?? state}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: color)),
+          Text([_fmt(e['at']), if (amount is num) 'K${amount.toDouble().toStringAsFixed(2)}', if (ref.isNotEmpty) 'Ref: $ref'].join(' • '),
+              style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
+          if (reason.isNotEmpty && reason != 'null')
+            Text(reason, style: const TextStyle(fontSize: 11.5, color: Color(0xFFB3261E), height: 1.35)),
+        ])),
+      ]),
     );
   }
 }
