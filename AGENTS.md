@@ -27,6 +27,13 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-second pass) — unified receipts, money-ops, dispute prefill
+
+- **Unified receipts:** `GET /me/receipts` lists all payment kinds for the signed-in user; `PlanReceiptScreen` now renders generic payment receipts (plan/upgrade/counter_fare/booking_deposit/job/topup/refund etc.) with logo and PNG share/download. Account screen shows "Receipts" for all payments.
+- **Admin money ops:** `GET /admin/money-ops` (admin-gated) returns pending/failed/success-today counts, recent pending/failed payments, pending/failed payouts, recent successes, and Lenco balance snapshot for reconciliation/float monitoring.
+- **Dispute/evidence:** booking "Get help" became "Report issue / get help" and pre-fills a support ticket with booking ref, status, payment state, rider, and counter-fare state as an evidence starter bundle.
+- Worker deployed `fe049b77-e594-4bbb-9952-d33327cc2326`; tsc clean, vitest 30/30.
+
 ## 2026-11-24 (forty-first pass) — Lenco top priority, fee model, plan receipts, contact number
 
 - **Lenco is top payment priority** (`PAYMENT_GATEWAY=lenco` in `workers/wrangler.toml`); Lipila code remains intact. Gateway-aware processing fees implemented: processing fee = DropOff platform cut (unchanged: 1% + K0.98, min K4.98) + gateway provider collection fee (Lenco mobile money 1%, Lipila K2.50). User-facing copy says "processing fee" (no breakdown). Added `lencoCollectionFee`/`collectionFees(..., gateway)` in `workers/src/fees.ts`.

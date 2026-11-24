@@ -67,7 +67,7 @@ class _PlanReceiptScreenState extends State<PlanReceiptScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F3),
       appBar: AppBar(
-        title: const Text('Plan receipt', style: TextStyle(fontWeight: FontWeight.w900)),
+        title: const Text('Payment receipt', style: TextStyle(fontWeight: FontWeight.w900)),
         actions: [
           IconButton(
             tooltip: 'Download / share receipt',
@@ -131,7 +131,18 @@ class _ReceiptCard extends StatelessWidget {
     final statusLabel = isSuccess ? 'PAID' : status == 'pending' ? 'PENDING' : status.toUpperCase();
     final kind = _s(receipt['kind']);
     final isPlan = kind == 'subscription' || kind == 'upgrade';
-    final title = isPlan ? 'Plan payment receipt' : 'Payment receipt';
+    final title = switch (kind) {
+      'subscription' => 'Plan payment receipt',
+      'upgrade' => 'Plan upgrade receipt',
+      'counter_fare' => 'Counter fare receipt',
+      'booking_deposit' => 'Booking deposit receipt',
+      'job' => 'Delivery payment receipt',
+      'topup' => 'Wallet top-up receipt',
+      'cod_remit' => 'COD remittance receipt',
+      'rider_reimbursement' => 'Rider reimbursement receipt',
+      'refund' => 'Refund receipt',
+      _ => 'Payment receipt',
+    };
 
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 8))]),

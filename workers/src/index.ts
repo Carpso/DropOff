@@ -7373,6 +7373,59 @@ app.get('/me/plan-receipts', async (c) => {
   });
 });
 
+app.get('/me/receipts', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'unauthorized' }, 401);
+  const kind = c.req.query('kind');
+  const whereKind = kind ? 'AND p.kind = ?2' : '';
+  const stmt = c.env.DB.prepare(
+    `SELECT p.id, p.status, p.kind, p.amount_zmw, p.credit_zmw, p.platform_fee_zmw, p.lipila_fee_zmw,
+            p.lipila_reference, p.gateway, p.gateway_reference, p.created_at, p.paid_at, p.subscription_id,
+            p.job_id, j.ref AS job_ref, j.counter_receipt_zmw AS job_counter_receipt_zmw,
+            s.tier AS sub_tier, s.period_start AS sub_period_start, s.period_end AS sub_period_end
+       FROM payments p
+       LEFT JOIN jobs j ON j.id = p.job_id
+       LEFT JOIN subscriptions s ON s.id = p.subscription_id
+      WHERE p.phone = ?1 ${whereKind}
+      ORDER BY p.id DESC LIMIT 100`,
+  );
+  const { results } = kind ? await stmt.bind(phone, kind).all<any>() : await stmt.bind(phone).all<any>();
+  const planTiers = await plans(c.env.DB);
+  return c.json({
+    receipts: (results ?? []).map((p: any) => {
+      const credit = round2(Number(p.credit_zmw ?? 0));
+      const processingFee = round2(Number(p.platform_fee_zmw ?? 0) + Number(p.lipila_fee_zmw ?? 0));
+      const total = round2(Number(p.amount_zmw ?? 0));
+      const queueFee = p.kind === 'counter_fare' ? DEPOT_QUEUE_FEE_ZMW : 0;
+      const plan = p.sub_tier ? planTiers[p.sub_tier as PlanTier] : null;
+      return {
+        receipt_no: `DRP-RCPT-${String(p.id).padStart(6, '0')}`,
+        payment_id: p.id,
+        status: p.status,
+        kind: p.kind,
+        paid_at: p.paid_at,
+        created_at: p.created_at,
+        job_ref: p.job_ref ?? null,
+        plan: (p.kind === 'subscription' || p.kind === 'upgrade') ? {
+          tier: p.sub_tier ?? null,
+          name: p.sub_tier ? ({ weekly: 'Weekly Sprint', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' } as Record<string,string>)[p.sub_tier] ?? String(p.sub_tier).toUpperCase() : null,
+          period_start: p.sub_period_start ?? null,
+          period_end: p.sub_period_end ?? null,
+        } : null,
+        amounts: {
+          total_zmw: total,
+          plan_amount_zmw: (p.kind === 'subscription' || p.kind === 'upgrade') ? credit : null,
+          receipt_amount_zmw: p.kind === 'counter_fare' ? round2(Number(p.job_counter_receipt_zmw ?? Math.max(0, total - processingFee - queueFee))) : null,
+          processing_fee_zmw: processingFee,
+          depot_queue_fee_zmw: queueFee,
+        },
+        gateway: p.gateway ?? 'lipila',
+        reference: p.gateway_reference ?? p.lipila_reference ?? null,
+      };
+    }),
+  });
+});
+
 /* ---------------------------- Lipila webhook ------------------------------ */
 // NEVER trust the webhook body: anyone can POST {"reference": …, "status":
 // "success"} and get free rides. The reported status is ignored — we look the
@@ -12466,6 +12519,43 @@ app.get('/admin/lenco/balance', async (c) => {
   } catch (e) {
     return c.json({ error: 'lenco_balance_failed', detail: String(e).slice(0, 300) }, 502);
   }
+});
+
+app.get('/admin/money-ops', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const [pendingPayments, failedPayments, pendingPayouts, failedPayouts, recentSuccess] = await Promise.all([
+    c.env.DB.prepare(`SELECT id, kind, status, amount_zmw, credit_zmw, platform_fee_zmw, lipila_fee_zmw, gateway, gateway_reference, lipila_reference, phone, job_id, subscription_id, created_at, paid_at, meta
+      FROM payments WHERE status = 'pending' ORDER BY id DESC LIMIT 50`).all<any>(),
+    c.env.DB.prepare(`SELECT id, kind, status, amount_zmw, gateway, gateway_reference, lipila_reference, phone, job_id, created_at, meta
+      FROM payments WHERE status = 'failed' ORDER BY id DESC LIMIT 50`).all<any>(),
+    c.env.DB.prepare(`SELECT id, reference, kind, status, amount_zmw, phone, job_id, gateway, gateway_reference, attempts, last_error, next_attempt_at, created_at, needs_admin_confirm
+      FROM payouts WHERE status IN ('queued','processing','pending','failed') ORDER BY id DESC LIMIT 50`).all<any>(),
+    c.env.DB.prepare(`SELECT id, reference, kind, status, amount_zmw, phone, gateway, attempts, last_error, created_at
+      FROM payouts WHERE status = 'failed' ORDER BY id DESC LIMIT 20`).all<any>(),
+    c.env.DB.prepare(`SELECT id, kind, status, amount_zmw, gateway, gateway_reference, created_at, paid_at
+      FROM payments WHERE status = 'success' ORDER BY id DESC LIMIT 20`).all<any>(),
+  ]);
+  let lenco: any = null;
+  try {
+    const [accounts, balance] = await Promise.all([lencoAccounts(c.env), lencoBalance(c.env)]);
+    lenco = { ok: true, balance: balance?.data ?? null, accounts: accounts?.data ?? [] };
+  } catch (e) { lenco = { ok: false, error: String(e).slice(0, 200) }; }
+  const count = async (sql: string) => ((await c.env.DB.prepare(sql).first<any>())?.n ?? 0) as number;
+  const [pendingCount, failedCount, successToday] = await Promise.all([
+    count(`SELECT COUNT(*) AS n FROM payments WHERE status='pending'`),
+    count(`SELECT COUNT(*) AS n FROM payments WHERE status='failed'`),
+    count(`SELECT COUNT(*) AS n FROM payments WHERE status='success' AND date(COALESCE(paid_at, created_at)) = date('now')`),
+  ]);
+  return c.json({
+    ok: true,
+    gateway: c.env.PAYMENT_GATEWAY ?? 'auto',
+    counts: { pending_payments: pendingCount, failed_payments: failedCount, success_today: successToday },
+    lenco,
+    pending_payments: pendingPayments.results ?? [],
+    failed_payments: failedPayments.results ?? [],
+    payouts: pendingPayouts.results ?? [],
+    recent_success: recentSuccess.results ?? [],
+  });
 });
 
 // Lipila diagnostic (superadmin): tells us the Worker's egress IP and exactly

@@ -1416,16 +1416,16 @@ class _TiersCardState extends State<_TiersCard> {
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: Align(alignment: Alignment.centerLeft,
-              child: Text('Plan receipts', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20))),
+              child: Text('Receipts', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20))),
           ),
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: Align(alignment: Alignment.centerLeft,
-              child: Text('Download receipts for your plan payments for your records or audit.',
+              child: Text('Download receipts for your payments for your records or audit.',
                 style: TextStyle(fontSize: 13, color: Color(0xFF5F6B66), height: 1.4))),
           ),
           Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
-            future: DropOffApi.myPlanReceipts(),
+            future: DropOffApi.myReceipts(),
             builder: (ctx, snap) {
               if (snap.connectionState != ConnectionState.done) {
                 return const Center(child: AppLogoSpinner());
@@ -1446,13 +1446,24 @@ class _TiersCardState extends State<_TiersCard> {
                   final status = '${r['status'] ?? ''}'.toLowerCase();
                   final ok = status == 'success';
                   final color = ok ? const Color(0xFF1E7A43) : status == 'pending' ? const Color(0xFFB45309) : const Color(0xFFB3261E);
-                  final name = '${plan['name'] ?? plan['tier'] ?? 'Plan'}';
+                  final kind = '${r['kind'] ?? ''}';
+                  final name = '${plan['name'] ?? plan['tier'] ?? ''}';
                   final total = amounts['total_zmw'];
                   final totalText = total is num ? 'K${total.toDouble().toStringAsFixed(2)}' : '';
+                  final title = switch (kind) {
+                    'subscription' => name.isEmpty ? 'Plan payment' : '$name plan',
+                    'upgrade' => name.isEmpty ? 'Plan upgrade' : '$name upgrade',
+                    'counter_fare' => 'Counter fare payment',
+                    'booking_deposit' => 'Booking deposit',
+                    'job' => 'Delivery payment',
+                    'topup' => 'Top-up',
+                    'refund' => 'Refund',
+                    _ => 'Payment',
+                  };
                   return ListTile(
                     tileColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0x14000000))),
-                    title: Text('$name plan', style: const TextStyle(fontWeight: FontWeight.w800)),
+                    title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
                     subtitle: Text('${r['receipt_no'] ?? ''} • ${ok ? 'Paid' : status.toUpperCase()}\n$totalText', style: const TextStyle(height: 1.35)),
                     isThreeLine: true,
                     trailing: Icon(Icons.chevron_right, color: color),
@@ -1635,7 +1646,7 @@ class _TiersCardState extends State<_TiersCard> {
                       child: TextButton.icon(
                         onPressed: _busyTier != null ? null : _openPlanReceipts,
                         icon: const Icon(Icons.receipt_long_outlined, size: 18),
-                        label: const Text('Plan receipts'),
+                        label: const Text('Receipts'),
                       ),
                     ),
                   ]);

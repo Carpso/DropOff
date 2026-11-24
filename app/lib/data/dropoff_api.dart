@@ -1290,6 +1290,17 @@ class DropOffApi {
         .toList(growable: false);
   }
 
+  static Future<List<Map<String, dynamic>>> myReceipts({String? kind}) async {
+    final q = kind == null ? '' : '?kind=${Uri.encodeQueryComponent(kind)}';
+    final b = await get('/me/receipts$q');
+    final raw = b?['receipts'];
+    if (raw is! List) return const <Map<String, dynamic>>[];
+    return raw
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
+  }
+
   /// HELD-PAYMENT WATCH (owner bug 2026-11-17: "I paid but the payment screen
   /// didn't check or poll"): the held-booking screen polls the job's LATEST
   /// payment row — the server re-checks any pending row against Lipila inline,

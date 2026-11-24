@@ -616,10 +616,22 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const CircleAvatar(backgroundColor: Color(0xFFE8F2EC), child: Icon(Icons.support_agent_outlined, color: AppColors.forest)),
-                title: const Text('Get help with this delivery', style: TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: const Text('Open a support ticket for this booking'),
+                title: const Text('Report issue / get help', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Support ticket with booking evidence'),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TicketsScreen(prefill: 'Issue with booking ${booking.serverRef ?? booking.reference}: '))),
+                onTap: () {
+                  final ref = booking.serverRef ?? booking.reference;
+                  final evidence = [
+                    'Booking: $ref',
+                    'Status: ${booking.timeline[booking.stage.clamp(0, booking.timeline.length - 1)]}',
+                    'Payment: ${booking.paymentHeld ? 'held/pending' : 'not held'}',
+                    if (booking.riderName != null) 'Rider: ${booking.riderName}',
+                    if (booking.counterFareDue) 'Counter fare: due K${(booking.counterReceiptZmw ?? 0).toStringAsFixed(2)}',
+                    if (booking.counterReceiptPaid) 'Counter fare: paid',
+                    'Issue: ',
+                  ].join('\n');
+                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TicketsScreen(prefill: evidence)));
+                },
               ),
             ListTile(
               contentPadding: EdgeInsets.zero,
