@@ -6448,7 +6448,7 @@ async function counterFareFees(env: Env, phone: string, receipt: number) {
     gateway,
     processing_fee_zmw: processingFeeZmw,
     depot_queue_fee_zmw: depotQueueFeeZmw,
-    // Sender pays: receipt + processing fee (DropOff cut + gateway fee) + depot queue fee (K9).
+    // Sender pays: receipt + processing fee + depot queue fee.
     total: round2(receipt + processingFeeZmw + depotQueueFeeZmw),
   };
 }
@@ -6931,17 +6931,25 @@ async function reimburseRider(
   }
 }
 
-/* -------- platform revenue sweep (fees → business momo) ----------------- */
-// All platform income sits in the Lipila merchant account as we collect it. When the
-// undistributed balance reaches PLATFORM_SWEEP_MIN_ZMW, sweep it to the
-// business number in one disbursement. Idempotent: the ledger row is written
-// BEFORE the disburse call, so a crash-then-rerun can never double-pay
-// (the pending row blocks the next sweep until it is marked success/failed).
+/* -------- platform revenue sweep (fees/plan income → business momo) ------ */
+// All platform income sits in the merchant/Lenco account as we collect it.
+// Plan purchases: sweep the PLAN AMOUNT (credit_zmw) to the business line;
+// leave processing fees and depot queue fees in float for covering
+// transaction/payout costs. Counter fares: leave processing + depot queue fee
+// in float. Other payments: sweep the platform fee as before.
+// Idempotent: ledger row written BEFORE disburse call, so reruns cannot double-pay.
 async function sweepPlatformIncome(env: Env, minZmw = 0): Promise<void> {
   const businessPhone = env.BUSINESS_PHONE;
   if (!businessPhone) return;
   const earnedRow = await env.DB.prepare(
-    `SELECT COALESCE(SUM(platform_fee_zmw), 0) AS total FROM payments WHERE status = 'success'`,
+    `SELECT COALESCE(SUM(
+        CASE
+          WHEN kind IN ('subscription', 'upgrade') THEN COALESCE(credit_zmw, 0)
+          WHEN kind = 'counter_fare' THEN 0
+          ELSE COALESCE(platform_fee_zmw, 0)
+        END
+      ), 0) AS total
+     FROM payments WHERE status = 'success'`,
   ).first<any>();
   const sweptRow = await env.DB.prepare(
     `SELECT COALESCE(SUM(amount_zmw), 0) AS total FROM platform_disbursements WHERE status IN ('success', 'pending')`,

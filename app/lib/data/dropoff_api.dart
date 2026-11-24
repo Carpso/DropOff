@@ -54,9 +54,9 @@ class DropOffApi {
   /// Fee model mirror of workers/src/fees.ts — the server is authoritative;
   /// these helpers only render the estimate before the job is created.
   ///
-  /// MODEL: the customer pays the base + ONE "processing fee" (platform cut +
-  /// momo collection leg). Driver/rider earnings are NEVER computed here —
-  /// they live server-side between DropOff and the driver.
+  /// MODEL: the customer pays the base + one processing fee. Driver/rider
+  /// earnings are NEVER computed here — they live server-side between DropOff
+  /// and the driver.
   static const double platformFeePct = 1.0;
   static const double platformFixedFee = 0.48;
   static const double platformMinFee = 3.0;
