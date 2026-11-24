@@ -27,6 +27,14 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-sixth pass) — Step 5 referral payout + Step 3 follow-ups
+
+- **Referral reward (Step 5):** reward now issues only after referee's **first paid, delivered/completed** job (`rewardReferralOnBooking` checks paid+delivered; triggered on delivery/payment settlement). Added referral qualification/status machine fields (`qualified_at/qualified_job_id/reward_kind/reward_amount_zmw/void_reason`, migration `0084_referral_qualification.sql` applied). Status labels exposed: invited/signed up/qualified/paid. Added fraud/attribution guards: no self-referral, referrer must be active, late claim blocked if referee already completed paid delivery, one reward per referred phone, earlier paid-delivered job blocks later reward.
+- **Admin money audit/idempotency (Step 3):** added `admin_money_audit` (migration `0083_admin_money_audit.sql` applied), `logAdminMoneyAction`/`findAdminMoneyIdempotent`, and audit_id + optional `idempotency_key` in refund/confirm/retry/pay-now/counter-fare-prompt/waive endpoints. Flutter admin API sends idempotency keys.
+- **collectWithGateway reference review (Step 3):** reviewed call sites; most deterministic. Stabilized float topup ref to 2-minute window (`topup-${phone}-${window}`) to reduce duplicate prompt risk on retries.
+- **Integration test debt (Step 3):** added skipped scaffold `workers/test/integration/money.integration.test.ts` + `vitest.integration.config.ts`; full D1/workerd integration harness still needs `@cloudflare/vitest-pool-workers` wiring.
+- Worker deployed `6bb09e01-b02e-4f44-98b9-e46dea3a7eba`; tsc clean, vitest 30 pass/4 skipped.
+
 ## 2026-11-24 (forty-fifth pass) — Step 4 float/risk controls
 
 - **Lenco float guard:** `runPayoutQueue` checks available Lenco balance before sending Lenco payouts; if `amount + lencoDisbursementFeeEstimate.max > available`, payout is deferred with a clear float error and owner alert. Low-balance owner alert added with cooldown (`lenco_low_balance_alerted_at`, threshold setting `lenco_low_balance_threshold_zmw`, default K1000).

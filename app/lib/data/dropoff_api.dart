@@ -998,26 +998,28 @@ class DropOffApi {
 
   static Future<Map<String, dynamic>?> adminMoneyOps() => getAdmin('/admin/money-ops');
 
+  static String _adminIdempotencyKey(String action) => '$action-${DateTime.now().microsecondsSinceEpoch}';
+
   static Future<ApiResponse> confirmPayout(int id) =>
-      post('/admin/payouts/$id/confirm', {});
+      post('/admin/payouts/$id/confirm', {'idempotency_key': _adminIdempotencyKey('confirm-$id')});
 
   static Future<ApiResponse> payPayoutNow(int id) =>
-      post('/admin/payouts/$id/pay-now', {});
+      post('/admin/payouts/$id/pay-now', {'idempotency_key': _adminIdempotencyKey('paynow-$id')});
 
   static Future<ApiResponse> retryPayout(int id) =>
-      post('/admin/payouts/$id/retry', const {}, admin: true);
+      post('/admin/payouts/$id/retry', {'idempotency_key': _adminIdempotencyKey('retry-$id')}, admin: true);
 
   /// Staff escape hatch (owner bug 2026-11-23): settle a stuck depot counter
   /// fare with an audit reason so the sender can book again. No money moves.
   static Future<Map<String, dynamic>?> adminCounterFares() => getAdmin('/admin/counter-fares');
 
   static Future<ApiResponse> adminWaiveCounterFare(String ref, String reason) =>
-      post('/admin/jobs/${Uri.encodeComponent(ref)}/waive-counter-fare', {'reason': reason}, admin: true);
+      post('/admin/jobs/${Uri.encodeComponent(ref)}/waive-counter-fare', {'reason': reason, 'idempotency_key': _adminIdempotencyKey('waive-$ref')}, admin: true);
 
   /// Re-fire a stuck depot counter-fare momo prompt from the real sender phone.
   /// Returns the provider's raw answer on failure so staff can act on it.
   static Future<ApiResponse> adminSendCounterFarePrompt(String ref, String reason) =>
-      post('/admin/jobs/${Uri.encodeComponent(ref)}/counter-fare-prompt', {'reason': reason}, admin: true);
+      post('/admin/jobs/${Uri.encodeComponent(ref)}/counter-fare-prompt', {'reason': reason, 'idempotency_key': _adminIdempotencyKey('prompt-$ref')}, admin: true);
 
   /// Clear all auto-created/unpaid jobs (status='created' AND paid=0). Admin-only;
   /// used to clear test/demo leftovers so the app launches clean for senders.

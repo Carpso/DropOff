@@ -4087,6 +4087,9 @@ app.post('/jobs/:ref/events', async (c) => {
     `SELECT ref, status, paid, counter_price_zmw, rider_fee_zmw, leg2_fee_zmw,
             wait_minutes, wait_fee_zmw, cod_collected_zmw, total_zmw FROM jobs WHERE id = ?1`,
   ).bind(job.id).first();
+  if (status && ['delivered', 'ready_for_collection', 'completed'].includes(status) && Number((updated as any)?.paid) === 1) {
+    c.executionCtx.waitUntil(rewardReferralOnBooking(c.env, job.id, String(job.sender_phone ?? '')).catch(() => {}));
+  }
   // FCM push to the sender — status transitions are the parcel's whole story.
   if (status && updated) {
     // Milestone copy uses the sender's own item name + the REAL destination
@@ -6332,7 +6335,8 @@ app.post('/payments', async (c) => {
     platformFeeZmw = platformFee(creditZmw);
     lipilaFeeZmw = feeGw === 'lenco' ? lencoCollectionFee(creditZmw) : MOMO_COLLECTION_FEE;
     amount = round2(creditZmw + platformFeeZmw + lipilaFeeZmw);
-    lipilaRef = `topup-${phone}-${Date.now().toString(36)}`;
+    // Stable for 2-minute retry window to reduce duplicate prompt risk on client retries.
+    lipilaRef = `topup-${phone}-${Math.floor(Date.now() / 120000).toString(36)}`;
   }
 
   const note = kind === 'job' ? `DropOff ${lipilaRef}`
@@ -6599,41 +6603,78 @@ const isReferralPromo = (p: any): boolean =>
   String(p?.note ?? '').startsWith('Referral reward');
 
 async function rewardReferralOnBooking(env: Env, jobId: number, senderPhone: string): Promise<void> {
-  // OWNER TOGGLE (2026-11-21): the admin can switch the bonus off without a
-  // deploy. Pending referrals stay pending and are rewarded if it is re-enabled.
+  // Step 5: reward only after referee completes FIRST PAID DELIVERY.
   if (!flagOn(await getSetting(env.DB, 'referral_bonus_enabled'))) return;
+  const job = await env.DB.prepare(
+    `SELECT id, ref, sender_phone, paid, status FROM jobs WHERE id = ?1`,
+  ).bind(jobId).first<any>();
+  if (!job) return;
+  const refereePhone = normalizeZmPhone(String(job.sender_phone || senderPhone || ''));
+  const paid = Number(job.paid) === 1;
+  const delivered = ['delivered', 'ready_for_collection', 'completed'].includes(String(job.status ?? ''));
+  if (!paid || !delivered) return;
+
   const refRow = await env.DB.prepare(
-    `SELECT id, referrer_phone, reward_code FROM referrals
-      WHERE referred_phone = ?1 AND status = 'pending'`,
-  ).bind(senderPhone).first<any>();
-  if (!refRow || refRow.reward_code) return;
+    `SELECT * FROM referrals WHERE referred_phone = ?1 AND status IN ('pending','qualified') LIMIT 1`,
+  ).bind(refereePhone).first<any>();
+  if (!refRow) return;
+  if (refRow.referrer_phone === refereePhone) {
+    await env.DB.prepare(`UPDATE referrals SET status='void', void_reason='self_referral' WHERE id=?1`).bind(refRow.id).run().catch(() => {});
+    return;
+  }
+
+  // Fraud/attribution guards: one reward per referred phone, first qualifying delivered paid job only.
+  const priorReward = await env.DB.prepare(
+    `SELECT id FROM referrals WHERE referred_phone = ?1 AND status = 'rewarded' LIMIT 1`,
+  ).bind(refereePhone).first<any>();
+  if (priorReward) return;
+  const existingDelivered = await env.DB.prepare(
+    `SELECT j.id FROM jobs j
+      WHERE j.sender_phone = ?1 AND j.id <> ?2 AND j.paid = 1 AND j.status IN ('delivered','ready_for_collection','completed')
+      ORDER BY j.id ASC LIMIT 1`,
+  ).bind(refereePhone, jobId).first<any>();
+  // If there's an earlier delivered paid job, only allow that one as qualifier; this prevents rewarding on later jobs.
+  if (existingDelivered) return;
+
+  if (String(refRow.status) === 'pending') {
+    await env.DB.prepare(
+      `UPDATE referrals SET status='qualified', qualified_at=datetime('now'), qualified_job_id=?2 WHERE id=?1 AND status='pending'`,
+    ).bind(refRow.id, jobId).run().catch(() => {});
+  }
+
+  const fresh = await env.DB.prepare(`SELECT * FROM referrals WHERE id = ?1`).bind(refRow.id).first<any>();
+  if (!fresh || !['qualified','pending'].includes(String(fresh.status)) || fresh.reward_code) return;
+  // Re-check qualified state
+  const qualified = String(fresh.status) === 'qualified' || (Number(job.paid) === 1 && delivered);
+  if (!qualified) return;
+
   const rewardCode = `FRIEND${randomCode(6)}`;
   const pct = REF_REWARD_PCT;
-  // ONE atomic batch: status, promo and audit event commit together, so the
-  // referrer can never be left with a 'rewarded' row and no usable code.
+  const rewardAmount = round2(Math.max(0, Number(job.rider_fee_zmw ?? 0) * (pct / 100)));
   const result = await env.DB.batch([
     env.DB.prepare(
-      `UPDATE referrals SET status = 'rewarded', referred_job_id = ?2, rewarded_at = datetime('now'),
-              reward_code = ?3, reward_notified_at = datetime('now')
-        WHERE id = ?1 AND status = 'pending'`,
-    ).bind(refRow.id, jobId, rewardCode),
+      `UPDATE referrals SET status = 'rewarded', qualified_at = COALESCE(qualified_at, datetime('now')),
+              qualified_job_id = COALESCE(qualified_job_id, ?2), referred_job_id = COALESCE(referred_job_id, ?2),
+              rewarded_at = datetime('now'), reward_code = ?3, reward_notified_at = datetime('now'),
+              reward_kind = 'promo_code', reward_amount_zmw = ?4
+        WHERE id = ?1 AND status IN ('pending','qualified') AND reward_code IS NULL`,
+    ).bind(refRow.id, jobId, rewardCode, rewardAmount),
     env.DB.prepare(
       `INSERT INTO promo_codes (code, discount_pct, note, uses_left, active, kind)
        VALUES (?1, ?2, ?3, 1, 1, 'referral')`,
-    ).bind(rewardCode, pct, `Referral reward — ${senderPhone} joined via your code`),
+    ).bind(rewardCode, pct, `Referral reward — first paid delivery by ${refereePhone}`),
     env.DB.prepare(`INSERT INTO job_events (job_id, status, note) VALUES (?1, 'referral_rewarded', ?2)`)
-      .bind(jobId, `Referrer ${refRow.referrer_phone} gets ${rewardCode} (${pct}% off, single-use)`),
+      .bind(jobId, `Referrer ${refRow.referrer_phone} rewarded ${rewardCode} (${pct}% off, single-use) after first paid delivery.`),
   ]);
   if (!result?.[0]?.meta?.changes) return;
-  // Tell the referrer — the code was previously minted but never surfaced.
   try {
     await sendToPhone(env, refRow.referrer_phone, {
       title: 'Referral reward earned',
-      body: `Your friend's booking is confirmed. Use code ${rewardCode} for ${pct}% off your next DropOff leg.`,
+      body: `Your friend's first paid delivery is complete. Use code ${rewardCode} for ${pct}% off your next DropOff leg.`,
       data: { kind: 'referral_reward', code: rewardCode },
     });
     await sendSms(env, refRow.referrer_phone,
-      `DropOff: thanks for inviting a friend! Your ${pct}% off code is ${rewardCode} - single use, at booking.`,
+      `DropOff: your referral reward is ready! ${pct}% off code ${rewardCode} (single use). Earned after your friend's first paid delivery.`,
       { transactional: true });
   } catch { /* notification must never block the reward */ }
 }
@@ -7090,6 +7131,40 @@ async function logLipila(env: Env, kind: string, reference: string, phone: strin
       `INSERT INTO lipila_logs (kind, reference, phone, amount_zmw, status, message, gateway) VALUES (?1,?2,?3,?4,?5,?6,?7)`,
     ).bind(kind, reference, phone, amount, status, message?.slice(0, 300) ?? null, gateway).run();
   } catch { /* audit must never block money movement */ }
+}
+
+async function logAdminMoneyAction(env: Env, input: {
+  action: string; actorPhone?: string | null; actorRole?: string | null;
+  targetType: string; targetId: string | number; idempotencyKey?: string | null;
+  request?: unknown; result?: unknown; ok?: boolean;
+}): Promise<number | null> {
+  try {
+    const r = await env.DB.prepare(
+      `INSERT INTO admin_money_audit (action, actor_phone, actor_role, target_type, target_id, idempotency_key, request_json, result_json, ok)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`,
+    ).bind(
+      input.action, input.actorPhone ?? null, input.actorRole ?? null,
+      input.targetType, String(input.targetId), input.idempotencyKey ?? null,
+      input.request ? JSON.stringify(input.request).slice(0, 2000) : null,
+      input.result ? JSON.stringify(input.result).slice(0, 4000) : null,
+      input.ok === false ? 0 : 1,
+    ).run();
+    return Number(r.meta.last_row_id ?? 0) || null;
+  } catch { return null; }
+}
+
+async function findAdminMoneyIdempotent(env: Env, action: string, targetId: string | number, idempotencyKey?: string | null): Promise<any | null> {
+  const key = String(idempotencyKey ?? '').trim();
+  if (!key) return null;
+  try {
+    const row = await env.DB.prepare(
+      `SELECT id, result_json, ok FROM admin_money_audit
+        WHERE action = ?1 AND target_id = ?2 AND idempotency_key = ?3 AND ok = 1
+        ORDER BY id DESC LIMIT 1`,
+    ).bind(action, String(targetId), key).first<any>();
+    if (!row?.result_json) return null;
+    return { audit_id: row.id, ...(safeParse(row.result_json) ?? {}), idempotent_replay: true };
+  } catch { return null; }
 }
 
 async function notifyPayout(env: Env, title: string, body: string): Promise<void> {
@@ -9250,21 +9325,32 @@ app.get('/refer/code', async (c) => {
   if (!phone) return c.json({ error: 'identity_required' }, 401);
   const code = await ensureReferralCode(c.env.DB, phone);
   const stats = await c.env.DB.prepare(
-    `SELECT SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
-            SUM(CASE WHEN status='rewarded' THEN 1 ELSE 0 END) AS rewarded,
-            COUNT(*) AS total
-       FROM referrals WHERE referrer_phone = ?1`,
+    `SELECT
+       SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
+       SUM(CASE WHEN status='qualified' THEN 1 ELSE 0 END) AS qualified,
+       SUM(CASE WHEN status='rewarded' THEN 1 ELSE 0 END) AS rewarded,
+       COUNT(*) AS total
+     FROM referrals WHERE referrer_phone = ?1`,
   ).bind(phone).first<any>();
   const rewards = await c.env.DB.prepare(
-    `SELECT status, reward_code, rewarded_at, referred_job_id FROM referrals
-      WHERE referrer_phone = ?1 ORDER BY id DESC LIMIT 20`,
+    `SELECT id, referred_phone, status, reward_code, rewarded_at, qualified_at, qualified_job_id, referred_job_id, reward_amount_zmw, void_reason, created_at
+       FROM referrals WHERE referrer_phone = ?1 ORDER BY id DESC LIMIT 20`,
   ).bind(phone).all<any>();
+  const label = (s: string) => s === 'rewarded' ? 'paid' : s === 'qualified' ? 'qualified' : s === 'pending' ? 'signed_up' : s;
   return c.json({
     code,
     bonus_enabled: flagOn(await getSetting(c.env.DB, 'referral_bonus_enabled')),
     share_text: `Join me on DropOff — senders get home pickup to their courier. Use my link: ${publicLinkBase(c.env)}/r/${code}`,
-    stats: { pending: stats?.pending ?? 0, rewarded: stats?.rewarded ?? 0, total: stats?.total ?? 0 },
-    rewards: rewards.results ?? [],
+    stats: {
+      invited: 0, // share link; no row until claim
+      signed_up: stats?.pending ?? 0,
+      qualified: stats?.qualified ?? 0,
+      paid: stats?.rewarded ?? 0,
+      pending: stats?.pending ?? 0, // backward compat
+      rewarded: stats?.rewarded ?? 0, // backward compat
+      total: stats?.total ?? 0,
+    },
+    rewards: (rewards.results ?? []).map((r: any) => ({ ...r, status_label: label(String(r.status)) })),
   });
 });
 
@@ -9272,32 +9358,47 @@ app.post('/refer/claim', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const code = String(b?.code ?? '').trim().toUpperCase();
   if (!code) return c.json({ error: 'missing code' }, 400);
-  const phone = c.get('phone');
+  const phone = normalizeZmPhone(c.get('phone') ?? '');
   if (!phone) return c.json({ error: 'identity_required' }, 401);
-  // Only senders can be referred — a rider joining is not a referral.
   if (c.get('role') === 'rider') return c.json({ error: 'forbidden' }, 403);
-  const referrer = await c.env.DB.prepare('SELECT phone FROM auth_users WHERE referral_code = ?1').bind(code).first<any>();
-  if (!referrer) return c.json({ error: 'referral_code_not_found' }, 404);
+  const referrer = await c.env.DB.prepare('SELECT phone, status FROM auth_users WHERE referral_code = ?1').bind(code).first<any>();
+  if (!referrer?.phone) return c.json({ error: 'referral_code_not_found' }, 404);
   if (referrer.phone === phone) return c.json({ error: 'cannot_refer_yourself' }, 400);
+  if (String(referrer.status ?? 'active') !== 'active') return c.json({ error: 'referrer_inactive' }, 400);
+
+  // Attribution lock/fraud guard: do not allow late claim after referee already completed a paid delivery.
+  const priorPaidDelivery = await c.env.DB.prepare(
+    `SELECT id FROM jobs WHERE sender_phone = ?1 AND paid = 1 AND status IN ('delivered','ready_for_collection','completed') LIMIT 1`,
+  ).bind(phone).first<any>();
+  if (priorPaidDelivery) return c.json({ ok: false, tracked: false, reason: 'referee_already_completed_delivery' }, 409);
+
   const out = await c.env.DB.prepare(
-    'INSERT OR IGNORE INTO referrals (referrer_phone, referred_phone) VALUES (?1, ?2)',
-  ).bind(referrer.phone, phone).run();
-  return c.json({ ok: true, tracked: (out.meta.changes ?? 0) > 0, referrer: referrer.phone });
+    'INSERT OR IGNORE INTO referrals (referrer_phone, referred_phone, status) VALUES (?1, ?2, ?3)',
+  ).bind(referrer.phone, phone, 'pending').run();
+  return c.json({ ok: true, tracked: (out.meta.changes ?? 0) > 0, referrer: referrer.phone, status: 'signed_up' });
 });
 
 /* -------- admin reporting of the referral funnel ------------------------- */
 app.get('/admin/referrals', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
   const { results } = await c.env.DB.prepare(
-    `SELECT referrer_phone, referred_phone, status, reward_code, created_at, rewarded_at
+    `SELECT id, referrer_phone, referred_phone, status, reward_code, created_at, qualified_at, qualified_job_id, rewarded_at, reward_amount_zmw, void_reason
        FROM referrals ORDER BY id DESC LIMIT 200`,
   ).all();
   const agg = await c.env.DB.prepare(
-    `SELECT SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
-            SUM(CASE WHEN status='rewarded' THEN 1 ELSE 0 END) AS rewarded,
-            COUNT(*) AS total FROM referrals`,
+    `SELECT
+       SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
+       SUM(CASE WHEN status='qualified' THEN 1 ELSE 0 END) AS qualified,
+       SUM(CASE WHEN status='rewarded' THEN 1 ELSE 0 END) AS rewarded,
+       SUM(CASE WHEN status='void' THEN 1 ELSE 0 END) AS voided,
+       COUNT(*) AS total FROM referrals`,
   ).first<any>();
-  return c.json({ total: agg?.total ?? 0, pending: agg?.pending ?? 0, rewarded: agg?.rewarded ?? 0, recent: results });
+  const label = (s: string) => s === 'rewarded' ? 'paid' : s === 'qualified' ? 'qualified' : s === 'pending' ? 'signed_up' : s;
+  return c.json({
+    total: agg?.total ?? 0, pending: agg?.pending ?? 0, qualified: agg?.qualified ?? 0,
+    rewarded: agg?.rewarded ?? 0, voided: agg?.voided ?? 0,
+    recent: (results ?? []).map((r: any) => ({ ...r, status_label: label(String(r.status)) })),
+  });
 });
 
 /* -------- recurring parcel plans (standing orders) ------------------------- */
@@ -10923,6 +11024,9 @@ app.post('/admin/jobs/:ref/counter-fare-prompt', async (c) => {
   if (!ref) return c.json({ error: 'ref required' }, 400);
   const body: any = await c.req.json().catch(() => ({}));
   const reason = String(body?.reason ?? '').trim();
+  const idempotencyKey = String(body?.idempotency_key ?? '').trim() || null;
+  const replay = await findAdminMoneyIdempotent(c.env, 'counter_fare_prompt', ref, idempotencyKey);
+  if (replay) return c.json(replay);
   const job = await c.env.DB.prepare(
     `SELECT id, ref, sender_phone, counter_receipt_zmw, counter_receipt_paid FROM jobs WHERE UPPER(ref) = ?1`,
   ).bind(ref).first<any>();
@@ -10979,9 +11083,11 @@ app.post('/admin/jobs/:ref/counter-fare-prompt', async (c) => {
     body: `DropOff sent a K${amount.toFixed(2)} momo prompt for the depot receipt on ${job.ref}. Approve it on your phone to unlock the photo.`,
     data: { job_ref: job.ref, kind: 'counter_fare_prompt' },
   }).catch(() => {});
-  return c.json({ ok: true, payment_id: meta.last_row_id, amount_zmw: amount,
+  const result = { ok: true, payment_id: meta.last_row_id, amount_zmw: amount,
     lipila_reference: init.providerReference ?? init.reference, gateway: init.gateway,
-    gateway_reference: init.reference });
+    gateway_reference: init.reference };
+  const audit_id = await logAdminMoneyAction(c.env, { action: 'counter_fare_prompt', actorPhone: c.get('phone'), actorRole: c.get('role'), targetType: 'job', targetId: job.id, idempotencyKey, request: { ref, reason, idempotency_key: idempotencyKey }, result });
+  return c.json({ ...result, audit_id });
 });
 
 // RECOVERY: a sender can be blocked from ALL new bookings by one unpaid depot
@@ -10997,6 +11103,9 @@ app.post('/admin/jobs/:ref/waive-counter-fare', async (c) => {
   if (!ref) return c.json({ error: 'ref required' }, 400);
   const body: any = await c.req.json().catch(() => ({}));
   const reason = String(body?.reason ?? '').trim();
+  const idempotencyKey = String(body?.idempotency_key ?? '').trim() || null;
+  const replay = await findAdminMoneyIdempotent(c.env, 'counter_fare_waive', ref, idempotencyKey);
+  if (replay) return c.json(replay);
   if (reason.length < 8) {
     return c.json({ error: 'reason_required', detail: 'Give a short audit reason (at least 8 characters).' }, 400);
   }
@@ -11022,7 +11131,9 @@ app.post('/admin/jobs/:ref/waive-counter-fare', async (c) => {
       data: { job_ref: job.ref, kind: 'counter_fare_paid' },
     }).catch(() => {});
   }
-  return c.json({ ok: true, ref: job.ref, waived_zmw: amount });
+  const result = { ok: true, ref: job.ref, waived_zmw: amount };
+  const audit_id = await logAdminMoneyAction(c.env, { action: 'counter_fare_waive', actorPhone: c.get('phone'), actorRole: c.get('role'), targetType: 'job', targetId: job.id, idempotencyKey, request: { ref, reason, idempotency_key: idempotencyKey }, result });
+  return c.json({ ...result, audit_id });
 });
 
 // Soft-delete a booking: status='deleted' + audit event. Every normal queue /
@@ -12615,7 +12726,11 @@ app.get('/rider/reviews', async (c) => {
 // real money; delegated admins cannot do it without the owner key/phone.
 app.post('/admin/payments/:id/refund', async (c) => {
   if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const body: any = await c.req.json().catch(() => ({}));
   const id = Number(c.req.param('id'));
+  const idempotencyKey = String(body?.idempotency_key ?? '').trim() || null;
+  const replay = await findAdminMoneyIdempotent(c.env, 'refund', id, idempotencyKey);
+  if (replay) return c.json(replay, 202);
   const pay = await c.env.DB.prepare(
     `SELECT id, job_id, phone, provider, amount_zmw, status, gateway FROM payments WHERE id = ?1`,
   ).bind(id).first<any>();
@@ -12623,10 +12738,6 @@ app.post('/admin/payments/:id/refund', async (c) => {
   if (pay.status !== 'success') return c.json({ error: 'only settled payments can be refunded' }, 409);
   const amount = Math.round(Number(pay.amount_zmw) * 100) / 100;
   if (!(amount > 0)) return c.json({ error: 'nothing to refund' }, 409);
-  // Queue the refund instead of firing Lipila inline (Chisomo pattern). A
-  // failed/401 payout stays in the ledger and retries every 30 minutes; the
-  // source payment is marked 'refunded' only once Lipila confirms. Nothing is
-  // lost if the admin request drops or the worker restarts mid-transfer.
   const payout = await enqueuePayout(c.env, {
     kind: 'refund', paymentId: pay.id, jobId: pay.job_id,
     phone: pay.phone, amount, note: `DropOff refund payment ${pay.id}`,
@@ -12638,11 +12749,16 @@ app.post('/admin/payments/:id/refund', async (c) => {
     ).bind(pay.job_id, `Refund K${amount} queued for momo payout (${payout.reference}).`).run();
   }
   if (!payout.duplicate) c.executionCtx.waitUntil(runPayoutQueue(c.env));
-  return c.json({
+  const result = {
     ok: true, queued: true, payout_id: payout.id, refund_reference: payout.reference,
     amount_zmw: amount, duplicate: payout.duplicate,
     hint: 'Refund queued. The payment provider confirms within minutes; the owner is notified on success or each retry.',
-  }, 202);
+  };
+  const audit_id = await logAdminMoneyAction(c.env, {
+    action: 'refund', actorPhone: c.get('phone'), actorRole: c.get('role'),
+    targetType: 'payment', targetId: id, idempotencyKey, request: { idempotency_key: idempotencyKey }, result,
+  });
+  return c.json({ ...result, audit_id }, 202);
 });
 
 // Payout ledger + manual retry (superadmin only — this moves real money).
@@ -12660,7 +12776,11 @@ app.get('/admin/payouts', async (c) => {
 
 app.post('/admin/payouts/:id/confirm', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const body: any = await c.req.json().catch(() => ({}));
   const id = Number(c.req.param('id'));
+  const idempotencyKey = String(body?.idempotency_key ?? '').trim() || null;
+  const replay = await findAdminMoneyIdempotent(c.env, 'payout_confirm', id, idempotencyKey);
+  if (replay) return c.json(replay);
   const p = await c.env.DB.prepare('SELECT id, status, needs_admin_confirm FROM payouts WHERE id = ?1').bind(id).first<any>();
   if (!p) return c.json({ error: 'not found' }, 404);
   if (p.status === 'success') return c.json({ error: 'already settled' }, 409);
@@ -12670,12 +12790,18 @@ app.post('/admin/payouts/:id/confirm', async (c) => {
      WHERE id = ?1`,
   ).bind(id, c.get('phone') ?? 'admin').run();
   c.executionCtx.waitUntil(runPayoutQueue(c.env));
-  return c.json({ ok: true, payout_id: id, status: 'queued' });
+  const result = { ok: true, payout_id: id, status: 'queued' };
+  const audit_id = await logAdminMoneyAction(c.env, { action: 'payout_confirm', actorPhone: c.get('phone'), actorRole: c.get('role'), targetType: 'payout', targetId: id, idempotencyKey, request: { idempotency_key: idempotencyKey }, result });
+  return c.json({ ...result, audit_id });
 });
 
 app.post('/admin/payouts/:id/retry', async (c) => {
   if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  const body: any = await c.req.json().catch(() => ({}));
   const id = Number(c.req.param('id'));
+  const idempotencyKey = String(body?.idempotency_key ?? '').trim() || null;
+  const replay = await findAdminMoneyIdempotent(c.env, 'payout_retry', id, idempotencyKey);
+  if (replay) return c.json(replay);
   const p = await c.env.DB.prepare('SELECT id, status, attempts FROM payouts WHERE id = ?1').bind(id).first<any>();
   if (!p) return c.json({ error: 'not found' }, 404);
   if (p.status === 'success') return c.json({ error: 'already settled' }, 409);
@@ -12684,12 +12810,18 @@ app.post('/admin/payouts/:id/retry', async (c) => {
        last_error = NULL, updated_at = datetime('now') WHERE id = ?1`,
   ).bind(id).run();
   c.executionCtx.waitUntil(runPayoutQueue(c.env));
-  return c.json({ ok: true, payout_id: id, status: 'queued' });
+  const result = { ok: true, payout_id: id, status: 'queued' };
+  const audit_id = await logAdminMoneyAction(c.env, { action: 'payout_retry', actorPhone: c.get('phone'), actorRole: c.get('role'), targetType: 'payout', targetId: id, idempotencyKey, request: { idempotency_key: idempotencyKey }, result });
+  return c.json({ ...result, audit_id });
 });
 
 app.post('/admin/payouts/:id/pay-now', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const body: any = await c.req.json().catch(() => ({}));
   const id = Number(c.req.param('id'));
+  const idempotencyKey = String(body?.idempotency_key ?? '').trim() || null;
+  const replay = await findAdminMoneyIdempotent(c.env, 'payout_pay_now', id, idempotencyKey);
+  if (replay) return c.json(replay);
   const p = await c.env.DB.prepare('SELECT id, status, needs_admin_confirm FROM payouts WHERE id = ?1').bind(id).first<any>();
   if (!p) return c.json({ error: 'not found' }, 404);
   if (p.status === 'success') return c.json({ error: 'already settled' }, 409);
@@ -12700,7 +12832,9 @@ app.post('/admin/payouts/:id/pay-now', async (c) => {
      WHERE id = ?1 AND status IN ('queued','failed')`,
   ).bind(id, c.get('phone') ?? 'admin').run();
   c.executionCtx.waitUntil(runPayoutQueue(c.env));
-  return c.json({ ok: true, payout_id: id, status: 'queued' });
+  const result = { ok: true, payout_id: id, status: 'queued' };
+  const audit_id = await logAdminMoneyAction(c.env, { action: 'payout_pay_now', actorPhone: c.get('phone'), actorRole: c.get('role'), targetType: 'payout', targetId: id, idempotencyKey, request: { idempotency_key: idempotencyKey }, result });
+  return c.json({ ...result, audit_id });
 });
 
 // Lenco float balance — admin/superadmin can monitor payout float.

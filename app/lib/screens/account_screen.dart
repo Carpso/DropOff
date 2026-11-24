@@ -1121,7 +1121,7 @@ class _ReferralCardState extends State<_ReferralCard> {
     if (code.isEmpty) return;
     // Include human context: what the code is for and how to use it.
     final text = 'My DropOff referral code: $code\n'
-        'Sign up in the app → enter this code and get home pickup to your courier. I earn a 20% promo when your first booking is confirmed.';
+        'Sign up in the app → enter this code and get home pickup to your courier. I earn a 20% promo when your first paid delivery is completed.';
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) setState(() => _copied = true);
     await Future<void>.delayed(const Duration(seconds: 2));
@@ -1141,8 +1141,9 @@ class _ReferralCardState extends State<_ReferralCard> {
     if (!DropOffApi.enabled) return const SizedBox.shrink();
     final code = _data?['code'] as String?;
     final stats = _data?['stats'] as Map<String, dynamic>?;
-    final rewarded = (stats?['rewarded'] as num?)?.toInt() ?? 0;
-    final pending = (stats?['pending'] as num?)?.toInt() ?? 0;
+    final paid = (stats?['paid'] as num?)?.toInt() ?? (stats?['rewarded'] as num?)?.toInt() ?? 0;
+    final signedUp = (stats?['signed_up'] as num?)?.toInt() ?? (stats?['pending'] as num?)?.toInt() ?? 0;
+    final qualified = (stats?['qualified'] as num?)?.toInt() ?? 0;
     final rewards = ((_data?['rewards'] as List?) ?? const <dynamic>[])
         .whereType<Map>()
         .map((m) => Map<String, dynamic>.from(m))
@@ -1156,7 +1157,7 @@ class _ReferralCardState extends State<_ReferralCard> {
           const Text('Invite senders — earn', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
           const SizedBox(height: 4),
           const Row(children: [
-            Expanded(child: Text('Friend-code → you get a 20% promo when they book their first pickup.', style: AppType.bodyStrong)),
+            Expanded(child: Text('Invite a sender. You earn a 20% promo after their first paid delivery is completed.', style: AppType.bodyStrong)),
             HelpIconButton(topic: HelpTopic.referralReward),
           ]),
           const SizedBox(height: 12),
@@ -1174,7 +1175,9 @@ class _ReferralCardState extends State<_ReferralCard> {
             IconButton(tooltip: 'Share on WhatsApp', icon: const Icon(Icons.share_rounded, color: AppColors.forest), onPressed: _share),
           ]),
           const SizedBox(height: 6),
-          Text('$rewarded rewarded · $pending waiting (first booking)', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          Text('$paid paid · $qualified qualified · $signedUp signed up', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          const SizedBox(height: 2),
+          const Text('Status: invited (shared link) → signed up → qualified (first paid delivery) → paid.', style: TextStyle(color: AppColors.muted, fontSize: 11)),
           if (earned.isNotEmpty) ...[
             const SizedBox(height: 8),
             const Text('Your earned codes — use at booking', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
