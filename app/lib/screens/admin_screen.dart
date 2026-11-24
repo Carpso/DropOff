@@ -4165,7 +4165,7 @@ class _MoneyOpsCardState extends State<_MoneyOpsCard> {
           Padding(padding: const EdgeInsets.only(top: 10), child: Container(
             width: double.infinity, padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(color: const Color(0xFFFFF3F0), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0x33B3261E))),
-            child: Text('Low Lenco float warning: balance K${balance.toStringAsFixed(2)} vs pending payouts K${pendingPayoutTotal.toStringAsFixed(2)} + est. fees K${pendingFeeMax.toStringAsFixed(2)} (threshold K${threshold.toStringAsFixed(2)}). Top up before confirming disbursements.',
+            child: Text('Low Lenco float warning: balance K${(balance ?? 0).toStringAsFixed(2)} vs pending payouts K${pendingPayoutTotal.toStringAsFixed(2)} + est. fees K${pendingFeeMax.toStringAsFixed(2)} (threshold K${threshold.toStringAsFixed(2)}). Top up before confirming disbursements.',
               style: const TextStyle(fontSize: 11.5, color: Color(0xFF8C1D18), height: 1.35)),
           )),
         const SizedBox(height: 10),
