@@ -27,6 +27,14 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-fourth pass) — Step 3 idempotency audit/hardening
+
+- **Payout idempotency:** `enqueuePayout` now uses `ON CONFLICT(payment_id, kind) WHERE payment_id IS NOT NULL DO NOTHING` + read-back; added migration `0081_payout_unique.sql` (applied remotely) for a partial unique index on `payouts(payment_id, kind)`.
+- **Payout settlement race guard:** `settlePayoutSuccess` returns if the success-claim update affects no rows, preventing duplicate side effects on concurrent webhook/cron races.
+- **Stuck processing payouts:** `runPayoutQueue` now reconciles `processing` payouts older than 2 minutes (not only `pending`) via provider status.
+- **Lipila disbursement webhook:** for `cod_remit/rider_reimbursement/refund` payment kinds, Lipila webhook now re-verifies transfer status via provider before updating (matches Lenco path), instead of trusting verified body.
+- **Still to test more deeply:** D1-backed integration tests for duplicate webhook replay/retries/admin replay require a Workers test harness; added guards are code-audited and build-verified.
+
 ## 2026-11-24 (forty-third pass) — payment timeline UI + admin money-ops card
 
 - **Payment timeline UI:** `/jobs/:ref/payments` now returns `payments`, `payouts`, and `timeline` (prompt sent/awaiting approval/settled/failed/receipt unlocked/reimbursement queued/sent/failed) while keeping backward-compatible `payment`. Booking detail shows a "Payment timeline" card with refs/reasons and receipt download buttons for settled payments.

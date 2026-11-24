@@ -7054,14 +7054,15 @@ async function notifyPayout(env: Env, title: string, body: string): Promise<void
   } catch { /* notification best-effort */ }
 }
 
-async function settlePayoutSuccess(env: Env, id: number, identifier?: string | null): Promise<void> {
+export async function settlePayoutSuccess(env: Env, id: number, identifier?: string | null): Promise<void> {
   const p = await env.DB.prepare('SELECT * FROM payouts WHERE id = ?1').bind(id).first<any>();
   if (!p || p.status === 'success') return; // webhook replay / cron race is a no-op
-  await env.DB.prepare(
+  const upd = await env.DB.prepare(
     `UPDATE payouts SET status = 'success', lipila_identifier = COALESCE(?2, lipila_identifier),
        gateway_identifier = COALESCE(?2, gateway_identifier),
        settled_at = datetime('now'), updated_at = datetime('now') WHERE id = ?1 AND status <> 'success'`,
   ).bind(id, identifier ?? null).run();
+  if (!upd.meta.changes) return;
   if (p.payment_id) {
     await env.DB.prepare(
       `UPDATE payments SET status = 'refunded', refunded_at = datetime('now') WHERE id = ?1 AND status <> 'refunded'`,
@@ -7076,7 +7077,7 @@ async function settlePayoutSuccess(env: Env, id: number, identifier?: string | n
   await notifyPayout(env, 'Payout sent', `Payout ${p.reference} for K${Number(p.amount_zmw).toFixed(2)} completed.`);
 }
 
-async function failPayout(env: Env, id: number, reason: string): Promise<void> {
+export async function failPayout(env: Env, id: number, reason: string): Promise<void> {
   await env.DB.prepare(
     `UPDATE payouts SET status = 'failed', last_error = ?2,
        next_attempt_at = datetime('now', '+30 minutes'), updated_at = datetime('now')
@@ -7084,7 +7085,7 @@ async function failPayout(env: Env, id: number, reason: string): Promise<void> {
   ).bind(id, String(reason ?? 'Payment provider reported failure').slice(0, 300)).run();
 }
 
-async function enqueuePayout(env: Env, input: {
+export async function enqueuePayout(env: Env, input: {
   kind: string; paymentId?: number | null; jobId?: number | null;
   phone: string; amount: number; note?: string; needsAdminConfirm?: boolean;
   gateway?: GatewayPreference;
@@ -7100,19 +7101,26 @@ async function enqueuePayout(env: Env, input: {
   const prefix = input.kind === 'refund' ? 'REF' : input.kind === 'fee_sweep' ? 'SWEEP' : 'SET';
   const reference = moneyRef(prefix);
   const gateway: Gateway = gatewayPreference(env, input.gateway) === 'lenco' ? 'lenco' : 'lipila';
-  const { meta } = await env.DB.prepare(
+  const ins = await env.DB.prepare(
     `INSERT INTO payouts (kind, payment_id, job_id, phone, amount_zmw, reference, gateway, status, next_attempt_at, needs_admin_confirm)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,'queued',datetime('now'),?8)`,
+     VALUES (?1,?2,?3,?4,?5,?6,?7,'queued',datetime('now'),?8)
+     ON CONFLICT(payment_id, kind) WHERE payment_id IS NOT NULL DO NOTHING`,
   ).bind(input.kind, input.paymentId ?? null, input.jobId ?? null, input.phone, input.amount, reference, gateway, input.needsAdminConfirm ? 1 : 0).run();
+  if (!ins.meta.changes && input.paymentId) {
+    const existing = await env.DB.prepare(
+      `SELECT id, reference FROM payouts WHERE payment_id = ?1 AND kind = ?2 LIMIT 1`,
+    ).bind(input.paymentId, input.kind).first<any>();
+    if (existing) return { id: existing.id, reference: existing.reference, duplicate: true };
+  }
   await logLipila(env, 'disbursement', reference, input.phone, input.amount, 'pending', 'queued', gateway);
-  return { id: meta.last_row_id as number, reference, duplicate: false };
+  return { id: ins.meta.last_row_id as number, reference, duplicate: false };
 }
 
 async function runPayoutQueue(env: Env): Promise<void> {
   try {
     // 1) Reconcile transfers already handed to a provider — webhook can be lost.
     const pending = await env.DB.prepare(
-      `SELECT id, reference, gateway FROM payouts WHERE status = 'pending'
+      `SELECT id, reference, gateway, status FROM payouts WHERE status IN ('pending', 'processing')
          AND updated_at < datetime('now', '-2 minutes') ORDER BY id LIMIT 20`,
     ).all<any>();
     for (const p of pending.results ?? []) {
@@ -7511,8 +7519,12 @@ app.post('/webhooks/lipila', async (c) => {
   if (!pay) return c.json({ ok: true });
 
   if (pay.kind === 'cod_remit' || pay.kind === 'rider_reimbursement' || pay.kind === 'refund') {
-    if (verified && pay.status !== 'success') {
-      await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, 'success').run();
+    if (pay.status !== 'success') {
+      const d = await transferStatus(c.env, 'lipila', String(pay.gateway_reference ?? pay.lipila_reference ?? ref));
+      if (d.status !== 'pending') {
+        await c.env.DB.prepare('UPDATE payments SET status = ?2 WHERE id = ?1').bind(pay.id, d.status).run();
+        await recordFailReason(c.env, pay.id, d.reason);
+      }
     }
     return c.json({ ok: true });
   }
