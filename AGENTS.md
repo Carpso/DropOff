@@ -27,6 +27,13 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (fifty-first pass) — admin standing orders + booking/contact diagnostics
+
+- **Standing orders (0968551110):** no `recurring_plans` row exists for `260968551110` (checked remote D1). Added admin management: `GET /admin/recurring?phone=`, admin can list/cancel any recurring plan, and existing `/recurring` GET/toggle/delete now allow admin (not only ops/owner).
+- **Admin UI:** new `Standing orders` card in Admin console with phone filter and cancel action.
+- **Booking/contact diagnostics:** booking screen now surfaces clear session/paused/error-code messages when detail is missing; `AppStore.saveRecipient` returns `ApiResponse` and booking screen shows specific save errors (sign-in required / invalid phone / detail).
+- **Checks:** `npx tsc --noEmit` clean; touched Flutter analyze clean except 4 pre-existing `admin_screen.dart` issues. Worker deploy retried as needed; follow standing checklist.
+
 ## 2026-11-24 (fiftieth pass) — push notifications, wake, in-app curtain banner
 
 - **FCM order alerts:** worker `push.ts` sends order alerts as high-priority data-only messages (no `android.notification`) with 300s TTL; app background isolate creates channels and renders max-importance full-screen alarm notifications. Foreground messages include title/body in `onForegroundMessage` payload.

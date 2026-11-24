@@ -1014,6 +1014,12 @@ class DropOffApi {
   static Future<ApiResponse> retryPayout(int id) =>
       post('/admin/payouts/$id/retry', {'idempotency_key': _adminIdempotencyKey('retry-$id')}, admin: true);
 
+  static Future<Map<String, dynamic>?> adminRecurring({String? phone}) =>
+      getAdmin('/admin/recurring', {if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim()});
+
+  static Future<ApiResponse> adminCancelRecurring(int id) =>
+      post('/recurring/$id/delete', const {}, admin: true);
+
   /// Staff escape hatch (owner bug 2026-11-23): settle a stuck depot counter
   /// fare with an audit reason so the sender can book again. No money moves.
   static Future<Map<String, dynamic>?> adminCounterFares() => getAdmin('/admin/counter-fares');

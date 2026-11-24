@@ -299,6 +299,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _PayoutQueueCard(),
               const SizedBox(height: 18),
+              const _RecurringOrdersCard(),
+              const SizedBox(height: 18),
               const _ClientCrashesCard(),
               const SizedBox(height: 18),
               if (_role == 'admin') ...[
@@ -4308,6 +4310,117 @@ class _PayoutQueueCardState extends State<_PayoutQueueCard> {
                         onPressed: _busyId != null ? null : () => _retry(id),
                         icon: _busyId == id ? const AppLogoSpinner(size: 16) : const Icon(Icons.replay, size: 19),
                       ),
+                  ]),
+                ),
+              );
+            }),
+        ]),
+      ),
+    );
+  }
+}
+
+class _RecurringOrdersCard extends StatefulWidget {
+  const _RecurringOrdersCard();
+  @override
+  State<_RecurringOrdersCard> createState() => _RecurringOrdersCardState();
+}
+
+class _RecurringOrdersCardState extends State<_RecurringOrdersCard> {
+  List<Map<String, dynamic>> _rows = const [];
+  bool _loading = true;
+  int? _busyId;
+  final _phoneCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _phoneCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load({String? phone}) async {
+    setState(() => _loading = true);
+    final data = await DropOffApi.adminRecurring(phone: phone);
+    if (!mounted) return;
+    setState(() {
+      _rows = _safeRows(data?['recurring']);
+      _loading = false;
+    });
+  }
+
+  Future<void> _cancel(int id) async {
+    setState(() => _busyId = id);
+    final res = await DropOffApi.adminCancelRecurring(id);
+    if (!mounted) return;
+    setState(() => _busyId = null);
+    AppToast.show(context, res.ok ? 'Standing order canceled.' : _adminError(res, 'Could not cancel standing order.'));
+    final q = _phoneCtrl.text.trim();
+    _load(phone: q.isEmpty ? null : q);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.repeat_rounded, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Standing orders', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : () => _load(phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim()), icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 4),
+          const Text('View and cancel recurring/standing orders for users.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _phoneCtrl,
+                decoration: const InputDecoration(labelText: 'Filter by phone (optional)', isDense: true, border: OutlineInputBorder()),
+                onSubmitted: (v) => _load(phone: v.trim().isEmpty ? null : v.trim()),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(onPressed: _loading ? null : () => _load(phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim()), child: const Text('Filter')),
+          ]),
+          const SizedBox(height: 10),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(12), child: Center(child: AppLogoSpinner(size: 26)))
+          else if (_rows.isEmpty)
+            const Text('No standing orders found.', style: TextStyle(fontSize: 12.5))
+          else
+            ..._rows.take(20).map((p) {
+              final id = (p['id'] as num?)?.toInt() ?? 0;
+              final active = (p['active'] as num?)?.toInt() == 1;
+              final freq = '${p['frequency'] ?? ''}';
+              final dest = '${p['dest_city'] ?? ''}';
+              final phone = '${p['phone'] ?? ''}';
+              final pickup = '${p['pickup_address'] ?? ''}';
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(10)),
+                  child: Row(children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('$freq to $dest · #$id', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                      Text(phone, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                      if (pickup.isNotEmpty)
+                        Text(pickup, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+                      Text(active ? 'Active' : 'Paused', style: TextStyle(fontSize: 10, color: active ? AppColors.success : AppColors.warning)),
+                    ])),
+                    IconButton(
+                      tooltip: 'Cancel standing order',
+                      onPressed: _busyId != null ? null : () => _cancel(id),
+                      icon: _busyId == id ? const AppLogoSpinner(size: 16) : const Icon(Icons.cancel_outlined, color: AppColors.danger),
+                    ),
                   ]),
                 ),
               );

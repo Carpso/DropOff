@@ -9484,12 +9484,23 @@ app.post('/recurring', async (c) => {
 app.get('/recurring', async (c) => {
   const role = c.get('role');
   const q = c.req.query('phone');
-  const phone = role === 'ops' && q ? normalizeZmPhone(q) : c.get('phone')!;
+  const staff = role === 'ops' || isAdmin(c);
+  const phone = staff && q ? normalizeZmPhone(q) : c.get('phone')!;
   if (!phone) return c.json({ error: 'missing phone' }, 401);
   const { results } = await c.env.DB.prepare(
     'SELECT * FROM recurring_plans WHERE phone = ?1 ORDER BY id DESC',
   ).bind(phone).all();
   return c.json({ recurring: results });
+});
+
+app.get('/admin/recurring', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
+  const q = String(c.req.query('phone') ?? '').trim();
+  const phone = q ? normalizeZmPhone(q) : null;
+  const { results } = phone
+    ? await c.env.DB.prepare('SELECT * FROM recurring_plans WHERE phone = ?1 ORDER BY id DESC LIMIT 100').bind(phone).all<any>()
+    : await c.env.DB.prepare('SELECT * FROM recurring_plans ORDER BY id DESC LIMIT 100').all<any>();
+  return c.json({ recurring: results ?? [] });
 });
 
 app.post('/recurring/:id/toggle', async (c) => {
@@ -9498,7 +9509,7 @@ app.post('/recurring/:id/toggle', async (c) => {
   const role = c.get('role');
   const plan = await c.env.DB.prepare('SELECT * FROM recurring_plans WHERE id = ?1').bind(id).first() as any;
   if (!plan) return c.json({ error: 'not found' }, 404);
-  if (role !== 'ops' && c.get('phone') !== plan.phone) return c.json({ error: 'forbidden' }, 403);
+  if (role !== 'ops' && !isAdmin(c) && c.get('phone') !== plan.phone) return c.json({ error: 'forbidden' }, 403);
   await c.env.DB.prepare('UPDATE recurring_plans SET active = CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id = ?1').bind(id).run();
   const updated = await c.env.DB.prepare('SELECT active FROM recurring_plans WHERE id = ?1').bind(id).first() as any;
   return c.json({ ok: true, id, active: updated.active });
@@ -9509,7 +9520,7 @@ const deleteRecurringPlan = async (c: any) => {
   const role = c.get('role');
   const plan = await c.env.DB.prepare('SELECT phone FROM recurring_plans WHERE id = ?1').bind(id).first() as any;
   if (!plan) return c.json({ error: 'not found' }, 404);
-  if (role !== 'ops' && c.get('phone') !== plan.phone) return c.json({ error: 'forbidden' }, 403);
+  if (role !== 'ops' && !isAdmin(c) && c.get('phone') !== plan.phone) return c.json({ error: 'forbidden' }, 403);
   await c.env.DB.prepare('DELETE FROM recurring_plans WHERE id = ?1').bind(id).run();
   return c.json({ ok: true });
 };

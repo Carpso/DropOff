@@ -378,20 +378,19 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
     await flushRecipientsOutbox();
   }
 
-  /// Queue or send a recipient right now, depending on connectivity. Returns
-  /// true iff the server (or the outbox) has it.
-  Future<bool> saveRecipient({required String name, required String phone, required String city}) async {
-    if (!DropOffApi.enabled) return false;
+  /// Queue or send a recipient right now, depending on connectivity.
+  Future<ApiResponse> saveRecipient({required String name, required String phone, required String city}) async {
+    if (!DropOffApi.enabled) return const ApiResponse(error: 'offline_demo_mode');
     final payload = {'name': name, 'phone': phone, 'city': city};
     final res = await DropOffApi.saveRecipient(payload);
-    if (res.ok) return true;
+    if (res.ok) return res;
     if (res.error == 'network_error' || res.error == 'offline_demo_mode') {
       _recipientsOutbox.add(payload);
       await _persistRecipientsOutbox();
       notifyListeners();
-      return true; // queued locally — syncs later
+      return const ApiResponse(status: 202, body: {'queued': true});
     }
-    return false;
+    return res;
   }
 
   Future<void> flushRecipientsOutbox() async {

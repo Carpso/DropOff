@@ -810,9 +810,19 @@ class _BookingScreenState extends State<BookingScreen> {
     }
     final res = await AppScope.of(context).saveRecipient(name: name, phone: phone, city: _to);
     if (!mounted) return;
-    _message(res
-      ? 'Recipient saved'
-      : 'Could not save recipient — check your connection and try again.');
+    if (res.ok) {
+      _message(res.body['queued'] == true ? 'Recipient saved locally — it will sync when you are online.' : 'Recipient saved');
+      return;
+    }
+    final err = res.error ?? '';
+    final detail = res.body['detail']?.toString();
+    _message(detail?.isNotEmpty == true
+        ? detail!
+        : err == 'sign_in_required' || err == 'identity_required'
+            ? 'Sign in again to save contacts.'
+            : err == 'name_and_phone_required'
+                ? 'Enter a valid recipient name and Zambian phone number.'
+                : 'Could not save recipient. Check your connection and try again.');
   }
 
   Future<void> _submit() async {
@@ -890,11 +900,16 @@ class _BookingScreenState extends State<BookingScreen> {
         }));
         return;
       }
-      final msg = switch (store.lastBookingError) {
+      final errCode = store.lastBookingError ?? '';
+      final msg = switch (errCode) {
         'slot_required' || 'pickup_window_required' => 'Every parcel must be booked onto a Sweep slot (no untimed pickups).',
+        'unauthorized' || 'sign_in_required' || 'identity_required' => 'Your session expired. Please sign in again, then place the booking.',
+        'bookings_paused' => store.lastBookingErrorDetail?.isNotEmpty == true ? store.lastBookingErrorDetail! : 'New pickups are temporarily paused. Please try again later.',
         _ => store.lastBookingErrorDetail?.isNotEmpty == true
             ? store.lastBookingErrorDetail!
-            : "We couldn't place your booking. Check your connection and try again.",
+            : errCode.isNotEmpty
+                ? "We couldn't place your booking ($errCode). Please try again."
+                : "We couldn't place your booking. Check your connection and try again.",
       };
       _message(msg);
       return;
