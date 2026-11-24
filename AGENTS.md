@@ -27,6 +27,31 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (fortieth pass) — Lipila parity with chisomo + live auth diagnosis
+
+Compared DropOff against `chisomo` / `chisomo_flutter` money handling.
+
+- **Both projects currently fail Lipila with HTTP 401 (empty body)** on
+  balance, collection and disbursement. Chisomo's live diagnostic also returns
+  401 from the same Cloudflare egress IP (`172.69.37.142`), so this is NOT a
+  DropOff-only code bug. It points to revoked/invalid production keys or a
+  Lipila-side IP/account restriction. Chisomo had successful collections in
+  September/October 2026 and successful withdrawals in August 2026, but recent
+  attempts fail.
+- **DropOff now mirrors chisomo's proven gateway shape:** explicit
+  `LIPILA_ENV=production`, environment-aware base URL, trimmed/quoted secret
+  handling, identical mobile-money request fields (removed extra
+  `referenceData`), callback URL on every call, narration sanitization,
+  provider status polling, and durable audit logging.
+- Empty Lipila 401 bodies are now converted to an actionable raw detail
+  (`check LIPILA_API_KEY / IP allowlist`) and written to `lipila_logs` for both
+  collection and disbursement failures.
+- Live K1 collection on `0968551110` and K1 settlement on `0976847775` were
+  attempted with owner approval; both failed at Lipila auth (401), so **no money
+  moved**. Do not retry live money tests until Lipila credentials/IP access are
+  corrected in the dashboard.
+- Worker tests 27/27; worker deployed (`0de4b0cf`).
+
 ## 2026-11-23 (thirty-ninth pass) — admin crashes, tracking truth, devices, payroll
 
 - **Admin console:** normalised all 20 worker list casts through `_safeRows()`

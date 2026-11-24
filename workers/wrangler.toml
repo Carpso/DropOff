@@ -23,6 +23,7 @@ crons = ["*/5 * * * *", "0 2 * * *", "* * * * *", "0 19 * * *", "0 14 * * SUN", 
 [vars]
 # Lipila: PRODUCTION https://blz.lipila.io (live key required in LIPILA_API_KEY secret)
 # sandbox https://api.lipila.dev — only for test deploys
+LIPILA_ENV = "production"
 LIPILA_BASE_URL = "https://blz.lipila.io"
 LIPILA_CALLBACK_URL = "https://dropoff-api.godfreymoseskalambo.workers.dev/webhooks/lipila"
 # Business momo for ALL platform income (platform fees + processing fees).

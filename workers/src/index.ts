@@ -9,7 +9,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import {
   Env, Provider, lipilaCollect, lipilaDisburse, lipilaDisburseStatusDetail, lipilaStatus,
-  lipilaStatusDetail, normalizeZmPhone, providerFromPhone,
+  lipilaStatusDetail, normalizeZmPhone, providerFromPhone, lipilaBase, lipilaApiKey,
 } from './lipila';
 
 import {
@@ -6334,7 +6334,11 @@ app.post('/payments', async (c) => {
         : 'DropOff ride float top-up');
   }
   if (!init.ok) {
-    return paymentFail('lipila_init_failed', 502, { detail: init.raw, amount, phone, lipila_status: init.status });
+    const detail = init.raw?.trim()
+      ? init.raw
+      : `Lipila HTTP ${init.status}${init.status === 401 ? ' (check LIPILA_API_KEY / IP allowlist)' : ''}`;
+    await logLipila(c.env, 'collection', lipilaRef, phone, amount, 'failed', detail);
+    return paymentFail('lipila_init_failed', 502, { detail, amount, phone, lipila_status: init.status });
   }
 
   const provider: Provider = b.provider ?? providerFromPhone(phone);
@@ -6370,7 +6374,13 @@ app.post('/admin/test-collect', async (c) => {
   const init = await lipilaCollect(c.env, phone, amount, ref,
     flavor === 'subscription' ? 'DropOff TEST plan subscription' : 'DropOff TEST prepayment (pay-as-you-go)')
     .catch(() => ({ ok: false } as any));
-  if (!init.ok) return c.json({ error: 'lipila_init_failed', detail: (init as any).raw }, 502);
+  if (!init.ok) {
+    const detail = (init as any).raw?.trim()
+      ? (init as any).raw
+      : `Lipila HTTP ${(init as any).status}${(init as any).status === 401 ? ' (check LIPILA_API_KEY / IP allowlist)' : ''}`;
+    await logLipila(c.env, 'collection', ref, phone, amount, 'failed', detail);
+    return c.json({ error: 'lipila_init_failed', detail }, 502);
+  }
   const { meta } = await c.env.DB.prepare(
     `INSERT INTO payments (job_id, subscription_id, phone, provider, amount_zmw, credit_zmw, platform_fee_zmw,
        lipila_fee_zmw, lipila_reference, status, channel, kind)
@@ -12250,8 +12260,8 @@ app.post('/admin/payouts/:id/retry', async (c) => {
 app.get('/admin/lipila/diagnose', async (c) => {
   if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
   const out: Record<string, unknown> = {
-    baseUrl: c.env.LIPILA_BASE_URL,
-    keyPrefix: c.env.LIPILA_API_KEY ? `${c.env.LIPILA_API_KEY.slice(0, 8)}...` : 'NOT SET',
+    baseUrl: lipilaBase(c.env),
+    keyPrefix: lipilaApiKey(c.env) ? `${lipilaApiKey(c.env).slice(0, 8)}...` : 'NOT SET',
     callbackUrl: c.env.LIPILA_CALLBACK_URL ?? null,
   };
   try {
@@ -12260,7 +12270,7 @@ app.get('/admin/lipila/diagnose', async (c) => {
   } catch (e) { out.outboundIpError = String(e).slice(0, 120); }
   try {
     const r = await fetch(`${c.env.LIPILA_BASE_URL}/api/v1/merchants/balance`, {
-      headers: { accept: 'application/json', 'x-api-key': c.env.LIPILA_API_KEY },
+      headers: { accept: 'application/json', 'x-api-key': lipilaApiKey(c.env) },
       signal: AbortSignal.timeout(8000),
     });
     out.balanceHttp = r.status;

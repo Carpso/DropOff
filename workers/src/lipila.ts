@@ -10,6 +10,7 @@ import { withCircuit } from './circuit';
 export interface Env {
   DB: D1Database;
   LIPILA_BASE_URL: string;        // sandbox https://api.lipila.dev · production https://blz.lipila.io
+  LIPILA_ENV?: string;            // explicit environment selector, mirrors chisomo
   LIPILA_API_KEY: string;
   HUGGINGFACE_TOKEN?: string;
   LIPILA_CALLBACK_URL?: string;   // posted as the callbackUrl header on collect/disburse
@@ -81,6 +82,18 @@ export function providerFromPhone(zm: string): Provider {
   return 'zamtel';
 }
 
+/** Environment-aware base URL, matching chisomo's production/sandbox selector. */
+export function lipilaBase(env: Env): string {
+  if (env.LIPILA_ENV === 'production') return 'https://blz.lipila.io';
+  if (env.LIPILA_ENV === 'sandbox') return 'https://api.lipila.dev';
+  return String(env.LIPILA_BASE_URL ?? '').replace(/\/+$/, '');
+}
+
+/** Trim accidental dotenv quotes/whitespace before sending the secret. */
+export function lipilaApiKey(env: Env): string {
+  return String(env.LIPILA_API_KEY ?? '').trim().replace(/^["']|["']$/g, '');
+}
+
 function lipilaHeaders(apiKey: string, env: Env): HeadersInit {
   // Chisomo pattern: embed our shared secret directly in the callbackUrl —
   // Lipila echoes the full URL back on the webhook, so /webhooks/lipila can
@@ -124,9 +137,9 @@ export async function lipilaCollect(
 ): Promise<{ ok: boolean; lipilaReference?: string; raw?: string; status: number }> {
   let res: Response;
   try {
-    res = await withCircuit('lipila-collect', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/collections/mobile-money`, {
+    res = await withCircuit('lipila-collect', () => fetch(`${lipilaBase(env)}/api/v1/collections/mobile-money`, {
       method: 'POST',
-      headers: lipilaHeaders(env.LIPILA_API_KEY, env),
+      headers: lipilaHeaders(lipilaApiKey(env), env),
       body: JSON.stringify({
         referenceId: reference,
         amount: amountZmw,
@@ -134,7 +147,6 @@ export async function lipilaCollect(
         accountNumber: phoneZm,
         currency: 'ZMW',
         ...(email ? { email } : {}),
-        referenceData: sanitizeNarration(note),
       }),
       // Hard cap — without this a slow provider hangs the whole payment
       // request past the app's timeout and users see "network error".
@@ -173,16 +185,15 @@ export async function lipilaDisburse(
 ): Promise<{ ok: boolean; lipilaReference?: string; raw?: string; status: number }> {
   let res: Response;
   try {
-    res = await withCircuit('lipila-disbursements', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/disbursements/mobile-money`, {
+    res = await withCircuit('lipila-disbursements', () => fetch(`${lipilaBase(env)}/api/v1/disbursements/mobile-money`, {
       method: 'POST',
-      headers: lipilaHeaders(env.LIPILA_API_KEY, env),
+      headers: lipilaHeaders(lipilaApiKey(env), env),
       body: JSON.stringify({
         referenceId: reference,
         amount: amountZmw,
         accountNumber: phoneZm,
         currency: 'ZMW',
         narration: sanitizeNarration(note),
-        referenceData: sanitizeNarration(note),
       }),
       signal: AbortSignal.timeout(8000),
     }));
@@ -212,8 +223,8 @@ export async function lipilaDisburse(
 export async function lipilaStatusDetail(env: Env, reference: string): Promise<{ status: 'pending' | 'success' | 'failed'; reason?: string }> {
   let res: Response;
   try {
-    res = await withCircuit('lipila-status', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/collections/check-status?referenceId=${encodeURIComponent(reference)}`, {
-      headers: { accept: 'application/json', 'x-api-key': env.LIPILA_API_KEY },
+    res = await withCircuit('lipila-status', () => fetch(`${lipilaBase(env)}/api/v1/collections/check-status?referenceId=${encodeURIComponent(reference)}`, {
+      headers: { accept: 'application/json', 'x-api-key': lipilaApiKey(env) },
       signal: AbortSignal.timeout(8000),
     }));
   } catch {
@@ -239,8 +250,8 @@ export async function lipilaStatus(env: Env, reference: string): Promise<'pendin
 export async function lipilaDisburseStatusDetail(env: Env, reference: string): Promise<{ status: 'pending' | 'success' | 'failed'; reason?: string }> {
   let res: Response;
   try {
-    res = await withCircuit('lipila-disburse-status', () => fetch(`${env.LIPILA_BASE_URL}/api/v1/disbursements/check-status?referenceId=${encodeURIComponent(reference)}`, {
-      headers: { accept: 'application/json', 'x-api-key': env.LIPILA_API_KEY },
+    res = await withCircuit('lipila-disburse-status', () => fetch(`${lipilaBase(env)}/api/v1/disbursements/check-status?referenceId=${encodeURIComponent(reference)}`, {
+      headers: { accept: 'application/json', 'x-api-key': lipilaApiKey(env) },
       signal: AbortSignal.timeout(8000),
     }));
   } catch {

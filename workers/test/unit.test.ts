@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { collectionFees, computeJobTotals, payoutNet, platformFee, round2 } from '../src/fees';
 import { generateOtp, hashPassword, signJwt, verifyJwtClaims, verifyPassword } from '../src/auth';
-import { normalizeZmPhone, providerFromPhone } from '../src/lipila';
+import { normalizeZmPhone, providerFromPhone, lipilaBase, lipilaApiKey } from '../src/lipila';
 
 describe('fees', () => {
   it('platform fee has a K4.98 floor (raised 2026-11-17: SMS + ops costs)', () => {
@@ -32,8 +32,32 @@ describe('fees', () => {
   });
 });
 
-describe('phone normalization', () => {
-  it('normalizes Zambian formats to 260XXXXXXXXX', () => {
+describe('Lipila configuration', () => {
+  const env = (overrides: Record<string, unknown> = {}) => ({
+    DB: {} as D1Database,
+    LIPILA_BASE_URL: 'https://blz.lipila.io/',
+    LIPILA_API_KEY: 'lsk_test',
+    API_AUTH_KEY: 'x',
+    JWT_SECRET: 'x',
+    ADMIN_AUTH_KEY: 'x',
+    CHAT: {} as any,
+    ...overrides,
+  }) as any;
+
+  it('uses the explicit production environment like chisomo', () => {
+    expect(lipilaBase(env({ LIPILA_ENV: 'production', LIPILA_BASE_URL: 'https://api.lipila.dev' }))).toBe('https://blz.lipila.io');
+  });
+
+  it('uses sandbox only when explicitly selected', () => {
+    expect(lipilaBase(env({ LIPILA_ENV: 'sandbox' }))).toBe('https://api.lipila.dev');
+  });
+
+  it('trims accidental dotenv quotes and whitespace from the key', () => {
+    expect(lipilaApiKey(env({ LIPILA_API_KEY: '  "lsk_test"  ' }))).toBe('lsk_test');
+  });
+});
+
+describe('phone normalization', () => {  it('normalizes Zambian formats to 260XXXXXXXXX', () => {
     const cases: Array<[string, string]> = [
       // Legacy assigned ranges
       ['0971234567', '260971234567'], ['260961234567', '260961234567'],
