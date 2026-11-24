@@ -318,7 +318,7 @@ class _LiveDepotsSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          const InfoPill(icon: Icons.info_outline, label: 'Your rider pays the depot at the counter. You repay the receipt plus processing fee and K15 depot queue fee in DropOff.'),
+          const InfoPill(icon: Icons.info_outline, label: 'Your rider pays the depot at the counter. You repay the receipt plus processing fee in DropOff.'),
         ]);
       },
     );
@@ -578,7 +578,7 @@ class _QuoteAnswerState extends State<_QuoteAnswer> {
           const SizedBox(height: 8),
           const Text(
             'The courier fare is heard at the counter when your parcel arrives — it is the depot’s charge, never published in this app. '
-            'Your DropOff rider leg is shown before you book. If the rider fronts the depot fare, you repay the receipt plus processing fee and K15 depot queue fee in DropOff.',
+            'Your DropOff rider leg is shown before you book. If the rider fronts the depot fare, you repay the receipt plus processing fee in DropOff.',
             style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.45),
           ),
           if (_serving.isNotEmpty) ...[

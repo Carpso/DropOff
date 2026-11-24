@@ -964,7 +964,7 @@ class _BookingScreenState extends State<BookingScreen> {
             ? 'Your plan cap is reached — this trip uses your tier discount. Pay K${due.toStringAsFixed(2)} to dispatch.'
             : overCap
                 ? 'Your plan cap is reached — this trip is billed pay-as-you-go. Pay K${due.toStringAsFixed(2)} to dispatch.'
-                : 'Approve the prepayment prompt for K${due.toStringAsFixed(2)} sent to ${_senderPhone.text} — your rider dispatches the moment it lands. If the rider fronts a depot fare, you repay the receipt plus processing fee and K15 depot queue fee in DropOff to reimburse them.');
+                : 'Approve the prepayment prompt for K${due.toStringAsFixed(2)} sent to ${_senderPhone.text} — your rider dispatches the moment it lands. If the rider fronts a depot fare, you repay the receipt plus processing fee in DropOff to reimburse them.');
       }
       final out = await PayJob.startAndPoll(jobRef: booking.serverRef!, phone: _senderPhone.text);
       if (!mounted) return;
@@ -977,7 +977,7 @@ class _BookingScreenState extends State<BookingScreen> {
     } else if (booking.dispatched && due != null && due > 0 && mounted) {
       // Deposit required but no live prompt on this device: the sender
       // approves the momo prompt that was sent at booking time.
-      _message('DropOff leg: K${due.toStringAsFixed(2)} — approve the prepayment prompt sent to your momo at booking; your rider dispatches on approval. If the rider fronts a depot fare, you repay the receipt plus processing fee and K15 depot queue fee in DropOff.');
+      _message('DropOff leg: K${due.toStringAsFixed(2)} — approve the prepayment prompt sent to your momo at booking; your rider dispatches on approval. If the rider fronts a depot fare, you repay the receipt plus processing fee in DropOff.');
       paymentOutcome = 'held';
     }
     // In-flow approval releases the HELD gate at once (share/track cards and
@@ -1416,7 +1416,7 @@ class _BookingScreenState extends State<BookingScreen> {
         const Padding(
           padding: EdgeInsets.only(top: 8),
           child: Row(children: [
-            Expanded(child: Text('Rider pays depot; you repay receipt + processing fee + K15 depot queue fee.', style: AppType.caption)),
+            Expanded(child: Text('Rider pays depot; you repay receipt + processing fee in DropOff.', style: AppType.caption)),
             HelpIconButton(topic: HelpTopic.courierFare),
           ]),
         ),

@@ -27,6 +27,13 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-ninth pass) — K15 depot queue fee removed + payment prompt safety
+
+- **K15 depot queue fee removed:** `DEPOT_QUEUE_FEE_ZMW` set to `0` in `workers/src/fees.ts`; counter-fare total is now receipt + processing fee. Removed K15/queue-fee references from worker settlement/SMS/push/receipt copy, legal text, and app booking/bookings/couriers/help/tutorial/thermal/admin/plan-receipt copy. API keeps `depot_queue_fee_zmw` fields as `0` for compatibility.
+- **Duplicate reference / prompt safety:** `/payments` catches provider duplicate-reference responses, reuses existing pending/success payment for the same job+kind or retries once with a fresh reference. App `money_errors.dart` sanitizes raw provider JSON/details and never claims "no money taken" on ambiguous init failures; `settleCounterFare` and `PayJob.startAndPoll` recheck failed status once before reporting failure and recover pending/success payments where possible.
+- **Receipt load copy:** plan receipt load failure now explains processing/pending states and Retry.
+- **Checks:** `npx tsc --noEmit` clean; touched Flutter analyze clean except 4 pre-existing `admin_screen.dart` issues.
+
 ## 2026-11-24 (forty-eighth pass) — PIN/capture/basemap fixes + order cleanup
 
 - **Sender PIN verify:** `DropOffApi.verifyPin` now retries once with a 12s timeout to reduce false "could not reach DropOff" failures; worker verify-pin endpoint unchanged.
@@ -80,8 +87,8 @@ After every change session, without asking the owner:
 ## 2026-11-24 (forty-first pass) — Lenco top priority, fee model, plan receipts, contact number
 
 - **Lenco is top payment priority** (`PAYMENT_GATEWAY=lenco` in `workers/wrangler.toml`); Lipila code remains intact. Gateway-aware processing fees implemented: processing fee = DropOff platform cut (unchanged: 1% + K0.98, min K4.98) + gateway provider collection fee (Lenco mobile money 1%, Lipila K2.50). User-facing copy says "processing fee" (no breakdown). Added `lencoCollectionFee`/`collectionFees(..., gateway)` in `workers/src/fees.ts`.
-- **Counter-fare repayment**: sender pays **receipt + processing fee + K15 depot queue fee** (`DEPOT_QUEUE_FEE_ZMW=15`). Rider reimbursement sends the **exact receipt amount** entered on the receipt (`reimburseRider` uses `job.counter_receipt_zmw`). K15 queue fee stays in float to cover disbursement/transaction costs.
-- **Business sweep** (`sweepPlatformIncome`): for `subscription`/`upgrade` payments, sweep **plan amount** (`credit_zmw`) to `BUSINESS_PHONE`; leave processing fees and counter-fare depot queue fees in float. Other kinds keep platform-fee sweep behavior.
+- **Counter-fare repayment**: sender pays **receipt + processing fee**. Depot queue fee (K15) is currently waived (`DEPOT_QUEUE_FEE_ZMW=0`, planned for plan inclusion later). Rider reimbursement sends the **exact receipt amount** entered on the receipt (`reimburseRider` uses `job.counter_receipt_zmw`).
+- **Business sweep** (`sweepPlatformIncome`): for `subscription`/`upgrade` payments, sweep **plan amount** (`credit_zmw`) to `BUSINESS_PHONE`; leave processing fees in float. Other kinds keep platform-fee sweep behavior.
 - **Plan receipts**: `GET /payments/:id/receipt` enriched (buyer/plan/period/amounts/processing fee/business contact); `GET /me/plan-receipts` added. Flutter `PlanReceiptScreen` renders branded receipt with DropOff logo and supports download/share as PNG; wired after plan purchase and in Account > Plan receipts.
 - **Contact numbers**: calls/support contact shown to users is **0968551110**; transactions/disbursements use `BUSINESS_PHONE=0976847775` (env/wrangler) — **never expose transaction number to users**. Receipt endpoint returns contact number only.
 - **Counter-fare SMS/push** updated to new total formula; plan activation push mentions receipt download. `workers/src/legal.ts` counter-fare clause updated.

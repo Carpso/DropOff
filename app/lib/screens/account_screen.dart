@@ -1,4 +1,5 @@
 ﻿import '../ui/app_toast.dart';
+import '../ui/proof_upload_overlay.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -219,10 +220,13 @@ class _AccountScreenState extends State<AccountScreen> {
     if (mounted) setState(() {});
   }
 
-  /// Set / change / remove the recipient's own door PIN.
+  /// View / change the recipient's own door PIN.
   Future<void> _editDoorPin() async {
-    final ctrl = TextEditingController();
+    final store = AppScope.of(context);
+    final current = store.doorPin ?? '';
+    final ctrl = TextEditingController(text: current);
     bool busy = false;
+    bool revealed = current.isNotEmpty;
     final res = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -237,9 +241,29 @@ class _AccountScreenState extends State<AccountScreen> {
             const SizedBox(height: 16),
             const Text('Door handover PIN', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
             const SizedBox(height: 8),
-            const Text('Choose a 4-digit code. The rider asks for it when your parcel reaches your door. Keep it secret — never share it by SMS.', style: TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted)),
+            Text(
+              current.isNotEmpty
+                  ? 'Your current door PIN is shown below. You can change it anytime if you forgot it or want a new one.'
+                  : 'Choose a 4-digit code. The rider asks for it when your parcel reaches your door.',
+              style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.muted),
+            ),
             const SizedBox(height: 12),
-            TextField(controller: ctrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: '4-digit PIN', counterText: '', border: OutlineInputBorder())),
+            TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              obscureText: !revealed,
+              decoration: InputDecoration(
+                labelText: '4-digit PIN',
+                counterText: '',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  tooltip: revealed ? 'Hide PIN' : 'Show PIN',
+                  icon: Icon(revealed ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                  onPressed: () => setDialog(() => revealed = !revealed),
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             Row(children: [
               Expanded(child: OutlinedButton(onPressed: busy ? null : () => Navigator.pop(ctx, false), child: const Text('Cancel'))),
@@ -250,6 +274,10 @@ class _AccountScreenState extends State<AccountScreen> {
                   if (pin.length != 4) { _snackSimple('Enter exactly 4 digits.'); return; }
                   setDialog(() => busy = true);
                   final out = await DropOffApi.setDoorPin(pin);
+                  if (!ctx.mounted) return;
+                  if (out.ok) {
+                    await store.refreshRole(force: true);
+                  }
                   if (!ctx.mounted) return;
                   Navigator.pop(ctx, out.ok);
                   if (mounted) _snackSimple(out.ok ? 'Door PIN saved.' : moneyErrorText(out, 'Could not save PIN'));
@@ -421,31 +449,49 @@ class _AccountScreenState extends State<AccountScreen> {
     final picked = await ImagePicker().pickImage(source: source, maxWidth: 1200, imageQuality: 85);
     if (picked == null) return;
     setState(() => _photoBusy = true);
-    final bytes = await picked.readAsBytes();
-    DateTime? capturedAt;
-    try { capturedAt = await picked.lastModified(); } catch (_) {}
-    final name = picked.name.isNotEmpty ? picked.name : 'me.jpg';
-    final up = await DropOffApi.uploadImage(bytes, name, kind: 'selfie', capturedAt: capturedAt);
-    if (!mounted) return;
-    if (!up.ok) {
+    try {
+      final bytes = await picked.readAsBytes();
+      DateTime? capturedAt;
+      try { capturedAt = await picked.lastModified(); } catch (_) {}
+      final name = picked.name.isNotEmpty ? picked.name : 'me.jpg';
+      if (!mounted) return;
+      final up = await ProofUploadOverlay.run(
+        context,
+        title: 'Securing your photo',
+        task: DropOffApi.uploadImage(bytes, name, kind: 'selfie', capturedAt: capturedAt),
+      );
+      if (!mounted) return;
+      if (!up.ok) {
+        setState(() => _photoBusy = false);
+        _snackPhoto('Upload failed (${up.error}).');
+        return;
+      }
+      final url = '${up.body['url'] ?? ''}';
+      if (url.isEmpty) {
+        setState(() => _photoBusy = false);
+        _snackPhoto('Upload failed. Try again.');
+        return;
+      }
+      final res = await DropOffApi.addMePhoto(url);
+      if (!mounted) return;
       setState(() => _photoBusy = false);
-      _snackPhoto('Upload failed (${up.error}).');
+      if (!res.ok) {
+        _snackPhoto('Could not save photo (${res.error}).');
+        return;
+      }
+      await AppScope.of(context).refreshRole(force: true);
+      if (!mounted) return;
+      final st = '${res.body['verification_status'] ?? ''}';
+      _snackPhoto(st == 'pending'
+          ? 'Photo saved - it does not look like one person, so you are back in the review queue.'
+          : 'Photo saved - senders will see you on the tracking page.');
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _photoBusy = false);
+      _snackPhoto('Could not upload the photo. Check camera permission and try again.');
       return;
     }
-    final url = '${up.body['url'] ?? ''}';
-    final res = await DropOffApi.addMePhoto(url);
-    if (!mounted) return;
-    setState(() => _photoBusy = false);
-    if (!res.ok) {
-      _snackPhoto('Could not save photo (${res.error}).');
-      return;
-    }
-    await AppScope.of(context).refreshRole(force: true);
-    if (!mounted) return;
-    final st = '${res.body['verification_status'] ?? ''}';
-    _snackPhoto(st == 'pending'
-        ? 'Photo saved — it does not look like one person, so you are back in the review queue.'
-        : 'Photo saved — senders will see you on the tracking page.');
   }
 
   Future<void> _removePhoto() async {
@@ -715,7 +761,15 @@ class _AccountScreenState extends State<AccountScreen> {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.pin_outlined, color: AppColors.forest),
                   title: const Text('Door handover PIN', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                  subtitle: const Text('Set your own 4-digit door code — recipients show it at handover.', style: TextStyle(fontSize: 11.5)),
+                  subtitle: Text(
+                    store.doorPin != null && store.doorPin!.isNotEmpty
+                        ? 'Current PIN: ${store.doorPin}  •  Tap to view, edit, or change it.'
+                        : 'Set your own 4-digit door code — recipients show it at handover.',
+                    style: const TextStyle(fontSize: 11.5),
+                  ),
+                  trailing: store.doorPin != null && store.doorPin!.isNotEmpty
+                      ? const Icon(Icons.visibility_outlined, size: 18, color: AppColors.muted)
+                      : null,
                   onTap: _editDoorPin,
                 ),
                 const SizedBox(height: 6),

@@ -36,7 +36,7 @@ class _PlanReceiptScreenState extends State<PlanReceiptScreen> {
     setState(() {
       _receipt = r;
       _loading = false;
-      _error = r == null ? 'Could not load receipt.' : null;
+      _error = r == null ? 'Could not load this receipt right now. If the payment is still processing, wait a moment and tap Retry. If it did not complete, no receipt was issued.' : null;
     });
   }
 
@@ -183,8 +183,7 @@ class _ReceiptCard extends StatelessWidget {
           if (isPlan) _row('Plan amount', _money(amounts['plan_amount_zmw'] ?? amounts['credit_zmw'])),
           if (!isPlan && _s(receipt['kind']) == 'counter_fare') _row('Depot receipt amount', _money(amounts['receipt_amount_zmw'])),
           _row('Processing fee', _money(amounts['processing_fee_zmw'])),
-          if ((amounts['depot_queue_fee_zmw'] as num?)?.toDouble() != null && (amounts['depot_queue_fee_zmw'] as num).toDouble() > 0)
-            _row('Depot queue fee', _money(amounts['depot_queue_fee_zmw'])),
+
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),

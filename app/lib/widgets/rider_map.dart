@@ -178,32 +178,32 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
       RiderMap.lusakaTileUrl,
       '$altAssetsBase/tiles/lusaka-z0-16.pmtiles',
     ];
+
+    Future<VectorTileProvider?> openLusakaReliable() async {
+      // Prefer a full download for Lusaka (30 MB): Range requests often "open"
+      // but fail to serve tiles on some mobile networks, causing a blank basemap.
+      for (final url in lusakaUrls) {
+        try {
+          final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 45));
+          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+            final archive = await PmTilesArchive.fromBytes(res.bodyBytes);
+            debugPrint('RiderMap: Lusaka full download (${res.bodyBytes.length} bytes) from $url');
+            return PmTilesVectorTileProvider.fromArchive(archive);
+          }
+        } catch (e) {
+          debugPrint('RiderMap: Lusaka full download failed for $url: $e');
+        }
+      }
+      // Last resort: range-open (can work where full download is too slow).
+      return openWithFallback(lusakaUrls, const Duration(seconds: 8));
+    }
+
     final opened = await Future.wait([
       openWithFallback(regionalUrls, const Duration(seconds: 8)),
-      openWithFallback(lusakaUrls, const Duration(seconds: 8)),
+      openLusakaReliable(),
     ]);
     VectorTileProvider? regional = opened[0];
     VectorTileProvider? lusaka = opened[1];
-    if (lusaka == null) {
-      // Networks that refuse Range requests (some MTN/Airtel configurations,
-      // VPNs, Private DNS) make PMTiles' byte-range opener fail entirely. The
-      // Lusaka archive is only ~30 MB, so download it once into memory and
-      // read it locally - this is the difference between a map and green box
-      // on those connections (owner onboarding report 2026-11-23).
-      for (final url in lusakaUrls) {
-        try {
-          final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 60));
-          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-            final archive = await PmTilesArchive.fromBytes(res.bodyBytes);
-            lusaka = PmTilesVectorTileProvider.fromArchive(archive);
-            debugPrint('RiderMap: Lusaka archive loaded as full download (${res.bodyBytes.length} bytes) from $url');
-            break;
-          }
-        } catch (e) {
-          debugPrint('RiderMap: full-download fallback failed for $url: $e');
-        }
-      }
-    }
     VectorTileProvider? provider;
     if (regional != null && lusaka != null) {
       provider = CityFirstTileProvider(

@@ -69,6 +69,7 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   String? _role;
   String? _photoUrl;
   String? _fullName;
+  String? _doorPin;
   bool _superadmin = false;
   /// Live-position broadcasting defaults ON once a rider signs in. The rider
   /// can flip it off any time; it only fires when GPS is granted anyway.
@@ -91,6 +92,8 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   /// photo on file — views fall back to initials.
   String? get photoUrl => _photoUrl;
   String? get fullName => _fullName;
+  String? get doorPin => _doorPin;
+  bool get hasDoorPin => _doorPin != null && _doorPin!.isNotEmpty;
 
   /// Server role: customer | partner | admin | ops | rider | cfo.
   /// Admin/ops/cfo unlock the Team tab; rider unlocks their personal queue.
@@ -278,12 +281,14 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
     final photo = me['photo_url'] as String?;
     final name = me['full_name'] as String?;
     final email = me['email'] as String?;
+    final doorPin = me['door_pin'] as String?;
     final preferences = await SharedPreferences.getInstance();
-    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email) {
+    if (role != _role || sa != _superadmin || photo != _photoUrl || name != _fullName || email != _email || doorPin != _doorPin) {
       _role = role;
       _superadmin = sa;
       _photoUrl = photo;
       _fullName = name;
+      _doorPin = doorPin;
       if (email != null) {
         _email = email;
         await preferences.setString(_emailKey, email);
@@ -661,6 +666,7 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
     _role = null;
     _photoUrl = null;
     _fullName = null;
+    _doorPin = null;
     _superadmin = false;
     // A different rider/seller links this phone next — do NOT leak GPS or language.
     final prefs = await SharedPreferences.getInstance();
@@ -1279,23 +1285,37 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
         );
       }
     }
+    String? paymentId;
     if (!res.ok) {
       final code = res.error ?? 'http_${res.status ?? 0}';
       final detail = res.body['detail']?.toString();
-      // Log the truth for support: the old generic toast hid provider outages,
-      // wrong-account jobs and stale receipts behind one misleading message.
       debugPrint('counter_fare prompt_start_failed ref=$jobRef code=$code http=${res.status} detail=$detail');
       if (code == 'counter_fare_already_paid') {
         return const CounterFareResult(status: 'success', message: 'Already paid — your receipt is unlocked.');
       }
-      return CounterFareResult(
-        status: 'error',
-        errorCode: code,
-        detail: detail,
-        message: counterFareErrorText(res),
-      );
+      // Safety: the prompt may have been sent even if the start call failed or
+      // timed out. Before telling the user it failed, check for an existing
+      // pending/success counter-fare payment and poll it.
+      try {
+        final latest = await DropOffApi.latestJobPayment(jobRef);
+        final latestStatus = '${latest?['status'] ?? ''}';
+        final latestKind = '${latest?['kind'] ?? ''}';
+        final latestId = latest?['id'] ?? latest?['payment_id'];
+        if (latestKind == 'counter_fare' && latestId != null && (latestStatus == 'pending' || latestStatus == 'success')) {
+          paymentId = '$latestId';
+        }
+      } catch (_) {}
+      if (paymentId == null) {
+        return CounterFareResult(
+          status: 'error',
+          errorCode: code,
+          detail: detail,
+          message: counterFareErrorText(res),
+        );
+      }
+    } else {
+      paymentId = '${res.body['payment_id']}';
     }
-    final paymentId = '${res.body['payment_id']}';
     var status = 'pending';
     String? failReason;
     for (var attempt = 0; attempt < 20 && status == 'pending'; attempt++) {
@@ -1304,6 +1324,13 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
       status = st.$1 ?? 'pending';
       failReason = st.$2;
     }
+    if (status == 'failed') {
+      // One safety recheck: provider status can lag or a webhook may settle late.
+      await Future<void>.delayed(const Duration(seconds: 3));
+      final recheck = await DropOffApi.paymentStatus(paymentId);
+      status = recheck.$1 ?? status;
+      failReason = recheck.$2 ?? failReason;
+    }
     if (status == 'success') {
       await syncJobsFromServer();
       return const CounterFareResult(status: 'success', message: 'Courier bill paid — the receipt is unlocked.');
@@ -1311,12 +1338,16 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
     if (status == 'failed') {
       final reason = failReason?.trim();
       debugPrint('counter_fare prompt_rejected ref=$jobRef payment=$paymentId reason=$reason');
+      final lower = (reason ?? '').toLowerCase();
+      final looksLikeBalance = lower.contains('insufficient') || lower.contains('balance') || lower.contains('not enough');
       return CounterFareResult(
         status: 'failed',
         providerReason: reason,
         message: (reason == null || reason.isEmpty)
-            ? 'The momo prompt was rejected. Check your wallet balance and try again.'
-            : 'Payment rejected: $reason — top up your momo wallet and try again.',
+            ? 'The payment prompt was not approved. Check your phone for any prompt and your momo balance before trying again.'
+            : looksLikeBalance
+                ? 'Payment not completed: $reason. If no money was deducted, top up and try again. If money was deducted, wait a moment and refresh — it may still confirm.'
+                : 'Payment not completed: $reason. If money was deducted, wait a moment and refresh before trying again.',
       );
     }
     return const CounterFareResult(status: 'pending', message: 'Prompt sent — approve it on your phone to unlock the receipt.');

@@ -268,11 +268,15 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         ? instruction
         : '${instruction[0].toLowerCase()}${instruction.substring(1)}';
     final isArrival = lowering.startsWith('arrive') || lowering.contains('destination');
+    final distanceM = (metres / 10).round() * 10;
+    final distancePhrase = distanceM >= 1000
+        ? '${(distanceM / 1000).toStringAsFixed(1)} kilometres'
+        : '$distanceM metres';
     final say = band == 0
-        ? (isArrival ? "You've arrived at $_destLabel." : '$lowering now.')
+        ? (isArrival ? "You've arrived at $_destLabel." : 'Now, $lowering.')
         : band == 1
-            ? '$lowering ahead.'
-            : 'In ${(metres / 50).floor() * 50} metres, $lowering';
+            ? 'In $distancePhrase, $lowering.'
+            : 'In $distancePhrase, $lowering.';
     try { await _tts.setSpeechRate(StepSounds.voiceRate); } catch (_) {}
     await _tts.speak(say).catchError((_) => 0);
   }
@@ -477,6 +481,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           depot: (widget.otherLat != null && widget.otherIsDepot)
               ? LatLng(widget.otherLat!, widget.otherLng!)
               : null,
+          depotName: widget.destIsDepot ? _destLabel : (widget.otherIsDepot ? widget.otherLabel : null),
           // Other half of the job + the growing saved-places collection, all
           // as pins on our own map.
           stops: [
@@ -503,7 +508,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           searchPin: _searchPin,
           searchPinLabel: _searchPinLabel,
         ),
-        // Floating search â search-only (never sets destination). Placed below
+        // Floating search - search-only (never sets destination). Placed below
         // the compass/basemap banner so it does not obstruct map controls.
         Positioned(
           left: 12,

@@ -1656,6 +1656,9 @@ class DropOffApi {
 
   static Future<Map<String, dynamic>?> riderTargets() => get('/rider/targets');
 
+  static Future<Map<String, dynamic>?> riderHistory({int limit = 50}) =>
+      get('/rider/history', {'limit': '$limit'});
+
   /* --------------------- admin rider verification -------------------- */
   static Future<Map<String, dynamic>?> adminRiders() => getAdmin('/admin/riders');
 

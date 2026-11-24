@@ -28,7 +28,7 @@ class TutorialSheet extends StatelessWidget {
     (Icons.local_shipping_outlined, '2. Book a pickup',
         'Pick a depot, address and item size. Add a photo for protection, then choose a sweep slot.'),
     (Icons.payments_outlined, '3. Pay on your phone',
-        'Approve the momo prompt. Plan members use their included item slots; pay-as-you-go pays the quoted fee up front. If the rider fronts a depot counter fare, you repay the receipt amount plus processing fee and K15 depot queue fee in DropOff to unlock the receipt and reimburse the rider.'),
+        'Approve the momo prompt. Plan members use their included item slots; pay-as-you-go pays the quoted fee up front. If the rider fronts a depot counter fare, you repay the receipt amount plus processing fee in DropOff to unlock the receipt and reimburse the rider.'),
     (Icons.pin_outlined, '4. Show the pickup code',
         'Show your rider the pickup code when they arrive.'),
     (Icons.track_changes, '5. Follow it live',
@@ -47,7 +47,7 @@ class TutorialSheet extends StatelessWidget {
     (Icons.help_outline, '4. Ask for the codes',
         'Ask the SENDER for their 4-digit pickup code. Photograph EVERY item once. At a door delivery, ask the recipient for their DropOff door PIN (intercity SMS code or their own PIN).'),
     (Icons.receipt_long_outlined, '5. Depot drop',
-        'Drop at the depot, photograph the item and the written receipt, type the EXACT amount on each receipt, then tap Submit drop. The sender repays the receipt amount plus processing fee and K15 depot queue fee in DropOff; the rider is reimbursed the exact receipt amount.'),
+        'Drop at the depot, photograph the item and the written receipt, type the EXACT amount on each receipt, then tap Submit drop. The sender repays the receipt amount plus processing fee in DropOff; the rider is reimbursed the exact receipt amount.'),
     (Icons.insights_outlined, '6. Stats & bonuses',
         'Your card shows today, in hand and done. Pay and bonuses follow your agreement and the monthly target.'),
   ];

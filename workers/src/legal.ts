@@ -87,7 +87,7 @@ DropOff is a first-mile parcel marketplace operated in Zambia by Carpso Solution
 - You book in the app with pickup address, recipient, parcel weight class and description.
 - DropOff dispatches algorithmically to the nearest available verified rider. Staff cannot hand-pick a rider for you.
 - The rider collects, drops at the branch you nominated. You pay the rider's leg via Lipila mobile money **up front**; your rider is dispatched once the prepayment lands.
-- The courier's counter fare is **your arrangement with the courier**, paid by you at the depot counter. DropOff never collects courier counter fares; if your rider fronted it on your behalf, you repay the receipt amount plus a processing fee and depot queue fee in the app.
+- The courier's counter fare is **your arrangement with the courier**, paid by you at the depot counter. DropOff never collects courier counter fares; if your rider fronted it on your behalf, you repay the receipt amount plus the processing fee in the app.
 - Delivery to your recipient's door (last mile) is an optional add-on with its own code (OTP) handover.
 
 ## What we charge

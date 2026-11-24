@@ -49,6 +49,13 @@ class PayJob {
       status = st.$1 ?? 'pending';
       failReason = st.$2;
     }
+    if (status == 'failed') {
+      // Safety recheck: provider/webhook status can lag behind a debit.
+      await Future<void>.delayed(const Duration(seconds: 3));
+      final recheck = await DropOffApi.paymentStatus(paymentId);
+      status = recheck.$1 ?? status;
+      failReason = recheck.$2 ?? failReason;
+    }
     return (status: status, failReason: failReason);
   }
 }

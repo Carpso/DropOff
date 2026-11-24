@@ -695,7 +695,7 @@ class _AdminScreenState extends State<AdminScreen> {
       case 'pending': return 'awaiting admin';
       case 'admin_confirmed': return 'awaiting second admin';
       case 'paid': return 'paid ✓';
-      case 'failed': return 'Lipila failed';
+      case 'failed': return 'Payment failed';
       default: return status;
     }
   }
@@ -3142,7 +3142,7 @@ class _CounterFareRecoveryCardState extends State<_CounterFareRecoveryCard> {
     final ok = await showConfirmSheet(
       context,
       title: 'Send a fresh momo prompt?',
-      message: 'Send a K${amount.toStringAsFixed(2)} receipt + processing fee + K15 depot queue fee momo prompt to the sender on $ref. A new payment reference is used, so this is safe after a failed attempt. If a prompt is already waiting it will be reused instead.',
+      message: 'Send a K${amount.toStringAsFixed(2)} receipt + processing fee momo prompt to the sender on $ref. A new payment reference is used, so this is safe after a failed attempt. If a prompt is already waiting it will be reused instead.',
       confirmLabel: 'Send prompt',
       icon: Icons.send_outlined,
     );

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../data/dropoff_api.dart';
 import '../ui/app_theme.dart';
+import '../ui/receipt_viewer.dart';
 
 /// Compact proof/parcel photo preview with an optional remove button.
 /// Accepts a local camera/gallery path (instant, before upload) or a server URL
@@ -27,19 +28,43 @@ class PhotoPreview extends StatelessWidget {
     this.label = 'Photo',
   });
 
-  bool get _isLocal => !pathOrUrl.startsWith('http');
+  bool get _isLocal => !pathOrUrl.startsWith('http') && !pathOrUrl.startsWith('/media');
+
+  void _openFullScreen(BuildContext context) {
+    final p = pathOrUrl.trim();
+    if (p.isEmpty) return;
+    if (_isLocal) {
+      Navigator.of(context).push<void>(MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white, title: Text(label, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16))),
+          body: InteractiveViewer(maxScale: 5, child: Center(child: Image.file(File(p), fit: BoxFit.contain))),
+        ),
+      ));
+      return;
+    }
+    ReceiptViewer.show(
+      context,
+      path: p,
+      title: label.isNotEmpty ? label : 'Photo',
+      shareTooltip: 'Download / share photo',
+      shareLabel: 'Download & share photo',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final image = _isLocal
         ? Image.file(File(pathOrUrl), fit: BoxFit.cover, width: size, height: size)
-        : Image.network('${DropOffApi.baseUrl}${pathOrUrl.startsWith('/') ? '' : '/'}$pathOrUrl',
+        : Image.network(ReceiptViewer.resolve(pathOrUrl),
             headers: DropOffApi.authHeaders, // evidence photos live behind the auth-gated /media route
             fit: BoxFit.cover, width: size, height: size,
             errorBuilder: (_, __, ___) => Container(
                   width: size, height: size, color: AppColors.line.withValues(alpha: 0.25),
                   child: const Icon(Icons.broken_image_outlined, color: AppColors.muted)));
 
+    final tap = onTap ?? () => _openFullScreen(context);
     return Container(
       width: size,
       height: size,
@@ -49,11 +74,7 @@ class PhotoPreview extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(fit: StackFit.expand, children: [
-        Positioned.fill(
-          child: onTap == null
-              ? image
-              : GestureDetector(onTap: onTap, child: image),
-        ),
+        Positioned.fill(child: GestureDetector(onTap: tap, child: image)),
         Positioned(
           left: 0, right: 0, bottom: 0,
           child: Container(

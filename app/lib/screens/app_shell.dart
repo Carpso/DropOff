@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
 import 'bookings_screen.dart';
@@ -19,7 +20,30 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
+  static const _tabKey = 'ui.last_tab';
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_restoreTab());
+  }
+
+  Future<void> _restoreTab() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getInt(_tabKey);
+      if (!mounted || saved == null) return;
+      setState(() => _index = saved);
+    } catch (_) {}
+  }
+
+  Future<void> _persistTab(int index) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_tabKey, index);
+    } catch (_) {}
+  }
 
   void goTo(int index) {
     final store = AppScope.of(context);
@@ -31,6 +55,7 @@ class _AppShellState extends State<AppShell> {
     // another device or by support must show without tapping a profile picture.
     if (store.linked) unawaited(store.refreshRole(force: true));
     setState(() => _index = index);
+    unawaited(_persistTab(index));
   }
 
   @override

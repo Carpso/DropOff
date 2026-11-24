@@ -30,6 +30,7 @@ import '../ui/app_theme.dart';
 import '../ui/app_sheet.dart';
 import '../widgets/common.dart';
 import 'account_screen.dart';
+import 'rider_history_screen.dart';
 import 'in_app_navigator_screen.dart';
 import 'waybill_screen.dart' show waybillDepotTitle;
 import '../ui/app_spinner.dart';
@@ -1561,9 +1562,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                         scrollDirection: Axis.horizontal,
                         itemCount: photos.length,
                         separatorBuilder: (_, __) => const SizedBox(width: 8),
-                        itemBuilder: (_, i) => ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: ColoredBox(color: AppColors.line.withValues(alpha: 0.18), child: AuthedImage(photos[i], fit: BoxFit.contain, width: 84, height: 84)),
+                        itemBuilder: (_, i) => GestureDetector(
+                          onTap: () => ReceiptViewer.show(context, path: photos[i], title: 'Item photo ${i + 1}', shareTooltip: 'Download / share photo', shareLabel: 'Download & share photo'),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: ColoredBox(color: AppColors.line.withValues(alpha: 0.18), child: AuthedImage(photos[i], fit: BoxFit.contain, width: 84, height: 84)),
+                          ),
                         ),
                       ),
                     ),
@@ -2458,6 +2462,11 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           // Compact shift switch — full controls live in a bottom sheet so
           // the Task Queue body (and the stats card) never gets pushed down.
           _shiftPill(),
+          IconButton(
+            tooltip: 'Job history',
+            icon: const Icon(Icons.history_rounded),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const RiderHistoryScreen())),
+          ),
           IconButton(
             tooltip: 'Rider tutorial',
             icon: const Icon(Icons.menu_book_outlined),

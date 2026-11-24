@@ -1,4 +1,5 @@
 ﻿import '../ui/app_toast.dart';
+import '../ui/proof_upload_overlay.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -1292,28 +1293,42 @@ class _RiderVerificationCardState extends State<_RiderVerificationCard> with Wid
     final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return;
     setState(() => _busyField = field);
-    final bytes = await picked.readAsBytes();
-    DateTime? capturedAt;
-    try { capturedAt = await picked.lastModified(); } catch (_) {}
-    final name = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
-    final res = await DropOffApi.uploadImage(bytes, name, kind: field == 'selfie' ? 'selfie' : 'kyc', capturedAt: capturedAt);
-    if (!mounted) return;
-    setState(() => _busyField = null);
-    if (!res.ok) {
-      AppToast.show(context, 'Photo upload failed. Check your connection and try again.');
-      return;
-    }
-    final url = '${res.body['url'] ?? ''}';
-    if (url.isEmpty) return;
-    setState(() {
-      _local[field] = picked.path;
-      switch (field) {
-        case 'selfie': _selfieUrl = url;
-        case 'nrc': _nrcUrl = url;
-        case 'plate': _plateUrl = url;
-        case 'license': _licenseUrl = url;
+    try {
+      final bytes = await picked.readAsBytes();
+      DateTime? capturedAt;
+      try { capturedAt = await picked.lastModified(); } catch (_) {}
+      final name = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
+      if (!mounted) return;
+      final res = await ProofUploadOverlay.run(
+        context,
+        title: 'Securing your photo',
+        task: DropOffApi.uploadImage(bytes, name, kind: field == 'selfie' ? 'selfie' : 'kyc', capturedAt: capturedAt),
+      );
+      if (!mounted) return;
+      setState(() => _busyField = null);
+      if (!res.ok) {
+        AppToast.show(context, 'Photo upload failed. Check your connection and try again.');
+        return;
       }
-    });
+      final url = '${res.body['url'] ?? ''}';
+      if (url.isEmpty) {
+        AppToast.show(context, 'Photo upload failed. Check your connection and try again.');
+        return;
+      }
+      setState(() {
+        _local[field] = picked.path;
+        switch (field) {
+          case 'selfie': _selfieUrl = url;
+          case 'nrc': _nrcUrl = url;
+          case 'plate': _plateUrl = url;
+          case 'license': _licenseUrl = url;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _busyField = null);
+      AppToast.show(context, 'Could not upload the photo. Check camera permission and try again.');
+    }
   }
 
   bool get _canSubmit =>
@@ -1659,30 +1674,46 @@ class _SelfieBannerState extends State<_SelfieBanner> {
     final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 82);
     if (picked == null) return;
     setState(() => _busy = true);
-    final bytes = await picked.readAsBytes();
-    DateTime? capturedAt;
-    try { capturedAt = await picked.lastModified(); } catch (_) {}
-    final name = picked.name.isNotEmpty ? picked.name : 'selfie.jpg';
-    final up = await DropOffApi.uploadImage(bytes, name, kind: 'selfie', capturedAt: capturedAt);
-    if (!mounted) return;
-    if (!up.ok) {
+    try {
+      final bytes = await picked.readAsBytes();
+      DateTime? capturedAt;
+      try { capturedAt = await picked.lastModified(); } catch (_) {}
+      final name = picked.name.isNotEmpty ? picked.name : 'selfie.jpg';
+      if (!mounted) return;
+      final up = await ProofUploadOverlay.run(
+        context,
+        title: 'Securing your photo',
+        task: DropOffApi.uploadImage(bytes, name, kind: 'selfie', capturedAt: capturedAt),
+      );
+      if (!mounted) return;
+      if (!up.ok) {
+        setState(() => _busy = false);
+        _snack('Upload failed (${up.error}).');
+        return;
+      }
+      final url = '${up.body['url'] ?? ''}';
+      if (url.isEmpty) {
+        setState(() => _busy = false);
+        _snack('Upload failed. Try again.');
+        return;
+      }
+      final res = await DropOffApi.addMePhoto(url);
+      if (!mounted) return;
       setState(() => _busy = false);
-      _snack('Upload failed (${up.error}).');
-      return;
+      if (!res.ok) {
+        _snack('Could not save photo (${res.error}).');
+        return;
+      }
+      final st = '${res.body['verification_status'] ?? ''}';
+      _snack(st == 'pending'
+          ? 'We need a clearer selfie. Retake it to return to review.'
+          : 'Photo added - senders will see you on the tracking page.');
+      setState(() => _needed = false);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      _snack('Could not upload the photo. Check camera permission and try again.');
     }
-    final url = '${up.body['url'] ?? ''}';
-    final res = await DropOffApi.addMePhoto(url);
-    if (!mounted) return;
-    setState(() => _busy = false);
-    if (!res.ok) {
-      _snack('Could not save photo (${res.error}).');
-      return;
-    }
-    final st = '${res.body['verification_status'] ?? ''}';
-    _snack(st == 'pending'
-        ? 'We need a clearer selfie. Retake it to return to review.'
-        : 'Photo added - senders will see you on the tracking page.');
-    setState(() => _needed = false);
   }
 
   void _snack(String t) => AppToast.show(context, t);

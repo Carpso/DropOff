@@ -41,7 +41,14 @@ class ReceiptViewer {
   }
 
   /// Full-screen, pinch-to-zoom view with a Download & share action.
-  static void show(BuildContext context, {required String path, required String title, String ref = ''}) {
+  static void show(
+    BuildContext context, {
+    required String path,
+    required String title,
+    String ref = '',
+    String shareTooltip = 'Download / share receipt',
+    String shareLabel = 'Download & share receipt',
+  }) {
     final url = resolve(path);
     Navigator.of(context).push<void>(MaterialPageRoute<void>(
       fullscreenDialog: true,
@@ -53,7 +60,7 @@ class ReceiptViewer {
           title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
           actions: [
             IconButton(
-              tooltip: 'Download / share receipt',
+              tooltip: shareTooltip,
               icon: const Icon(Icons.ios_share),
               onPressed: () => share(context, path, ref),
             ),
@@ -66,7 +73,7 @@ class ReceiptViewer {
             child: FilledButton.icon(
               onPressed: () => share(context, path, ref),
               icon: const Icon(Icons.ios_share, size: 17),
-              label: const Text('Download & share receipt'),
+              label: Text(shareLabel),
             ),
           ),
         ),

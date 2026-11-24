@@ -21,7 +21,7 @@ import {
   generateEmailToken, generateOtp, hashOtp, hashPassword, isValidEmail, passwordNeedsRehash, signJwt,
   verifyJwtClaims, verifyPassword,
 } from './auth';
-import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, lencoCollectionFee, lencoDisbursementFeeEstimate, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW, DEPOT_QUEUE_FEE_ZMW } from './fees';
+import { collectionFees, computeJobTotals, MOMO_COLLECTION_FEE, lencoCollectionFee, lencoDisbursementFeeEstimate, platformFee, round2, PLATFORM_SWEEP_MIN_ZMW } from './fees';
 import { PRIVACY_MD, PRIVACY_TITLE, TERMS_MD, TERMS_TITLE, mdToHtml } from './legal';
 import { filedReceiptTotal, invalidFiledReceipt, parseFiledReceipts } from './receipts';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor, vehicleClassForParcel } from './pricing';
@@ -1309,13 +1309,15 @@ app.get('/me', async (c) => {
     const r = await c.env.DB.prepare('SELECT id, full_name, photo_url FROM riders WHERE phone = ?1 AND active = 1')
       .bind(phone).first<{ id: number; full_name: string; photo_url: string | null }>();
     if (r) { rider = { id: r.id, name: r.full_name }; photoUrl = r.photo_url; fullName = r.full_name; }
-    const u = await c.env.DB.prepare('SELECT email, full_name, photo_url, locale_pref FROM auth_users WHERE phone = ?1')
-      .bind(phone).first<{ email: string | null; full_name: string | null; photo_url: string | null; locale_pref: string | null }>();
+    const u = await c.env.DB.prepare('SELECT email, full_name, photo_url, locale_pref, door_pin_hash, door_pin FROM auth_users WHERE phone = ?1')
+      .bind(phone).first<{ email: string | null; full_name: string | null; photo_url: string | null; locale_pref: string | null; door_pin_hash: string | null; door_pin: string | null }>();
     if (u?.full_name) fullName = u.full_name;
     // Account photo (incl. seller uploads) wins for display; rider photo is the tracking identity.
     if (u?.photo_url) photoUrl = u.photo_url;
     email = u?.email ?? null;
     (c as any)._localePref = u?.locale_pref ?? null;
+    (c as any)._doorPinSet = !!(u?.door_pin_hash || u?.door_pin);
+    (c as any)._doorPin = u?.door_pin ?? null;
   }
   return c.json({
     phone: phone ?? null,
@@ -1325,6 +1327,8 @@ app.get('/me', async (c) => {
     photo_url: photoUrl,
     full_name: fullName,
     locale_pref: (c as any)._localePref ?? null,
+    door_pin_set: !!(c as any)._doorPinSet,
+    door_pin: (c as any)._doorPin ?? null,
     ...(email ? { email } : {}),
   });
 });
@@ -4074,11 +4078,11 @@ app.post('/jobs/:ref/events', async (c) => {
     const fee = round2(cfare.total - counterReceiptDue);
     try {
       await sendSms(c.env, job.sender_phone,
-        `DropOff: your item ${job.ref} is at the depot. Your rider paid the K${counterReceiptDue.toFixed(2)} counter fare. Repay K${cfare.total.toFixed(2)} in Bookings (receipt + processing fee + K15 depot queue fee) to unlock the receipt photo and reimburse your rider.`, { transactional: true });
+        `DropOff: your item ${job.ref} is at the depot. Your rider paid the K${counterReceiptDue.toFixed(2)} counter fare. Repay K${cfare.total.toFixed(2)} in Bookings (receipt + processing fee) to unlock the receipt photo and reimburse your rider.`, { transactional: true });
     } catch { /* notification must never break the event */ }
     c.executionCtx.waitUntil(sendToPhone(c.env, job.sender_phone, {
       title: 'Counter fare due',
-      body: `Item ${job.ref} is at the depot. Pay K${cfare.total.toFixed(2)} in Bookings (receipt + processing fee + K15 depot queue fee) to unlock the receipt and reimburse your rider.`,
+      body: `Item ${job.ref} is at the depot. Pay K${cfare.total.toFixed(2)} in Bookings (receipt + processing fee) to unlock the receipt and reimburse your rider.`,
       data: { job_ref: job.ref ?? '', kind: 'counter_fare_due' },
     }));
   }
@@ -6362,6 +6366,37 @@ app.post('/payments', async (c) => {
     init = await collectWithGateway(c.env, init.gateway, phone, amount, lipilaRef, note);
   }
   if (!init.ok) {
+    const raw = (init.raw ?? '').toLowerCase();
+    if (raw.includes('duplicate reference') || raw.includes('duplicate_reference') || raw.includes('errorcode":"10"')) {
+      // Provider says reference already used. Reuse an existing pending/success
+      // payment if present; otherwise retry once with a fresh reference.
+      if (jobId && ['counter_fare','job','booking_deposit','collection'].includes(kind)) {
+        const existing = await c.env.DB.prepare(
+          `SELECT id, lipila_reference, gateway, gateway_reference, amount_zmw, platform_fee_zmw, lipila_fee_zmw, status
+             FROM payments WHERE job_id = ?1 AND kind = ?2 AND status IN ('pending','success')
+             ORDER BY id DESC LIMIT 1`,
+        ).bind(jobId, kind).first<any>();
+        if (existing) {
+          return c.json({
+            ok: true,
+            payment_id: existing.id,
+            lipila_reference: existing.lipila_reference ?? null,
+            gateway: existing.gateway ?? 'lipila',
+            gateway_reference: existing.gateway_reference ?? existing.lipila_reference,
+            amount_zmw: existing.amount_zmw,
+            platform_fee_zmw: existing.platform_fee_zmw ?? 0,
+            lipila_fee_zmw: existing.lipila_fee_zmw ?? 0,
+            reused_prompt: true,
+          });
+        }
+      }
+      const freshRef = `${lipilaRef}-r${Date.now().toString(36).slice(-4)}`;
+      console.warn(JSON.stringify({ where: 'payments', event: 'duplicate_reference_retry', kind, old_ref: lipilaRef, new_ref: freshRef }));
+      init = await collectWithGateway(c.env, init.gateway, phone, amount, freshRef, note);
+      if (init.ok) lipilaRef = freshRef;
+    }
+  }
+  if (!init.ok) {
     const detail = init.raw?.trim()
       ? init.raw
       : `${init.gateway === 'lenco' ? 'Lenco' : 'Lipila'} HTTP ${init.status}${init.status === 401 ? ' (check API key / account access)' : ''}`;
@@ -6450,7 +6485,7 @@ async function counterFareFees(env: Env, phone: string, receipt: number) {
   const gateway = gatewayPreference(env) === 'lenco' ? 'lenco' : 'lipila';
   const platformFeeZmw = active ? 0 : platformFee(receipt);
   const providerFeeZmw = gateway === 'lenco' ? lencoCollectionFee(receipt) : MOMO_COLLECTION_FEE;
-  const depotQueueFeeZmw = DEPOT_QUEUE_FEE_ZMW;
+  const depotQueueFeeZmw = 0;
   const processingFeeZmw = round2(platformFeeZmw + providerFeeZmw);
   return {
     planWaived: !!active,
@@ -6460,7 +6495,7 @@ async function counterFareFees(env: Env, phone: string, receipt: number) {
     gateway,
     processing_fee_zmw: processingFeeZmw,
     depot_queue_fee_zmw: depotQueueFeeZmw,
-    // Sender pays: receipt + processing fee + depot queue fee.
+    // Sender pays: receipt + processing fee. Depot queue fee waived for now.
     total: round2(receipt + processingFeeZmw + depotQueueFeeZmw),
   };
 }
@@ -6889,9 +6924,9 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       await captureError(env, e, { method: 'SETTLE', url: `https://settle/ledger/${pay.job_id}` }).catch(() => {});
     }
   } else if (pay.kind === 'counter_fare' && pay.job_id) {
-    // Sender paid the depot counter fare (+ processing fee + depot queue fee) through DropOff.
+    // Sender paid the depot counter fare (+ processing fee) through DropOff.
     // Unlock the receipt photo for them, then reimburse the rider the EXACT
-    // counter amount fee-free (the processing/depot queue fees cover costs).
+    // counter amount fee-free (the processing fee covers costs).
     const job = await env.DB.prepare(
       `SELECT id, ref, sender_phone, counter_receipt_zmw, rider_id FROM jobs WHERE id = ?1`,
     ).bind(pay.job_id).first<any>();
@@ -6904,7 +6939,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
         ).bind(pay.phone, receipt, job.id),
         env.DB.prepare(
           `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_fare_paid', ?2)`,
-        ).bind(job.id, `Sender paid the depot counter fare K${receipt.toFixed(2)} (+ processing fee + depot queue fee) — receipt photo unlocked for the sender. Rider reimbursement in flight.`),
+        ).bind(job.id, `Sender paid the depot counter fare K${receipt.toFixed(2)} (+ processing fee) — receipt photo unlocked for the sender. Rider reimbursement in flight.`),
       ]);
       await sendToPhone(env, pay.phone, {
         title: 'Receipt unlocked',
@@ -7027,9 +7062,8 @@ async function reimburseRider(
 /* -------- platform revenue sweep (fees/plan income → business momo) ------ */
 // All platform income sits in the merchant/Lenco account as we collect it.
 // Plan purchases: sweep the PLAN AMOUNT (credit_zmw) to the business line;
-// leave processing fees and depot queue fees in float for covering
-// transaction/payout costs. Counter fares: leave processing + depot queue fee
-// in float. Other payments: sweep the platform fee as before.
+// leave processing fees in float for covering transaction/payout costs.
+// Counter fares: leave processing fee in float. Other payments: sweep the platform fee as before.
 // Idempotent: ledger row written BEFORE disburse call, so reruns cannot double-pay.
 async function sweepPlatformIncome(env: Env, minZmw = 0): Promise<void> {
   const businessPhone = env.BUSINESS_PHONE;
@@ -7546,7 +7580,7 @@ app.get('/payments/:id/receipt', async (c) => {
   const providerFee = round2(Number(pay.lipila_fee_zmw ?? 0));
   const processingFee = round2(platform + providerFee);
   const total = round2(Number(pay.amount_zmw ?? 0));
-  const queueFee = pay.kind === 'counter_fare' ? DEPOT_QUEUE_FEE_ZMW : 0;
+  const queueFee = pay.kind === 'counter_fare' ? 0 : 0;
   const receiptAmount = pay.kind === 'counter_fare'
     ? round2(Math.max(0, total - processingFee - queueFee))
     : credit;
@@ -7666,7 +7700,7 @@ app.get('/me/receipts', async (c) => {
       const credit = round2(Number(p.credit_zmw ?? 0));
       const processingFee = round2(Number(p.platform_fee_zmw ?? 0) + Number(p.lipila_fee_zmw ?? 0));
       const total = round2(Number(p.amount_zmw ?? 0));
-      const queueFee = p.kind === 'counter_fare' ? DEPOT_QUEUE_FEE_ZMW : 0;
+      const queueFee = p.kind === 'counter_fare' ? 0 : 0;
       const plan = p.sub_tier ? planTiers[p.sub_tier as PlanTier] : null;
       return {
         receipt_no: `DRP-RCPT-${String(p.id).padStart(6, '0')}`,
@@ -10556,6 +10590,25 @@ app.get('/admin/payroll/:id/proof', async (c) => {
   });
 });
 
+// Rider job/task history (completed + canceled) for the signed-in rider.
+app.get('/rider/history', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const rider = await c.env.DB.prepare('SELECT id FROM riders WHERE phone = ?1 AND active = 1').bind(phone).first<any>();
+  if (!rider) return c.json({ error: 'rider not found' }, 404);
+  const limit = Math.min(100, Math.max(1, Number(c.req.query('limit') ?? 50)));
+  const { results } = await c.env.DB.prepare(
+    `SELECT j.ref, j.status, j.created_at, j.pickup_address, j.dest_city, j.dest_address,
+            j.recipient_name, j.service, j.parcels, j.total_zmw, j.rider_fee_zmw,
+            co.name AS courier_name, co.depot_name
+       FROM jobs j LEFT JOIN couriers co ON co.id = j.courier_id
+      WHERE j.rider_id = ?1
+        AND j.status IN ('delivered','ready_for_collection','canceled','cancelled','deleted')
+      ORDER BY j.created_at DESC LIMIT ?2`,
+  ).bind(rider.id, limit).all<any>();
+  return c.json({ jobs: results ?? [] });
+});
+
 // A rider can see their own payroll history + proof links in the app.
 app.get('/rider/payroll', async (c) => {
   const phone = c.get('phone');
@@ -11549,15 +11602,15 @@ app.post('/me/door-pin', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const pin = String(b?.pin ?? '').replace(/\D/g, '');
   if (!/^\d{4}$/.test(pin)) return c.json({ error: 'pin_must_be_4_digits' }, 400);
-  await c.env.DB.prepare('UPDATE auth_users SET door_pin_hash = ?2 WHERE phone = ?1')
-    .bind(phone, await hashOtp(pin, c.env.JWT_SECRET)).run();
-  return c.json({ ok: true, pin_set: true });
+  await c.env.DB.prepare('UPDATE auth_users SET door_pin_hash = ?2, door_pin = ?3 WHERE phone = ?1')
+    .bind(phone, await hashOtp(pin, c.env.JWT_SECRET), pin).run();
+  return c.json({ ok: true, pin_set: true, door_pin: pin });
 });
 app.delete('/me/door-pin', async (c) => {
   const phone = c.get('phone');
   if (!phone) return c.json({ error: 'sign_in_required' }, 401);
-  await c.env.DB.prepare('UPDATE auth_users SET door_pin_hash = NULL WHERE phone = ?1').bind(phone).run();
-  return c.json({ ok: true, pin_set: false });
+  await c.env.DB.prepare('UPDATE auth_users SET door_pin_hash = NULL, door_pin = NULL WHERE phone = ?1').bind(phone).run();
+  return c.json({ ok: true, pin_set: false, door_pin: null });
 });
 
 // Rider self-check: run the AI face review on their OWN current selfie
