@@ -381,6 +381,8 @@ class _SplashScreenState extends State<_SplashScreen> {
   final _passwordCtor = TextEditingController();
 
   StreamSubscription<Map<String, dynamic>>? _pushSub;
+  OverlayEntry? _pushBannerEntry;
+  Timer? _pushBannerTimer;
 
   @override
   void initState() {
@@ -398,10 +400,11 @@ class _SplashScreenState extends State<_SplashScreen> {
       }
       setState(() {});
     });
-    // Foreground push: the worker fires counter_fare_due the moment a rider
-    // files the depot receipt. Show the prompt immediately, wherever she is.
+    // Foreground push: show an in-app heads-up banner and handle urgent flows.
     _pushSub = PushService.onForegroundMessage.stream.listen((data) {
-      if ('${data['kind'] ?? ''}' == 'counter_fare_due') _showCounterFarePrompt();
+      final kind = '${data['kind'] ?? ''}';
+      if (kind == 'counter_fare_due') _showCounterFarePrompt();
+      _showForegroundPushBanner(data);
     });
   }
 
@@ -420,8 +423,100 @@ class _SplashScreenState extends State<_SplashScreen> {
     });
   }
 
+  void _showForegroundPushBanner(Map<String, dynamic> data) {
+    final overlay = navigatorKey.currentState?.overlay;
+    if (overlay == null) return;
+    _pushBannerTimer?.cancel();
+    _pushBannerEntry?.remove();
+    _pushBannerEntry = null;
+
+    final title = (data['title'] ?? 'DropOff').toString();
+    final body = (data['body'] ?? '').toString();
+    final kind = '${data['kind'] ?? ''}'.toLowerCase();
+    final isOrder = kind.contains('assign') || kind.contains('new_order') || kind == 'trip_transferred' || kind == 'claim_available';
+
+    final entry = OverlayEntry(builder: (ctx) {
+      final top = MediaQuery.of(ctx).padding.top + 8;
+      return Positioned(
+        top: top,
+        left: 12,
+        right: 12,
+        child: Material(
+          color: Colors.transparent,
+          child: Dismissible(
+            key: ValueKey('push-${data['kind'] ?? 'k'}-${data['job_ref'] ?? ''}-${data['message_id'] ?? DateTime.now().millisecondsSinceEpoch}'),
+            direction: DismissDirection.up,
+            onDismissed: (_) {
+              _pushBannerTimer?.cancel();
+              _pushBannerEntry?.remove();
+              _pushBannerEntry = null;
+            },
+            child: GestureDetector(
+              onTap: () {
+                _pushBannerTimer?.cancel();
+                _pushBannerEntry?.remove();
+                _pushBannerEntry = null;
+                _runWhenReady(() => _performTap(widget.store, data));
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isOrder ? const Color(0xFF0F2A1D) : const Color(0xFF14213D),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 18, offset: Offset(0, 8))],
+                  border: Border.all(color: isOrder ? const Color(0xFFF2C94C) : Colors.white24),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: isOrder ? const Color(0xFFF2C94C) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(isOrder ? Icons.delivery_dining_rounded : Icons.notifications_active_rounded,
+                          color: const Color(0xFF0F2A1D), size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13.5)),
+                          if (body.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(body, maxLines: 2, overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Color(0xE6FFFFFF), fontSize: 12.5, height: 1.3)),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.chevron_right_rounded, color: Colors.white70),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    });
+
+    _pushBannerEntry = entry;
+    overlay.insert(entry);
+    _pushBannerTimer = Timer(const Duration(seconds: 5), () {
+      _pushBannerEntry?.remove();
+      _pushBannerEntry = null;
+    });
+  }
+
   @override
   void dispose() {
+    _pushBannerTimer?.cancel();
+    _pushBannerEntry?.remove();
     _pushSub?.cancel();
     _emailCtor.dispose();
     _passwordCtor.dispose();

@@ -27,6 +27,12 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (fiftieth pass) — push notifications, wake, in-app curtain banner
+
+- **FCM order alerts:** worker `push.ts` sends order alerts as high-priority data-only messages (no `android.notification`) with 300s TTL; app background isolate creates channels and renders max-importance full-screen alarm notifications. Foreground messages include title/body in `onForegroundMessage` payload.
+- **In-app foreground banner:** `main.dart` shows a dismissible top in-app heads-up banner for foreground pushes; tap routes through existing push navigation.
+- **Reliability fixes:** `PushService` creates channels in background isolate, guards token-refresh listener binding, uses alarm audio attributes/category for order alerts, and preserves full-screen intent/wake permissions.
+
 ## 2026-11-24 (forty-ninth pass) — K15 depot queue fee removed + payment prompt safety
 
 - **K15 depot queue fee removed:** `DEPOT_QUEUE_FEE_ZMW` set to `0` in `workers/src/fees.ts`; counter-fare total is now receipt + processing fee. Removed K15/queue-fee references from worker settlement/SMS/push/receipt copy, legal text, and app booking/bookings/couriers/help/tutorial/thermal/admin/plan-receipt copy. API keeps `depot_queue_fee_zmw` fields as `0` for compatibility.

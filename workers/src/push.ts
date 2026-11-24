@@ -123,15 +123,19 @@ export function buildFcmMessage(token: string, payload: PushPayload): Record<str
         priority: 'high',
         // A job that arrived 20 minutes ago is not an alarm.
         ...(orderAlert ? { ttl: '300s' } : {}),
-        notification: {
-          channel_id: androidChannelId(kind),
-          notification_priority: orderAlert ? 'PRIORITY_MAX' : 'PRIORITY_HIGH',
-          visibility: 'PUBLIC',
-          default_sound: true,
-          ...(orderAlert ? { default_vibrate_timings: true } : {}),
-        },
+        // Order alerts are data-only so the app background isolate can render
+        // a max-importance full-screen alarm notification. Other pushes keep a
+        // system notification for reliable curtain delivery.
+        ...(orderAlert ? {} : {
+          notification: {
+            channel_id: androidChannelId(kind),
+            notification_priority: 'PRIORITY_HIGH',
+            visibility: 'PUBLIC',
+            default_sound: true,
+          },
+        }),
       },
-      apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
+      apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default', ...(orderAlert ? { 'content-available': 1 } : {}) } } },
     },
   };
 }

@@ -33,6 +33,7 @@ class PushService {
   static final Completer<void> _initDone = Completer<void>();
   static bool _localReady = false;
   static bool _permissionGranted = false;
+  static bool _tokenRefreshBound = false;
 
   /// True when Android actually allows notifications. Riders need this to be
   /// visible: a denied POST_NOTIFICATIONS (Android 13+) makes every FCM send
@@ -175,6 +176,10 @@ class PushService {
       onDidReceiveNotificationResponse: (details) =>
           onPayloadTap.add(details.payload?.isNotEmpty == true ? _decodePayload(details.payload!) : null),
     );
+    // Background isolates must also have channels; otherwise data-only order
+    // alerts are dropped silently on Android 8+.
+    final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    await _prepareChannels(android);
   }
 
   static Map<String, dynamic> _decodePayload(String raw) {
@@ -208,8 +213,14 @@ class PushService {
   }
 
   static void _onForegroundMessage(RemoteMessage message) {
-    _show(message.data, message.notification?.title, message.notification?.body);
-    onForegroundMessage.add(Map<String, dynamic>.from(message.data));
+    final title = message.notification?.title ?? _str(message.data['title']);
+    final body = message.notification?.body ?? _str(message.data['body']);
+    _show(message.data, title, body);
+    onForegroundMessage.add({
+      ...Map<String, dynamic>.from(message.data),
+      if (title != null) 'title': title,
+      if (body != null) 'body': body,
+    });
   }
 
   /// Category of a notification; used to pick channel, icon accent and sound.
@@ -269,14 +280,16 @@ class PushService {
           : (channel.importance == Importance.defaultImportance ? Priority.defaultPriority : Priority.high),
       playSound: true,
       enableVibration: true,
+      audioAttributesUsage: isOrderAlert ? AudioAttributesUsage.alarm : AudioAttributesUsage.notification,
       largeIcon: const DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
       icon: '@drawable/ic_stat_dropoff',
       ticker: t,
-      category: (kind.contains('job') || kind.contains('assign') || kind.contains('status'))
+      category: (isOrderAlert || kind.contains('job') || kind.contains('assign') || kind.contains('status'))
           ? AndroidNotificationCategory.alarm
           : AndroidNotificationCategory.message,
       fullScreenIntent: isOrderAlert || kind.contains('job') || kind.contains('assign'),
       visibility: NotificationVisibility.public,
+      autoCancel: true,
       styleInformation: BigTextStyleInformation(b, contentTitle: t, htmlFormatBigText: false),
       groupKey: 'dropoff',
     );
@@ -340,13 +353,14 @@ class PushService {
       }
       // Also refresh on FCM's own token-refresh stream so the server always
       // holds the current token (older ones get 404/410 and are pruned server-side).
-      // NOTE: onRegistered is firebase's FID — NOT the messaging token our
-      // backend needs (it sends via FCM token). Deprecated but intentional.
-      // ignore: deprecated_member_use
-      _fcm.onTokenRefresh.listen((newToken) async {
-        if (newToken.isEmpty || DropOffApi.token == null) return;
-        await DropOffApi.post('/push/register', {'token': newToken, 'platform': defaultTargetPlatform.name});
-      });
+      if (!_tokenRefreshBound) {
+        _tokenRefreshBound = true;
+        // ignore: deprecated_member_use
+        _fcm.onTokenRefresh.listen((newToken) async {
+          if (newToken.isEmpty || DropOffApi.token == null) return;
+          await DropOffApi.post('/push/register', {'token': newToken, 'platform': defaultTargetPlatform.name});
+        });
+      }
     } catch (_) {}
   }
 
