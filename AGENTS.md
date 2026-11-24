@@ -27,6 +27,16 @@ After every change session, without asking the owner:
 4. Commit and push everything: `git add -A`, `git commit`, `git push origin main`.
    **Never leave work uncommitted or report these steps as "pending"** — just do them.
 
+## 2026-11-24 (forty-first pass) — Lenco top priority, fee model, plan receipts, contact number
+
+- **Lenco is top payment priority** (`PAYMENT_GATEWAY=lenco` in `workers/wrangler.toml`); Lipila code remains intact. Gateway-aware processing fees implemented: processing fee = DropOff platform cut (unchanged: 1% + K0.98, min K4.98) + gateway provider collection fee (Lenco mobile money 1%, Lipila K2.50). User-facing copy says "processing fee" (no breakdown). Added `lencoCollectionFee`/`collectionFees(..., gateway)` in `workers/src/fees.ts`.
+- **Counter-fare repayment**: sender pays **receipt + processing fee + K15 depot queue fee** (`DEPOT_QUEUE_FEE_ZMW=15`). Rider reimbursement sends the **exact receipt amount** entered on the receipt (`reimburseRider` uses `job.counter_receipt_zmw`). K15 queue fee stays in float to cover disbursement/transaction costs.
+- **Business sweep** (`sweepPlatformIncome`): for `subscription`/`upgrade` payments, sweep **plan amount** (`credit_zmw`) to `BUSINESS_PHONE`; leave processing fees and counter-fare depot queue fees in float. Other kinds keep platform-fee sweep behavior.
+- **Plan receipts**: `GET /payments/:id/receipt` enriched (buyer/plan/period/amounts/processing fee/business contact); `GET /me/plan-receipts` added. Flutter `PlanReceiptScreen` renders branded receipt with DropOff logo and supports download/share as PNG; wired after plan purchase and in Account > Plan receipts.
+- **Contact numbers**: calls/support contact shown to users is **0968551110**; transactions/disbursements use `BUSINESS_PHONE=0976847775` (env/wrangler) — **never expose transaction number to users**. Receipt endpoint returns contact number only.
+- **Counter-fare SMS/push** updated to new total formula; plan activation push mentions receipt download. `workers/src/legal.ts` counter-fare clause updated.
+- Worker deployed `fcf40da0-4138-4f11-af89-03ca3db90d30` -> later deploy required after this pass; tests 30/30.
+
 ## 2026-11-24 (fortieth pass) — Lipila parity with chisomo + live auth diagnosis
 
 Compared DropOff against `chisomo` / `chisomo_flutter` money handling.

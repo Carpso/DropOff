@@ -36,7 +36,7 @@
 
 ## 1. Money flow — prepayment, held bookings, counter-fare repayment — 🟡
 
-**What it does.** Sender's momo is charged a DropOff prepayment (trip price + processing fee). The rider is NEVER the pay-first leg: no prepayment → booking held → no dispatch (server-side; tracking 402s; `redispatchUnassignedPaidJobs` cron re-dispatches when it lands; holds > 24h auto-cancel with `hold_expired`, no money moved). Courier counter fare is partner money — sender repays the *exact receipt* amount + processing after drop-off; never taken in advance. Payout to riders: handled in payroll (weekly, pace-gated K3,000/mo/Light); platform cut 5% over K2,500/mo turnover. Refunds on undelivered/auto-canceled journeys return to original momo.
+**What it does.** Sender's momo is charged a DropOff prepayment (trip price + processing fee). The rider is NEVER the pay-first leg: no prepayment → booking held → no dispatch (server-side; tracking 402s; `redispatchUnassignedPaidJobs` cron re-dispatches when it lands; holds > 24h auto-cancel with `hold_expired`, no money moved). Courier counter fare is partner money — sender repays the *exact receipt* amount + processing fee + depot queue fee after drop-off; never taken in advance. Payout to riders: handled in payroll (weekly, pace-gated K3,000/mo/Light); platform cut 5% over K2,500/mo turnover. Refunds on undelivered/auto-canceled journeys return to original momo.
 
 **Evidence.** `workers/src/index.ts` — `jobPaymentHeld()`, `settlePaymentSuccess()`, `/payments/*`, `/admin/jobs/:ref/delete`; `cancelExpiredHolds` in the minute cron. App: held banner on My Bookings (this release), `_PrepayCard`, `_CounterReceiptCard`, delivery OTP gate. Worker checked OK on live; typecheck clean.
 

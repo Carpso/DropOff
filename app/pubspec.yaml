@@ -1,10 +1,10 @@
-# DROPOFF — ownership stamp (do not remove)
+﻿# DROPOFF â€” ownership stamp (do not remove)
 # :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
-# © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
+# Â© 2026 Godfrey Moses Kalambo Â· Carpso Solutions Â· Lusaka, Zambia.
 name: dropoff
 description: DropOff - home or shop pickup to your chosen Zambian courier depot.
 publish_to: "none"
-version: 0.5.87+97
+version: 0.5.88+98
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

@@ -4064,13 +4064,11 @@ app.post('/jobs/:ref/events', async (c) => {
     const fee = round2(cfare.total - counterReceiptDue);
     try {
       await sendSms(c.env, job.sender_phone,
-        cfare.planWaived
-          ? `DropOff: your item ${job.ref} is at the depot. Your rider paid the counter fare. Pay K${cfare.total.toFixed(2)} in Bookings to reveal your receipt photo and reimburse them (no processing - plan active).`
-          : `DropOff: your item ${job.ref} is at the depot. Your rider paid the K${counterReceiptDue.toFixed(2)} counter fare; repay K${counterReceiptDue.toFixed(2)} + K${fee.toFixed(2)} processing = K${cfare.total.toFixed(2)} in Bookings to reveal the receipt photo.`, { transactional: true });
+        `DropOff: your item ${job.ref} is at the depot. Your rider paid the K${counterReceiptDue.toFixed(2)} counter fare. Repay K${cfare.total.toFixed(2)} in Bookings (receipt + processing fee + K15 depot queue fee) to unlock the receipt photo and reimburse your rider.`, { transactional: true });
     } catch { /* notification must never break the event */ }
     c.executionCtx.waitUntil(sendToPhone(c.env, job.sender_phone, {
       title: 'Counter fare due',
-      body: `Item ${job.ref} is at the depot. Your rider paid the counter fare - pay K${cfare.total.toFixed(2)} in Bookings to reveal the receipt photo and reimburse them.`,
+      body: `Item ${job.ref} is at the depot. Pay K${cfare.total.toFixed(2)} in Bookings (receipt + processing fee + K15 depot queue fee) to unlock the receipt and reimburse your rider.`,
       data: { job_ref: job.ref ?? '', kind: 'counter_fare_due' },
     }));
   }
@@ -6715,8 +6713,8 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     await sendToPhone(env, pay.phone, {
       title: sub?.tier ? `${sub.tier} plan renewed` : 'Plan renewed',
       body: cycleDays === 1
-        ? 'Your daily pass is live for today. Book away — unused item slots expire tonight.'
-        : `Renewed for another ${cycleDays} days. Unused item slots do not carry over — book away!`,
+        ? 'Your daily pass is live for today. Download your plan receipt in Account. Unused item slots expire tonight.'
+        : `Renewed for another ${cycleDays} days. Download your plan receipt in Account. Unused item slots do not carry over — book away!`,
       data: { kind: 'subscription_active' },
     });
   } else if (pay.kind === 'upgrade' && pay.subscription_id) {
@@ -6725,7 +6723,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     const sub = await env.DB.prepare('SELECT tier FROM subscriptions WHERE id = ?1').bind(pay.subscription_id).first<any>();
     await sendToPhone(env, pay.phone, {
       title: 'Plan upgraded',
-      body: sub?.tier ? `You are now on ${sub.tier} — bigger cap, live immediately.` : 'Upgrade complete.',
+      body: sub?.tier ? `You are now on ${sub.tier} — bigger cap, live immediately. Download your plan receipt in Account.` : 'Upgrade complete. Download your plan receipt in Account.',
       data: { kind: 'subscription_active' },
     });
   } else if (pay.kind === 'job' && pay.job_id) {
@@ -6840,10 +6838,9 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
       await captureError(env, e, { method: 'SETTLE', url: `https://settle/ledger/${pay.job_id}` }).catch(() => {});
     }
   } else if (pay.kind === 'counter_fare' && pay.job_id) {
-    // Sender paid the depot counter fare (+ processing) through DropOff.
+    // Sender paid the depot counter fare (+ processing fee + depot queue fee) through DropOff.
     // Unlock the receipt photo for them, then reimburse the rider the EXACT
-    // counter amount fee-free (the processing fee the sender paid covers
-    // DropOff's costs — no payout fee is charged on the reimbursement).
+    // counter amount fee-free (the processing/depot queue fees cover costs).
     const job = await env.DB.prepare(
       `SELECT id, ref, sender_phone, counter_receipt_zmw, rider_id FROM jobs WHERE id = ?1`,
     ).bind(pay.job_id).first<any>();
@@ -6856,7 +6853,7 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
         ).bind(pay.phone, receipt, job.id),
         env.DB.prepare(
           `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_fare_paid', ?2)`,
-        ).bind(job.id, `Sender paid the depot counter fare K${receipt.toFixed(2)} (+ processing) — receipt photo unlocked for the sender. Rider reimbursement in flight.`),
+        ).bind(job.id, `Sender paid the depot counter fare K${receipt.toFixed(2)} (+ processing fee + depot queue fee) — receipt photo unlocked for the sender. Rider reimbursement in flight.`),
       ]);
       await sendToPhone(env, pay.phone, {
         title: 'Receipt unlocked',
@@ -7260,38 +7257,119 @@ app.get('/payments/:id/receipt', async (c) => {
   const id = Number(c.req.param('id'));
   const pay = await c.env.DB.prepare(
     `SELECT p.*, j.ref AS job_ref, j.sender_name, j.pickup_address, j.dest_city,
-            co.name AS courier_name
+            j.counter_receipt_zmw AS job_counter_receipt_zmw,
+            co.name AS courier_name,
+            s.tier AS sub_tier, s.period_start AS sub_period_start, s.period_end AS sub_period_end,
+            u.name AS account_name
        FROM payments p
        LEFT JOIN jobs j ON j.id = p.job_id
        LEFT JOIN couriers co ON co.id = j.courier_id
+       LEFT JOIN subscriptions s ON s.id = p.subscription_id
+       LEFT JOIN auth_users u ON u.phone = p.phone
       WHERE p.id = ?1`,
   ).bind(id).first<any>();
   if (!pay) return c.json({ error: 'not found' }, 404);
   if (c.get('role') === 'customer' && c.get('phone') !== pay.phone) return c.json({ error: 'forbidden' }, 403);
+
+  const credit = round2(Number(pay.credit_zmw ?? 0));
+  const platform = round2(Number(pay.platform_fee_zmw ?? 0));
+  const providerFee = round2(Number(pay.lipila_fee_zmw ?? 0));
+  const processingFee = round2(platform + providerFee);
+  const total = round2(Number(pay.amount_zmw ?? 0));
+  const queueFee = pay.kind === 'counter_fare' ? DEPOT_QUEUE_FEE_ZMW : 0;
+  const receiptAmount = pay.kind === 'counter_fare'
+    ? round2(Math.max(0, total - processingFee - queueFee))
+    : credit;
+
+  const planTiers = await plans(c.env.DB);
+  const plan = pay.sub_tier ? planTiers[pay.sub_tier as PlanTier] : null;
+
   return c.json({
-    receipt_no: `RCPT-${pay.id}`,
+    receipt_no: `DRP-RCPT-${String(pay.id).padStart(6, '0')}`,
     payment_id: pay.id,
     status: pay.status,
     kind: pay.kind,
     paid_at: pay.paid_at,
     created_at: pay.created_at,
     phone: pay.phone,
+    buyer_name: pay.account_name ?? pay.sender_name ?? null,
     job_ref: pay.job_ref ?? null,
     sender_name: pay.sender_name ?? null,
     pickup_address: pay.pickup_address ?? null,
     dest_city: pay.dest_city ?? null,
     courier: pay.courier_name ?? null,
+    plan: (pay.kind === 'subscription' || pay.kind === 'upgrade') ? {
+      tier: pay.sub_tier ?? null,
+      name: pay.sub_tier ? ({ weekly: 'Weekly Sprint', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' } as Record<string,string>)[pay.sub_tier] ?? String(pay.sub_tier).toUpperCase() : null,
+      period_start: pay.sub_period_start ?? null,
+      period_end: pay.sub_period_end ?? null,
+      cycle_days: plan?.cycle_days ?? null,
+    } : null,
     amounts: {
-      total_zmw: pay.amount_zmw,
-      credit_zmw: pay.credit_zmw ?? 0,
-      platform_fee_zmw: pay.platform_fee_zmw ?? 0,
-      lipila_fee_zmw: pay.lipila_fee_zmw ?? 0,
+      total_zmw: total,
+      credit_zmw: credit,
+      plan_amount_zmw: (pay.kind === 'subscription' || pay.kind === 'upgrade') ? credit : null,
+      receipt_amount_zmw: pay.kind === 'counter_fare' ? receiptAmount : null,
+      processing_fee_zmw: processingFee,
+      depot_queue_fee_zmw: queueFee,
+      platform_fee_zmw: platform,
+      lipila_fee_zmw: providerFee,
     },
     refund_of_payment_id: pay.refund_of_payment_id ?? null,
     refunded_at: pay.refunded_at ?? null,
     lipila_reference: pay.lipila_reference ?? null,
     gateway: pay.gateway ?? 'lipila',
     gateway_reference: pay.gateway_reference ?? pay.lipila_reference,
+    business: {
+      name: 'DropOff',
+      legal: 'DropOff by Carpso Solutions',
+      phone: '0968551110',
+      email: 'support@carpsosolutions.store',
+    },
+  });
+});
+
+app.get('/me/plan-receipts', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'unauthorized' }, 401);
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.id, p.status, p.kind, p.amount_zmw, p.credit_zmw, p.platform_fee_zmw, p.lipila_fee_zmw,
+            p.lipila_reference, p.gateway, p.gateway_reference, p.created_at, p.paid_at, p.subscription_id,
+            s.tier AS sub_tier, s.period_start AS sub_period_start, s.period_end AS sub_period_end
+       FROM payments p
+       LEFT JOIN subscriptions s ON s.id = p.subscription_id
+      WHERE p.phone = ?1 AND p.kind IN ('subscription','upgrade')
+      ORDER BY p.id DESC LIMIT 50`,
+  ).bind(phone).all<any>();
+  const planTiers = await plans(c.env.DB);
+  return c.json({
+    receipts: (results ?? []).map((p: any) => {
+      const credit = round2(Number(p.credit_zmw ?? 0));
+      const processingFee = round2(Number(p.platform_fee_zmw ?? 0) + Number(p.lipila_fee_zmw ?? 0));
+      const total = round2(Number(p.amount_zmw ?? 0));
+      const plan = p.sub_tier ? planTiers[p.sub_tier as PlanTier] : null;
+      return {
+        receipt_no: `DRP-RCPT-${String(p.id).padStart(6, '0')}`,
+        payment_id: p.id,
+        status: p.status,
+        kind: p.kind,
+        paid_at: p.paid_at,
+        created_at: p.created_at,
+        plan: {
+          tier: p.sub_tier ?? null,
+          name: p.sub_tier ? ({ weekly: 'Weekly Sprint', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' } as Record<string,string>)[p.sub_tier] ?? String(p.sub_tier).toUpperCase() : null,
+          period_start: p.sub_period_start ?? null,
+          period_end: p.sub_period_end ?? null,
+        },
+        amounts: {
+          total_zmw: total,
+          plan_amount_zmw: credit,
+          processing_fee_zmw: processingFee,
+        },
+        gateway: p.gateway ?? 'lipila',
+        reference: p.gateway_reference ?? p.lipila_reference ?? null,
+      };
+    }),
   });
 });
 

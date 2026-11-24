@@ -16,6 +16,7 @@ import '../main.dart';
 import '../screens/admin_screen.dart';
 import '../screens/tickets_screen.dart';
 import '../screens/legal_screen.dart';
+import '../screens/plan_receipt_screen.dart';
 import '../state/app_store.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_sheet.dart';
@@ -1370,14 +1371,105 @@ class _TiersCardState extends State<_TiersCard> {
       context: 'account_tiers',
       meta: {'tier': tier, 'status': status},
     );
-      AppToast.show(context, switch (status) {
+    final msg = switch (status) {
       'success' when tier == 'weekly' => 'Weekly Sprint is LIVE — 7 days of items are ready.',
       'success' => '$tier plan is LIVE — your monthly items are ready.',
       'failed' => (failReason == null || failReason.isEmpty)
           ? 'The mobile-money prompt was rejected — verify your momo balance has the funds, then tap Pay now again.'
           : 'Payment failed: $failReason — top up your momo wallet, then tap Pay now again.',
       _ => 'Payment still pending — the plan activates the moment it lands.',
-    });
+    };
+    AppToast.show(context, msg);
+    if (paymentId.isNotEmpty && paymentId != 'null' && mounted) {
+      showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Plan receipt', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+            const SizedBox(height: 8),
+            Text(status == 'success'
+                ? 'Your plan payment is confirmed. Download the receipt for your records.'
+                : 'You can download the payment receipt for your records. If payment is still pending, the receipt will show pending until it confirms.',
+                style: const TextStyle(fontSize: 14, height: 1.45)),
+            const SizedBox(height: 16),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              onPressed: () { Navigator.pop(ctx); Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlanReceiptScreen(paymentId: paymentId))); },
+              icon: const Icon(Icons.receipt_long_outlined),
+              label: const Text('View / download receipt'),
+            )),
+          ]),
+        )),
+      );
+    }
+  }
+
+  Future<void> _openPlanReceipts() async {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(child: SizedBox(
+        height: MediaQuery.of(ctx).size.height * 0.72,
+        child: Column(children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Align(alignment: Alignment.centerLeft,
+              child: Text('Plan receipts', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20))),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Align(alignment: Alignment.centerLeft,
+              child: Text('Download receipts for your plan payments for your records or audit.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF5F6B66), height: 1.4))),
+          ),
+          Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
+            future: DropOffApi.myPlanReceipts(),
+            builder: (ctx, snap) {
+              if (snap.connectionState != ConnectionState.done) {
+                return const Center(child: AppLogoSpinner());
+              }
+              final items = snap.data ?? const <Map<String, dynamic>>[];
+              if (items.isEmpty) {
+                return const Center(child: Padding(padding: EdgeInsets.all(24),
+                  child: Text('No plan receipts yet.', textAlign: TextAlign.center)));
+              }
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (ctx, i) {
+                  final r = items[i];
+                  final plan = (r['plan'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+                  final amounts = (r['amounts'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+                  final status = '${r['status'] ?? ''}'.toLowerCase();
+                  final ok = status == 'success';
+                  final color = ok ? const Color(0xFF1E7A43) : status == 'pending' ? const Color(0xFFB45309) : const Color(0xFFB3261E);
+                  final name = '${plan['name'] ?? plan['tier'] ?? 'Plan'}';
+                  final total = amounts['total_zmw'];
+                  final totalText = total is num ? 'K${total.toDouble().toStringAsFixed(2)}' : '';
+                  return ListTile(
+                    tileColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0x14000000))),
+                    title: Text('$name plan', style: const TextStyle(fontWeight: FontWeight.w800)),
+                    subtitle: Text('${r['receipt_no'] ?? ''} • ${ok ? 'Paid' : status.toUpperCase()}\n$totalText', style: const TextStyle(height: 1.35)),
+                    isThreeLine: true,
+                    trailing: Icon(Icons.chevron_right, color: color),
+                    onTap: () {
+                      final pid = '${r['payment_id'] ?? ''}';
+                      if (pid.isEmpty || pid == 'null') return;
+                      Navigator.of(ctx).pop();
+                      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PlanReceiptScreen(paymentId: pid)));
+                    },
+                  );
+                },
+              );
+            },
+          )),
+        ]),
+      )),
+    );
   }
 
   @override
@@ -1537,6 +1629,15 @@ class _TiersCardState extends State<_TiersCard> {
                         ),
                         ),
                       ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _busyTier != null ? null : _openPlanReceipts,
+                        icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                        label: const Text('Plan receipts'),
+                      ),
+                    ),
                   ]);
                 },
               ),
