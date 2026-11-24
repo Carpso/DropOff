@@ -60,9 +60,20 @@ export interface SmsResult {
   error?: string;
 }
 
+/** Strip provider-internal details (e.g. "Insufficient balance") from the
+ *  error string so they are never shown to end users. Users see a generic
+ *  "SMS temporarily unavailable" and the real reason stays in worker logs. */
+/** Strip provider-internal details (e.g. "Insufficient balance") from the
+ *  error string so they are never shown to end users. Users see a generic
+ *  "SMS temporarily unavailable" and the real reason stays in worker logs. */
+export function sanitizeSmsError(err: string): string {
+  const s = String(err ?? '');
+  if (/insufficient|balance|credit|wallet|funds/i.test(s)) return 'sms_temporarily_unavailable';
+  return s;
+}
+
 export async function sendSms(
   env: {
-    ENV?: string;
     AT_USERNAME?: string;
     AT_API_KEY?: string;
     AT_FROM?: string;
@@ -96,7 +107,7 @@ export async function sendSms(
   // InvalidSenderId). One funded ChurchOnApp wallet serves every Carpso app
   // (owner 2026-11-18) — branded sender IDs per app, no cross-wallet fallback.
   const from = String(env.AT_FROM ?? env.SMS_SENDER_ID ?? '').trim();
-  const production = String(env.ENV ?? '').toLowerCase() === 'production';
+  const production = String((env as any).ENV ?? '').toLowerCase() === 'production';
 
   // Dev / sandbox: never call AT (no billing), just surface the text so the
   // route can return a dev_code when AUTH_DEV_MODE=1.
@@ -139,7 +150,7 @@ export async function sendSms(
     }
     const body = await res.text().catch(() => '');
     if (!res.ok) {
-      return { sent: false, error: `at_status_${res.status}${body ? `:${body.slice(0, 120)}` : ''}` };
+      return { sent: false, error: sanitizeSmsError(`at_status_${res.status}${body ? `:${body.slice(0, 120)}` : ''}`) };
     }
     let recipients: any[] = [];
     try {
@@ -147,13 +158,13 @@ export async function sendSms(
     } catch { /* non-JSON body — treat as unconfirmed */ }
     if (!recipients.length) {
       const reason = String(body.match(/"Message":"([^"]+)"/)?.[1] ?? 'no_recipients');
-      return { sent: false, error: `at_reject:${reason.slice(0, 80)}` };
+      return { sent: false, error: sanitizeSmsError(`at_reject:${reason.slice(0, 80)}`) };
     }
     const ok = recipients.some(
       (r) => Number(r?.statusCode) === 100 || String(r?.status ?? '').toLowerCase() === 'success',
     );
     if (ok) return { sent: true };
-    return { sent: false, error: `at_reject:${String(recipients[0]?.status ?? 'unknown').slice(0, 80)}` };
+    return { sent: false, error: sanitizeSmsError(`at_reject:${String(recipients[0]?.status ?? 'unknown').slice(0, 80)}`) };
   };
   try {
     // Ladder (delivery beats branding): the configured sender ID first, and

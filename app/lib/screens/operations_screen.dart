@@ -52,7 +52,7 @@ class OperationsScreen extends StatelessWidget {
                 if (res.ok && res.body['sent'] == true) {
                   phrase = 'One-time code sent by SMS. Enter it below.';
                 } else if (res.ok) {
-                  phrase = 'SMS could not be delivered (${res.body['sms_error'] ?? 'gateway error'}). Sign in with email on the Account tab instead.';
+                  phrase = 'SMS could not be delivered. Sign in with email on the Account tab instead.';
                 } else {
                   phrase = 'Could not send a code (${res.error}). Try again shortly.';
                 }

@@ -1222,7 +1222,7 @@ app.post('/delete-data/request', async (c) => {
   ]);
   const sms = await sendSms(c.env, phone,
     `DropOff data deletion: your confirmation code is ${code}. It expires in 10 minutes. Never share this code.`, { transactional: true });
-  return c.json({ sent: sms.sent, ...(sms.error ? { sms_error: sms.error } : {}) });
+  return c.json({ sent: sms.sent });
 });
 
 // Confirm step: OTP-gated anonymization + session/token revocation.

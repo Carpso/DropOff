@@ -702,12 +702,37 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// Auto-name a depot dropoff point (Waze-style growing location): reverse
   /// geocode the rider's current position and save it as a shared community
   /// POI so every rider in the city sees it on the map.
-  Future<void> _autoNameDepotPoi(String ref) async {
+  Future<String?> _autoNameDepotPoi(String ref) async {
     try {
       final pos = _riderPos;
-      if (pos == null) return;
-      final name = await MapServices.reverse(LatLng(pos.latitude, pos.longitude));
-      if (name == null || name.trim().isEmpty) return;
+      if (pos == null) return null;
+      var name = await MapServices.reverse(LatLng(pos.latitude, pos.longitude));
+      if (name == null || name.trim().isEmpty) {
+        // Manual fallback: ask the rider to name the dropoff point.
+        if (!mounted) return null;
+        name = await showDialog<String>(
+          context: context,
+          builder: (ctx) {
+            final ctrl = TextEditingController();
+            return AlertDialog(
+              title: const Text('Name this dropoff point?'),
+              content: TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                  hintText: 'e.g. Kabwata Market, Mercury Kabulonga',
+                  border: OutlineInputBorder(),
+                ),
+                autofocus: true,
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Skip')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Save')),
+              ],
+            );
+          },
+        );
+        if (name == null || name.trim().isEmpty) return null;
+      }
       const city = 'Lusaka';
       await DropOffApi.saveCommunityPoi(
         name: name,
@@ -715,8 +740,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         lat: pos.latitude,
         lng: pos.longitude,
       );
+      return name;
     } catch (_) {
       // Best-effort: never fail the depot drop because of POI naming.
+      return null;
     }
   }
 
@@ -2100,7 +2127,10 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
       // Auto-name this dropoff point (Waze-style growing location): reverse
       // geocode the rider's position and save it as a shared community POI.
-      unawaited(_autoNameDepotPoi(ref));
+      final savedName = await _autoNameDepotPoi(ref);
+      if (mounted && savedName != null && savedName.isNotEmpty) {
+        AppToast.show(context, 'Dropoff point saved as "$savedName" on the map.');
+      }
       // Best-effort: compare seller's booking photo vs this drop photo.
       final chk = await DropOffApi.parcelCheck(ref);
       if (!mounted) return res;

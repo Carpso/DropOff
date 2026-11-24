@@ -131,7 +131,7 @@ class _AccountScreenState extends State<AccountScreen> {
         _otpMsg = 'Code sent by SMS — it expires in 10 minutes.';
         if (context.mounted) AppToast.show(context, 'Code sent — check your SMS.');
       } else if (res.ok) {
-        _otpMsg = 'SMS could not be delivered (${res.body['sms_error'] ?? 'gateway error'}). Use email sign-in below.';
+        _otpMsg = 'SMS could not be delivered. Use email sign-in below.';
       } else {
         final why = res.error ?? 'error';
         _otpMsg = why == 'network_error'
