@@ -81,6 +81,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   String _destLabel = '';
   RouteResult? _route;
   bool _routeLoading = false;
+  bool _searchExpanded = false;
   bool _engineDown = false;
   String _error = '';
   Timer? _timer;
@@ -528,10 +529,29 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         ),
         // Floating search - search-only (never sets destination). Placed below
         // the compass/basemap banner so it does not obstruct map controls.
-        Positioned(
-          left: 12,
-          right: 64, // leave the top-right compass badge visible/tappable
-          top: 60,
+        if (!_searchExpanded)
+          Positioned(
+            top: 60,
+            right: 12,
+            child: Material(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              elevation: 4,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(24),
+                onTap: () => setState(() => _searchExpanded = true),
+                child: const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: Icon(Icons.search, color: AppColors.forest, size: 22),
+                ),
+              ),
+            ),
+          ),
+        if (_searchExpanded)
+          Positioned(
+            left: 12,
+            right: 64,
+            top: 60,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(
               decoration: BoxDecoration(

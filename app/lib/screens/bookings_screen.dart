@@ -359,6 +359,24 @@ class BookingCard extends StatelessWidget {
                             : 'Pay the depot receipt + processing fee to reveal the receipt and reimburse your rider.',
                         style: const TextStyle(fontSize: 11.5, color: AppColors.ink, height: 1.35),
                       ),
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final res = await DropOffApi.repromptCounterFare();
+                            if (!context.mounted) return;
+                            if (res.ok) {
+                              AppToast.show(context, 'A fresh payment prompt has been sent to your phone.');
+                            } else {
+                              AppToast.error(context, 'Could not send a new prompt — try again or contact support.');
+                            }
+                          },
+                          icon: const Icon(Icons.refresh, size: 14),
+                          label: const Text('Request re-prompt', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
+                          style: TextButton.styleFrom(foregroundColor: const Color(0xFF7B5710), padding: EdgeInsets.zero, minimumSize: const Size(0, 28)),
+                        ),
+                      ),
                     ])),
                     const Icon(Icons.chevron_right, color: Color(0xFF7B5710)),
                   ]),

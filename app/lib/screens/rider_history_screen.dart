@@ -16,6 +16,19 @@ class _RiderHistoryScreenState extends State<RiderHistoryScreen> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _jobs = const [];
+  String _query = '';
+
+  List<Map<String, dynamic>> get _filtered => _query.trim().isEmpty
+      ? _jobs
+      : _jobs.where((j) {
+          final q = _query.trim().toLowerCase();
+          return '${j['ref'] ?? ''}'.toLowerCase().contains(q) ||
+              '${j['description'] ?? ''}'.toLowerCase().contains(q) ||
+              '${j['dest_city'] ?? ''}'.toLowerCase().contains(q) ||
+              '${j['from_city'] ?? ''}'.toLowerCase().contains(q) ||
+              '${j['courier_name'] ?? ''}'.toLowerCase().contains(q) ||
+              '${j['status'] ?? ''}'.toLowerCase().contains(q);
+        }).toList();
 
   @override
   void initState() {
@@ -95,7 +108,7 @@ class _RiderHistoryScreenState extends State<RiderHistoryScreen> {
 
   Map<String, List<Map<String, dynamic>>> _grouped() {
     final out = <String, List<Map<String, dynamic>>>{};
-    for (final j in _jobs) {
+    for (final j in _filtered) {
       final key = _dateKey(j['created_at']?.toString());
       out.putIfAbsent(key, () => []).add(j);
     }
@@ -115,90 +128,110 @@ class _RiderHistoryScreenState extends State<RiderHistoryScreen> {
           ? const Center(child: AppLogoSpinner(size: 32))
           : _error != null
               ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)))
-              : _jobs.isEmpty
-                  ? const Center(child: Text('No completed jobs yet.', style: TextStyle(color: AppColors.muted)))
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView(
-                        padding: const EdgeInsets.all(12),
-                        children: [
-                          for (final entry in _grouped().entries) ...[
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
-                              child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.muted, letterSpacing: 0.5)),
-                            ),
-                            ...entry.value.map((j) {
-                              final ref = '${j['ref'] ?? ''}';
-                              final status = '${j['status'] ?? ''}';
-                              final city = '${j['dest_city'] ?? j['from_city'] ?? ''}';
-                              final courier = '${j['courier_name'] ?? j['depot_name'] ?? ''}';
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(12),
-                                  onTap: () => _openDetail(j),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 42,
-                                          height: 42,
-                                          decoration: BoxDecoration(
-                                            color: _statusColor(status).withValues(alpha: 0.12),
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          child: Icon(Icons.inventory_2_outlined, color: _statusColor(status), size: 20),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(ref, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-                                              const SizedBox(height: 2),
-                                              Text('${j['description'] ?? 'Parcel'}${city.isNotEmpty ? ' · $city' : ''}',
-                                                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                                              if (courier.isNotEmpty)
-                                                Text(courier, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-                                            ],
-                                          ),
-                                        ),
-                                        Column(
-                                          crossAxisAlignment: CrossAxisAlignment.end,
-                                          children: [
-                                            Text(_time(j['created_at']?.toString()), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted)),
-                                            const SizedBox(height: 4),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                              decoration: BoxDecoration(
-                                                color: _statusColor(status).withValues(alpha: 0.12),
-                                                borderRadius: BorderRadius.circular(8),
-                                              ),
-                                              child: Text(_statusLabel(status), style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: _statusColor(status))),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(width: 4),
-                                        const Icon(Icons.chevron_right_rounded, color: AppColors.muted, size: 18),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }),
-                          ],
-                        ],
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                      child: TextField(
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.search),
+                          hintText: 'Search by ref, city, courier, status…',
+                          isDense: true,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          suffixIcon: _query.isNotEmpty
+                              ? IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => _query = ''))
+                              : null,
+                        ),
+                        onChanged: (v) => setState(() => _query = v),
                       ),
                     ),
+                    Expanded(
+                      child: _filtered.isEmpty
+                          ? const Center(child: Text('No matching jobs.', style: TextStyle(color: AppColors.muted)))
+                          : RefreshIndicator(
+                              onRefresh: _load,
+                              child: ListView(
+                                padding: const EdgeInsets.all(12),
+                                children: [
+                                  for (final entry in _grouped().entries) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
+                                      child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.muted, letterSpacing: 0.5)),
+                                    ),
+                                    ...entry.value.map((j) {
+                                      final ref = '${j['ref'] ?? ''}';
+                                      final status = '${j['status'] ?? ''}';
+                                      final city = '${j['dest_city'] ?? j['from_city'] ?? ''}';
+                                      final courier = '${j['courier_name'] ?? j['depot_name'] ?? ''}';
+                                      return Card(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        child: InkWell(
+                                          borderRadius: BorderRadius.circular(12),
+                                          onTap: () => _openDetail(j),
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(12),
+                                            child: Row(
+                                              children: [
+                                                Container(
+                                                  width: 42,
+                                                  height: 42,
+                                                  decoration: BoxDecoration(
+                                                    color: _statusColor(status).withValues(alpha: 0.12),
+                                                    borderRadius: BorderRadius.circular(12),
+                                                  ),
+                                                  child: Icon(Icons.inventory_2_outlined, color: _statusColor(status), size: 20),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(ref, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+                                                      const SizedBox(height: 2),
+                                                      Text('${j['description'] ?? 'Parcel'}${city.isNotEmpty ? ' · $city' : ''}',
+                                                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                                                          style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                                                      if (courier.isNotEmpty)
+                                                        Text(courier, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                                                    ],
+                                                  ),
+                                                ),
+                                                Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                                  children: [
+                                                    Text(_time(j['created_at']?.toString()), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted)),
+                                                    const SizedBox(height: 4),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                      decoration: BoxDecoration(
+                                                        color: _statusColor(status).withValues(alpha: 0.12),
+                                                        borderRadius: BorderRadius.circular(8),
+                                                      ),
+                                                      child: Text(_statusLabel(status), style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: _statusColor(status))),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(width: 4),
+                                                const Icon(Icons.chevron_right_rounded, color: AppColors.muted, size: 18),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            ),
+                    ],
+                  ),
     );
   }
 
   void _openDetail(Map<String, dynamic> j) {
     final ref = '${j['ref'] ?? ''}';
     if (ref.isEmpty) return;
-    // Open the order waybill sheet (read-only) for this job.
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,

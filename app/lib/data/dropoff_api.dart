@@ -1300,6 +1300,9 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> counterFareStatus() =>
       get('/counter-fare/status');
 
+  /// Sender missed the momo prompt: request a fresh one without USSD.
+  static Future<ApiResponse> repromptCounterFare() => post('/counter-fare/reprompt', const {});
+
   /// Depot counter fare (owner directive 2026-11-12): pay the EXACT amount
   /// transcribed off the depot receipt + processing. The receipt photo
   /// unlocks on approval and the rider is reimbursed fee-free.

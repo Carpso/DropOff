@@ -11313,6 +11313,54 @@ app.get('/counter-fare/status', async (c) => {
 
 // Outstanding depot counter fares — the jobs currently blocking their senders
 // from booking again. Drives the admin recovery card.
+app.post('/counter-fare/reprompt', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'sign_in_required' }, 401);
+  const due = await c.env.DB.prepare(
+    `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1
+      AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0
+      AND counter_receipt_paid = 0
+      AND COALESCE(status,'') NOT IN ('deleted','canceled','cancelled')
+      ORDER BY id DESC LIMIT 1`,
+  ).bind(phone).first<any>();
+  if (!due) return c.json({ error: 'no_counter_fare_due' }, 404);
+  const receipt = round2(Number(due.counter_receipt_zmw ?? 0));
+  if (!(receipt > 0)) return c.json({ error: 'no_counter_receipt' }, 409);
+  const job = await c.env.DB.prepare('SELECT id FROM jobs WHERE ref = ?1').bind(due.ref).first<any>();
+  const pending = await c.env.DB.prepare(
+    `SELECT id, amount_zmw, lipila_reference, gateway, gateway_reference FROM payments
+      WHERE job_id = ?1 AND kind = 'counter_fare' AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+  ).bind(job.id).first<any>();
+  if (pending) {
+    return c.json({ ok: true, reused_prompt: true, payment_id: pending.id, amount_zmw: pending.amount_zmw });
+  }
+  const fees = await counterFareFees(c.env, phone, receipt);
+  const amount = fees.total;
+  const failed = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM payments WHERE job_id = ?1 AND kind = 'counter_fare' AND status = 'failed'`,
+  ).bind(job.id).first<any>();
+  const lipilaRef = `cfare-${due.ref}-reprompt-${Number(failed?.n ?? 0) + 1}`;
+  const init = await collectWithGateway(c.env, null, phone, amount, lipilaRef, 'DropOff depot counter fare');
+  if (!init.ok) {
+    return c.json({ error: `${init.gateway}_init_failed`, detail: init.raw, gateway: init.gateway, provider_status: init.status }, 502);
+  }
+  const { meta } = await c.env.DB.prepare(
+    `INSERT INTO payments (job_id, phone, provider, amount_zmw, platform_fee_zmw, lipila_fee_zmw,
+       lipila_reference, gateway, gateway_reference, status, channel, kind)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending','merchant','counter_fare')`,
+  ).bind(job.id, phone, providerFromPhone(phone), amount, fees.platformFeeZmw, fees.lipilaFeeZmw,
+    init.providerReference ?? init.reference, init.gateway, init.reference).run();
+  await c.env.DB.prepare(
+    'INSERT INTO job_events (job_id, status, note) VALUES (?1, ?2, ?3)',
+  ).bind(job.id, 'counter_fare_prompt_sent', `Sender requested a re-prompt for the depot counter fare (K${amount.toFixed(2)}).`);
+  await sendToPhone(c.env, phone, {
+    title: 'Repay your depot fare',
+    body: `Your depot receipt is K${receipt.toFixed(2)}. Repay K${amount.toFixed(2)} in Bookings (receipt + processing fee) to unlock the receipt and reimburse your rider.`,
+    data: { job_ref: due.ref, kind: 'counter_fare_due' },
+  }).catch(() => {});
+  return c.json({ ok: true, reprompted: true, payment_id: meta.last_row_id, amount_zmw: amount, gateway: init.gateway, gateway_reference: init.reference });
+});
+
 app.get('/admin/counter-fares', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
   const { results } = await c.env.DB.prepare(
