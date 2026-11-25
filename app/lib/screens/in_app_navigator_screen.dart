@@ -80,6 +80,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   LatLng _destPos = const LatLng(0, 0);
   String _destLabel = '';
   RouteResult? _route;
+  int _selectedRouteIndex = 0;
   bool _routeLoading = false;
   bool _searchExpanded = false;
   bool _engineDown = false;
@@ -284,7 +285,6 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     try { await _tts.setSpeechRate(StepSounds.voiceRate); } catch (_) {}
     await _tts.speak(say).catchError((_) => 0);
   }
-
   Future<void> _refreshRoute() async {
     final me = _me;
     if (me == null || _routeLoading) return;
@@ -407,6 +407,24 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
   /// The app-bar suffix follows the CURRENT destination, not a frozen caption:
   /// it changes when the rider re-routes to a saved place / search result and
+  Widget _routeChip(String label, int index, bool selected) {
+    return GestureDetector(
+      onTap: () {
+        setState(() => _selectedRouteIndex = index);
+        if (_route != null) _syncCues(index == 0 ? _route! : _route!.alternatives[index - 1], _me ?? _dest);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.forest : Colors.white.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? AppColors.forest : AppColors.line),
+        ),
+        child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: selected ? Colors.white : AppColors.ink)),
+      ),
+    );
+  }
+
   /// again as she approaches and arrives. Short, arrow-led and single-line so
   /// it can never collapse into vertical text on a 320 px phone.
   String _destinationSuffix() => navigatorTitleSuffix(_destLabel, _me, _destPos);
@@ -415,11 +433,23 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
   Widget build(BuildContext context) {
     final me = _me;
     final route = _route;
-    final routePoints = route?.points;
+    final activeRoute = (_selectedRouteIndex == 0 || route == null)
+        ? route
+        : (route.alternatives.isNotEmpty && _selectedRouteIndex - 1 < route.alternatives.length
+            ? route.alternatives[_selectedRouteIndex - 1]
+            : route);
+    final routePoints = activeRoute?.points;
     final isStraight = routePoints == null || routePoints.length < 3 || _engineDown;
     final displayLine = routePoints ?? (me == null ? null : [me, _dest]);
-    final distanceLabel = route?.distanceLabel ?? (me == null ? null : RouteResult.straightLine(me, _dest).distanceLabel);
-    final durationLabel = route?.durationLabel ?? (me == null ? null : RouteResult.straightLine(me, _dest).durationLabel);
+    final distanceLabel = activeRoute?.distanceLabel ?? (me == null ? null : RouteResult.straightLine(me, _dest).distanceLabel);
+    final durationLabel = activeRoute?.durationLabel ?? (me == null ? null : RouteResult.straightLine(me, _dest).durationLabel);
+    final altRoutes = route == null
+        ? null
+        : [
+            if (_selectedRouteIndex != 0) route.points,
+            for (var i = 0; i < route.alternatives.length; i++)
+              if (i + 1 != _selectedRouteIndex) route.alternatives[i].points,
+          ];
 
     return Scaffold(
       appBar: AppBar(
@@ -460,26 +490,13 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         ],
       ),
       body: Stack(children: [
-        if (widget.approximateLocation)
-          Positioned(
-            top: 10, left: 10, right: 10,
-            child: IgnorePointer(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.95), borderRadius: BorderRadius.circular(10)),
-                child: const Text('Approximate location — exact street pin unavailable',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w800)),
-              ),
-            ),
-          ),
         RiderMap(
           pickup: _dest,
           pickupIsDepot: widget.destIsDepot,
           rider: me,
           route: displayLine,
           routeIsStraightLine: isStraight,
-          alternativeRoutes: _route?.alternatives.map((r) => r.points).toList(),
+          alternativeRoutes: altRoutes,
           vehicleClass: widget.vehicleClass,
           // The other half of the job as context: depot gets the full
           // warehouse pin, a sender stop gets the small storefront badge.
@@ -514,7 +531,23 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           searchPinLabel: _searchPinLabel,
           city: 'Lusaka',
         ),
-        // SPEEDOMETER (owner 2026-11-24, Yango parity): live km/h badge.
+        if (route != null && route.alternatives.isNotEmpty)
+          Positioned(
+            bottom: 80,
+            left: 12,
+            right: 12,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _routeChip('Route 1', 0, _selectedRouteIndex == 0),
+                for (var i = 0; i < route.alternatives.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: _routeChip('Route ${i + 2}', i + 1, _selectedRouteIndex == i + 1),
+                  ),
+              ],
+            ),
+          ),
         Positioned(
           top: 60,
           right: 12,
@@ -659,41 +692,9 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                 ),
               ),
             ),
-      ]),
-      // Destination bar
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Container(
-          decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.forest, width: 1, strokeAlign: BorderSide.strokeAlignOutside))),
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Text(_destLabel, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14.5)),
-            const SizedBox(height: 3),
-            Row(children: [
-              Icon(_engineDown ? Icons.straight : Icons.route, size: 15, color: AppColors.forest),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  distanceLabel == null
-                      ? 'Waiting for GPS…'
-                      : '$distanceLabel · $durationLabel${_engineDown ? ' · direct line' : ''}${_routeLoading ? ' · routing…' : ''}',
-                  style: const TextStyle(color: AppColors.ink, fontSize: 12.5, fontWeight: FontWeight.w600),
-                ),
-              ),
-              if (_route != null && _route!.steps.isNotEmpty)
-                TextButton.icon(
-                  onPressed: _openCueSheet,
-                  icon: const Icon(Icons.format_list_bulleted, size: 18),
-                  label: Text('View steps (${_route!.steps.length})'),
-                ),
-            ]),
-            if (_error.isNotEmpty) Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(_error, style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4)),
-            ),
-          ]),
-        ),
+      ],
       ),
+      // Destination bar
     );
   }
 }
