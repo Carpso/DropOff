@@ -1012,6 +1012,10 @@ class DropOffApi {
 
   static Future<Map<String, dynamic>?> adminMoneyOps() => getAdmin('/admin/money-ops');
 
+  static Future<Map<String, dynamic>?> adminSettings() => getAdmin('/admin/settings');
+  static Future<ApiResponse> adminSetSetting(String key, bool enabled) =>
+      post('/admin/settings', {'key': key, 'enabled': enabled}, admin: true);
+
   static String _adminIdempotencyKey(String action) => '$action-${DateTime.now().microsecondsSinceEpoch}';
 
   static Future<ApiResponse> confirmPayout(int id) =>

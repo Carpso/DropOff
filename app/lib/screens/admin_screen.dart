@@ -301,6 +301,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _RecurringOrdersCard(),
               const SizedBox(height: 18),
+              const _FeatureFlagsCard(),
+              const SizedBox(height: 18),
               const _RiderRosterCard(),
               const SizedBox(height: 18),
               const _ClientCrashesCard(),
@@ -4524,6 +4526,88 @@ class _RiderRosterCardState extends State<_RiderRosterCard> {
                     ]),
                   ]),
                 ),
+              );
+            }),
+        ]),
+      ),
+    );
+  }
+}
+
+class _FeatureFlagsCard extends StatefulWidget {
+  const _FeatureFlagsCard();
+  @override
+  State<_FeatureFlagsCard> createState() => _FeatureFlagsCardState();
+}
+
+class _FeatureFlagsCardState extends State<_FeatureFlagsCard> {
+  Map<String, dynamic> _flags = const {};
+  bool _loading = true;
+  String? _busy;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await DropOffApi.adminSettings();
+    if (!mounted) return;
+    setState(() {
+      _flags = (data?['settings'] as Map?)?.cast<String, dynamic>() ?? const {};
+      _loading = false;
+    });
+  }
+
+  Future<void> _toggle(String key, bool value) async {
+    setState(() => _busy = key);
+    final res = await DropOffApi.adminSetSetting(key, value);
+    if (!mounted) return;
+    setState(() => _busy = null);
+    if (res.ok) {
+      setState(() => _flags = Map<String, dynamic>.from(_flags)..[key] = value);
+    } else {
+      AppToast.error(context, 'Could not toggle $key');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keys = _flags.keys.toList()..sort();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.toggle_on_rounded, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Feature flags', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 4),
+          const Text('Toggle paid surfaces on/off. Superadmin only.', style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(12), child: Center(child: AppLogoSpinner(size: 26)))
+          else if (keys.isEmpty)
+            const Text('No flags loaded.', style: TextStyle(fontSize: 12.5))
+          else
+            ...keys.map((k) {
+              final on = _flags[k] == true;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  Expanded(child: Text(k, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700))),
+                  if (_busy == k)
+                    const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  else
+                    Switch(
+                      value: on,
+                      onChanged: (v) => _toggle(k, v),
+                    ),
+                ]),
               );
             }),
         ]),
