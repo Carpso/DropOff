@@ -301,6 +301,8 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _RecurringOrdersCard(),
               const SizedBox(height: 18),
+              const _RiderRosterCard(),
+              const SizedBox(height: 18),
               const _ClientCrashesCard(),
               const SizedBox(height: 18),
               if (_role == 'admin') ...[
@@ -4421,6 +4423,105 @@ class _RecurringOrdersCardState extends State<_RecurringOrdersCard> {
                       onPressed: _busyId != null ? null : () => _cancel(id),
                       icon: _busyId == id ? const AppLogoSpinner(size: 16) : const Icon(Icons.cancel_outlined, color: AppColors.danger),
                     ),
+                  ]),
+                ),
+              );
+            }),
+        ]),
+      ),
+    );
+  }
+}
+
+class _RiderRosterCard extends StatefulWidget {
+  const _RiderRosterCard();
+  @override
+  State<_RiderRosterCard> createState() => _RiderRosterCardState();
+}
+
+class _RiderRosterCardState extends State<_RiderRosterCard> {
+  List<Map<String, dynamic>> _rows = const [];
+  bool _loading = true;
+  String _date = DateTime.now().toIso8601String().substring(0, 10);
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await DropOffApi.adminRiderRoster(date: _date);
+    if (!mounted) return;
+    setState(() {
+      _rows = _safeRows(data?['riders']);
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final clockedIn = _rows.where((r) => r['clockedIn'] == true).length;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.people_alt_rounded, color: AppColors.forest),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('Rider roster (clock-in)', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+          ]),
+          const SizedBox(height: 4),
+          Text('Pilot/probation mode: tracking only, no payroll deductions applied. $_date — $clockedIn/${_rows.length} clocked in.',
+              style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                decoration: const InputDecoration(labelText: 'Date (YYYY-MM-DD)', isDense: true, border: OutlineInputBorder()),
+                controller: TextEditingController(text: _date),
+                onSubmitted: (v) { _date = v.trim().isEmpty ? _date : v.trim(); _load(); },
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(onPressed: _loading ? null : _load, child: const Text('Load')),
+          ]),
+          const SizedBox(height: 10),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(12), child: Center(child: AppLogoSpinner(size: 26)))
+          else if (_rows.isEmpty)
+            const Text('No riders found.', style: TextStyle(fontSize: 12.5))
+          else
+            ..._rows.map((r) {
+              final name = '${r['name'] ?? ''}';
+              final phone = '${r['phone'] ?? ''}';
+              final clocked = r['clockedIn'] == true;
+              final clockedAt = '${r['clockedAt'] ?? ''}';
+              final shifts = '${r['shifts'] ?? ''}';
+              final onShift = r['onShift'] == true;
+              final active = r['active'] == true;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(color: AppColors.canvas, borderRadius: BorderRadius.circular(10)),
+                  child: Row(children: [
+                    Icon(clocked ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                        color: clocked ? AppColors.success : AppColors.danger, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                      Text(phone, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+                      Text('Shifts: $shifts${onShift ? ' · ON SHIFT' : ''}${active ? '' : ' · INACTIVE'}',
+                          style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+                    ])),
+                    Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      Text(clocked ? 'Clocked in' : 'Missed',
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: clocked ? AppColors.success : AppColors.danger)),
+                      if (clocked) Text(clockedAt, style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+                    ]),
                   ]),
                 ),
               );

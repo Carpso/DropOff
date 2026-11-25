@@ -103,7 +103,15 @@ class _CouriersScreenState extends State<CouriersScreen> {
           _QuoteAnswer(query: _query),
           _LiveDepotsSection(query: _query),
           const SizedBox(height: 26),
-          const Text('FEATURED — partner depots', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.ink)),
+          Row(children: [
+            const Text('FEATURED — PARTNER DEPOTS', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.ink)),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
+              child: const Text('Not yet partnered — only listed', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.ink)),
+            ),
+          ]),
           const SizedBox(height: 12),
           ...filtered.map((courier) {
             final live = courier.isLusakaLive;

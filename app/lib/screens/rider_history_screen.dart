@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/dropoff_api.dart';
+import '../screens/rider_queue_screen.dart' show OrderWaybillSheet;
 import '../ui/app_spinner.dart';
 import '../ui/app_theme.dart';
 
@@ -47,6 +48,8 @@ class _RiderHistoryScreenState extends State<RiderHistoryScreen> {
       case 'cancelled':
       case 'deleted':
         return AppColors.danger;
+      case 'rejected_at_depot':
+        return AppColors.amber;
       default:
         return AppColors.muted;
     }
@@ -63,84 +66,143 @@ class _RiderHistoryScreenState extends State<RiderHistoryScreen> {
         return 'Canceled';
       case 'deleted':
         return 'Deleted';
+      case 'rejected_at_depot':
+        return 'Rejected at depot';
       default:
-        return status.isEmpty ? 'Unknown' : status;
+        return status.replaceAll('_', ' ');
     }
   }
 
-  String _fmtDate(dynamic raw) {
-    final s = raw?.toString() ?? '';
-    final dt = DateTime.tryParse(s.endsWith('Z') ? s : '${s}Z');
-    if (dt == null) return s;
-    final cat = dt.toUtc().add(const Duration(hours: 2));
-    String two(int n) => n.toString().padLeft(2, '0');
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${two(cat.day)} ${months[cat.month - 1]} ${cat.year}, ${two(cat.hour)}:${two(cat.minute)} CAT';
+  String _dateKey(String? iso) {
+    if (iso == null || iso.isEmpty) return 'Unknown date';
+    final d = DateTime.tryParse(iso.replaceFirst(' ', 'T'));
+    if (d == null) return iso.substring(0, 10);
+    final now = DateTime.now();
+    if (d.year == now.year && d.month == now.month && d.day == now.day) return 'Today';
+    final yest = now.subtract(const Duration(days: 1));
+    if (d.year == yest.year && d.month == yest.month && d.day == yest.day) return 'Yesterday';
+    return '${d.day} ${_months[d.month - 1]} ${d.year}';
+  }
+
+  static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  String _time(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    final d = DateTime.tryParse(iso.replaceFirst(' ', 'T'));
+    if (d == null) return '';
+    return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
+  Map<String, List<Map<String, dynamic>>> _grouped() {
+    final out = <String, List<Map<String, dynamic>>>{};
+    for (final j in _jobs) {
+      final key = _dateKey(j['created_at']?.toString());
+      out.putIfAbsent(key, () => []).add(j);
+    }
+    return out;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text('Job history', style: TextStyle(fontWeight: FontWeight.w900)),
+        actions: [
+          IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _load),
+        ],
       ),
       body: _loading
-          ? const Center(child: AppLogoSpinner())
+          ? const Center(child: AppLogoSpinner(size: 32))
           : _error != null
-              ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted)),
-                  const SizedBox(height: 12),
-                  FilledButton(onPressed: _load, child: const Text('Retry')),
-                ])))
+              ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center)))
               : _jobs.isEmpty
-                  ? const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('No completed jobs yet. Your delivered and closed jobs will appear here.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted))))
+                  ? const Center(child: Text('No completed jobs yet.', style: TextStyle(color: AppColors.muted)))
                   : RefreshIndicator(
                       onRefresh: _load,
-                      child: ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _jobs.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (_, i) {
-                          final j = _jobs[i];
-                          final status = '${j['status'] ?? ''}';
-                          final ref = '${j['ref'] ?? ''}';
-                          final pickup = '${j['pickup_address'] ?? ''}';
-                          final dest = '${j['dest_address'] ?? j['dest_city'] ?? ''}';
-                          final recipient = '${j['recipient_name'] ?? ''}';
-                          final parcels = j['parcels'];
-                          final createdAt = _fmtDate(j['created_at']);
-                          final courier = '${j['courier_name'] ?? j['depot_name'] ?? ''}'.trim();
-                          return Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: AppColors.line),
+                      child: ListView(
+                        padding: const EdgeInsets.all(12),
+                        children: [
+                          for (final entry in _grouped().entries) ...[
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
+                              child: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: AppColors.muted, letterSpacing: 0.5)),
                             ),
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Row(children: [
-                                Expanded(child: Text(ref, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13))),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(color: _statusColor(status).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(999)),
-                                  child: Text(_statusLabel(status), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _statusColor(status))),
+                            ...entry.value.map((j) {
+                              final ref = '${j['ref'] ?? ''}';
+                              final status = '${j['status'] ?? ''}';
+                              final city = '${j['dest_city'] ?? j['from_city'] ?? ''}';
+                              final courier = '${j['courier_name'] ?? j['depot_name'] ?? ''}';
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: () => _openDetail(j),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 42,
+                                          height: 42,
+                                          decoration: BoxDecoration(
+                                            color: _statusColor(status).withValues(alpha: 0.12),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: Icon(Icons.inventory_2_outlined, color: _statusColor(status), size: 20),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(ref, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+                                              const SizedBox(height: 2),
+                                              Text('${j['description'] ?? 'Parcel'}${city.isNotEmpty ? ' · $city' : ''}',
+                                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                                              if (courier.isNotEmpty)
+                                                Text(courier, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                                            ],
+                                          ),
+                                        ),
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: [
+                                            Text(_time(j['created_at']?.toString()), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted)),
+                                            const SizedBox(height: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: _statusColor(status).withValues(alpha: 0.12),
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Text(_statusLabel(status), style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: _statusColor(status))),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Icon(Icons.chevron_right_rounded, color: AppColors.muted, size: 18),
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              ]),
-                              const SizedBox(height: 6),
-                              Text(createdAt, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                              if (recipient.isNotEmpty) ...[const SizedBox(height: 6), Text('Recipient: $recipient', style: const TextStyle(fontSize: 12.5))],
-                              if (pickup.isNotEmpty) ...[const SizedBox(height: 4), Text('Pickup: $pickup', style: const TextStyle(fontSize: 12.5, color: AppColors.muted))],
-                              if (dest.isNotEmpty) ...[const SizedBox(height: 2), Text('Destination: $dest', style: const TextStyle(fontSize: 12.5, color: AppColors.muted))],
-                              if (courier.isNotEmpty || parcels != null) ...[
-                                const SizedBox(height: 6),
-                                Text([if (courier.isNotEmpty) courier, if (parcels != null) '$parcels item${'$parcels' == '1' ? '' : 's'}'].join(' • '), style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                              ],
-                            ]),
-                          );
-                        },
+                              );
+                            }),
+                          ],
+                        ],
                       ),
                     ),
+    );
+  }
+
+  void _openDetail(Map<String, dynamic> j) {
+    final ref = '${j['ref'] ?? ''}';
+    if (ref.isEmpty) return;
+    // Open the order waybill sheet (read-only) for this job.
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => OrderWaybillSheet(ref: ref),
     );
   }
 }

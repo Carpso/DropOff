@@ -153,8 +153,9 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
     ).listen((pos) {
       if (!mounted) return;
       final me = LatLng(pos.latitude, pos.longitude);
-      final kmh = (pos.speed * 3.6).clamp(0.0, 200.0);
-      setState(() { _me = me; _speedKmh = kmh; });
+      final kmh = (pos.speed * 3.6);
+      final display = kmh < 2.0 ? 0.0 : kmh;
+      setState(() { _me = me; _speedKmh = display.clamp(0.0, 200.0); });
       final moved = _lastRouteFix == null ||
           const Distance().as(LengthUnit.Meter, _lastRouteFix!, me) > 150;
       if (_route == null || moved) unawaited(_refreshRoute());
@@ -513,8 +514,8 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         ),
         // SPEEDOMETER (owner 2026-11-24, Yango parity): live km/h badge.
         Positioned(
-          top: 12,
-          left: 12,
+          top: 60,
+          right: 12,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(

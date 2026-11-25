@@ -9699,6 +9699,49 @@ app.get('/admin/recurring', async (c) => {
   return c.json({ recurring: results ?? [] });
 });
 
+/* -------- rider roster (admin, 2026-11-25) ------------------------------ */
+// Auto-checks which riders clocked in for a given date, their shift, and
+// their last-seen time. Pilot/probation mode: no payroll implications.
+app.get('/admin/riders/roster', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'admin_key_required' }, 403);
+  const date = String(c.req.query('date') ?? '').trim() || new Date().toISOString().slice(0, 10);
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, phone, full_name, vehicle, active, shifts, on_shift, verification_status,
+            last_lat, last_lng, last_seen_at, status, current_load, capacity
+       FROM riders ORDER BY full_name ASC, phone ASC`,
+  ).all<any>();
+  const rows = (results ?? []).map((r: any) => {
+    const lastSeen = r.last_seen_at ? String(r.last_seen_at) : null;
+    // Clocked in = last_seen within the last 24h and on the given date.
+    let clockedIn = false;
+    let clockedAt: string | null = null;
+    if (lastSeen) {
+      const seenDate = lastSeen.slice(0, 10);
+      if (seenDate === date) {
+        clockedIn = true;
+        clockedAt = lastSeen.slice(11, 16);
+      }
+    }
+    return {
+      id: r.id,
+      phone: r.phone,
+      name: r.full_name ?? r.phone,
+      vehicle: r.vehicle,
+      active: r.active === 1,
+      shifts: r.shifts,
+      onShift: r.on_shift === 1,
+      verification: r.verification_status,
+      lastSeenAt: lastSeen,
+      status: r.status,
+      currentLoad: r.current_load ?? 0,
+      capacity: r.capacity ?? 0,
+      clockedIn,
+      clockedAt,
+    };
+  });
+  return c.json({ date, riders: rows });
+});
+
 app.post('/recurring/:id/toggle', async (c) => {
   const id = Number(c.req.param('id'));
   if (!id) return c.json({ error: 'bad id' }, 400);

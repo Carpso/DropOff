@@ -25,7 +25,9 @@ import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../data/map_services.dart';
 import '../data/analytics_service.dart';
+import '../data/notification_inbox.dart';
 import '../data/push_service.dart';
+import 'notifications_screen.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_sheet.dart';
@@ -2626,7 +2628,20 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           style: TextStyle(fontWeight: FontWeight.w900),
         ),
         actions: [
-          // Compact shift switch — full controls live in a bottom sheet so
+          // Bell: notification center (replaces the auto-popping banner).
+          ValueListenableBuilder<int>(
+            valueListenable: NotificationInbox.unread,
+            builder: (_, n, __) => IconButton(
+              tooltip: 'Notifications',
+              icon: Badge(
+                isLabelVisible: n > 0,
+                label: Text('$n'),
+                child: const Icon(Icons.notifications_outlined),
+              ),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const NotificationsScreen())),
+            ),
+          ),
+          // Compact shift switch - full controls live in a bottom sheet so
           // the Task Queue body (and the stats card) never gets pushed down.
           _shiftPill(),
           IconButton(

@@ -30,6 +30,7 @@ import 'data/analytics_service.dart';
 import 'services/crash_reporting.dart';
 import 'ui/app_theme.dart';
 import 'data/push_service.dart';
+import 'data/notification_inbox.dart';
 import 'services/order_alert.dart';
 import 'screens/incoming_order_screen.dart';
 import 'ui/app_toast.dart';
@@ -262,6 +263,9 @@ Future<void> main() async {
   // inDrive-style order alerts: channel wiring + replay of an Accept/Decline
   // tap that relaunched the app while it was closed (owner 2026-11-24).
   OrderAlert.init();
+  // Notification center (owner 2026-11-25): foreground pushes land here instead
+  // of an auto-popping banner; reachable from the bell icon.
+  NotificationInbox.init();
   void handleTap(Map<String, dynamic>? data) {
     // Cold start / lock screen: queue the tap instead of dropping it or
     // navigating above the biometric gate.
@@ -469,11 +473,12 @@ class _SplashScreenState extends State<_SplashScreen> {
         // Accept / Decline card, not a small banner.
         if (widget.store.isRider) {
           _openIncomingOrder(data);
+          unawaited(NotificationInbox.add(data));
           return;
         }
       }
       if (kind == 'counter_fare_due') _showCounterFarePrompt();
-      _showForegroundPushBanner(data);
+      unawaited(NotificationInbox.add(data));
     });
     // Accept / Decline answered from the ring service or a notification action.
     _orderActionSub = OrderAlert.onAction.listen((action) {

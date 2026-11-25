@@ -1026,6 +1026,9 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> adminRecurring({String? phone}) =>
       getAdmin('/admin/recurring', {if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim()});
 
+  static Future<Map<String, dynamic>?> adminRiderRoster({String? date}) =>
+      getAdmin('/admin/riders/roster', {if (date != null && date.trim().isNotEmpty) 'date': date.trim()});
+
   static Future<ApiResponse> adminCancelRecurring(int id) =>
       post('/recurring/$id/delete', const {}, admin: true);
 
