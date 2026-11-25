@@ -57,6 +57,7 @@ class PhotoStamp {
 
       final wide = image.width >= 900;
       final font = wide ? img.arial48 : img.arial24;
+      if (font.characters.isEmpty) return null; // font not available in this isolate
       final pad = wide ? 26 : 12;
       final barH = wide ? 86 : 46;
       final top = image.height - barH;

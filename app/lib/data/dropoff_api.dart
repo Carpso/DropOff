@@ -1435,10 +1435,6 @@ class DropOffApi {
   /// Platform feature flags (owner-flippable without a deploy): door-to-door
   /// service and the tier overage discount. GET is staff-visible; POST is
   /// superadmin-only server-side.
-  static Future<Map<String, dynamic>?> adminSettings() => getAdmin('/admin/settings');
-  static Future<ApiResponse> adminSetSetting(String key, bool enabled) =>
-      post('/admin/settings', {'key': key, 'enabled': enabled}, admin: true);
-
   /// Rider incentive programmes — admin creates/edits with a title, toggles on/off.
   static Future<Map<String, dynamic>?> adminIncentives() => getAdmin('/admin/incentives');
 
@@ -1641,29 +1637,45 @@ class DropOffApi {
         _ => 'EVIDENCE',
       };
       final Uint8List source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
-      final Uint8List? stamped = DropOffApi.featureFlags['photo_stamp_enabled'] == false
-          ? null
-          : await compute(_stampInIsolate, _StampJob(source, tag, capturedAt));
+      Uint8List? stamped;
+      if (DropOffApi.featureFlags['photo_stamp_enabled'] != false) {
+        try {
+          stamped = await compute(_stampInIsolate, _StampJob(source, tag, capturedAt));
+        } catch (_) {
+          stamped = null; // stamping failed — upload original bytes
+        }
+      }
       if (stamped != null) {
         payload = stamped;
         final dot = filename.lastIndexOf('.');
         uploadName = '${dot > 0 ? filename.substring(0, dot) : filename}.jpg';
       }
-      final req = http.MultipartRequest('POST', _uri('/uploads'))
-        ..headers.addAll(authHeaders)
-        ..fields['kind'] = kind
-        ..files.add(http.MultipartFile.fromBytes('file', payload, filename: uploadName));
-      final streamed = await req.send().timeout(const Duration(seconds: 45));
-      final res = await http.Response.fromStream(streamed);
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
-      _noteAuthFailure(res.statusCode);
-      final ok = res.statusCode >= 200 && res.statusCode < 300;
-      return ApiResponse(
-        status: res.statusCode,
-        ok: ok,
-        body: decoded,
-        error: ok ? null : '${decoded['error'] ?? 'http_${res.statusCode}'}',
-      );
+      // Upload with retry: if the stamped version fails (e.g. server rejects
+      // the re-encoded bytes), retry once with the original bytes so the photo
+      // is never lost.
+      ApiResponse? result;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        final useStamped = attempt == 0 && stamped != null;
+        final reqPayload = useStamped ? payload : bytes;
+        final reqName = useStamped ? uploadName : filename;
+        final req = http.MultipartRequest('POST', _uri('/uploads'))
+          ..headers.addAll(authHeaders)
+          ..fields['kind'] = kind
+          ..files.add(http.MultipartFile.fromBytes('file', reqPayload, filename: reqName));
+        final streamed = await req.send().timeout(const Duration(seconds: 90));
+        final res = await http.Response.fromStream(streamed);
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>? ?? const {};
+        _noteAuthFailure(res.statusCode);
+        final ok = res.statusCode >= 200 && res.statusCode < 300;
+        result = ApiResponse(
+          status: res.statusCode,
+          ok: ok,
+          body: decoded,
+          error: ok ? null : '${decoded['error'] ?? 'http_${res.statusCode}'}',
+        );
+        if (ok || attempt == 1) break;
+      }
+      return result!;
     } catch (_) {
       return const ApiResponse(error: 'network_error');
     }

@@ -8,7 +8,8 @@ import 'app_shell.dart';
 import '../services/order_alert.dart';
 import '../ui/app_spinner.dart';
 import '../ui/app_theme.dart';
-import '../ui/app_toast.dart';
+import '../widgets/rider_map.dart';
+import 'package:latlong2/latlong.dart';
 
 /// Full-screen INCOMING ORDER (owner 2026-11-24, inDrive parity).
 ///
@@ -59,6 +60,18 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
   int get _secondsLeft {
     final s = _deadline.difference(DateTime.now()).inSeconds;
     return s < 0 ? 0 : s;
+  }
+
+  double? get _pickupLat {
+    final v = widget.detail?['pickup_lat'];
+    if (v == null) return null;
+    return double.tryParse('$v');
+  }
+
+  double? get _pickupLng {
+    final v = widget.detail?['pickup_lng'];
+    if (v == null) return null;
+    return double.tryParse('$v');
   }
 
   String _read(List<String> keys) {
@@ -212,6 +225,20 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
                             const SizedBox(height: 4),
                             Text('Deliver to $city',
                                 style: const TextStyle(fontSize: 13, color: AppColors.muted)),
+                          ],
+                          if (_pickupLat != null && _pickupLng != null) ...[
+                            const SizedBox(height: 12),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: SizedBox(
+                                height: 120,
+                                child: RiderMap(
+                                  pickup: LatLng(_pickupLat!, _pickupLng!),
+                                  rider: null,
+                                  city: 'Lusaka',
+                                ),
+                              ),
+                            ),
                           ],
                           const SizedBox(height: 16),
                           Wrap(
