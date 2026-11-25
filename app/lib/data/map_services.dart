@@ -34,12 +34,14 @@ class RouteResult {
   final double durationSeconds;
   final List<RouteStep> steps;
   final bool fromRoutingEngine;
+  final List<RouteResult> alternatives;
   const RouteResult({
     required this.points,
     required this.distanceMetres,
     required this.durationSeconds,
     required this.steps,
     this.fromRoutingEngine = true,
+    this.alternatives = const [],
   });
 
   /// Straight-line fallback when OSRM is unreachable — never shown as a road.
@@ -116,11 +118,39 @@ class MapServices {
           })
           .where((s) => s.instruction.isNotEmpty)
           .toList();
+      final altRaw = (data['alternatives'] as List?) ?? const [];
+      final alts = altRaw.map((a) {
+        final am = a as Map<String, dynamic>;
+        final apts = ((am['points'] as List?) ?? const [])
+            .map((p) => LatLng((p[0] as num).toDouble(), (p[1] as num).toDouble()))
+            .toList();
+        if (apts.length < 2) return null;
+        final asteps = ((am['steps'] as List?) ?? const [])
+            .map((s) {
+              final lat = (s['lat'] as num?)?.toDouble();
+              final lng = (s['lng'] as num?)?.toDouble();
+              return RouteStep(
+                '${s['instruction'] ?? ''}',
+                (s['distance_m'] as num?)?.toDouble() ?? 0,
+                location: lat != null && lng != null ? LatLng(lat, lng) : null,
+              );
+            })
+            .where((s) => s.instruction.isNotEmpty)
+            .toList();
+        return RouteResult(
+          points: apts,
+          distanceMetres: (am['distance_m'] as num?)?.toDouble() ?? 0,
+          durationSeconds: (am['duration_s'] as num?)?.toDouble() ?? 0,
+          steps: asteps,
+        );
+      }).whereType<RouteResult>().toList();
+
       return RouteResult(
         points: pts,
         distanceMetres: (data['distance_m'] as num?)?.toDouble() ?? 0,
         durationSeconds: (data['duration_s'] as num?)?.toDouble() ?? 0,
         steps: steps,
+        alternatives: alts,
       );
     } catch (_) {
       return null;

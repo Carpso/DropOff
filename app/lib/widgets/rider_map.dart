@@ -43,6 +43,9 @@ class RiderMap extends StatefulWidget {
   /// draws it dashed so it never masquerades as a road route.
   final bool routeIsStraightLine;
 
+  /// Alternative routes (thinner, grey) shown alongside the primary route.
+  final List<List<LatLng>>? alternativeRoutes;
+
   /// Extra labelled pins (e.g. batched pickup stops 1..n).
   final List<Map<String, dynamic>>? stops;
 
@@ -79,6 +82,7 @@ class RiderMap extends StatefulWidget {
     this.pickupIsDepot = false,
     this.route,
     this.routeIsStraightLine = false,
+    this.alternativeRoutes,
     this.stops,
     this.selectedSavedLabel,
     this.frequentSavedLabels = const {},
@@ -572,6 +576,11 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 ),
               // Labels are rendered by the PMTiles/Protomaps theme; avoid third-party
               // label overlays that require external API keys.
+              if (widget.alternativeRoutes != null && widget.alternativeRoutes!.isNotEmpty)
+                PolylineLayer(polylines: [
+                  for (final alt in widget.alternativeRoutes!)
+                    Polyline(points: alt, strokeWidth: 3, color: const Color(0x88888888)),
+                ]),
               if (casing != null && core != null)
                 PolylineLayer(polylines: widget.routeIsStraightLine
                     ? [Polyline(points: widget.route!, strokeWidth: 4, color: AppColors.mint,

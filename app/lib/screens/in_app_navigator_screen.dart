@@ -479,6 +479,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           rider: me,
           route: displayLine,
           routeIsStraightLine: isStraight,
+          alternativeRoutes: _route?.alternatives.map((r) => r.points).toList(),
           vehicleClass: widget.vehicleClass,
           // The other half of the job as context: depot gets the full
           // warehouse pin, a sender stop gets the small storefront badge.

@@ -8,6 +8,7 @@ import 'app_shell.dart';
 import '../services/order_alert.dart';
 import '../ui/app_spinner.dart';
 import '../ui/app_theme.dart';
+import '../ui/app_toast.dart';
 import '../widgets/rider_map.dart';
 import 'package:latlong2/latlong.dart';
 
