@@ -86,18 +86,39 @@ class PhotoStamp {
       final right = '$when CAT${tag.trim().isEmpty ? '' : ' · ${tag.trim().toUpperCase()}'}';
       final baseline = top + barH ~/ 2 + (wide ? 10 : 5);
 
+      // Brand mark: amber square with a dark "D" beside the DropOff name.
+      final markSize = wide ? 52 : 26;
+      final markX = pad;
+      final markY = baseline - (wide ? 26 : 13);
+      img.fillRect(
+        image,
+        x1: markX,
+        y1: markY,
+        x2: markX + markSize,
+        y2: markY + markSize,
+        color: img.ColorRgba8(255, 193, 7, 245),
+      );
+      img.drawString(
+        image,
+        'D',
+        font: font,
+        x: markX + (wide ? 14 : 7),
+        y: baseline - (wide ? 28 : 14),
+        color: img.ColorRgba8(8, 57, 41, 255),
+      );
+      final textX = pad + markSize + (wide ? 10 : 5);
       img.drawString(
         image,
         left,
         font: font,
-        x: pad,
+        x: textX,
         y: baseline - (wide ? 16 : 8),
         color: img.ColorRgba8(255, 255, 255, 245),
       );
       // Right-aligned capture time: pixels survive any later re-upload.
       final rightW = _textWidth(font, right);
       final rightX = image.width - pad - rightW;
-      if (rightX > pad + _textWidth(font, left) + pad) {
+      if (rightX > textX + _textWidth(font, left) + pad) {
         img.drawString(
           image,
           right,

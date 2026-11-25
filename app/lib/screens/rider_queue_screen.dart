@@ -606,7 +606,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     );
     if (!mounted) return;
     if (res.ok) {
-      AppToast.show(context, 'SOS sent to ${res.body['alerted'] ?? 'all'} riders. Help is on the way.');
+      final riders = (res.body['riders'] as List?) ?? const [];
+      final names = riders.map((r) => '${(r as Map)['name'] ?? (r as Map)['phone'] ?? ''}').where((s) => s.isNotEmpty).toList();
+      final msg = names.isEmpty
+          ? 'SOS sent. Help is on the way.'
+          : 'SOS sent to ${names.length} rider${names.length == 1 ? '' : 's'} (push + SMS): ${names.join(', ')}.';
+      AppToast.show(context, msg);
     } else {
       AppToast.error(context, 'Could not send SOS - check your connection and try again.');
     }
@@ -747,6 +752,32 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     }
   }
 
+  Future<String?> _promptRejectReason(BuildContext ctx) async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: ctx,
+      builder: (d) => AlertDialog(
+        title: const Text('Why was it rejected?'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            hintText: 'e.g. wrong size, prohibited item, no space',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(d, ctrl.text.trim().isEmpty ? 'courier refused at counter' : ctrl.text.trim()),
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /* ----------------------- live clock + arrival GPS ----------------------- */
 
   /// The server runs on CAT (UTC+2) — slot times and targets are CAT.
@@ -778,7 +809,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   /// True once the parcel is collected or beyond — slot cards flip from
   /// "navigate to sender" to "navigate to depot" from this point.
   bool _picked(String st) =>
-      ['picked_up', 'at_depot', 'departed', 'arrived', 'delivered', 'ready_for_collection'].contains(st);
+      ['picked_up', 'at_depot', 'departed', 'arrived', 'delivered', 'ready_for_collection', 'rejected_at_depot'].contains(st);
 
   Future<void> _startArrivalWatch() async {
     try {
@@ -2071,6 +2102,19 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   Row(children: [
                     Expanded(child: OutlinedButton(onPressed: filing ? null : () => Navigator.pop(ctx, null), child: const Text('Cancel'))),
                     const SizedBox(width: 10),
+                    Expanded(child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger, side: const BorderSide(color: AppColors.danger)),
+                      onPressed: filing ? null : () async {
+                        final reason = await _promptRejectReason(ctx);
+                        if (reason == null) return;
+                        setDialog(() => filing = true);
+                        final r = await DropOffApi.rejectAtDepot(ref, reason: reason);
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx, r);
+                      },
+                      child: const Text('Reject at depot'),
+                    )),
+                    const SizedBox(width: 10),
                     Expanded(child: FilledButton(
                       onPressed: filing || !amountCopiedFromReceipt ? null : () async {
                         if (parcelPhotos.isEmpty) { _snack('At least one item photo is required.'); return; }
@@ -2121,15 +2165,22 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     if (!mounted) return null;
     if (res == null) return null; // cancelled
     if (res.ok) {
+      final rejected = res.body['status'] == 'rejected_at_depot';
       setState(() => _busyRef = null);
-      await _snack('$ref - dropped at depot. Sender will be asked for $filedSummary on the filed receipt - check it matches the photo.');
-      await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
-      AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
-      // Auto-name this dropoff point (Waze-style growing location): reverse
-      // geocode the rider's position and save it as a shared community POI.
-      final savedName = await _autoNameDepotPoi(ref);
-      if (mounted && savedName != null && savedName.isNotEmpty) {
-        AppToast.show(context, 'Dropoff point saved as "$savedName" on the map.');
+      if (rejected) {
+        final fee = res.body['return_fee_zmw'];
+        await _snack('$ref - rejected at depot. Return fee K${(fee is num ? fee : 0).toStringAsFixed(2)} charged to sender.');
+        AnalyticsService.instance.track(feature: 'rider', action: 'rejected_at_depot', context: 'depot_stop');
+      } else {
+        await _snack('$ref - dropped at depot. Sender will be asked for $filedSummary on the filed receipt - check it matches the photo.');
+        await StepSounds.stepDone(); // step-complete chime (owner request 2026-11-20)
+        AnalyticsService.instance.track(feature: 'rider', action: 'delivered', context: 'depot_stop');
+        // Auto-name this dropoff point (Waze-style growing location): reverse
+        // geocode the rider's position and save it as a shared community POI.
+        final savedName = await _autoNameDepotPoi(ref);
+        if (mounted && savedName != null && savedName.isNotEmpty) {
+          AppToast.show(context, 'Dropoff point saved as "$savedName" on the map.');
+        }
       }
       // Best-effort: compare seller's booking photo vs this drop photo.
       final chk = await DropOffApi.parcelCheck(ref);
@@ -2605,7 +2656,6 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
         onPressed: _triggerSos,
         backgroundColor: AppColors.danger,
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.sos_rounded),
         label: const Text('SOS', style: TextStyle(fontWeight: FontWeight.w900)),
       ),
       body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

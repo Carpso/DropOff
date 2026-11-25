@@ -156,7 +156,7 @@ const FLAG_KEYS = [
   'door_to_door_enabled', 'overage_discount_enabled', 'referral_bonus_enabled',
   'auto_assign_enabled', 'claim_board_enabled', 'bookings_enabled',
   'rider_transfer_enabled', 'photo_stamp_enabled', 'step_sounds_enabled',
-  'voice_guidance_enabled',
+  'voice_guidance_enabled', 'payroll_deductions_enabled',
 ] as const;
 async function readFlags(db: D1Database): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
@@ -3624,7 +3624,7 @@ app.post('/jobs/:ref/events', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   if (!b) return c.json({ error: 'invalid JSON body' }, 400);
   const status = b.status as string | undefined;
-  const allowed = ['rider_assigned', 'picked_up', 'at_depot', 'departed', 'arrived', 'delivered', 'ready_for_collection'];
+  const allowed = ['rider_assigned', 'picked_up', 'at_depot', 'departed', 'arrived', 'delivered', 'ready_for_collection', 'rejected_at_depot'];
   if (status !== undefined && !allowed.includes(status)) return c.json({ error: 'bad status' }, 400);
 
   const job = await c.env.DB.prepare(
@@ -8943,6 +8943,49 @@ app.post('/jobs/:ref/decline', async (c) => {
   return c.json({ ok: true, ref, returned_to_board: true });
 });
 
+/* -------- rejected at depot: courier refused the parcel (first-mile) ------ */
+// The rider reached the depot counter but the courier refused the parcel
+// (wrong size, prohibited item, no space, etc.). The parcel goes back to the
+// sender and a return leg fee is charged. Admin can waive it.
+app.post('/jobs/:ref/reject-at-depot', async (c) => {
+  const phone = c.get('phone');
+  const isAdminKey = isAdmin(c);
+  const isOpsKey = c.get('role') === 'ops';
+  if (!phone && !isAdminKey && !isOpsKey) return c.json({ error: 'sign_in_required' }, 401);
+  const ref = c.req.param('ref');
+  const job = await c.env.DB.prepare(
+    `SELECT id, ref, rider_id, status, rider_fee_zmw, sender_phone, from_city FROM jobs WHERE ref = ?1`,
+  ).bind(ref).first<any>();
+  if (!job) return c.json({ error: 'not found' }, 404);
+  if (job.status !== 'at_depot' && job.status !== 'picked_up') {
+    return c.json({ error: 'not_at_depot', detail: 'Parcel must be at the depot to be rejected there.' }, 409);
+  }
+  // Rider must be the assigned one (unless staff).
+  if (!isAdminKey && !isOpsKey) {
+    const rider = await c.env.DB.prepare('SELECT id FROM riders WHERE phone = ?1').bind(phone).first<any>();
+    if (!rider || Number(rider.id) !== Number(job.rider_id)) return c.json({ error: 'not_your_job' }, 403);
+  }
+  const b: any = await c.req.json().catch(() => ({}));
+  const reason = String(b?.reason ?? '').trim().slice(0, 200) || 'courier refused at counter';
+  // Return leg fee = the rider fee (one leg back to sender). Charged to sender.
+  const returnFee = round2(Number(job.rider_fee_zmw ?? 0) || 0);
+  await c.env.DB.prepare(
+    `UPDATE jobs SET status = 'rejected_at_depot', return_leg_fee_zmw = ?2 WHERE id = ?1`,
+  ).bind(job.id, returnFee).run();
+  await c.env.DB.prepare(
+    `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rejected_at_depot', ?2)`,
+  ).bind(job.id, `Rejected at depot: ${reason}. Return leg fee K${returnFee.toFixed(2)} charged to sender.`).run();
+  // Notify sender.
+  c.executionCtx.waitUntil(
+    sendToPhone(c.env, job.sender_phone, {
+      title: 'Parcel refused at depot',
+      body: `Your parcel ${ref} was refused at the depot (${reason}). A return fee of K${returnFee.toFixed(2)} applies — pay in Bookings to have it returned.`,
+      data: { job_ref: ref, kind: 'rejected_at_depot', return_fee_zmw: String(returnFee) },
+    }).catch(() => {}),
+  );
+  return c.json({ ok: true, ref, status: 'rejected_at_depot', return_fee_zmw: returnFee });
+});
+
 /* -------- SOS: a rider in trouble pings every other rider (2026-11-24) -- */
 app.post('/rider/sos', async (c) => {
   const phone = c.get('phone');
@@ -8961,21 +9004,26 @@ app.post('/rider/sos', async (c) => {
   ).bind(phone, rider.full_name ?? phone, lat || null, lng || null, city, note || null).run();
 
   // Ping every OTHER active rider. High-priority data-only so it rings like
-  // an incoming order even with the app closed.
+  // an incoming order even with the app closed. Also SMS as a fallback so
+  // riders without push tokens still get alerted.
   const { results } = await c.env.DB.prepare(
-    `SELECT phone FROM riders WHERE active = 1 AND phone != ?1`,
-  ).bind(phone).all<{ phone: string }>();
+    `SELECT phone, full_name FROM riders WHERE active = 1 AND phone != ?1`,
+  ).bind(phone).all<{ phone: string; full_name: string }>();
+  const alerted: { phone: string; name: string }[] = [];
   const body = `SOS from ${rider.full_name ?? 'a rider'}${lat && lng ? ` near ${lat.toFixed(4)},${lng.toFixed(4)}` : ''}. Open the Task Queue and help if you can.`;
   c.executionCtx.waitUntil(
-    Promise.all((results ?? []).map((r) =>
-      sendToPhone(c.env, r.phone, {
+    Promise.all((results ?? []).map(async (r) => {
+      alerted.push({ phone: r.phone, name: r.full_name ?? r.phone });
+      await sendToPhone(c.env, r.phone, {
         title: 'SOS - rider needs help',
         body,
         data: { kind: 'sos', lat: String(lat), lng: String(lng), rider_phone: phone },
-      }).catch(() => {}),
-    )),
+      }).catch(() => {});
+      // SMS fallback (transactional - never blocked by STOP opt-out).
+      await sendSms(c.env, r.phone, `DropOff SOS: ${rider.full_name ?? 'A rider'} needs help${lat && lng ? ` near ${lat.toFixed(4)},${lng.toFixed(4)}` : ''}. Open your Task Queue.`, { transactional: true }).catch(() => {});
+    })),
   );
-  return c.json({ ok: true, alerted: (results ?? []).length });
+  return c.json({ ok: true, alerted: (results ?? []).length, riders: alerted });
 });
 
 // RIDER TRIP TRANSFER (owner 2026-11-21): at ANY active stage (including stuck
@@ -10710,7 +10758,7 @@ app.post('/admin/payroll/:id/void', async (c) => {
 });
 
 /** Downloadable proof-of-payment receipt (HTML, prints to PDF from any browser). */
-function payrollProofHtml(row: any): string {
+function payrollProofHtml(row: any, deductionsEnabled = false): string {
   const esc = (v: unknown) => String(v ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch] as string));
   const status = String(row.status ?? '').toUpperCase();
   return `<!doctype html><html><head><meta charset="utf-8"><title>DropOff payout proof #${esc(row.id)}</title>
@@ -10724,6 +10772,11 @@ function payrollProofHtml(row: any): string {
 <tr><th>Fuel allowance (pace-gated)</th><td>K${esc(Number(row.fuel_zmw ?? 0).toFixed(2))}</td></tr>
 <tr><th>Trips completed / target</th><td>${esc(row.trips ?? 0)} / ${esc(row.period_target ?? 0)}${Number(row.pace_met ?? 0) ? ' (on pace)' : ' (below pace — pro-rated)'}</td></tr>
 <tr><th><b>Total paid</b></th><td><big>K${esc(Number(row.amount_zmw ?? 0).toFixed(2))}</big></td></tr>
+${deductionsEnabled ? `<tr><th>NAPSA (5% employee)</th><td>-K${esc((Number(row.amount_zmw ?? 0) * 0.05).toFixed(2))}</td></tr>
+<tr><th>NHIMA (1% employee)</th><td>-K${esc((Number(row.amount_zmw ?? 0) * 0.01).toFixed(2))}</td></tr>
+<tr><th>PAYE (income tax)</th><td>K0.00 (below threshold)</td></tr>
+<tr><th><b>Total deductions</b></th><td><b>-K${esc((Number(row.amount_zmw ?? 0) * 0.06).toFixed(2))}</b></td></tr>
+<tr><th><b>Net pay</b></th><td><big>K${esc((Number(row.amount_zmw ?? 0) * 0.94).toFixed(2))}</big></td></tr>` : ''}
 <tr><th>Status</th><td class="${status === 'PAID' ? 'ok' : 'bad'}">${esc(status)}</td></tr>
 <tr><th>1st confirmation (admin)</th><td>${esc(row.admin_confirm_by ?? '—')} at ${esc(row.admin_confirm_at ?? '—')}</td></tr>
 <tr><th>2nd confirmation (superadmin)</th><td>${esc(row.confirmed_by ?? '—')} at ${esc(row.confirmed_at ?? '—')}</td></tr>
@@ -10740,7 +10793,8 @@ app.get('/admin/payroll/:id/proof', async (c) => {
   const row = await c.env.DB.prepare(`SELECT * FROM rider_payroll WHERE id = ?1`).bind(id).first<any>();
   if (!row) return c.json({ error: 'payout_not_found' }, 404);
   if (!isFinanceExec(c) && c.get('phone') !== row.rider_phone) return c.json({ error: 'forbidden' }, 403);
-  return new Response(payrollProofHtml(row), {
+  const deductionsEnabled = await featureOn(c.env, 'payroll_deductions_enabled', false);
+  return new Response(payrollProofHtml(row, deductionsEnabled), {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',

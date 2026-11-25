@@ -1153,7 +1153,7 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
           'picked_up' => 2,
           'at_depot' => door ? 4 : 3,
           'departed' || 'arrived' => door ? 5 : 4,
-          'delivered' || 'ready_for_collection' => door ? 6 : 4,
+          'delivered' || 'ready_for_collection' || 'rejected_at_depot' => door ? 6 : 4,
           _ => 0,
         };
   }

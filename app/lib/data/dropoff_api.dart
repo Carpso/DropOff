@@ -1226,6 +1226,10 @@ class DropOffApi {
   static Future<ApiResponse> acceptJob(String ref) => post('/jobs/$ref/accept', const {});
   static Future<ApiResponse> declineJob(String ref) => post('/jobs/$ref/decline', const {});
 
+  /// Courier refused the parcel at the depot (first-mile): return leg charged.
+  static Future<ApiResponse> rejectAtDepot(String ref, {String? reason}) =>
+      post('/jobs/$ref/reject-at-depot', {if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim()});
+
   /// Transfer an assigned-but-not-collected trip to another rider.
   static Future<ApiResponse> transferJob(String ref, int toRiderId) =>
       post('/jobs/${Uri.encodeComponent(ref)}/transfer', {'to_rider_id': toRiderId});
