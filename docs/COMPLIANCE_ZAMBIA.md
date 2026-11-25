@@ -132,4 +132,33 @@ Governing: **Competition and Consumer Protection Act**.
 
 ---
 
+## 12. Rider engagement model (avoiding employer scrutiny)
+
+**Question:** Can we call rider payments "salary" or use an alternative (part-time stipend, per-task pay, contractor) to avoid being classified as an employer (NAPSA, NHIMA, PAYE, contracts, leave, termination)?
+
+**Zambian law (Employment Code Act 2019, s.2):** There is a **presumption of employment** — regular, ongoing, controlled work is employment regardless of the label on the contract. If DropOff sets shifts (06:00/10:00/14:00), assigns jobs, and pays regularly, riders are likely deemed employees by ZRA/NAPSA regardless of what the contract says.
+
+### Options
+
+| Option | Description | Employer obligations? | Risk |
+|---|---|---|---|
+| **A. Keep salary + comply** | Register NAPSA/NHIMA, do PAYE, issue contracts. Cost ~K300-500/rider/month in contributions. | Yes (full) | None — safest |
+| **B. Per-task / per-shift pay (gig)** | Pay per completed delivery or shift attended, not fixed monthly. | Likely yes (presumption of employment) | High — label won't hold up |
+| **C. Third-party agency (manpower)** | Engage a licensed employment agency that employs riders; Carpso pays the agency. | No (agency is employer) | Low — cleanest legal shield |
+| **D. Volunteer / stipend** | Call riders "volunteers" receiving a stipend. | Likely yes | High — regular stipends = wages |
+| **E. Mixed (small base + per-task bonus)** | Small availability stipend + per-delivery bonus. | Likely yes | High |
+
+### Recommendation
+
+- **If you want to avoid employer obligations entirely → Option C (agency).** Carpso Solutions pays the agency a flat fee; the agency handles NAPSA, NHIMA, PAYE, contracts, leave, termination. Cost: ~10-15% agency fee. This is the cleanest legal shield and is common in Zambia for last-mile/delivery fleets.
+- **If you accept employer obligations (few riders, manageable cost) → Option A (comply).** Register with NAPSA + NHIMA, do PAYE, issue written contracts. Cost ~K300-500/rider/month. This builds rider loyalty and is the safest.
+- **Options B/D/E are legally risky** in Zambia because of the presumption of employment. Calling it "stipend", "allowance", or "contractor fee" does not change the substance. ZRA/NAPSA look at the reality (regular work, set shifts, assigned jobs, regular pay), not the label.
+
+### Practical note
+
+Even under Option C, Carpso Solutions should:
+- Keep rider PII minimal (phone + name for dispatch; the agency holds employment records).
+- Not control riders' daily schedule beyond shift windows (let the agency manage attendance).
+- Document the agency agreement clearly (scope, fee, who is employer of record).
+
 *Last updated: 2026-11-25. Owner: Carpso Solutions / DropOff product team.*
