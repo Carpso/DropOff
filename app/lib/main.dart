@@ -706,7 +706,9 @@ class _SplashScreenState extends State<_SplashScreen> {
           SizedBox(height: 8),
           AppLogoSpinner(size: 34, color: AppColors.amber),
           SizedBox(height: 14),
-          Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.7)),
+          Text('DropOff', style: TextStyle(color: Colors.white, fontSize: 42, fontWeight: FontWeight.w900, letterSpacing: -1.2)),
+          const SizedBox(height: 8),
+          Text('WE CARRY IT TO THE COURIER', style: TextStyle(color: AppColors.amber, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 2.0)),
         ]),
       ),
     );

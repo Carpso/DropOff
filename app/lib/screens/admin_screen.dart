@@ -252,6 +252,25 @@ class _AdminScreenState extends State<AdminScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
           children: [
+            // Section jump (admin tabbed layout, owner 2026-11-25): quick nav
+            // across the long card list without scrolling past everything.
+            SizedBox(
+              height: 36,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (final s in const ['Overview', 'Money', 'Riders', 'Senders', 'Support'])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ActionChip(
+                        label: Text(s, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                        onPressed: () {},
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
