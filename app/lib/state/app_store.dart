@@ -1331,7 +1331,16 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
       failReason = recheck.$2 ?? failReason;
     }
     if (status == 'success') {
-      await syncJobsFromServer();
+      // The payment status can return 'success' before the server has flipped
+      // counter_receipt_paid=1 (webhook/settlement lag). Poll the authoritative
+      // /counter-fare/status until the fare is cleared, so the receipt unlocks
+      // instantly instead of staying "locked" until the next manual sync.
+      for (var i = 0; i < 10; i++) {
+        await syncJobsFromServer();
+        final due = await DropOffApi.counterFareStatus();
+        if (due?['due'] != true) break;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
       return const CounterFareResult(status: 'success', message: 'Courier bill paid — the receipt is unlocked.');
     }
     if (status == 'failed') {
