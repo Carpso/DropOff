@@ -4635,7 +4635,6 @@ class _FeatureFlagsCardState extends State<_FeatureFlagsCard> {
   }
 }
 
-/// Tiny sender avatar for support-ticket bubbles (the account photo, or initials).
 class _SheetAvatar extends StatelessWidget {
   const _SheetAvatar({this.photoUrl, required this.label, required this.mine});
   final String? photoUrl;
