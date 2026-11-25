@@ -11346,7 +11346,7 @@ app.post('/counter-fare/reprompt', async (c) => {
     `SELECT COUNT(*) AS n FROM payments WHERE job_id = ?1 AND kind = 'counter_fare' AND status = 'failed'`,
   ).bind(job.id).first<any>();
   const lipilaRef = `cfare-${due.ref}-reprompt-${Number(failed?.n ?? 0) + 1}`;
-  const init = await collectWithGateway(c.env, null, phone, amount, lipilaRef, 'DropOff depot counter fare');
+  const init = await collectWithGateway(c.env, undefined, phone, amount, lipilaRef, 'DropOff depot counter fare');
   if (!init.ok) {
     return c.json({ error: `${init.gateway}_init_failed`, detail: init.raw, gateway: init.gateway, provider_status: init.status }, 502);
   }
