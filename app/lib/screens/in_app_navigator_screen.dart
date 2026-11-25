@@ -531,23 +531,89 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
           searchPinLabel: _searchPinLabel,
           city: 'Lusaka',
         ),
-        if (route != null && route.alternatives.isNotEmpty)
-          Positioned(
-            bottom: 80,
-            left: 12,
-            right: 12,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _routeChip('Route 1', 0, _selectedRouteIndex == 0),
-                for (var i = 0; i < route.alternatives.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _routeChip('Route ${i + 2}', i + 1, _selectedRouteIndex == i + 1),
+        // ONE SafeArea-bounded bottom column: the live cue banner can no
+        // longer paint over the route chips, and nothing hides under the
+        // system gesture bar (owner 2026-11-25).
+        Positioned(
+          left: 12,
+          right: 12,
+          bottom: 0,
+          child: SafeArea(
+            top: false,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              // ROUTE CARD - distance, ETA and a way into the step list. This
+              // existed in an older build and was dropped, leaving the labels
+              // computed but never rendered.
+              if (activeRoute != null)
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    child: Row(children: [
+                      const Icon(Icons.route, color: AppColors.forest, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(
+                        '${distanceLabel ?? 'Route'}  ·  ${durationLabel ?? ''}  ·  $_destLabel',
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                      )),
+                      if (route != null && route.steps.isNotEmpty)
+                        InkWell(
+                          onTap: _openCueSheet,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Text('Steps (${route.steps.length})',
+                                style: const TextStyle(color: AppColors.forest, fontWeight: FontWeight.w800, fontSize: 11)),
+                          ),
+                        ),
+                    ]),
                   ),
-              ],
-            ),
+                ),
+              if (route != null && route.alternatives.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      _routeChip('Route 1', 0, _selectedRouteIndex == 0),
+                      for (var i = 0; i < route.alternatives.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: _routeChip('Route ${i + 2}', i + 1, _selectedRouteIndex == i + 1),
+                        ),
+                    ]),
+                  ),
+                ),
+              if (_route != null && _cueIndex < _route!.steps.length)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: IgnorePointer(
+                    child: Card(
+                      margin: EdgeInsets.zero,
+                      color: AppColors.forest,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        child: Row(children: [
+                          Icon(_stepIcon(_route!.steps[_cueIndex].instruction), color: AppColors.amber, size: 26),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(
+                            _route!.steps[_cueIndex].instruction,
+                            maxLines: 2, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14, height: 1.3),
+                          )),
+                          const SizedBox(width: 10),
+                          Text(_cueDistance >= 1000
+                              ? '${(_cueDistance / 1000).toStringAsFixed(1)} km'
+                              : '${(_cueDistance / 10).round() * 10} m',
+                              style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 15)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+            ]),
           ),
+        ),
         Positioned(
           top: 60,
           right: 12,
@@ -565,7 +631,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         // the compass/basemap banner so it does not obstruct map controls.
         if (!_searchExpanded)
           Positioned(
-            top: 60,
+            top: 112, // below the speedometer (which owns top: 60, right: 12)
             right: 12,
             child: Material(
               color: Colors.white,
@@ -584,7 +650,7 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         if (_searchExpanded)
           Positioned(
             left: 12,
-            right: 64,
+            right: 96, // clear of the speedometer badge at right: 12
             top: 60,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(
@@ -662,36 +728,6 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
               ),
           ]),
         ),
-          // LIVE CUE BANNER — mirrors the spoken instruction (Waze/Google
-          // pattern): riders see the next turn even if audio is missed.
-          if (_route != null && _cueIndex < _route!.steps.length)
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 12,
-              child: IgnorePointer(
-                child: Card(
-                  color: AppColors.forest,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    child: Row(children: [
-                      Icon(_stepIcon(_route!.steps[_cueIndex].instruction), color: AppColors.amber, size: 26),
-                      const SizedBox(width: 12),
-                      Expanded(child: Text(
-                        _route!.steps[_cueIndex].instruction,
-                        maxLines: 2, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14, height: 1.3),
-                      )),
-                      const SizedBox(width: 10),
-                      Text(_cueDistance >= 1000
-                          ? '${(_cueDistance / 1000).toStringAsFixed(1)} km'
-                          : '${(_cueDistance / 10).round() * 10} m',
-                          style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 15)),
-                    ]),
-                  ),
-                ),
-              ),
-            ),
       ],
       ),
       // Destination bar

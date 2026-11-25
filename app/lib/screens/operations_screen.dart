@@ -589,7 +589,13 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
-      final res = await DropOffApi.riderPing(phone: widget.store.linkedPhone!, lat: pos.latitude, lng: pos.longitude);
+      final res = await DropOffApi.riderPing(
+        phone: widget.store.linkedPhone!,
+        lat: pos.latitude,
+        lng: pos.longitude,
+        accuracy: pos.accuracy,
+        capturedAt: pos.timestamp,
+      );
       if (!mounted) return;
       setState(() {
         _pinging = false;
@@ -625,21 +631,25 @@ class _RiderLocationCardInnerState extends State<_RiderLocationCardInner> {
             const SizedBox(width: 10),
             const Expanded(child: Text('Live position sharing', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
             Switch(
-              value: on,
+              value: store.isRider ? true : on,
               activeTrackColor: AppColors.forest,
-              onChanged: (value) async {
-                await store.setShareLocationOn(value);
-                _startLoop();
-                if (value) await _ping();
-                if (mounted) setState(() {});
-              },
+              onChanged: store.isRider
+                  ? null
+                  : (value) async {
+                      await store.setShareLocationOn(value);
+                      _startLoop();
+                      if (value) await _ping();
+                      if (mounted) setState(() {});
+                    },
             ),
           ]),
           const SizedBox(height: 4),
           Text(
-            on
-                ? 'On — senders of your active jobs see your live pin.'
-                : 'Off — senders see only your name, vehicle and ETA.',
+            store.isRider
+                ? 'Always on for riders - exact dispatch and live tracking.'
+                : (on
+                    ? 'On - senders of your active jobs see your live pin.'
+                    : 'Off - senders see only your name, vehicle and ETA.'),
             style: AppType.caption,
           ),
           if (_lastStatus != null) ...[

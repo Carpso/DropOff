@@ -293,11 +293,19 @@ class PushService {
     // Data-only order alerts carry the display text in `data` (the worker
     // cannot rely on `message.notification` for the alarm path).
     final rawTitle = title ?? _str(data['title']) ?? _titleFor(data);
-    final t = rawTitle.toLowerCase().startsWith('dropoff') ? rawTitle : 'DropOff · $rawTitle';
-    final b = body ?? _str(data['body']) ?? '';
     final kind = _kindOf(data);
     final channel = _channelFor(kind);
     final isOrderAlert = channel.id == 'dropoff_orders';
+    // Premium heads-up copy (owner 2026-11-25): a flagship-grade call-screen
+    // feel, never a raw system-looking string. Pickup details stay in the
+    // expanded body so the rider can decide without unlocking.
+    final t = isOrderAlert
+        ? 'DropOff · New order ready'
+        : (rawTitle.toLowerCase().startsWith('dropoff') ? rawTitle : 'DropOff · $rawTitle');
+    final rawBody = body ?? _str(data['body']) ?? '';
+    final b = isOrderAlert
+        ? 'A pickup is waiting. Accept to claim it. $rawBody'.trim()
+        : rawBody;
     final android = AndroidNotificationDetails(
       channel.id,
       channel.name,
@@ -309,7 +317,7 @@ class PushService {
       playSound: true,
       enableVibration: true,
       audioAttributesUsage: isOrderAlert ? AudioAttributesUsage.alarm : AudioAttributesUsage.notification,
-      largeIcon: const DrawableResourceAndroidBitmap('@mipmap/launcher_icon'),
+      largeIcon: const DrawableResourceAndroidBitmap('@drawable/ic_notification_large'),
       icon: '@drawable/ic_stat_dropoff',
       ticker: t,
       category: (isOrderAlert || kind.contains('job') || kind.contains('assign') || kind.contains('status'))

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -12,6 +11,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
+import '../data/map_theme_layers.dart';
 import '../data/map_tile_cache.dart';
 import '../data/map_tile_sources.dart';
 import '../data/dropoff_api.dart';
@@ -248,12 +248,11 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     dynamic theme;
     try {
       final raw = await rootBundle.loadString('assets/map/theme-light-v4.json');
-      final decoded = jsonDecode(raw) as Map<String, dynamic>;
-      final layers = (decoded['layers'] as List).cast<Map<String, Object>>();
+      final decoded = decodeMapTheme(raw);
       theme = ProtomapsThemes(
         glyphs: decoded['glyphs'] as String,
         sprites: decoded['sprite'] as String,
-      ).build(layers);
+      ).build(protomapsLayers(decoded));
     } catch (e) {
       error = '${error ?? ''} theme: $e';
       debugPrint('RiderMap theme load failed: $e');

@@ -13,16 +13,18 @@ void main() {
       expect(t, contains('connection'));
     });
 
-    test('provider rejection names Lipila and confirms no money was taken', () {
+    test('provider rejection keeps ambiguity honest and shows the real detail', () {
       final t = counterFareErrorText(const ApiResponse(
         status: 502,
         error: 'lipila_init_failed',
         body: {'detail': 'gateway timeout'},
       ));
-      expect(t, contains('could not send the mobile money prompt'));
       expect(t, contains('gateway timeout'));
-      expect(t.toLowerCase(), contains('no money was taken'));
-      expect(t, contains('check your signal'));
+      expect(t, contains('Check your phone for a prompt'));
+      expect(t, contains('retrying'));
+      // An init timeout can land AFTER the prompt: never lie that no money
+      // moved (owner safety rule, 49th pass).
+      expect(t.toLowerCase(), isNot(contains('no money was taken')));
     });
 
     test('stale receipt and wrong-account job get their own next steps', () {

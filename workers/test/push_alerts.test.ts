@@ -36,13 +36,7 @@ describe('new-order push alarm', () => {
     });
     expect(m.android.priority).toBe('high');
     expect(m.android.ttl).toBe('300s'); // stale orders must not ring later
-    expect(m.android.notification).toMatchObject({
-      channel_id: 'dropoff_orders',
-      notification_priority: 'PRIORITY_MAX',
-      visibility: 'PUBLIC',
-      default_sound: true,
-      default_vibrate_timings: true,
-    });
+    expect(m.android.notification).toBeUndefined(); // app renders the alarm + full-screen intent
   });
 
   it('keeps the system notification for non-order pushes', () => {

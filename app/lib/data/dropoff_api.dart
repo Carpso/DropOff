@@ -474,12 +474,24 @@ class DropOffApi {
 
   /// Share the rider's current GPS fix for dispatch + live tracking. `status`
   /// optionally flips the rider's availability flag (available|on_route).
-  static Future<ApiResponse> riderPing({required String phone, required double lat, required double lng, String? status}) async {
+  static Future<ApiResponse> riderPing({
+    required String phone,
+    required double lat,
+    required double lng,
+    String? status,
+    double? accuracy,
+    DateTime? capturedAt,
+  }) async {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
       final res = await http
           .post(Uri.parse('$baseUrl/rider/ping'), headers: _headers,
-              body: jsonEncode({'phone': phone, 'lat': lat, 'lng': lng, if (status != null) 'status': status}))
+              body: jsonEncode({
+                'phone': phone, 'lat': lat, 'lng': lng,
+                if (status != null) 'status': status,
+                if (accuracy != null) 'accuracy': accuracy,
+                if (capturedAt != null) 'captured_at': capturedAt.toIso8601String(),
+              }))
           .timeout(_timeout);
       return ApiResponse(status: res.statusCode, ok: res.statusCode < 300, body: const {});
     } catch (e) {

@@ -906,6 +906,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       lat: pos.latitude,
       lng: pos.longitude,
       status: onRoute ? 'on_route' : 'available',
+      accuracy: pos.accuracy,
+      capturedAt: pos.timestamp,
     ));
   }
 

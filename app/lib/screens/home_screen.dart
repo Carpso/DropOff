@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -304,7 +305,15 @@ class _FareCheckerState extends State<_FareChecker> {
   /// K95 beyond). Cars are assigned by the system when the item needs one.
   double _fee(double km) => km <= 5 ? 55.0 : km <= 12 ? 75.0 : 95.0;
 
-  Future<void> _locate() async {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_locate(silent: true));
+    });
+  }
+
+  Future<void> _locate({bool silent = false}) async {
     setState(() => _locating = true);
     try {
       var permission = await Geolocator.checkPermission();
@@ -312,7 +321,7 @@ class _FareCheckerState extends State<_FareChecker> {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        if (mounted) {
+        if (mounted && !silent) {
           AppToast.warning(context, 'Location permission is needed to pin the pickup.');
         }
         return;
@@ -327,8 +336,8 @@ class _FareCheckerState extends State<_FareChecker> {
         _feeChecked = false;
       });
     } catch (_) {
-      if (mounted) {
-        AppToast.error(context, 'Could not get your location — the fee locks exactly when you book.');
+      if (mounted && !silent) {
+        AppToast.error(context, 'Could not get your location - the fee locks exactly when you book.');
       }
     } finally {
       if (mounted) setState(() => _locating = false);

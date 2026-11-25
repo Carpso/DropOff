@@ -117,9 +117,13 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   bool get shareLocationOn => _shareLocationOn;
 
   Future<void> setShareLocationOn(bool on) async {
-    _shareLocationOn = on;
+    // EXACT LIVE PIN (owner 2026-11-25): sharing is non-optional for a rider.
+    // An unpinned rider cannot be dispatched to an exact pickup, so a rider
+    // can no longer silently opt out and disappear from the board.
+    final enabled = on || _role == 'rider';
+    _shareLocationOn = enabled;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_shareLocationKey, on);
+    await prefs.setBool(_shareLocationKey, enabled);
     notifyListeners();
   }
 

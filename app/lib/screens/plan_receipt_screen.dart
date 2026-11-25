@@ -36,7 +36,9 @@ class _PlanReceiptScreenState extends State<PlanReceiptScreen> {
     setState(() {
       _receipt = r;
       _loading = false;
-      _error = r == null ? 'Could not load this receipt right now. If the payment is still processing, wait a moment and tap Retry. If it did not complete, no receipt was issued.' : null;
+      _error = r == null
+          ? 'Your payment is safe. We could not open the receipt right now. Check your connection and tap Retry; if you just paid, allow a moment for confirmation.'
+          : null;
     });
   }
 

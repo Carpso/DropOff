@@ -230,6 +230,14 @@ class _BookingScreenState extends State<BookingScreen> {
         _declaredValue.text = declared.toStringAsFixed(declared % 1 == 0 ? 0 : 2);
       }
     }
+    // EXACT PIN (owner 2026-11-25): capture a high-accuracy GPS pin
+    // automatically on entry unless the fare checker / repeat-booking already
+    // supplied one. Silent so first-time senders are not greeted with a toast.
+    if (_pickupLat == null || _pickupLng == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_captureLocation(silent: true));
+      });
+    }
     _courierSearchCtl.addListener(() => setState(() {}));
     _hintTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
@@ -672,7 +680,7 @@ class _BookingScreenState extends State<BookingScreen> {
     await openInApp('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(q)}');
   }
 
-  Future<void> _captureLocation() async {
+  Future<void> _captureLocation({bool silent = false}) async {
     setState(() => _locating = true);
     try {
       var permission = await Geolocator.checkPermission();
@@ -680,7 +688,12 @@ class _BookingScreenState extends State<BookingScreen> {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        _message('Location permission is needed to pin the pickup.');
+        setState(() {
+          _pickupError = permission == LocationPermission.deniedForever
+              ? 'Location is blocked. Open Settings, allow location, then tap the pin icon.'
+              : 'Allow location so we can pin your exact pickup automatically.';
+        });
+        if (!silent) _message(_pickupError!);
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
@@ -690,13 +703,16 @@ class _BookingScreenState extends State<BookingScreen> {
       setState(() {
         _pickupLat = pos.latitude;
         _pickupLng = pos.longitude;
+        _tidyPinLabel = null;
+        _pickupError = null;
       });
       unawaited(SavedPlaces.remember(
         _pickup.text.trim().isEmpty ? 'My current location' : _pickup.text.trim(),
         lat: pos.latitude, lng: pos.longitude));
-      _message('Pickup location pinned — the nearest rider will dispatch.');
+      if (!silent) _message('Exact pickup pinned - the nearest rider will dispatch.');
     } catch (_) {
-      _message('Could not get your location — type the address or try again.');
+      setState(() => _pickupError = 'Could not get an exact GPS pin. Turn on location and try the pin icon again.');
+      if (!silent) _message(_pickupError!);
     } finally {
       if (mounted) setState(() => _locating = false);
     }
@@ -826,6 +842,12 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Future<void> _submit() async {
+    // Exact pickup pin is a booking requirement (owner 2026-11-25). Dispatch
+    // must never silently fall back to the Chibolya hub for a pinless job.
+    if (_pickupLat == null || _pickupLng == null) {
+      setState(() => _pickupError = 'An exact pickup pin is required. Tap the location icon to pin your current position.');
+      return _message('Pin your exact pickup location before placing the booking.');
+    }
     final serverCourierId = courierServerIdOf(_courierId);
     if (serverCourierId == null) {
       return _message('That courier is unavailable right now — pick Platinum, Mercury, DHL, One World, Rovert, Icypeed or Falcon.');
@@ -1163,7 +1185,15 @@ class _BookingScreenState extends State<BookingScreen> {
               ActionChip(
                 visualDensity: VisualDensity.compact,
                 label: Text(p.label, style: const TextStyle(fontSize: 11)),
-                onPressed: () => setState(() => _pickup.text = p.label),
+                onPressed: () => setState(() {
+                  _pickup.text = p.label;
+                  if (p.lat != null && p.lng != null) {
+                    _pickupLat = p.lat;
+                    _pickupLng = p.lng;
+                    _tidyPinLabel = null;
+                    _pickupError = null;
+                  }
+                }),
               ),
           ]),
         ],

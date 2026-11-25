@@ -528,10 +528,10 @@ app.use('*', async (c, next) => {
 //   ops       X-Api-Key - rider-device service + ops console
 //   admin     X-Admin-Key - superadmin pricebook / partner management (below)
 // Public without auth: /health, /auth/*, /webhooks/*, /plans, courier profiles, //console pages.
-const PUBLIC_GETS = new Set(['/health', '/couriers', '/cities', '/plans', '/console', '/partner/console']);
+const PUBLIC_GETS = new Set(['/health', '/app/version', '/couriers', '/cities', '/plans', '/console', '/partner/console']);
 app.use('*', async (c, next) => {
   const p = c.req.path;
-  if (p === '/health' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/') || p.startsWith('/.well-known/') || p.startsWith('/delete-data')) return next();
+  if (p === '/health' || p === '/app/version' || p.startsWith('/auth/') || p.startsWith('/webhooks') || p.startsWith('/legal/') || p.startsWith('/.well-known/') || p.startsWith('/delete-data')) return next();
   // '/track/incoming' is the signed-in recipient's parcel list - it needs the
   // JWT identity, so it does NOT get the public bypass.
   // All other '/track/*' routes do their own account check in trackAccess —
@@ -607,6 +607,18 @@ const isAdmin = (c: { env: Env; req: { header: (k: string) => string | undefined
   c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY
   || (typeof c.get === 'function' && c.get('role') === 'admin')
   || (typeof c.get === 'function' && c.get('phone') === ownerPhone(c.env));
+
+// Zambia's continental bounds (with a small border tolerance). A booking must
+// carry a real GPS pin: dispatch must never silently fall back to the Chibolya
+// hub because pickup_lat/pickup_lng were null, zero or garbage.
+function validZambiaPin(latRaw: unknown, lngRaw: unknown): boolean {
+  const lat = Number(latRaw);
+  const lng = Number(lngRaw);
+  return Number.isFinite(lat) && Number.isFinite(lng)
+    && lat >= -18.0 && lat <= -8.0
+    && lng >= 21.0 && lng <= 34.0
+    && !(lat === 0 && lng === 0);
+}
 
 // CFO = finance executive. Same visibility as admin/ops on the payroll/tax/stats
 // ledger surfaces (they are in charge of the audited books), but NOTHING that
@@ -885,6 +897,43 @@ app.use('GET /plans', cacheFor(30));
 
 /* --------------------------------- health --------------------------------- */
 app.get('/health', (c) => c.json({ ok: true, ts: Date.now() }));
+
+// App-update policy. The owner can raise `app_min_version` to force a curtain
+// (old builds cannot stay live), or `app_latest_version` to offer an optional
+// update. Values live in app_settings so no deploy is needed for a rollout.
+app.get('/app/version', async (c) => {
+  const [latest, minimum, force, message] = await Promise.all([
+    getSetting(c.env.DB, 'app_latest_version'),
+    getSetting(c.env.DB, 'app_min_version'),
+    getSetting(c.env.DB, 'app_update_force'),
+    getSetting(c.env.DB, 'app_update_message'),
+  ]);
+  const fallback = '0.5.93';
+  return c.json({
+    latest: (latest?.trim() || fallback),
+    minimum: (minimum?.trim() || '0.5.0'),
+    force: force === '1' || force === 'true',
+    message: message?.trim() || 'A faster, smoother DropOff is ready. Update now to keep sending and receiving deliveries.',
+    store_url: 'market://details?id=zm.dropoff.dropoff',
+    web_url: 'https://dropoff.carpsosolutions.store',
+  }, 200, { 'Cache-Control': 'public, max-age=300' });
+});
+
+// Owner/admin rollout control. The body is intentionally small and audited.
+app.post('/admin/app/version', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_required' }, 403);
+  const b: any = await c.req.json().catch(() => ({}));
+  const latest = String(b?.latest ?? '').trim();
+  const minimum = String(b?.minimum ?? '').trim();
+  if (!latest && !minimum && b?.message == null && b?.force == null) {
+    return c.json({ error: 'nothing_to_update' }, 400);
+  }
+  if (latest) await setSetting(c.env.DB, 'app_latest_version', latest, c.get('phone') ?? 'admin');
+  if (minimum) await setSetting(c.env.DB, 'app_min_version', minimum, c.get('phone') ?? 'admin');
+  if (b?.message != null) await setSetting(c.env.DB, 'app_update_message', String(b.message).slice(0, 300), c.get('phone') ?? 'admin');
+  if (b?.force != null) await setSetting(c.env.DB, 'app_update_force', b.force === true ? '1' : '0', c.get('phone') ?? 'admin');
+  return c.json({ ok: true, latest: latest || (await getSetting(c.env.DB, 'app_latest_version')), minimum: minimum || (await getSetting(c.env.DB, 'app_min_version')) });
+});
 
 // Road routing for the in-app navigator (riders). Signed-in accounts only;
 // results are cached by 5dp coordinate pair for 15 minutes. The ORS key lives
@@ -2169,9 +2218,7 @@ app.post('/jobs', async (c) => {
       // carry a receipt photo with no amount, and `/payments` refuses a zero
       // amount anyway. Such a row can neither be charged nor cleared, so it must
       // never block a new booking (it was a permanent dead end).
-      const dueCfare = await c.env.DB.prepare(
-        `SELECT ref, counter_receipt_zmw, counter_receipt_url FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0 AND counter_receipt_paid = 0 AND COALESCE(status,'') NOT IN ('deleted','canceled','cancelled') ORDER BY id DESC LIMIT 1`,
-      ).bind(c.get('phone') ?? '').first<any>();
+      const dueCfare = await findOutstandingCounterFare(c.env, c.get('phone') ?? '');
       if (dueCfare) {
         // Ship the ref + exact amount so the app can start the momo prompt
         // straight from this error instead of dead-ending the sender
@@ -2399,6 +2446,16 @@ app.post('/jobs', async (c) => {
       return c.json({
         error: 'missing_required_fields',
         required: ['pickup_address', 'recipient_name', 'recipient_phone', 'dest_city'].filter((k) => !String(b[k] ?? '').trim()),
+      }, 400);
+    }
+    // EXACT PIN REQUIRED (owner 2026-11-25). The app captures GPS
+    // automatically, and a saved place now restores its saved coordinates.
+    // Reject missing/garbage pins here too so an old client cannot dispatch a
+    // rider to the hub by accident.
+    if (!staffEyes && !validZambiaPin(b.pickup_lat, b.pickup_lng)) {
+      return c.json({
+        error: 'pickup_pin_required',
+        detail: 'Pin your exact pickup location before booking. Update DropOff or allow location and tap the pin icon.',
       }, 400);
     }
     // Parcel contents are MANDATORY (owner 2026-11-19): we cannot carry illegal
@@ -2769,9 +2826,7 @@ app.post('/collections', async (c) => {
   // the exact trap the owner reported. Returns the ref + amount so the app can
   // start the prompt from the error; zero-amount legacy rows never gate.
   if (role !== 'ops' && !isAdmin(c)) {
-    const dueCfare = await c.env.DB.prepare(
-      `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1 AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0 AND counter_receipt_paid = 0 AND COALESCE(status,'') NOT IN ('deleted','canceled','cancelled') ORDER BY id DESC LIMIT 1`,
-    ).bind(phone).first<any>();
+    const dueCfare = await findOutstandingCounterFare(c.env, phone);
     if (dueCfare) {
       return c.json({
         error: 'counter_fare_due',
@@ -7187,6 +7242,41 @@ async function sweepPlatformIncome(env: Env, minZmw = 0): Promise<void> {
 // Pending collects can miss their webhook (network, phone off). Sweep every
 // pending payment older than 2 minutes, re-check with Lipila and settle what
 // actually succeeded. Rows stuck >7 days are closed as failed.
+// AUTHORITATIVE outstanding-fare lookup. A successful counter-fare payment
+// OUTRANKS the jobs.counter_receipt_paid flag: settlement can fail after the
+// money lands (the wallet_ledger FK bug of 2026-11-25) and leave a sender who
+// already paid blocked from booking forever. Every gate and every status check
+// goes through here so the flag is healed at the point of use, not on a timer.
+async function findOutstandingCounterFare(env: Env, phone: string): Promise<any | null> {
+  const due = await env.DB.prepare(
+    `SELECT j.id, j.ref, j.counter_receipt_zmw, j.counter_receipt_url, j.rider_id
+       FROM jobs j WHERE j.sender_phone = ?1
+      AND j.counter_receipt_zmw IS NOT NULL AND j.counter_receipt_zmw > 0
+      AND COALESCE(j.counter_receipt_paid, 0) = 0
+      AND COALESCE(j.status, '') NOT IN ('deleted','canceled','cancelled')
+      ORDER BY j.id DESC LIMIT 1`,
+  ).bind(phone).first<any>();
+  if (!due) return null;
+  const paid = await env.DB.prepare(
+    `SELECT id FROM payments WHERE job_id = ?1 AND kind = 'counter_fare'
+       AND status = 'success' ORDER BY id DESC LIMIT 1`,
+  ).bind(due.id).first<any>();
+  if (paid) {
+    const claim = await env.DB.prepare(
+      `UPDATE jobs SET counter_receipt_paid = 1 WHERE id = ?1 AND counter_receipt_paid = 0`,
+    ).bind(due.id).run();
+    if (claim.meta.changes) {
+      await env.DB.prepare(
+        `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_fare_paid', ?2)`,
+      ).bind(due.id, `Depot counter fare was already paid (payment #${paid.id}) - receipt unlocked and the new-booking block lifted.`).run().catch(() => {});
+      const receipt = round2(Number(due.counter_receipt_zmw ?? 0));
+      reimburseRider(env, due, receipt).catch(() => { /* flagged on the job */ });
+    }
+    return null;
+  }
+  return due;
+}
+
 // Repair a counter-fare payment that reached 'success' but never flipped its
 // job's counter_receipt_paid. settlePaymentSuccess commits `settled = 1` in its
 // claim BEFORE running the side effects, so any failure after that point (the
@@ -7681,21 +7771,35 @@ function safeParse(s: string): Record<string, unknown> {
 
 app.get('/payments/:id/receipt', async (c) => {
   const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'invalid_payment_id' }, 400);
   const pay = await c.env.DB.prepare(
     `SELECT p.*, j.ref AS job_ref, j.sender_name, j.pickup_address, j.dest_city,
+            j.sender_phone AS job_sender_phone, j.recipient_phone AS job_recipient_phone,
+            r.phone AS job_rider_phone,
             j.counter_receipt_zmw AS job_counter_receipt_zmw,
             co.name AS courier_name,
             s.tier AS sub_tier, s.period_start AS sub_period_start, s.period_end AS sub_period_end,
             u.name AS account_name
        FROM payments p
        LEFT JOIN jobs j ON j.id = p.job_id
+       LEFT JOIN riders r ON r.id = j.rider_id
        LEFT JOIN couriers co ON co.id = j.courier_id
        LEFT JOIN subscriptions s ON s.id = p.subscription_id
        LEFT JOIN auth_users u ON u.phone = p.phone
       WHERE p.id = ?1`,
   ).bind(id).first<any>();
   if (!pay) return c.json({ error: 'not found' }, 404);
-  if (c.get('role') === 'customer' && c.get('phone') !== pay.phone) return c.json({ error: 'forbidden' }, 403);
+  // A job's payment timeline legitimately shows payments owned by the OTHER
+  // side (e.g. the rider's reimbursement). The old check only compared the
+  // payer's phone, so a sender tapping a settled timeline receipt got 403 and
+  // the app flattened it into "no receipt was issued" (owner 2026-11-25).
+  // Authority = payer, any job participant, or staff.
+  const caller = c.get('phone');
+  const staff = isAdmin(c) || c.get('role') === 'ops' || c.get('role') === 'cfo';
+  const participant = staff || caller === pay.phone
+    || (!!pay.job_id && (caller === pay.job_sender_phone
+      || caller === pay.job_recipient_phone || caller === pay.job_rider_phone));
+  if (!participant) return c.json({ error: 'forbidden' }, 403);
 
   const credit = round2(Number(pay.credit_zmw ?? 0));
   const platform = round2(Number(pay.platform_fee_zmw ?? 0));
@@ -8454,6 +8558,22 @@ app.post('/rider/ping', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const lat = Number(b?.lat), lng = Number(b?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return c.json({ error: 'lat/lng required' }, 400);
+  if (c.get('role') === 'rider') {
+    if (!validZambiaPin(lat, lng)) {
+      return c.json({ error: 'invalid_location', detail: 'A real GPS pin inside Zambia is required.' }, 400);
+    }
+    const accuracy = Number(b?.accuracy ?? 0);
+    if (Number.isFinite(accuracy) && accuracy > 200) {
+      return c.json({ error: 'location_not_accurate', detail: 'Move to an open area and wait for a sharper GPS fix.' }, 400);
+    }
+    if (b?.captured_at != null) {
+      const captured = Date.parse(String(b.captured_at));
+      const age = Date.now() - captured;
+      if (!Number.isFinite(captured) || age < -300000 || age > 90000) {
+        return c.json({ error: 'stale_location', detail: 'Take a fresh GPS fix and share again.' }, 400);
+      }
+    }
+  }
   const phone = c.get('phone') ?? (c.get('role') === 'ops' ? (b?.phone ?? null) : null);
   if (!phone) return c.json({ error: 'identity_required' }, 401);
   const status = b?.status ? String(b.status) : null;
@@ -11108,14 +11228,20 @@ app.get('/media/*', async (c) => {
       // them so the photo comparison works end-to-end. Authorization =
       // participant of a job that references this exact key.
       const linked = await c.env.DB.prepare(
-        `SELECT j.sender_phone, r.phone AS rider_phone
+        `SELECT j.sender_phone, j.recipient_phone, r.phone AS rider_phone
            FROM jobs j LEFT JOIN riders r ON r.id = j.rider_id
           WHERE j.parcel_photo_url = ?1 OR j.dropoff_photo_url = ?1
              OR j.pod_pickup_url = ?1 OR j.pod_delivery_url = ?1
-             OR j.collection_receipt_url = ?1 LIMIT 1`,
+             OR j.collection_receipt_url = ?1 OR j.counter_receipt_url = ?1
+             OR (json_valid(j.counter_receipts_json) AND EXISTS (
+                   SELECT 1 FROM json_each(j.counter_receipts_json) je
+                  WHERE json_extract(je.value, '$.url') = ?1))
+          LIMIT 1`,
       ).bind(`/media/${key}`).first<any>();
+      const caller = c.get('phone');
       const participant = !!linked
-        && (linked.sender_phone === c.get('phone') || linked.rider_phone === c.get('phone'));
+        && (linked.sender_phone === caller || linked.recipient_phone === caller
+            || linked.rider_phone === caller);
       if (!participant) {
         return c.json({ error: 'kyc_media_staff_only' }, 403);
       }
@@ -11386,13 +11512,7 @@ app.post('/admin/jobs/:ref/unpark', async (c) => {
 app.get('/counter-fare/status', async (c) => {
   const phone = c.get('phone');
   if (!phone) return c.json({ error: 'sign_in_required' }, 401);
-  const due = await c.env.DB.prepare(
-    `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1
-      AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0
-      AND counter_receipt_paid = 0
-      AND COALESCE(status,'') NOT IN ('deleted','canceled','cancelled')
-      ORDER BY id DESC LIMIT 1`,
-  ).bind(phone).first<any>();
+  const due = await findOutstandingCounterFare(c.env, phone);
   return c.json({
     due: !!due,
     ref: due?.ref ?? null,
@@ -11405,13 +11525,7 @@ app.get('/counter-fare/status', async (c) => {
 app.post('/counter-fare/reprompt', async (c) => {
   const phone = c.get('phone');
   if (!phone) return c.json({ error: 'sign_in_required' }, 401);
-  const due = await c.env.DB.prepare(
-    `SELECT ref, counter_receipt_zmw FROM jobs WHERE sender_phone = ?1
-      AND counter_receipt_zmw IS NOT NULL AND counter_receipt_zmw > 0
-      AND counter_receipt_paid = 0
-      AND COALESCE(status,'') NOT IN ('deleted','canceled','cancelled')
-      ORDER BY id DESC LIMIT 1`,
-  ).bind(phone).first<any>();
+  const due = await findOutstandingCounterFare(c.env, phone);
   if (!due) return c.json({ error: 'no_counter_fare_due' }, 404);
   const receipt = round2(Number(due.counter_receipt_zmw ?? 0));
   if (!(receipt > 0)) return c.json({ error: 'no_counter_receipt' }, 409);

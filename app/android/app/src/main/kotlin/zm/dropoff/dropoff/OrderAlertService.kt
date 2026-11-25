@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.Ringtone
 import android.media.RingtoneManager
@@ -242,24 +244,44 @@ class OrderAlertService : Service() {
         val acceptPi = PendingIntent.getActivity(this, 1001, MainActivity.orderActionIntent(this, "accept", ref), flags())
         val declinePi = PendingIntent.getActivity(this, 1002, MainActivity.orderActionIntent(this, "decline", ref), flags())
 
+        // Premium, brand-led copy. The old heads-up echoed whatever the push
+        // payload said and, with an undecodable large icon, Android labelled
+        // the curtain "System". A real logo plus an explicit DropOff title
+        // makes it read like a flagship phone's incoming-call screen.
+        val stripPrefix = Regex("^DropOff\\s*[-:]\\s*", RegexOption.IGNORE_CASE)
+        val cleanBody = body.trim().replace(stripPrefix, "")
+        val cleanTitle = title.trim().replace(stripPrefix, "")
+        val detail = cleanBody.ifEmpty { cleanTitle.ifEmpty { "Tap accept to claim this delivery." } }
+        val summary = if (ref.isNotEmpty()) "Rider  -  $ref" else "DropOff  -  New order"
         val text = buildString {
-            append(body)
-            if (address.isNotEmpty()) append("\nPickup: ").append(address)
-            if (eta.isNotEmpty()) append("\nETA to pickup: ").append(eta).append(" min")
-            if (fee.isNotEmpty()) append("\nRider fee: ").append(fee)
-        }
+            append("A new pickup is waiting.\n")
+            append(detail).append('\n')
+            if (address.isNotEmpty()) append("Pickup  -  ").append(address).append('\n')
+            if (eta.isNotEmpty()) append("Arrival  -  ").append(eta).append(" min")
+        }.trimEnd()
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_dropoff)
-            .setContentTitle(if (title.startsWith("DropOff")) title else "DropOff · $title")
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setLargeIcon(BitmapFactory.decodeResource(resources, R.drawable.ic_notification_large))
+            .setContentTitle("DropOff  -  New order ready")
+            .setContentText("A pickup is waiting. Accept to claim it.")
+            .setSubText("We carry it to the courier")
+            .setTicker("DropOff - New order ready")
+            .setStyle(NotificationCompat.BigTextStyle()
+                .bigText(text)
+                .setBigContentTitle("DropOff  -  New order ready")
+                .setSummaryText(summary))
+            .setColor(Color.parseColor("#123C32"))
+            .setColorized(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
+            .setShowWhen(true)
+            .setWhen(System.currentTimeMillis())
             .setFullScreenIntent(openPi, true)
             .setContentIntent(openPi)
             .addAction(0, "Accept", acceptPi)

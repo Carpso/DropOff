@@ -32,6 +32,7 @@ import 'ui/app_theme.dart';
 import 'data/push_service.dart';
 import 'data/notification_inbox.dart';
 import 'services/order_alert.dart';
+import 'services/app_update.dart';
 import 'screens/incoming_order_screen.dart';
 import 'ui/app_toast.dart';
 
@@ -448,6 +449,9 @@ class _SplashScreenState extends State<_SplashScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(AppUpdateService.checkAndShow(context));
+    });
     _emailCtor.text = widget.store.email ?? '';
     widget.initFuture.whenComplete(() {
       if (!mounted) return;
