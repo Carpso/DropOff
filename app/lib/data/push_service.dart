@@ -224,7 +224,26 @@ class PushService {
   static void _onForegroundMessage(RemoteMessage message) {
     final title = message.notification?.title ?? _str(message.data['title']);
     final body = message.notification?.body ?? _str(message.data['body']);
-    _show(message.data, title, body);
+    final kind = _kindOf(message.data);
+    final isOrderAlert = kind.contains('assign') || kind == 'new_order' ||
+        kind == 'trip_transferred' || kind == 'claim_available' || kind == 'sos';
+    // Foreground order alerts are handled entirely by the native OrderAlert
+    // service (looping ring + notification with Accept/Decline actions). Posting
+    // a second notification here would double up the curtain and the full-screen
+    // intent — InDrive/Yango show ONE alert, not two.
+    if (!isOrderAlert) {
+      _show(message.data, title, body);
+    } else {
+      // Start the looping ring; the native service posts the alert notification.
+      unawaited(OrderAlert.start(
+        ref: _str(message.data['job_ref']) ?? '',
+        title: title ?? 'New delivery',
+        body: body ?? '',
+        address: _str(message.data['pickup_address']) ?? _str(message.data['address']) ?? '',
+        eta: _str(message.data['eta_minutes']) ?? '',
+        fee: _str(message.data['fee']) ?? '',
+      ));
+    }
     onForegroundMessage.add({
       ...Map<String, dynamic>.from(message.data),
       if (title != null) 'title': title,
@@ -330,21 +349,6 @@ class PushService {
       notificationDetails: NotificationDetails(android: android, iOS: darwin),
       payload: _encodePayload({...data, 'title': t, 'body': b}),
     );
-    // LOOPING ALARM (owner 2026-11-24): one chime is easy to miss on a bike.
-    // Start the native ring service so the phone keeps ringing until the rider
-    // accepts, declines, opens the app, or 60 s pass. Harmless no-op in a
-    // background isolate (no plugin channel there) — the notification and its
-    // full-screen intent still bring the rider in.
-    if (isOrderAlert) {
-      unawaited(OrderAlert.start(
-        ref: _str(data['job_ref']) ?? '',
-        title: t,
-        body: b,
-        address: _str(data['pickup_address']) ?? _str(data['address']) ?? '',
-        eta: _str(data['eta_minutes']) ?? '',
-        fee: _str(data['fee']) ?? '',
-      ));
-    }
   }
 
   /// Compact k=v serialization for the tap payload (e.g. job_ref=DRO-1;kind=rider_assigned).

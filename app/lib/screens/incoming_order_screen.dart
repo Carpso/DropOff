@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../data/dropoff_api.dart';
 import '../main.dart';
+import 'app_shell.dart';
 import '../services/order_alert.dart';
 import '../ui/app_spinner.dart';
 import '../ui/app_theme.dart';
@@ -77,8 +78,11 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
     if (res.ok) {
       await AppScope.of(context).syncJobsFromServer();
       if (!mounted) return;
-      Navigator.of(context).maybePop();
-      AppToast.show(context, 'Order ${widget.jobRef} accepted — it is in your Task Queue.');
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const AppShell()),
+        (route) => false,
+      );
+      AppToast.show(context, 'Order ${widget.jobRef} accepted — open your Task Queue.');
       return;
     }
     setState(() => _busy = false);
@@ -245,7 +249,7 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
                   const Padding(
                     padding: EdgeInsets.only(bottom: 10),
                     child: Text(
-                      'The alarm stopped, but the order is still on your Task Queue.',
+                      'The alert has silenced — this order is still waiting in your Task Queue.',
                       softWrap: true,
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Color(0xCCFFFFFF), fontSize: 12),

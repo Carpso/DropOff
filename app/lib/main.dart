@@ -461,7 +461,7 @@ class _SplashScreenState extends State<_SplashScreen> {
     _pushSub = PushService.onForegroundMessage.stream.listen((data) {
       final kind = '${data['kind'] ?? ''}';
       final isOrder = kind.contains('assign') || kind == 'new_order' ||
-          kind == 'trip_transferred' || kind == 'claim_available';
+          kind == 'trip_transferred' || kind == 'claim_available' || kind == 'sos';
       if (isOrder) {
         final ref = '${data['job_ref'] ?? ''}';
         if (ref.isNotEmpty) _orderDetails[ref] = Map<String, dynamic>.from(data);
