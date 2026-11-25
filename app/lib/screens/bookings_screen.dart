@@ -1889,9 +1889,10 @@ class _CourierReceiptButtonState extends State<_CourierReceiptButton> {
   Future<void> _arm() async {
     final store = AppScope.of(context);
     try {
-      _serverDue = await store.counterFareStillDue();
+      final due = await store.counterFareStillDue();
+      if (mounted) setState(() => _serverDue = due);
     } catch (_) {
-      _serverDue = false;
+      if (mounted) setState(() => _serverDue = false);
     }
     if (!mounted) return;
     setState(() {});
@@ -2124,6 +2125,16 @@ class _CounterReceiptCardState extends State<_CounterReceiptCard> {
       return;
     }
     setState(() => _busy = true);
+    // Server-truth check first: if the fare was already settled (e.g. webhook
+    // landed since the screen loaded), don't start a new prompt.
+    final status = await DropOffApi.counterFareStatus();
+    if (status?['due'] != true) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      await AppScope.of(context).syncJobsFromServer();
+      if (mounted) AppToast.show(context, 'This courier bill is already settled — the receipt is unlocked.');
+      return;
+    }
     final result = await store.settleCounterFare(jobRef: ref, phone: widget.booking.senderPhone);
     if (!mounted) return;
     setState(() => _busy = false);
