@@ -1,5 +1,56 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-25 (fifty-third pass) — App Links fingerprint + a paid fare that still blocked booking
+
+- **Counter fare paid but still blocking (owner bug, `DRO-261125-KEJNQ`, sender
+  `260779686480`):** the K5.05 Lenco payment was `success` and the rider had
+  already filed the receipt, yet `jobs.counter_receipt_paid` stayed `0`, so
+  `POST /jobs` and `POST /collections` kept returning 409 `counter_fare_due`.
+  Root cause: `settlePaymentSuccess` writes the unlock in one atomic batch that
+  includes `INSERT INTO wallet_ledger (phone, ...)`, and `wallet_ledger.phone`
+  is `REFERENCES wallets(phone)`. Senders have NO wallet ("NOT A WALLET"), so
+  the FK threw and rolled the WHOLE batch back. Worse, the function had already
+  committed `settled = 1` in its claim step, so every later webhook/poll
+  returned early — permanently unrecoverable. **This is the same class of bug
+  the `booking_deposit` branch already documents; any new settlement branch
+  must insert `INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)`
+  before a `wallet_ledger` row.**
+- **Fix 1 (prevent):** the counter-fare batch now leads with the zero-balance
+  wallets row, so the ledger insert satisfies its FK and the batch commits.
+- **Fix 2 (recover):** new `healPaidCounterFares(env)` runs on the **minute**
+  cron (and in the daily reconcile). It finds any
+  `payments.kind='counter_fare' AND status='success'` whose job is still
+  unpaid, flips the flag, writes a `counter_fare_paid` event, pushes the
+  sender and queues the rider reimbursement. Idempotent: it only acts when its
+  own `UPDATE ... AND counter_receipt_paid = 0` reports changes, and
+  `reimburseRider` skips an existing pending/success reimbursement. **Do not
+  remove this — it is the only thing that can unstick a row whose `settled`
+  flag was already burned.**
+- **Verified live:** job 59 flipped to `counter_receipt_paid = 1`, event 490
+  `counter_fare_paid`, `rider_reimbursement` payment #30 queued (K5.00), and
+  the booking gate query now returns **zero** rows for that sender.
+- **Play App Links ("Failed domain checks", 10 paths × 3 domains):** all three
+  hosts already served `200 application/json`, no redirect, with only our
+  **upload key** fingerprint. Android verifies against the certificate the app
+  was *installed* with, and every Play install is re-signed by **Google Play
+  App Signing**, so the published fingerprint never matched → uniform failure.
+  `/.well-known/assetlinks.json` now merges the built-in upload key with any
+  extra fingerprints from `ANDROID_CERT_SHA256_EXTRA` (secret/env) or the
+  `app_settings` key `android_cert_sha256_extra` (comma/semicolon/space
+  separated, normalised to uppercase colon pairs). Cache dropped to 300 s.
+  **Remaining owner action:** paste the Play signing SHA-256 into
+  `npx wrangler secret put ANDROID_CERT_SHA256_EXTRA` (Play Console → Setup →
+  App integrity → App signing key certificate), then press *Recheck* in
+  Play Console → Test and release → Deep links. Until then the upload key stays
+  published (sideloaded builds keep working).
+- Worker deployed `0f9e7371-12aa-4ea7-bef7-53b714276589`; `tsc --noEmit` clean.
+- **Tooling note:** `wrangler d1 execute --command` cannot be called from this
+  PowerShell harness with inline quotes (arguments get re-split). Use a `.ps1`
+  that reads the SQL from a file and launches
+  `node workers/node_modules/wrangler/bin/wrangler.js d1 execute ... --command "<sql>"`
+  through `System.Diagnostics.ProcessStartInfo` with `UseShellExecute = $false`.
+  `--file` never prints SELECT rows, only import meta.
+
 ## Play Store versioning (mandatory)
 
 Every upload to Google Play **must** use a **strictly higher `versionCode`** than every previously uploaded build — Play Console rejects duplicates (`Version code N has already been used`).

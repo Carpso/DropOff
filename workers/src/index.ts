@@ -1282,10 +1282,37 @@ app.post('/delete-data/confirm', async (c) => {
 // them directly too. The apex company site is untouched.
 const DROPOFF_PACKAGE = 'zm.dropoff.dropoff';
 const UPLOAD_CERT_SHA256 = 'D0:DB:11:37:43:29:51:04:02:8F:42:3B:AB:B7:89:06:67:68:F0:48:D2:F1:AB:BF:76:21:A4:B8:5A:B0:E9:37';
-app.get('/.well-known/assetlinks.json', (c) => c.json([{
+
+// Android verifies App Links against the certificate the app was INSTALLED
+// with. Sideloaded builds carry our upload key, but every Play install is
+// re-signed by Google Play App Signing, so publishing only the upload key makes
+// ALL domains fail their check for Play users (owner report 2026-11-25: 10
+// paths x 3 domains, "Failed domain checks"). The Play signing fingerprint is
+// therefore additive, never a replacement: it arrives without a code change via
+// the ANDROID_CERT_SHA256_EXTRA secret or the app_settings key
+// `android_cert_sha256_extra` (comma/semicolon/space separated).
+function normaliseCertFingerprint(raw: string): string | null {
+  const hex = String(raw ?? '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (hex.length !== 64) return null;
+  const pairs = hex.match(/.{2}/g);
+  return pairs ? pairs.join(':') : null;
+}
+async function androidCertFingerprints(env: Env): Promise<string[]> {
+  const out: string[] = [UPLOAD_CERT_SHA256];
+  const sources = [
+    String(env.ANDROID_CERT_SHA256_EXTRA ?? ''),
+    (await getSetting(env.DB, 'android_cert_sha256_extra')) ?? '',
+  ].join(',');
+  for (const part of sources.split(/[,;\s]+/)) {
+    const fp = normaliseCertFingerprint(part);
+    if (fp && !out.includes(fp)) out.push(fp);
+  }
+  return out;
+}
+app.get('/.well-known/assetlinks.json', async (c) => c.json([{
   relation: ['delegate_permission/common.handle_all_urls'],
-  target: { namespace: 'android_app', package_name: DROPOFF_PACKAGE, sha256_cert_fingerprints: [UPLOAD_CERT_SHA256] },
-}], 200, { 'Cache-Control': 'public, max-age=3600' }));
+  target: { namespace: 'android_app', package_name: DROPOFF_PACKAGE, sha256_cert_fingerprints: await androidCertFingerprints(c.env) },
+}], 200, { 'Cache-Control': 'public, max-age=300' }));
 app.get('/.well-known/apple-app-site-association', (c) => {
   const appleTeam = String(c.env.APPLE_TEAM_ID ?? '').trim();
   if (!appleTeam) return c.json({ error: 'apple_app_site_association_not_configured' }, 404);
@@ -6972,6 +6999,15 @@ async function settlePaymentSuccess(env: Env, paymentId: number, finalStatus: st
     if (job) {
       const receipt = round2(Number(job.counter_receipt_zmw ?? 0));
       await env.DB.batch([
+        // The zero-balance wallets row satisfies wallet_ledger's FK. Senders
+        // have NO wallet ("NOT A WALLET", see PAYMENT_COMPLIANCE.md), so
+        // without this the ledger insert threw a FK error and rolled the WHOLE
+        // batch back: the job stayed counter_receipt_paid = 0 even though the
+        // momo payment had succeeded, and because settlePaymentSuccess had
+        // already committed settled = 1 every later webhook/poll returned
+        // early. The sender was then blocked from booking forever with a fare
+        // they had already paid (owner bug 2026-11-25, DRO-261125-KEJNQ).
+        env.DB.prepare('INSERT OR IGNORE INTO wallets (phone, balance_zmw) VALUES (?1, 0)').bind(pay.phone),
         env.DB.prepare(`UPDATE jobs SET counter_receipt_paid = 1 WHERE id = ?1 AND counter_receipt_paid = 0`).bind(job.id),
         env.DB.prepare(
           `INSERT INTO wallet_ledger (phone, amount_zmw, kind, job_id) VALUES (?1, ?2, 'counter_fare', ?3)`,
@@ -7151,6 +7187,47 @@ async function sweepPlatformIncome(env: Env, minZmw = 0): Promise<void> {
 // Pending collects can miss their webhook (network, phone off). Sweep every
 // pending payment older than 2 minutes, re-check with Lipila and settle what
 // actually succeeded. Rows stuck >7 days are closed as failed.
+// Repair a counter-fare payment that reached 'success' but never flipped its
+// job's counter_receipt_paid. settlePaymentSuccess commits `settled = 1` in its
+// claim BEFORE running the side effects, so any failure after that point (the
+// wallet_ledger FK rollback on 2026-11-25 is the proven case) leaves the sender
+// permanently blocked by a fare they already paid, with no retry able to fix it
+// because every later webhook/poll early-returns. Idempotent: it only selects
+// rows where the job is still unpaid, and reimburseRider skips an existing
+// pending/success reimbursement. Runs on the MINUTE cron so a paying sender is
+// unblocked within a minute, not a day.
+async function healPaidCounterFares(env: Env): Promise<void> {
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT p.id AS payment_id, p.phone, j.id, j.ref, j.rider_id, j.counter_receipt_zmw
+         FROM payments p JOIN jobs j ON j.id = p.job_id
+        WHERE p.kind = 'counter_fare' AND p.status = 'success'
+          AND COALESCE(j.counter_receipt_paid, 0) = 0
+        ORDER BY p.id LIMIT 20`,
+    ).all<any>();
+    for (const row of results ?? []) {
+      const receipt = round2(Number(row.counter_receipt_zmw ?? 0));
+      const claimed = await env.DB.batch([
+        env.DB.prepare(`UPDATE jobs SET counter_receipt_paid = 1 WHERE id = ?1 AND counter_receipt_paid = 0`).bind(row.id),
+        env.DB.prepare(
+          `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'counter_fare_paid', ?2)`,
+        ).bind(row.id, `Depot counter fare K${receipt.toFixed(2)} was already paid (payment #${row.payment_id}) - receipt photo unlocked and rider reimbursement queued. Recovered automatically.`),
+      ]);
+      // Only notify/reimburse when THIS run actually flipped the flag, so two
+      // overlapping crons cannot double-push or double-queue.
+      if (!Number((claimed?.[0] as any)?.meta?.changes ?? 0)) continue;
+      await sendToPhone(env, row.phone, {
+        title: 'Receipt unlocked',
+        body: `Counter fare for ${row.ref ?? 'your item'} is confirmed - the depot receipt photo is now visible in Bookings.`,
+        data: { job_ref: row.ref ?? '', kind: 'counter_fare_paid' },
+      }).catch(() => {});
+      reimburseRider(env, row, receipt).catch(() => { /* flagged on the job */ });
+    }
+  } catch (e) {
+    await captureError(env, e, { method: 'CRON', url: 'https://cron/selfheal-counter-fare' }).catch(() => {});
+  }
+}
+
 async function reconcilePayments(env: Env): Promise<void> {  try {
     const { results } = await env.DB.prepare(
       `SELECT id, gateway, gateway_reference, kind FROM payments
@@ -7176,6 +7253,12 @@ async function reconcilePayments(env: Env): Promise<void> {  try {
       await recordFailReason(env, pay.id, reason);
       await settlePaymentSuccess(env, pay.id, status);
     }
+    // SELF-HEAL: a counter-fare payment that reached 'success' but never
+    // flipped its job's counter_receipt_paid. This is the failure mode above:
+    // the claim commits settled = 1 first, so settlePaymentSuccess early-returns
+    // on every retry and the sender stays blocked by a fare they already paid.
+    // Repair the unlock and queue the rider's reimbursement (idempotent).
+    await healPaidCounterFares(env);
     const expired = await env.DB.prepare(
       `SELECT id, kind, subscription_id, meta FROM payments
         WHERE status = 'pending' AND created_at < datetime('now', '-7 days')`,
@@ -14527,6 +14610,7 @@ export default {
           await detectDrift(env);
           await redispatchUnassignedPaidJobs(env);
           await healMissingTrackingSms(env);
+          await healPaidCounterFares(env);
           await notifyCapNudges(env);
           await notifyExpiryNudges(env);
           try { await runPayoutQueue(env); } catch (e) {

@@ -42,6 +42,7 @@ export interface Env {
   PAYMENT_GATEWAY?: string;                   // auto (default) | lipila | lenco
   BACKUPS?: R2Bucket;                         // daily app-data exports land here (optional)
   APPLE_TEAM_ID?: string;                     // set to your Apple Team ID to enable universal links
+  ANDROID_CERT_SHA256_EXTRA?: string;         // extra App Links fingerprints (Play App Signing key), comma separated
   /** Workers AI binding: address parsing, support drafts, rider-doc checks. */
   AI?: Ai;
   CHAT: DurableObjectNamespace;               // realtime chat rooms (one per thread)
