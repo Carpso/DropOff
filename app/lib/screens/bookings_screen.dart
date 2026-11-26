@@ -31,6 +31,7 @@ import 'track_screen.dart';
 import 'waybill_screen.dart';
 import '../ui/app_spinner.dart';
 import '../ui/app_sheet.dart';
+import '../ui/notification_bell.dart';
 
 class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
@@ -202,6 +203,7 @@ class _BookingsScreenState extends State<BookingsScreen> with WidgetsBindingObse
               Text('Every pickup and courier handover, in one place.', style: TextStyle(color: AppColors.muted)),
             ])),
             _InboxButton(),
+            NotificationBell(),
           ]),
         ),
         Expanded(

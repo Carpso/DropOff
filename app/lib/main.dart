@@ -294,6 +294,10 @@ Future<void> main() async {
 void _performTap(AppStore store, Map<String, dynamic>? data) {
   final ctx = navigatorKey.currentContext;
   if (ctx == null || !ctx.mounted) return;
+  // A cold-start / background tap is a notification the rider has not seen in
+  // the bell yet — record it before routing (dedupe handles the foreground
+  // case where the same push was already added).
+  if (data != null && data.isNotEmpty) unawaited(NotificationInbox.add(data));
   // Accept / Decline tapped on an incoming-order notification (owner
   // 2026-11-24). Answered with the signed-in session, then the queue refreshes.
   final orderAction = '${data?['order_action'] ?? ''}'.toLowerCase();
@@ -366,6 +370,14 @@ void _performOrderAction(AppStore store, String rawRef, String action) {
   }
   unawaited(() async {
     await OrderAlert.stop();
+    unawaited(NotificationInbox.addLocal(
+      title: action == 'decline' ? 'Order declined' : 'Order accepted',
+      body: action == 'decline'
+          ? '$ref went back to the order board for another rider.'
+          : '$ref is in your Task Queue — head to the pickup.',
+      kind: 'order_answer',
+      jobRef: ref,
+    ));
     final res = action == 'decline'
         ? await DropOffApi.declineJob(ref)
         : await DropOffApi.acceptJob(ref);
@@ -542,7 +554,13 @@ class _SplashScreenState extends State<_SplashScreen> {
     _runWhenReady(() async {
       final due = await DropOffApi.counterFareStatus();
       if (due?['due'] == true) {
-        if (mounted) _performTap(widget.store, {'kind': 'counter_fare_due'});
+        if (mounted) {
+          _performTap(widget.store, {
+            'kind': 'counter_fare_due',
+            'title': 'Courier receipt is ready',
+            'body': 'Pay the depot receipt in Bookings to unlock it and reimburse your rider.',
+          });
+        }
       } else {
         await widget.store.syncJobsFromServer();
       }

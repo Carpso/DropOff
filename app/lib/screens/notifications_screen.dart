@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../data/notification_inbox.dart';
+import 'app_shell.dart';
+import 'tickets_screen.dart';
 import '../ui/app_theme.dart';
 
 /// Bell-icon notification center (owner 2026-11-25).
@@ -38,6 +40,31 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (kind.contains('chat') || kind.contains('support')) return Icons.chat_bubble_rounded;
     if (kind.contains('counter_fare')) return Icons.receipt_long_rounded;
     return Icons.notifications_rounded;
+  }
+
+  String _titleForKind(String kind) {
+    if (kind.contains('sos')) return 'Emergency alert';
+    if (kind.contains('assign') || kind.contains('new_order') || kind.contains('trip')) return 'New delivery';
+    if (kind.contains('job_update') || kind.contains('status')) return 'Parcel update';
+    if (kind.contains('payment') || kind.contains('deposit')) return 'Payment update';
+    if (kind.contains('plan') || kind.contains('subscription')) return 'Your DropOff plan';
+    if (kind.contains('chat') || kind.contains('support')) return 'DropOff support';
+    if (kind.contains('counter_fare')) return 'Courier receipt';
+    if (kind.contains('security') || kind.contains('alert')) return 'Account security';
+    if (kind.contains('marketing') || kind.contains('promo')) return 'DropOff offer';
+    return 'DropOff';
+  }
+
+  void _openNotification(Map<String, dynamic> n) {
+    final kind = '${n['kind'] ?? ''}'.toLowerCase();
+    final ctx = context;
+    if (kind.contains('chat') || kind.contains('support')) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const TicketsScreen()));
+      return;
+    }
+    if (kind.contains('assign') || kind.contains('new_order') || kind.contains('job_update') || kind.contains('status')) {
+      Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const AppShell()));
+    }
   }
 
   Color _color(String kind) {
@@ -83,10 +110,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               itemBuilder: (ctx, i) {
                 final n = items[i];
                 final kind = '${n['kind'] ?? ''}'.toLowerCase();
-                final title = (n['title'] ?? 'DropOff').toString();
+                final title = (n['title'] ?? _titleForKind(kind)).toString();
                 final body = (n['body'] ?? '').toString();
                 final read = n['read'] == true;
-                return Container(
+                return InkWell(
+                  onTap: () => _openNotification(n),
+                  child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: read ? Colors.white : AppColors.canvas,
@@ -121,6 +150,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         ),
                       ),
                     ],
+                  ),
                   ),
                 );
               },

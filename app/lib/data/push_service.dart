@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart' as permission_handler;
 
 import 'dropoff_api.dart';
+import 'notification_inbox.dart';
 import '../services/order_alert.dart';
 
 /// Firebase Cloud Messaging for DropOff — fully optional.
@@ -215,8 +216,18 @@ class PushService {
       // start the native looping alarm from the background isolate too (it
       // works when the app was merely backgrounded); the FCM system
       // notification above covers the killed/force-stopped case.
+      // Record EVERY push in the bell, including ones delivered while the app
+      // was in the background/killed. Dedupe keeps the FCM + local pair to one
+      // entry, and the main isolate reads this from SharedPreferences on open.
       final data = Map<String, dynamic>.from(message.data);
       final kind = _kindOf(data);
+      await NotificationInbox.add({
+        ...data,
+        'kind': kind,
+        'title': message.notification?.title ?? _str(data['title']) ?? _titleFor(data),
+        'body': message.notification?.body ?? _str(data['body']) ?? '',
+        'from_background': true,
+      });
       final isOrder = kind.contains('assign') || kind == 'new_order' ||
           kind == 'trip_transferred' || kind == 'claim_available' || kind == 'sos';
       if (isOrder) {

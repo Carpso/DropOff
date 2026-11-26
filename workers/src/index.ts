@@ -914,7 +914,7 @@ app.get('/app/version', async (c) => {
     getSetting(c.env.DB, 'app_update_force'),
     getSetting(c.env.DB, 'app_update_message'),
   ]);
-  const fallback = '0.6.0';
+  const fallback = '0.6.1';
   return c.json({
     latest: (latest?.trim() || fallback),
     minimum: (minimum?.trim() || '0.5.0'),

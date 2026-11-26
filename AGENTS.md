@@ -1,5 +1,26 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-26 (sixty-second pass) — notification bell shows everything, for every role
+
+- **Complete bell:** `NotificationInbox` now captures every notification for the
+  signed-in user — foreground pushes, BACKGROUND/killed pushes (written from
+  the FCM background isolate), cold-start notification taps, locally raised
+  order-accept/decline entries, counter-fare prompts, and any local alert via
+  `addLocal()`. `init()` is idempotent and awaited by `add()` so a push during
+  startup cannot be lost. A 5-minute fingerprint dedupes the same event
+  arriving as FCM + local alarm + tap; cap raised to 80.
+- **Bell for all users:** new reusable `NotificationBell` (unread badge) added
+  to Home, Bookings, Account, Admin console and the Rider Task Queue. The
+  notification screen gives context-aware titles per kind and taps through to
+  the right place (Task Queue for job updates, Tickets for support).
+- **Tests:** `app/test/notification_inbox_test.dart` (4) pins distinct pushes,
+  triple-delivery dedupe, local alerts and read/clear counts. Flutter **93/93**,
+  worker vitest 42/42, tsc clean, flutter analyze back to the 6 known warnings.
+- Release **0.6.1+111** (APK 69.3 MB, AAB 52.9 MB, web `f5506471`), worker
+  `7c0a30c7-2690-4baf-b913-723e0ad8ce90`, `/app/version` latest `0.6.1`,
+  minimum `0.5.0`, force off. (A transient Cloudflare 10001 auth failure
+  delayed the worker deploy one cycle; the retry succeeded.)
+
 ## 2026-11-26 (sixty-first pass) — whole-system backups, per-ride snapshots, context-aware push copy
 
 - **Backup audit:** the 02:00 CAT cron `backupAppData()` already exists in R2

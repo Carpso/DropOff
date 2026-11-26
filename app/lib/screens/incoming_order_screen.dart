@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/dropoff_api.dart';
+import '../data/notification_inbox.dart';
 import '../main.dart';
 import 'app_shell.dart';
 import '../services/order_alert.dart';
@@ -112,6 +113,12 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
     if (res.ok) {
       await AppScope.of(context).syncJobsFromServer();
       if (!mounted) return;
+      unawaited(NotificationInbox.addLocal(
+        title: 'Order accepted',
+        body: '${widget.jobRef} is in your Task Queue — head to the pickup.',
+        kind: 'order_answer',
+        jobRef: widget.jobRef,
+      ));
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute<void>(builder: (_) => const AppShell()),
         (route) => false,
@@ -139,6 +146,12 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
     if (res.ok) {
       await AppScope.of(context).syncJobsFromServer();
       if (!mounted) return;
+      unawaited(NotificationInbox.addLocal(
+        title: 'Order declined',
+        body: '${widget.jobRef} went back to the order board for another rider.',
+        kind: 'order_answer',
+        jobRef: widget.jobRef,
+      ));
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute<void>(builder: (_) => const AppShell()),
         (route) => false,

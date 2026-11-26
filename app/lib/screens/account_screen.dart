@@ -29,6 +29,7 @@ import '../services/step_sounds.dart';
 import '../ui/offline_map_sheet.dart';
 import '../ui/staff_email_card.dart';
 import '../ui/mfa_sheet.dart';
+import '../ui/notification_bell.dart';
 
 /// Email + password sign in / create account (the JWT + phone persist locally;
 /// the ops device-link stays separate under Team).
@@ -633,7 +634,10 @@ class _AccountScreenState extends State<AccountScreen> {
     final store = AppScope.of(context);
     final signedIn = store.linked;
     return Scaffold(
-      appBar: AppBar(title: const Text('Account')),
+      appBar: AppBar(
+        title: const Text('Account'),
+        actions: const [NotificationBell()],
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
           await store.syncJobsFromServer();

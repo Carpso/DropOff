@@ -1,4 +1,4 @@
-﻿// ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
 // DROPOFF — ownership stamp (do not remove)
 // :Godfrey Moses Kalambo:Carpso Solutions:0968551110.
 // © 2026 Godfrey Moses Kalambo · Carpso Solutions · Lusaka, Zambia.
@@ -24,9 +24,7 @@ import '../data/catalog.dart';
 import '../data/dropoff_api.dart';
 import '../data/map_services.dart';
 import '../data/analytics_service.dart';
-import '../data/notification_inbox.dart';
 import '../data/push_service.dart';
-import 'notifications_screen.dart';
 import '../main.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_sheet.dart';
@@ -36,6 +34,7 @@ import 'rider_history_screen.dart';
 import 'in_app_navigator_screen.dart';
 import 'waybill_screen.dart' show waybillDepotTitle;
 import '../ui/app_spinner.dart';
+import '../ui/notification_bell.dart';
 import '../services/step_sounds.dart';
 import '../services/order_alert.dart';
 import 'incoming_order_screen.dart';
@@ -2651,19 +2650,8 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
         ),
         actions: [
-          // Bell: notification center (replaces the auto-popping banner).
-          ValueListenableBuilder<int>(
-            valueListenable: NotificationInbox.unread,
-            builder: (_, n, __) => IconButton(
-              tooltip: 'Notifications',
-              icon: Badge(
-                isLabelVisible: n > 0,
-                label: Text('$n'),
-                child: const Icon(Icons.notifications_outlined),
-              ),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const NotificationsScreen())),
-            ),
-          ),
+          // Bell: notification centre (every push + local alert for this user).
+          const NotificationBell(),
           // Compact shift switch - full controls live in a bottom sheet so
           // the Task Queue body (and the stats card) never gets pushed down.
           _shiftPill(),

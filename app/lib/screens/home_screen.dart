@@ -19,6 +19,7 @@ import 'couriers_screen.dart';
 import 'track_screen.dart';
 import '../widgets/tutorial_sheet.dart';
 import '../ui/app_spinner.dart';
+import '../ui/notification_bell.dart';
 
 class HomeScreen extends StatelessWidget {
   final VoidCallback onOpenCouriers;
@@ -100,6 +101,7 @@ class HomeScreen extends StatelessWidget {
             Expanded(
               child: Text('DropOff', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: scaleText(context, 25), fontWeight: FontWeight.w900, letterSpacing: -0.7)),
             ),
+            const NotificationBell(),
             IconButton(
               tooltip: 'Account',
               onPressed: () => _openAccount(context),

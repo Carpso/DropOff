@@ -14,6 +14,7 @@ import '../ui/app_spinner.dart';
 import '../ui/admin_user_detail_sheet.dart';
 import '../ui/admin_map_console.dart';
 import '../ui/admin_team_codes.dart';
+import '../ui/notification_bell.dart';
 
 /// Normalise ANY worker list into real maps. A single malformed element used
 /// to throw a TypeError inside setState and wedge the console on a spinner.
@@ -268,6 +269,7 @@ class _AdminScreenState extends State<AdminScreen> {
       appBar: AppBar(
         title: Text(_financeOnly ? 'Finance console' : 'Admin console', style: const TextStyle(fontWeight: FontWeight.w900)),
         actions: [
+          const NotificationBell(),
           if (_role == 'cfo')
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
