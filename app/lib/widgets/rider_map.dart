@@ -5,15 +5,11 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:http/http.dart' as http;
-import 'package:pmtiles/pmtiles.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
-import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 
-import '../data/map_theme_layers.dart';
-import '../data/map_tile_cache.dart';
+import '../data/map_assets_cache.dart';
 import '../data/map_tile_sources.dart';
 import '../data/route_arrows.dart';
 import '../data/dropoff_api.dart';
@@ -102,17 +98,14 @@ class RiderMap extends StatefulWidget {
     this.city,
   });
 
-  static const String tileUrl =
-      'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/region-zm-zw-mw-mz.pmtiles';
+  static const String tileUrl = kRegionalTileUrl;
   /// High-detail Lusaka archive from the SAME bucket (z0-16, clipped to the
   /// city). Street-level zoom in Lusaka comes from here; the regional file
   /// still covers the rest of Zambia/Zimbabwe/Malawi/Mozambique.
-  static const String lusakaTileUrl =
-      'https://pub-f3c14b5846eb4de487b036d5a6d6a760.r2.dev/tiles/lusaka-z0-16.pmtiles';
+  static const String lusakaTileUrl = kLusakaTileUrl;
   /// Lusaka rectangle read from that archive's own PMTiles header
   /// (south, west, north, east).
-  static const MapBounds lusakaBounds =
-      MapBounds(south: -15.78, west: 27.66, north: -15.02, east: 28.62);
+  static const MapBounds lusakaBounds = kLusakaBounds;
   /// Map label assets (glyphs + sprites) mirrored into OUR R2 bucket. Nothing
   /// on the map reaches protomaps.github.io or any other external host.
   static const String labelAssetBase =
@@ -154,123 +147,18 @@ class _MapAssets {
 class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin {
   late Future<_MapAssets> _assets = _loadAssets();
 
-  /// Open the basemap without ever failing the screen. Each part degrades
-  /// independently, and the real error is reported so onboarding support can
-  /// see it (the old code swallowed everything into a generic message).
-  Future<_MapAssets> _loadAssets() async {
-    String? error;
-    // PMTiles reads via HTTP Range. Some mobile networks / VPNs / Private DNS
-    // setups answer 200 instead of 206 or strip Content-Range. Open BOTH
-    // archives independently and in parallel: the 30 MB Lusaka file is small
-    // enough to work where the 1.5 GB regional file fails, and onboarding is
-    // Lusaka-first. The PMTiles HTTP client has no timeout of its own, so cap
-    // each open - the old code could spin on the spinner forever.
-    Future<VectorTileProvider?> openOne(String url, Duration timeout) async {
-      for (var attempt = 0; attempt < 2; attempt++) {
-        try {
-          return await PmTilesVectorTileProvider.fromSource(url).timeout(timeout);
-        } catch (e) {
-          debugPrint('RiderMap could not open $url (attempt ${attempt + 1}): $e');
-          error = '${error ?? ''} ${Uri.parse(url).pathSegments.last}: $e';
-          if (attempt == 0) await Future<void>.delayed(const Duration(milliseconds: 250));
-        }
-      }
-      return null;
-    }
-    Future<VectorTileProvider?> openWithFallback(List<String> urls, Duration timeout) async {
-      for (final url in urls) {
-        final p = await openOne(url, timeout);
-        if (p != null) return p;
-      }
-      return null;
-    }
-
-    const altAssetsBase = 'https://pub-d23651cb1a9d491f998c73094d54f379.r2.dev';
-    final regionalUrls = <String>[
-      RiderMap.tileUrl,
-      '$altAssetsBase/region-zm-zw-mw-mz.pmtiles',
-    ];
-    final lusakaUrls = <String>[
-      RiderMap.lusakaTileUrl,
-      '$altAssetsBase/tiles/lusaka-z0-16.pmtiles',
-    ];
-
-    Future<VectorTileProvider?> openLusakaReliable() async {
-      // OFFLINE-FIRST (owner 2026-11-24): a previously downloaded archive
-      // (MapTileCache) is the best basemap — no network, no Range quirks.
-      try {
-        final cached = await MapTileCache.lusakaArchiveUri();
-        if (cached.scheme == 'file') {
-          final p = await PmTilesVectorTileProvider.fromSource(cached.toString()).timeout(const Duration(seconds: 8));
-          debugPrint('RiderMap: Lusaka from disk cache ($cached)');
-          return p;
-        }
-      } catch (e) {
-        debugPrint('RiderMap: cached Lusaka open failed: $e');
-      }
-      // Prefer a full download for Lusaka (30 MB): Range requests often "open"
-      // but fail to serve tiles on some mobile networks, causing a blank basemap.
-      for (final url in lusakaUrls) {
-        try {
-          final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 45));
-          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-            final archive = await PmTilesArchive.fromBytes(res.bodyBytes);
-            debugPrint('RiderMap: Lusaka full download (${res.bodyBytes.length} bytes) from $url');
-            // Persist so the next run is offline-by-default (Mapbox behaviour).
-            unawaited(MapTileCache.persistBytes(res.bodyBytes));
-            return PmTilesVectorTileProvider.fromArchive(archive);
-          }
-        } catch (e) {
-          debugPrint('RiderMap: Lusaka full download failed for $url: $e');
-        }
-      }
-      // Last resort: range-open (can work where full download is too slow).
-      return openWithFallback(lusakaUrls, const Duration(seconds: 8));
-    }
-
-    final opened = await Future.wait([
-      openWithFallback(regionalUrls, const Duration(seconds: 8)),
-      openLusakaReliable(),
-    ]);
-    VectorTileProvider? regional = opened[0];
-    VectorTileProvider? lusaka = opened[1];
-    VectorTileProvider? provider;
-    if (regional != null && lusaka != null) {
-      provider = CityFirstTileProvider(
-        regional: regional,
-        city: lusaka,
-        cityBounds: RiderMap.lusakaBounds,
+  /// Shared, memoised basemap (owner 2026-11-26): every map on every ride reuses
+  /// the SAME opened archives and parsed theme. The heavy open happens at most
+  /// once per app process — and is warmed while the splash screen is showing.
+  Future<_MapAssets> _loadAssets() => MapAssetsCache.load().then(
+        (b) => _MapAssets(b.provider, b.theme, b.error),
       );
-    } else {
-      // Either archive alone is a usable basemap: city covers Lusaka (where
-      // onboarding starts), regional covers the rest of the country.
-      provider = lusaka ?? regional;
-    }
-    if (provider != null) error = null; // at least one basemap opened
-
-    // The theme JSON ships in the app bundle; its glyphs + sprite templates
-    // point at OUR R2 bucket, so nothing on the map touches another host.
-    dynamic theme;
-    try {
-      final raw = await rootBundle.loadString('assets/map/theme-light-v4.json');
-      final decoded = decodeMapTheme(raw);
-      theme = ProtomapsThemes(
-        glyphs: decoded['glyphs'] as String,
-        sprites: decoded['sprite'] as String,
-      ).build(protomapsLayers(decoded));
-    } catch (e) {
-      error = '${error ?? ''} theme: $e';
-      debugPrint('RiderMap theme load failed: $e');
-    }
-    if (error != null) {
-      CrashReporting.reportCaught('RiderMap basemap degraded', error);
-    }
-    return _MapAssets(provider, theme, error);
-  }
 
   void _retryMap() {
     if (!mounted) return;
-    setState(() => _assets = _loadAssets());
+    setState(() => _assets = MapAssetsCache.reload().then(
+          (b) => _MapAssets(b.provider, b.theme, b.error),
+        ));
   }
   final MapController _mapCtl = MapController();
 

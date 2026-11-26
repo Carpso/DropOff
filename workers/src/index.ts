@@ -914,7 +914,7 @@ app.get('/app/version', async (c) => {
     getSetting(c.env.DB, 'app_update_force'),
     getSetting(c.env.DB, 'app_update_message'),
   ]);
-  const fallback = '0.5.97';
+  const fallback = '0.5.98';
   return c.json({
     latest: (latest?.trim() || fallback),
     minimum: (minimum?.trim() || '0.5.0'),
@@ -5684,9 +5684,19 @@ app.post('/tickets/:id/reply', async (c) => {
   if (ticket.status === 'closed') return c.json({ error: 'ticket_closed' }, 409);
   const b: any = await c.req.json().catch(() => null);
   const body = String(b?.body ?? '').trim().slice(0, 2000);
-  if (!body) return c.json({ error: 'body required' }, 400);
+  if (body.length < 3) return c.json({ error: 'message_too_short' }, 400);
   const gate = await chatSendGate(c, body, phone);
   if (gate) return gate;
+  // Idempotency: a double-tap (or a slow network retry) must not post the
+  // same message twice. Look at the last outgoing message in this thread.
+  const last = await c.env.DB.prepare(
+    `SELECT body, created_at FROM chat_messages WHERE thread_id = ?1 AND sender_phone = ?2
+      ORDER BY id DESC LIMIT 1`,
+  ).bind(id, phone).first<{ body: string; created_at: string }>();
+  if (last && String(last.body).trim() === body) {
+    const t = Date.parse(String(last.created_at).replace(' ', 'T') + 'Z');
+    if (!Number.isNaN(t) && Date.now() - t < 30000) return c.json({ ok: true, duplicate: true });
+  }
   await c.env.DB.prepare(
     `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, 'seller', ?3)`,
   ).bind(id, phone, body).run();
@@ -5701,6 +5711,7 @@ app.post('/tickets/:id/reply', async (c) => {
 });
 
 app.post('/tickets/:id/status', async (c) => {
+  if (await rateLimited(c, 'ticket_status', 20)) return c.json({ error: 'too_many_requests' }, 429);
   const id = Number(c.req.param('id'));
   const phone = c.get('phone');
   const staff = isAdmin(c) || c.get('role') === 'ops';

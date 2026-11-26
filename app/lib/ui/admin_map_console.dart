@@ -159,9 +159,12 @@ class _AdminPlacesCardState extends State<AdminPlacesCard> {
         ]),
         const SizedBox(height: 10),
         TextField(controller: _search, onChanged: (_) => _load(),
-          decoration: InputDecoration(hintText: 'Search a place or phone number', prefixIcon: const Icon(Icons.search, size: 19),
+          decoration: const InputDecoration(
+            hintText: 'Search a place or phone number',
+            prefixIcon: Icon(Icons.search, size: 19),
             isDense: true, filled: true, fillColor: AppColors.canvas,
-            border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(10)), borderSide: BorderSide(color: AppColors.line)))),
+            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(10)), borderSide: BorderSide(color: AppColors.line))),
+        ),
         const SizedBox(height: 10),
         if (pins.isNotEmpty)
           ClipRRect(borderRadius: BorderRadius.circular(12), child: SizedBox(height: 190, child: RiderMap(

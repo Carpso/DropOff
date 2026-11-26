@@ -60,6 +60,7 @@ class _AdminScreenState extends State<AdminScreen> {
   bool _authorized = false;
   bool _superadmin = false;
   String _role = 'admin';
+  String _activeSection = 'Overview';
   bool get _financeOnly => _role == 'cfo';
 
   final _smsPhone = TextEditingController();
@@ -291,47 +292,99 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: _load,
-        child: ListView(
-          controller: _scroll,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+        // Billion-dollar console: on wide screens the cards keep a comfortable
+        // reading width instead of stretching edge-to-edge; on phones they use
+        // the full width with roomier gutters.
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 780),
+            child: ListView(
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
           children: [
             // Section jump (admin tabbed layout, owner 2026-11-25): quick nav
             // across the long card list without scrolling past everything.
             SizedBox(
-              height: 36,
+              height: 40,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 children: [
-                  for (final s in const ['Overview', 'Money', 'Riders', 'Senders', 'Support'])
+                  for (final (s, icon) in const [
+                    ('Overview', Icons.dashboard_outlined),
+                    ('Money', Icons.account_balance_wallet_outlined),
+                    ('Riders', Icons.two_wheeler_outlined),
+                    ('Senders', Icons.people_alt_outlined),
+                    ('Support', Icons.support_agent_outlined),
+                  ])
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: ActionChip(
-                        label: Text(s, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
-                        onPressed: () => _jumpTo(s),
+                      child: ChoiceChip(
+                        avatar: Icon(icon, size: 15),
+                        label: Text(s, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                        selected: _activeSection == s,
+                        selectedColor: AppColors.forest,
+                        backgroundColor: Colors.white,
+                        side: BorderSide(color: AppColors.forest.withValues(alpha: 0.28)),
+                        onSelected: (_) { _activeSection = s; _jumpTo(s); },
                       ),
                     ),
                 ],
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             SizedBox(key: _sectionKeys['Overview'], child: Container(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: AppColors.forest.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.forest.withValues(alpha: 0.25)),
+                gradient: const LinearGradient(
+                  colors: [AppColors.forest, Color(0xFF1C6B52)],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [BoxShadow(color: Color(0x220E3B32), blurRadius: 14, offset: Offset(0, 6))],
               ),
-              child: Row(children: [
-                Icon(_financeOnly ? Icons.account_balance : Icons.admin_panel_settings_outlined, color: AppColors.forest),
-                const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(_financeOnly ? 'Finance (CFO)' : 'Operations overview', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forest)),
-                  const SizedBox(height: 2),
-                  Text(_financeOnly
-                      ? 'Salaries, turnover, payroll run-rate and ZRA filings. Two signatures release money.'
-                      : 'Live stats, security, fraud, depot branches and messaging.',
-                      style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
-                ])),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Container(width: 46, height: 46,
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(14)),
+                    child: Icon(_financeOnly ? Icons.account_balance : Icons.admin_panel_settings_outlined,
+                        color: Colors.white, size: 24)),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('DROPOFF · STAFF CONSOLE',
+                        style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 1.4, color: Color(0xAAFFFFFF))),
+                    const SizedBox(height: 3),
+                    Text(_financeOnly ? 'Finance command centre' : 'Operations command centre',
+                        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -0.3)),
+                  ])),
+                  Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(20)),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.circle, size: 7, color: AppColors.mint),
+                      SizedBox(width: 5),
+                      Text('LIVE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.8, color: Colors.white)),
+                    ])),
+                ]),
+                const SizedBox(height: 12),
+                Text(_financeOnly
+                    ? 'Salaries, turnover, payroll run-rate and ZRA filings. Two signatures release money.'
+                    : 'People, money, riders and support — the whole operation in one place.',
+                    style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 12.5, height: 1.4)),
+                const SizedBox(height: 14),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  for (final e in (_stats ?? const <String, dynamic>{}).entries
+                      .where((e) => e.value is num).take(4))
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(10)),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(e.key.toString().replaceAll('_', ' '),
+                            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xAAFFFFFF))),
+                        const SizedBox(height: 2),
+                        Text(_fmtNum(e.value),
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white)),
+                      ]),
+                    ),
+                ]),
               ]),
             )),
             const SizedBox(height: 16),
@@ -395,7 +448,6 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _ClearAutoCreatedCard(),
               const SizedBox(height: 18),
-              const SizedBox(height: 18),
               const _BookingStrikesCard(),
               const SizedBox(height: 18),
               const _CounterFareRecoveryCard(),
@@ -407,6 +459,8 @@ class _AdminScreenState extends State<AdminScreen> {
               _marketingPushCard(),
             ],
           ],
+        ),
+          ),
         ),
       ),
     );

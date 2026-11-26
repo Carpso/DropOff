@@ -1,5 +1,30 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-26 (fifty-ninth pass) — instant map reuse, robust tickets, roomy admin console
+
+- **Instant map on every ride:** all basemap loading moved into
+  `app/lib/data/map_assets_cache.dart` — ONE memoised future for the PMTiles
+  archives + parsed theme per app process, warmed at splash in `main.dart`.
+  `RiderMap` used to reopen both archives (and could re-run the 30 MB download)
+  on every mount, which is why an already-downloaded map still "reloaded".
+  Retry now calls `MapAssetsCache.reload()`. Lusaka open order is now: disk
+  cache → fast Range header → bounded full download (background persist), so a
+  first open is quick too.
+- **Support tickets:** worker rejects 1-character replies, rate-limits status
+  changes and de-dupes a same-body reply within 30 s (double-tap safety). App:
+  subject/body length limits and counters, plain-language error mapping,
+  15 s live refresh + pull-to-refresh, auto-scroll to newest, selectable/timestamped
+  bubbles, retry banner, and confirm sheets on close/reopen.
+- **Admin console layout:** main list is now centred with a 780 px max width on
+  wide screens and roomier gutters on phones; premium forest-gradient hero with
+  role, LIVE badge and live KPI tiles; section-jump pills carry icons and a
+  selected state. Removed a duplicate spacer.
+- **Checks:** Flutter 89/89, worker vitest 42/42 (4 integration skipped, one
+  flaky sms test passed on rerun), tsc clean, flutter analyze back to the 6 known
+  pre-existing warnings/infos. Release **0.5.98+108** (APK 69.3 MB, AAB 52.9 MB,
+  web `ced476f9`), worker `ef315676-14fd-40e6-ac49-26e7d6e3f9a8`, `/app/version`
+  latest `0.5.98`, minimum `0.5.0`, force off.
+
 ## 2026-11-26 (fifty-eighth pass) — order map/details, curtain routing, MFA, gating, admin map console, promo codes
 
 - **Incoming order card:** new rider-only `GET /jobs/:ref/offer` (assigned rider
