@@ -32,6 +32,9 @@ records; do not quote job/delivery totals until separated from real bookings.)
 - **Structure:** pilot sponsorship / grant, no equity. Fortnightly metrics note
   + sponsor logo on depot flyers. If the investor prefers equity, offer a
   simple SAFE and let them review terms — never offer both in one sentence.
+  A SAFE is a promise of shares LATER at a future priced round (with a cap or
+  discount), not shares today — see the note at the end of this file. If you
+  don't yet have a registered company and cap table, use sponsorship/grant.
 - **Use of funds (estimates; replace bike prices with 3 real quotes):**
 
 | Item | K |
@@ -182,16 +185,53 @@ formally agreed.
 **"Why bikes?"**
 > The three daily depot slots need guaranteed riders. Four brothers are getting
 > licensed; used Suzukis are the cheapest reliable way to make those slots real.
-> We buy the bikes only after the licences clear.
+> We buy the bikes only after the licences clear. Every bike is checked by a
+> mechanic, has transfer papers and third-party cover, and gets a service before
+> its first slot.
 
-**"Yes"**
-> Thank you — genuinely appreciated. I'll send the one-page agreement and the
-> first fortnightly report date today. Your logo goes on the depot flyer and
-> every metrics note.
+**"Why secondhand?"**
+> New Suzukis (~K16–20k each) would eat the whole $5k and leave nothing for
+> marketing. A clean used 100–150cc at ~K9k with a mechanic's check and full
+> papers does the same first-mile job. We buy one, prove the slot works, then
+> add the rest.
 
-**"No"**
-> Understood, thanks for the honest answer. If you know one person who funds
-> early logistics or Zambian founders, a name is enough — I'll do the rest.
+---
+
+## What a SAFE is (plain English, not legal advice)
+
+A **Simple Agreement for Future Equity** is a short contract: an investor gives
+you money **now**, and instead of getting shares today, they get the right to
+shares **later**, usually at your first priced round, at a discounted price or
+up to a **valuation cap**. There is no valuation to argue about today and no
+shares issued now, which is why early investors like it.
+
+- **Grant / sponsorship:** no shares, no repayment — but you owe the sponsor the
+  agreed deliverable (metrics note, logo). Cleanest for a $5k pilot.
+- **SAFE:** converts into shares later. Needs a registered company, a cap table
+  and a lawyer to review the terms — otherwise it can create a promise you
+  can't actually honour.
+- **Convertible note:** same "later shares" idea but it is a loan that converts.
+
+For **$5k with no company structure yet, use sponsorship/grant**. Offer a SAFE
+only when an investor specifically wants equity and you have a lawyer look at
+the paper.
+
+## Buying secondhand bikes — the checklist
+
+Used is fine and is the right call for this budget. Before paying:
+
+1. **Licences first** — no one rides until their licence is issued.
+2. **Papers** — log book / transfer papers in the seller's name, frame and
+   engine numbers matching, no hire-purchase or loan still on the bike, police
+   clearance if available.
+3. **Mechanic inspection** — engine, brakes, tyres, chain, lights (the 06:00
+   slot runs before sunrise), frame for cracks or accident repairs.
+4. **Service immediately** — oil, filters, plugs, brake pads, two spare tubes.
+5. **Third-party cover at minimum**, helmet, hi-vis, phone mount — budget
+   ~K1.5k per rider on top of the bike.
+6. **Asset register** — company owns the bikes; record who has which one.
+   Don't market rider "cover" as insurance — our cover is quoted protection.
+7. **Test ride** and walk away from "too good to be true" deals or missing papers.
 
 ---
 
