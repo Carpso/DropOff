@@ -12,8 +12,10 @@ salaried rider collects every item with a time-stamped camera photo, and the
 item is tracked live on our own self-hosted map through to the chosen courier
 depot or recipient door. We have shipped v0.6.1 of the Android app (offline
 map, turn-by-turn navigator, accept/decline order curtain, MFA, full staff
-console). **We have zero users today** — that is why this is a $5k pilot, not a
-funding round. The money buys four licences, four used Suzuki bikes, a first
+console). **We have seven registered users today, one of them an active
+sender** — that is why this is a $5k pilot, not a funding round. (The D1 ledger
+also holds test records; do not quote job/delivery totals until they are
+separated from real bookings.) The money buys four licences, four used Suzuki bikes, a first
 month of salaries and the marketing push to reach 100 repeat senders in 90 days.
 
 ## The ask
@@ -61,7 +63,7 @@ pitch "cash from other rides" unless that revenue line is formally agreed.
 
 > DropOff: a Zambian delivery app that sends a rider to your door, photographs
 > every item, and tracks it on our own offline map to your chosen courier depot.
-> Four licensed riders onboarding now. Running a 90-day pilot to reach 100 repeat
+> Four licensed riders onboarding now. 7 users, 1 active sender. Running a 90-day pilot to reach 100 repeat
 > senders. Looking for a $5k pilot sponsor.
 > Play Store: https://play.google.com/store/apps/details?id=zm.dropoff.dropoff
 > Web: https://dropoff.carpsosolutions.store
@@ -70,8 +72,8 @@ pitch "cash from other rides" unless that revenue line is formally agreed.
 
 **First DM**
 > Hi [Name] — we spoke a while back about DropOff. Quick update: v0.6.1 is live
-> (offline maps, order curtain, MFA, admin console). Still zero users, so I'm not
-> raising a round — I'm asking for a **$5k pilot sponsorship**: 4 rider licences
+> (offline maps, order curtain, MFA, admin console). We have **7 users, 1 active
+> sender** today, so I'm not raising a round — I'm asking for a **$5k pilot sponsorship**: 4 rider licences
 > (K1,500 each), 4 used Suzuki bikes, first-month salaries and the push to reach
 > 100 repeat senders in 90 days. No equity unless you'd prefer a simple SAFE;
 > you'd get a fortnightly metrics note and your logo on depot flyers.
@@ -98,8 +100,8 @@ pitch "cash from other rides" unless that revenue line is formally agreed.
 > sender's door to their chosen courier depot with salaried riders and our own
 > self-hosted map. v0.6.1 is live on Play
 > (https://play.google.com/store/apps/details?id=zm.dropoff.dropoff) and the web
-> app is at https://dropoff.carpsosolutions.store. We're pre-users, so I'm not
-> pitching a round: I'm looking for a **$5k pilot sponsor** to licence 4 riders,
+> app is at https://dropoff.carpsosolutions.store. With 7 users and 1 active
+> sender, I'm not pitching a round: I'm looking for a **$5k pilot sponsor** to licence 4 riders,
 > buy 4 used bikes and fund a 90-day push to 100 repeat senders. Fortnightly
 > metrics + your logo on depot flyers; no equity unless you'd prefer a SAFE.
 > Open to a 10-minute call?
@@ -107,8 +109,8 @@ pitch "cash from other rides" unless that revenue line is formally agreed.
 ## C. Cold DM — impact fund / accelerator / corporate sponsor
 
 > Hi [Name] — DropOff is a Zambia-built logistics app for door→depot parcel
-> delivery. We've shipped the product but have zero users, so we're running a
-> tightly scoped 90-day pilot rather than raising a round. We need **$5k** for
+> delivery. We've shipped the product; we have 7 users and 1 active sender, so
+> we're running a tightly scoped 90-day pilot rather than raising a round. We need **$5k** for
 > 4 rider licences, 4 used Suzuki bikes, first-month salaries and sender
 > acquisition — target: 100 repeat senders. We report fortnightly and can put
 > your logo on depot flyers. App: https://play.google.com/store/apps/details?id=zm.dropoff.dropoff
@@ -137,8 +139,9 @@ pitch "cash from other rides" unless that revenue line is formally agreed.
 > simple SAFE if you prefer.
 
 **"How many users?"**
-> Zero today — deliberately honest. That's why this is a $5k pilot with a
-> verifiable 100-repeat-sender milestone, not a scale round.
+> Seven registered users, one active sender today — deliberately honest, and
+> the exact reason this is a $5k pilot with a verifiable 100-repeat-sender
+> milestone, not a scale round.
 
 **"Why bikes?"**
 > The 06:00/10:00/14:00 depot slots need guaranteed riders. Four brothers are
