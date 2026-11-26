@@ -211,12 +211,28 @@ class PushService {
     try {
       await Firebase.initializeApp();
       await _ensureLocalInitialized();
-      // The worker sends order alerts as DATA-ONLY (see push.ts) so we render
-      // them here with the max-importance channel, alarm category and
-      // full-screen intent. Other pushes already have a system notification
-      // posted by FCM — showing another here would double-post in the shade.
+      // An order is the one alert that must ring and wake the phone. Try to
+      // start the native looping alarm from the background isolate too (it
+      // works when the app was merely backgrounded); the FCM system
+      // notification above covers the killed/force-stopped case.
+      final data = Map<String, dynamic>.from(message.data);
+      final kind = _kindOf(data);
+      final isOrder = kind.contains('assign') || kind == 'new_order' ||
+          kind == 'trip_transferred' || kind == 'claim_available' || kind == 'sos';
+      if (isOrder) {
+        unawaited(OrderAlert.start(
+          ref: _str(data['job_ref']) ?? '',
+          title: message.notification?.title ?? _str(data['title']) ?? 'New delivery',
+          body: message.notification?.body ?? _str(data['body']) ?? '',
+          address: _str(data['pickup_address']) ?? '',
+          eta: _str(data['eta_minutes']) ?? '',
+          fee: _str(data['fee']) ?? '',
+        ));
+      }
       if (message.notification == null) {
-        await _show(message.data, message.notification?.title, message.notification?.body);
+        // Data-only fallback: this local notification carries the full-screen
+        // intent that wakes the screen like an incoming call.
+        await _show(data, message.notification?.title, message.notification?.body);
       }
     } catch (_) {}
   }

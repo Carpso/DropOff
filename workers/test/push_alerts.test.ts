@@ -21,7 +21,7 @@ describe('new-order push alarm', () => {
     expect(isOrderAlert('status')).toBe(false);
   });
 
-  it('sends orders as high-priority data-only so the app can render the alarm', () => {
+  it('sends orders as a max-priority notification plus alarm data', () => {
     const msg = buildFcmMessage('fcm-token', {
       title: 'New delivery assigned',
       body: 'Job DRO-1 is waiting',
@@ -29,14 +29,21 @@ describe('new-order push alarm', () => {
     }) as any;
     const m = msg.message;
     expect(m.token).toBe('fcm-token');
-    expect(m.notification).toBeUndefined(); // FCM must not post its own quiet notification
+    // The system notification wakes the phone even if the app is killed.
+    expect(m.notification).toEqual({
+      title: 'New delivery assigned', body: 'Job DRO-1 is waiting',
+    });
     expect(m.data).toEqual({
       job_ref: 'DRO-1', kind: 'rider_assigned',
       title: 'New delivery assigned', body: 'Job DRO-1 is waiting',
     });
     expect(m.android.priority).toBe('high');
     expect(m.android.ttl).toBe('300s'); // stale orders must not ring later
-    expect(m.android.notification).toBeUndefined(); // app renders the alarm + full-screen intent
+    expect(m.android.notification.channel_id).toBe('dropoff_orders');
+    expect(m.android.notification.notification_priority).toBe('PRIORITY_MAX');
+    expect(m.android.notification.visibility).toBe('PUBLIC');
+    expect(m.android.notification.default_sound).toBe(true);
+    expect(m.android.notification.default_vibrate_timings).toBe(true);
   });
 
   it('keeps the system notification for non-order pushes', () => {

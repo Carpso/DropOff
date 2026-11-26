@@ -78,6 +78,11 @@ class OrderAlertService : Service() {
     private var ringtone: Ringtone? = null
     private var vibrator: Vibrator? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var screenWakeLock: PowerManager.WakeLock? = null
+    private val releaseScreenWake = Runnable {
+        try { if (screenWakeLock?.isHeld == true) screenWakeLock?.release() } catch (_: Throwable) {}
+        screenWakeLock = null
+    }
     private val handler = Handler(Looper.getMainLooper())
     private val timeoutStop = Runnable { stopEverything() }
 
@@ -111,6 +116,7 @@ class OrderAlertService : Service() {
 
         startRinging()
         startVibrating()
+        wakeScreen()
         handler.removeCallbacks(timeoutStop)
         handler.postDelayed(timeoutStop, RING_TIMEOUT_MS)
         return START_NOT_STICKY
@@ -121,6 +127,8 @@ class OrderAlertService : Service() {
         stopRinging()
         stopVibrating()
         releaseWake()
+        handler.removeCallbacks(releaseScreenWake)
+        releaseScreenWake.run()
         super.onDestroy()
     }
 
@@ -128,11 +136,35 @@ class OrderAlertService : Service() {
         stopRinging()
         stopVibrating()
         releaseWake()
+        handler.removeCallbacks(releaseScreenWake)
+        releaseScreenWake.run()
         try {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         } catch (_: Throwable) {
         }
         stopSelf()
+    }
+
+    /**
+     * Turn the screen on for a few seconds, like an incoming call (owner
+     * 2026-11-26: orders were only visible after the rider opened the app).
+     * A full-screen-intent notification is the primary path; this is the
+     * extra kick for OEM builds that ignore it while the phone is asleep.
+     */
+    private fun wakeScreen() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            @Suppress("DEPRECATION")
+            val wl = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "DropOff:orderWake",
+            )
+            wl.acquire(5_000L)
+            screenWakeLock = wl
+            handler.removeCallbacks(releaseScreenWake)
+            handler.postDelayed(releaseScreenWake, 5_000L)
+        } catch (_: Throwable) {
+        }
     }
 
     /* ------------------------------- ringing ------------------------------ */
@@ -218,10 +250,11 @@ class OrderAlertService : Service() {
         val existing = manager.getNotificationChannel(CHANNEL_ID)
         if (existing == null) {
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "DropOff — New orders", NotificationManager.IMPORTANCE_HIGH).apply {
+                NotificationChannel(CHANNEL_ID, "DropOff — New orders", NotificationManager.IMPORTANCE_MAX).apply {
                     description = "A new delivery is waiting — opens straight to your Task Queue."
                     enableVibration(true)
                     setBypassDnd(true)
+                    enableLights(true)
                 },
             )
         }

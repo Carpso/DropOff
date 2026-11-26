@@ -103,38 +103,38 @@ export function androidChannelId(kind: string): string {
 export function buildFcmMessage(token: string, payload: PushPayload): Record<string, unknown> {
   const kind = `${payload.data?.['kind'] ?? ''}`.toLowerCase();
   const orderAlert = isOrderAlert(kind);
-  // AN ORDER MUST RING (owner 2026-11-23): FCM's own notification payload
-  // cannot carry an Android full-screen intent or the `alarm` category, and
-  // its default notification priority is silent-ish. For orders we send a
-  // HIGH-PRIORITY DATA-ONLY message so the app's background isolate renders
-  // it with the max-importance `dropoff_orders` channel, sound, vibration and
-  // full-screen intent. Every other push keeps the system notification
-  // (guaranteed curtain post even if the app is force-stopped).
-  // Title/body travel in data for the local renderer.
+  // AN ORDER MUST WAKE THE PHONE (owner 2026-11-26): FCM's own notification
+  // payload cannot carry a full-screen intent, but it IS what Android treats
+  // as a high-priority incoming call when the app is killed. So orders get a
+  // system notification (wake + heads-up) AND data (title/body + job details)
+  // for the app's local full-screen alarm and looping ring. Data-only used to
+  // arrive only after the rider opened the app on aggressive OEM builds.
   const data: Record<string, string> = {
     ...(payload.data ?? {}),
     ...(orderAlert ? { title: payload.title, body: payload.body } : {}),
   };
+  // A new order gets BOTH: FCM's own high-priority notification (so Android
+  // wakes the phone and shows the heads-up even when the app is killed or the
+  // data callback is delayed by an OEM power manager) AND the data payload that
+  // lets the app start the looping alarm + full-screen curtain. Sending only
+  // data meant some riders saw an order only after they opened the app.
+  const notificationPriority = orderAlert ? 'PRIORITY_MAX' : 'PRIORITY_HIGH';
   return {
     message: {
       token,
-      ...(orderAlert ? {} : { notification: { title: payload.title, body: payload.body } }),
+      notification: { title: payload.title, body: payload.body },
       data,
       android: {
         priority: 'high',
         // A job that arrived 20 minutes ago is not an alarm.
         ...(orderAlert ? { ttl: '300s' } : {}),
-        // Order alerts are data-only so the app background isolate can render
-        // a max-importance full-screen alarm notification. Other pushes keep a
-        // system notification for reliable curtain delivery.
-        ...(orderAlert ? {} : {
-          notification: {
-            channel_id: androidChannelId(kind),
-            notification_priority: 'PRIORITY_HIGH',
-            visibility: 'PUBLIC',
-            default_sound: true,
-          },
-        }),
+        notification: {
+          channel_id: androidChannelId(kind),
+          notification_priority: notificationPriority,
+          visibility: 'PUBLIC',
+          default_sound: true,
+          default_vibrate_timings: true,
+        },
       },
       apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default', ...(orderAlert ? { 'content-available': 1 } : {}) } } },
     },

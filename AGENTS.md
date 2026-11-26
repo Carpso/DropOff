@@ -1,5 +1,33 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-26 (sixtieth pass) — no in-app update nag, orders wake the phone
+
+- **Update reminder removed from app open:** the splash no longer calls
+  `AppUpdateService.checkAndShow(context)`. Updates will be announced by push;
+  the curtain/service endpoint stay in place for a future admin-triggered
+  rollout only.
+- **Order pushes wake the phone (owner: orders only appeared after opening the
+  app):** `buildFcmMessage()` now sends order alerts as a HIGH-PRIORITY
+  **notification + data** message: FCM's own heads-up on the `dropoff_orders`
+  channel (`PRIORITY_MAX`, sound + vibration, public, 300 s TTL) wakes and
+  shows the curtain even when the app is killed, while the data payload still
+  drives the app's full-screen alarm + Accept/Decline actions. Data-only alone
+  was delayed/dropped by OEM power managers.
+- **Background handler** now also tries to start the native looping ring for an
+  order while the app is merely backgrounded; it keeps the data-only local
+  notification fallback (with full-screen intent) for any provider that drops
+  the notification payload.
+- **Native `OrderAlertService`:** fresh `dropoff_orders` channels are created at
+  IMPORTANCE_MAX with lights, and an incoming order briefly takes a
+  `SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP` (5 s) so the screen actually
+  turns on, like a call.
+- **Checks:** Flutter 89/89, worker vitest 42/42 (4 integration skipped; a
+  network-flaky sms test passed on rerun), tsc clean, flutter analyze back to
+  the 6 known pre-existing warnings/infos. Release **0.5.99+109** (APK 69.3 MB,
+  AAB 52.9 MB, web `e35aa079`), worker
+  `5a3f41d9-ec02-4fef-9e6f-ee6c7b656113`, `/app/version` latest `0.5.99`,
+  minimum `0.5.0`, force off.
+
 ## 2026-11-26 (fifty-ninth pass) — instant map reuse, robust tickets, roomy admin console
 
 - **Instant map on every ride:** all basemap loading moved into
