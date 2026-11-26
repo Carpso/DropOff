@@ -914,7 +914,7 @@ app.get('/app/version', async (c) => {
     getSetting(c.env.DB, 'app_update_force'),
     getSetting(c.env.DB, 'app_update_message'),
   ]);
-  const fallback = '0.5.99';
+  const fallback = '0.6.0';
   return c.json({
     latest: (latest?.trim() || fallback),
     minimum: (minimum?.trim() || '0.5.0'),
@@ -4380,34 +4380,47 @@ app.post('/jobs/:ref/events', async (c) => {
   }
   if (dbStatements.length) await c.env.DB.batch(dbStatements);
 
-  // Auto-mark in the parcel chat on every major milestone (everyone watches,
-  // no typing required). Executes only after the canonical events commit has
-  // landed — these are derived from `status` set by the authorized caller,
-  // and the message is always labelled SYSTEM (no fake user).
-  // Route-aware SYSTEM messages — never claim a hard-coded city when the job
-  // is happening anywhere else. Branch beats city beats generic.
+  // Context-aware milestone updates — never a raw "SYSTEM:" line. The rider,
+  // sender and recipient see WHAT happened to THEIR item and WHERE; the same
+  // human sentence is stored in the thread and shown in the push, so the chat
+  // and the notification never disagree. Branch beats city beats generic.
   const routeCity = (job.branch?.trim() ? job.branch : null) ?? job.dest_city?.trim() ?? job.to_city?.trim() ?? job.from_city?.trim() ?? null;
   const originCity = job.from_city?.trim() || null;
   const destCity = job.dest_city?.trim() || job.to_city?.trim() || null;
   const itemName = itemNameOf(job);
   const legDest = legDestinationOf(job);
   const isCollectionJob = String(job.service ?? '') === 'collection';
+  const milestoneTitle = (() => {
+    switch (status) {
+      case 'rider_assigned': return 'Your rider is on the way';
+      case 'picked_up': return `${itemName} collected`;
+      case 'at_depot': return `${itemName} at the depot`;
+      case 'departed': return `${itemName} on the move`;
+      case 'arrived': return `${itemName} arrived`;
+      case 'delivered': return `${itemName} delivered`;
+      case 'ready_for_collection': return `${itemName} ready for collection`;
+      default: return 'DropOff update';
+    }
+  })();
   const chatEvent = (() => {
     switch (status) {
-      case 'rider_assigned': return `SYSTEM: Rider is on the way to the pickup${originCity ? ` in ${originCity}` : ''} — ${itemName} handoff in progress.`;
+      case 'rider_assigned': return `Your DropOff rider is heading to the pickup${originCity ? ` in ${originCity}` : ''} — ${itemName} handoff is next.`;
       case 'picked_up':
-        return `SYSTEM: ${itemName} picked up by the rider — en route to ${legDest}.`;
+        return `Your ${itemName} was picked up by the rider and is on the way to ${legDest}.`;
       case 'at_depot':
         return isCollectionJob
-          ? `SYSTEM: ${itemName} collected from the depot — en route to the recipient's door.`
-          : `SYSTEM: ${itemName} dropped at ${legDest} — awaiting lodgement.`;
+          ? `Your ${itemName} was collected from the depot and is heading to the recipient's door.`
+          : `Your ${itemName} reached ${legDest} and is waiting at the depot.`;
       case 'departed':
-        return `SYSTEM: ${itemName} dispatched from ${originCity ?? 'the depot'} to ${destCity ?? legDest}.`;
+        return `Your ${itemName} left ${originCity ?? 'the depot'} and is on the way to ${destCity ?? legDest}.`;
       case 'arrived':
-        return `SYSTEM: ${isCollectionJob ? `${itemName} arrived at the recipient's door — ready for handover.` : `${itemName} arrived at ${destCity ?? routeCity ?? legDest} — awaiting collection.`}`;
-      case 'delivered':      return `SYSTEM: ${itemName} delivered — journey complete.`;
+        return isCollectionJob
+          ? `Your ${itemName} is at the recipient's door, ready for handover.`
+          : `Your ${itemName} arrived in ${destCity ?? routeCity ?? legDest} and is awaiting collection.`;
+      case 'delivered':
+        return `Your ${itemName} was delivered — your DropOff journey is complete. Thank you.`;
       case 'ready_for_collection':
-        return `SYSTEM: ${itemName} ready for collection at ${legDest}.`;
+        return `Your ${itemName} is ready for collection at ${legDest}.`;
       default: return '';
     }
   })();
@@ -4415,15 +4428,18 @@ app.post('/jobs/:ref/events', async (c) => {
     try {
       const threadId = await getOrCreateJobThread(c.env, job.id);
       await c.env.DB.prepare(
-        `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, ?3, ?4)`,
-      ).bind(threadId, 'dropoff', 'ops', chatEvent).run();
-      c.executionCtx.waitUntil(notifyChatParticipants(c.env, { id: threadId }, job, '', chatEvent).catch(() => {}));
+        `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, 'ops', ?3)`,
+      ).bind(threadId, 'dropoff', chatEvent).run();
+      c.executionCtx.waitUntil(notifyChatParticipants(
+        c.env, { id: threadId }, job, '', chatEvent,
+        { title: `DropOff · ${milestoneTitle}`, kind: 'job_update', job_ref: String(job.ref ?? '') },
+      ).catch(() => {}));
       // Recipient confirmed by handing over their OTP — that IS the confirmation.
       // The parcel is with the recipient, so the chat closes itself and archives;
       // every participant keeps the full history forever, read-only.
       if (status === 'delivered' && doorVerified) {
         try {
-          const closedMsg = `SYSTEM: Delivery confirmed — chat closed & archived. Everyone keeps the full history, read-only.`;
+          const closedMsg = `Delivery confirmed. This conversation is now read-only — the full history stays here for everyone.`;
           await c.env.DB.prepare(
             `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, 'dropoff', 'ops', ?2)`,
           ).bind(threadId, closedMsg).run();
@@ -4473,6 +4489,11 @@ app.post('/jobs/:ref/events', async (c) => {
   ).bind(job.id).first();
   if (status && ['delivered', 'ready_for_collection', 'completed'].includes(status) && Number((updated as any)?.paid) === 1) {
     c.executionCtx.waitUntil(rewardReferralOnBooking(c.env, job.id, String(job.sender_phone ?? '')).catch(() => {}));
+  }
+  // Durable per-ride snapshot: the whole job dossier is copied to R2 the
+  // moment a ride completes, independent of the nightly system dump.
+  if (status && ['delivered', 'ready_for_collection', 'completed'].includes(status)) {
+    c.executionCtx.waitUntil(backupCompletedRide(c.env, job.id).catch(() => {}));
   }
   // FCM push to the sender — status transitions are the parcel's whole story.
   if (status && updated) {
@@ -5445,7 +5466,10 @@ async function markThreadRead(env: Env, threadId: number, phone: string): Promis
   ).bind(threadId, phone, last?.m ?? 0).run();
 }
 
-async function notifyChatParticipants(env: Env, thread: any, job: any, fromPhone: string, preview: string): Promise<void> {
+async function notifyChatParticipants(
+  env: Env, thread: any, job: any, fromPhone: string, preview: string,
+  opts?: { title?: string; kind?: string; job_ref?: string },
+): Promise<void> {
   const targets = new Set<string>();
   if (job) {
     if (job.sender_phone) targets.add(job.sender_phone);
@@ -5460,8 +5484,18 @@ async function notifyChatParticipants(env: Env, thread: any, job: any, fromPhone
     if (op) targets.add(op);
   }
   targets.delete(fromPhone);
+  const title = opts?.title ?? 'DropOff support replied';
+  const kind = opts?.kind ?? 'chat';
   for (const t of targets) {
-    await sendToPhone(env, t, { title: 'New DropOff support reply', body: preview, data: { kind: 'chat', thread_id: String(thread?.id ?? '') } });
+    await sendToPhone(env, t, {
+      title,
+      body: preview,
+      data: {
+        kind,
+        thread_id: String(thread?.id ?? ''),
+        ...(opts?.job_ref ? { job_ref: opts.job_ref } : {}),
+      },
+    });
   }
 }
 
@@ -5648,7 +5682,8 @@ app.post('/tickets', async (c) => {
   ).bind(ticketId, phone, body).run();
   await markThreadRead(c.env, ticketId, phone);
   c.executionCtx.waitUntil(
-    notifyChatParticipants(c.env, { id: ticketId, phone }, null, phone, `New ticket: ${subject}`).catch(() => {}),
+    notifyChatParticipants(c.env, { id: ticketId, phone }, null, phone, `New ticket: ${subject}`,
+      { title: 'New support ticket' }).catch(() => {}),
   );
   return c.json({ ticket_id: ticketId, thread_id: ticketId, ok: true }, 201);
 });
@@ -9418,7 +9453,7 @@ async function dispatchToNearestRider(
     // event also drives the tracking page's "Rider assigned" timeline step.
     await env.DB.prepare(
       `INSERT INTO job_events (job_id, status, note) VALUES (?1, 'rider_assigned', ?2)`,
-    ).bind(job.id, `SYSTEM: nearest available rider auto-assigned — ${pick.rider.full_name} (${round2(pick.km)} km away, ETA ~${etaMin} min).`).run();
+    ).bind(job.id, `Auto-assigned to the nearest available rider — ${pick.rider.full_name} (${round2(pick.km)} km away, ETA ~${etaMin} min).`).run();
     await sendToPhone(env, job.sender_phone, {
       title: 'Rider assigned',
       body: `Rider ${pick.rider.full_name} (${pick.rider.vehicle}) is heading to ${String(job.service ?? '') === 'collection' ? 'the depot to collect your item' : 'your pickup'} — track live in Bookings.`,
@@ -12371,7 +12406,7 @@ app.post('/admin/jobs/:ref/delete', async (c) => {
       statements.push(c.env.DB.prepare(`UPDATE chat_threads SET status = 'closed', updated_at = datetime('now') WHERE id = ?1`).bind(t.id));
       statements.push(c.env.DB.prepare(
         `INSERT INTO chat_messages (thread_id, sender_phone, sender_role, body) VALUES (?1, ?2, 'ops', ?3)`,
-      ).bind(t.id, 'dropoff', `SYSTEM: Booking ${row.ref} was deleted by an admin. This request is closed.`));
+      ).bind(t.id, 'dropoff', `Booking ${row.ref} was removed by an admin. This request is now closed.`));
     }
   } catch { /* ticket hygiene never blocks the deletion */ }
   await c.env.DB.batch(statements);
@@ -14462,12 +14497,28 @@ async function dumpTable(env: Env, table: string): Promise<string | null> {
   } catch { return null; }
 }
 
-async function backupAppData(env: Env): Promise<{ ok: string[]; skipped: string[]; manifest_key?: string }> {
-  if (!env.BACKUPS) return { ok: [], skipped: [] };
-  const tables = ['auth_users','jobs','payments','wallets','wallet_ledger','subscriptions',
-    'recurring_plans','referrals','riders','couriers','quotes','job_events'];
+async function backupAppData(env: Env): Promise<{ files: string[]; skipped: string[]; manifest_key?: string }> {
+  if (!env.BACKUPS) return { files: [], skipped: [] };
+  // Back up the WHOLE system, not just the money tables: accounts, tickets,
+  // places, ratings, fleet, safety, analytics and settings too. Only Cloudflare's
+  // internal KV emulation table is excluded.
+  const tables = [
+    'admin_money_audit','analytics_events','app_settings','auth_users','booking_strikes',
+    'business_accounts','business_addresses','business_audit_log','business_members',
+    'chat_messages','chat_partner_joins','chat_reads','chat_reports','chat_strikes','chat_threads',
+    'client_crashes','community_pois','courier_branches','couriers','d1_migrations',
+    'device_sessions','email_tokens','error_events','fraud_flags','idempotency_keys',
+    'incentive_programmes','job_events','jobs','lipila_logs','login_attempts','mfa_settings',
+    'otp_codes','pack_codes','parcel_check_feedback','partner_keys','partner_pos','payments',
+    'payouts','platform_disbursements','promo_codes','promo_uses','push_broadcasts','push_tokens',
+    'quotes','rate_hits','rating_reports','ratings','recurring_plans','referrals',
+    'rider_payroll','riders','saved_places','saved_recipients','scheduled_pickups',
+    'security_alerts','sms_broadcasts','sos_events','subscriptions','sweep_run_decisions',
+    'sweep_run_items','sweep_run_stops','sweep_runs','tax_periods','tiers','tracking_tokens',
+    'uptime_checks','user_blocks','wallet_ledger','wallets',
+  ];
   const stamp = new Date(Date.now() + 2 * 3600_000).toISOString().slice(0, 10); // CAT date
-  const ok: string[] = [], skipped: string[] = [];
+  const files: string[] = [], skipped: string[] = [];
   for (const table of tables) {
     const payload = await dumpTable(env, table);
     if (payload == null) { skipped.push(table); continue; }
@@ -14475,12 +14526,48 @@ async function backupAppData(env: Env): Promise<{ ok: string[]; skipped: string[
     const key = `backups/${stamp}/${table}.jsonl.gz`;
     try {
       await env.BACKUPS.put(key, blob, { httpMetadata: { contentType: 'application/gzip' } });
-      ok.push(key);
+      files.push(key);
     } catch { skipped.push(table); }
   }
-  const manifest = JSON.stringify({ date: stamp, ok, skipped, generated_at: new Date().toISOString() });
+  const manifest = JSON.stringify({
+    date: stamp, files, skipped, table_count: tables.length,
+    generated_at: new Date().toISOString(),
+  });
   try { await env.BACKUPS.put(`backups/${stamp}/manifest.json`, manifest, { httpMetadata: { contentType: 'application/json' } }); } catch {}
-  return { ok, skipped, manifest_key: `backups/${stamp}/manifest.json` };
+  return { files, skipped, manifest_key: `backups/${stamp}/manifest.json` };
+}
+
+/** One durable snapshot per completed ride, written the moment it is marked
+ *  delivered (or ready for collection). Idempotent: a duplicate event never
+ *  overwrites the original snapshot. Best-effort — never breaks delivery. */
+async function backupCompletedRide(env: Env, jobId: number): Promise<string | null> {
+  if (!env.BACKUPS || !Number.isFinite(jobId) || jobId <= 0) return null;
+  try {
+    const job = await env.DB.prepare('SELECT * FROM jobs WHERE id = ?1').bind(jobId).first<any>();
+    if (!job) return null;
+    const ref = String(job.ref ?? jobId);
+    const [events, payments, place] = await Promise.all([
+      env.DB.prepare('SELECT * FROM job_events WHERE job_id = ?1 ORDER BY id').bind(jobId).all(),
+      env.DB.prepare('SELECT * FROM payments WHERE job_id = ?1 ORDER BY id').bind(jobId).all(),
+      env.DB.prepare('SELECT token FROM tracking_tokens WHERE job_id = ?1 ORDER BY id DESC LIMIT 1').bind(jobId).first<any>(),
+    ]);
+    const date = new Date(Date.now() + 2 * 3600_000).toISOString().slice(0, 10);
+    const key = `rides/${date}/${ref}.json.gz`;
+    const existing = await env.BACKUPS.head(key).catch(() => null);
+    if (existing) return key; // already snapshotted — event replay is harmless
+    const body = JSON.stringify({
+      ref, backed_up_at: new Date().toISOString(),
+      job, events: events.results ?? [], payments: payments.results ?? [],
+      tracking_token: place?.token ?? null,
+    });
+    await env.BACKUPS.put(key, await gzipBytes(body), {
+      httpMetadata: { contentType: 'application/gzip' },
+      customMetadata: { job_ref: ref, job_id: String(jobId), kind: 'completed_ride' },
+    });
+    return key;
+  } catch {
+    return null; // backup must never fail a delivery
+  }
 }
 
 /* --------------------------- admin: backup on demand ----------------------- */
@@ -14490,7 +14577,24 @@ app.get('/admin/backup-now', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
   if (!c.env.BACKUPS) return c.json({ error: 'backups_not_configured' }, 503);
   const res = await backupAppData(c.env);
-  return c.json({ ...res, ok: true, bucket: 'dropoff-backups' });
+  return c.json({ ok: true, bucket: 'dropoff-backups', ...res });
+});
+
+/** Verify what is actually stored: daily manifests and per-ride snapshots. */
+app.get('/admin/backups', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  if (!c.env.BACKUPS) return c.json({ error: 'backups_not_configured' }, 503);
+  const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? 60) || 60));
+  const daily = await c.env.BACKUPS.list({ prefix: 'backups/', limit });
+  const rides = await c.env.BACKUPS.list({ prefix: 'rides/', limit });
+  return c.json({
+    bucket: 'dropoff-backups',
+    daily_manifests: (daily.objects ?? []).filter((o) => o.key.endsWith('/manifest.json'))
+      .map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded })),
+    ride_snapshots: (rides.objects ?? []).map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded })),
+    daily_files: daily.objects?.length ?? 0,
+    ride_files: rides.objects?.length ?? 0,
+  });
 });
 
 /* ------- prepaid refunds: canceled-before-pickup → back to source momo ----- */

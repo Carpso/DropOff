@@ -1,5 +1,32 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-26 (sixty-first pass) — whole-system backups, per-ride snapshots, context-aware push copy
+
+- **Backup audit:** the 02:00 CAT cron `backupAppData()` already exists in R2
+  (`dropoff-backups`) but only covered 12 tables. It now dumps **all 69 D1
+  tables** (accounts, tickets, places, ratings, fleet, safety, settings, audit
+  logs…), writes a manifest with `files`/`skipped`/`table_count`, and
+  `/admin/backup-now` no longer hides the file list behind `ok: true`.
+  Verified live: **69 files, 0 skipped**, 2 daily manifests.
+- **Per-ride backup (new):** `backupCompletedRide()` writes a gzipped dossier
+  (job + events + payments + tracking token) to `rides/<date>/<ref>.json.gz`
+  the moment a ride is marked delivered/ready/completed. Idempotent via R2
+  `head()` — event replays never overwrite the original; failure never breaks a
+  delivery. `GET /admin/backups` lists daily manifests and ride snapshots.
+  Ride snapshots begin with the next completed ride (none existed at deploy).
+- **Push wording:** the raw `SYSTEM:` milestone lines in job chat and their
+  pushes are gone. Milestones now say what happened to the sender's **own item**
+  and **real place** ("Your Books were picked up by the rider and are on the way
+  to Chibolya depot"), carry a context-aware title
+  (`DropOff · Books delivered`), and use `kind='job_update'` with the job ref so
+  a tap opens the right parcel. Chat closure + auto-assign + admin-delete notes
+  were rewritten the same way; new tickets get a "New support ticket" title.
+- **Checks:** Flutter 89/89, worker vitest 42/42 (4 integration skipped), tsc
+  clean, flutter analyze back to the 6 known pre-existing warnings/infos.
+  Release **0.6.0+110** (APK 69.3 MB, AAB 52.9 MB, web `80d6bf8f`), worker
+  `eaaa043a-5ac2-4204-a17d-0fd67d0e28d9`, `/app/version` latest `0.6.0`,
+  minimum `0.5.0`, force off.
+
 ## 2026-11-26 (sixtieth pass) — no in-app update nag, orders wake the phone
 
 - **Update reminder removed from app open:** the splash no longer calls
