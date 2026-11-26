@@ -362,17 +362,25 @@ void _performOrderAction(AppStore store, String rawRef, String action) {
     return;
   }
   unawaited(() async {
+    await OrderAlert.stop();
     final res = action == 'decline'
         ? await DropOffApi.declineJob(ref)
         : await DropOffApi.acceptJob(ref);
     await store.syncJobsFromServer();
     final c = navigatorKey.currentContext;
     if (c == null || !c.mounted) return;
+    // Curtain answered: go straight to the Task Queue. Never re-open the
+    // full-screen order card asking the rider to accept/decline a second time
+    // (owner 2026-11-26).
+    Navigator.of(c).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const AppShell()),
+      (route) => false,
+    );
     AppToast.show(c, res.ok
         ? (action == 'decline'
             ? 'Declined $ref — it went back to the order board.'
             : 'Order $ref accepted — it is in your Task Queue.')
-        : 'Could not answer $ref — open your Task Queue.');
+        : 'Could not answer $ref — check your Task Queue.');
   }());
 }
 

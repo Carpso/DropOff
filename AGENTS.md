@@ -1,5 +1,48 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-26 (fifty-eighth pass) — order map/details, curtain routing, MFA, gating, admin map console, promo codes
+
+- **Incoming order card:** new rider-only `GET /jobs/:ref/offer` (assigned rider
+  or staff) supplies the real pickup pin, destination, parcels, window, ETA,
+  fee, declared value, vehicle and promo even on a cold start when the push
+  payload is gone. `IncomingOrderScreen` now always renders the DropOff map
+  (pickup + depot pins, straight-line label) and a full details block.
+- **Curtain routing:** answering Accept/Decline from a notification action now
+  `pushAndRemoveUntil(AppShell)` — straight to the Task Queue, never back to
+  the full-screen card asking a second time. In-app decline and "Open Task
+  Queue" do the same.
+- **Bum-press gates:** both resend-4-digit-code paths (step sheet + verification
+  dialog) now require a confirm sheet; admin SMS and push broadcasts require
+  confirmation. No more accidental fresh code / credit spend on a stray tap.
+- **MFA (available to every account, OPT-IN so nobody is locked out):** pure
+  RFC-6238 TOTP module `workers/src/totp.ts` (5 vitest tests, incl. SHA-1 vector),
+  migration `0091_mfa.sql` (`mfa_settings`, hashed recovery codes),
+  `/me/mfa` enroll/confirm/disable + `/auth/mfa/verify-login`. Enrolled accounts
+  get a 5-minute `purpose='mfa'` challenge from BOTH `/auth/login` and
+  `/auth/verify`; the middleware rejects challenge tokens, and only a valid
+  6-digit code (or unused recovery code) exchanges them for a session.
+  Account gets `MfaSettingsCard`; sign-in gets a 6-digit challenge sheet.
+- **Admin map console:** `GET/POST /admin/places`, `POST /admin/places/:id/update`,
+  `DELETE /admin/places/:id` (all admin/ops) and `GET /admin/riders/live`
+  (fresh pins only). App: `AdminPlacesCard` (map, search, add/edit/delete with
+  confirm) and `AdminLiveMapCard` (live rider pins, 30/60/180 min windows,
+  RepaintBoundary PNG snapshot + share) in the admin console.
+- **Promo codes:** `POST /admin/promos/generate` now takes `audience=sender|team`,
+  `discount_pct` (100 = free delivery, lower = percentage reduction) and
+  `uses`; `POST /admin/promos/:code/toggle` switches codes on/off without
+  deleting history. Admin console shows a single "Promo codes" card with
+  audience/discount/uses chips, copy and toggle. Riders see the applied promo
+  on the incoming order card with "your pay is unchanged".
+- **Update check:** `parsePlayStoreVersion()` reads the real version from the
+  public Play listing; `checkAndShow()` takes the higher of Play and
+  `/app/version`, so Download always follows a version actually on the Store.
+  5 unit tests pin the Play HTML shape.
+- **Checks:** Flutter **89/89**, worker vitest **42/42** (4 integration skipped),
+  tsc clean, flutter analyze back to the 6 known pre-existing warnings/infos.
+  Release **0.5.97+107** (APK 69.3 MB, AAB 52.9 MB, web `f44739b0`), worker
+  `f19b2076-98bc-4b55-b133-92452baf9598`, `/app/version` latest `0.5.97`,
+  minimum `0.5.0`, force off.
+
 ## 2026-11-26 (fifty-seventh pass) — owner reset protection, offline map, premium admin Users console
 
 - **Owner/admin password reset protection (owner: "protect it as the app owner"):**

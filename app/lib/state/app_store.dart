@@ -426,12 +426,38 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<bool> confirmOtp(String phone, String code) async {
     final res = await DropOffApi.verifyOtp(phone, code);
+    if (res.ok && res.body['mfa_required'] == true) {
+      pendingMfaChallenge = res.body['challenge'] as String?;
+      lastAuthError = null;
+      return false;
+    }
     if (res.ok) {
+      pendingMfaChallenge = null;
       await _saveSession(token: DropOffApi.token, phone: res.body['phone'] as String? ?? phone, email: null);
       unawaited(PushService.register());
       return true;
     }
     return false;
+  }
+
+  /// Second factor for either login route. The challenge token alone is
+  /// rejected by the API — only this call exchanges it for a real session.
+  String? pendingMfaChallenge;
+
+  Future<bool> completeMfa(String code) async {
+    final challenge = pendingMfaChallenge;
+    if (challenge == null || challenge.isEmpty) return false;
+    final res = await DropOffApi.mfaVerifyLogin(challenge, code);
+    if (!res.ok) {
+      lastAuthError = res.error == 'wrong_code'
+          ? 'That code is wrong or expired — try the current one.'
+          : 'Could not verify that code. Try again.';
+      return false;
+    }
+    pendingMfaChallenge = null;
+    await _saveSession(token: DropOffApi.token, phone: res.body['phone'] as String?, email: _email);
+    unawaited(PushService.register());
+    return true;
   }
 
   /// Email + password account (customer login / first-time registration).
@@ -465,7 +491,13 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
   Future<bool> loginEmail(String email, String password, {bool remember = true}) async {
     final res = await DropOffApi.loginEmail(email, password);
     _captureAuthError(res);
+    if (res.ok && res.body['mfa_required'] == true) {
+      pendingMfaChallenge = res.body['challenge'] as String?;
+      lastAuthError = null;
+      return false;
+    }
     if (res.ok) {
+      pendingMfaChallenge = null;
       await _saveSession(
         token: DropOffApi.token,
         phone: res.body['phone'] as String?,

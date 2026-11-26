@@ -26,6 +26,7 @@ import { PRIVACY_MD, PRIVACY_TITLE, TERMS_MD, TERMS_TITLE, mdToHtml } from './le
 import { filedReceiptTotal, invalidFiledReceipt, parseFiledReceipts } from './receipts';
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor, vehicleClassForParcel } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
+import { generateTotpSecret, otpauthUri, verifyTotp } from './totp';
 import { sendSms } from './sms';
 import { sendToPhone } from './push';
 import {
@@ -546,6 +547,8 @@ app.use('*', async (c, next) => {
   const bearer = (c.req.header('Authorization') ?? '').replace(/^Bearer\s+/, '');
   if (bearer) {
     const claims = await verifyJwtClaims(bearer, c.env.JWT_SECRET);
+    // An MFA challenge is proof of the FIRST factor only — never a session.
+    if (claims && claims.purpose) return c.json({ error: 'mfa_required' }, 401);
     if (claims) {
       // role and token_version live on the account row — a password reset bumps
       // token_version, instantly invalidating every outstanding session
@@ -911,7 +914,7 @@ app.get('/app/version', async (c) => {
     getSetting(c.env.DB, 'app_update_force'),
     getSetting(c.env.DB, 'app_update_message'),
   ]);
-  const fallback = '0.5.96';
+  const fallback = '0.5.97';
   return c.json({
     latest: (latest?.trim() || fallback),
     minimum: (minimum?.trim() || '0.5.0'),
@@ -1671,7 +1674,123 @@ app.post('/auth/verify', async (c) => {
   const acct = await c.env.DB.prepare(
     'SELECT COALESCE(token_version, 0) AS ver FROM auth_users WHERE phone = ?1',
   ).bind(phone).first<{ ver: number }>();
-  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(acct?.ver ?? 0), deviceId(c));
+  const ver = Number(acct?.ver ?? 0);
+  const mfa = await mfaSettings(c.env.DB, phone);
+  if (Number(mfa?.enabled ?? 0) === 1) return c.json(await mfaChallenge(c, phone, ver));
+  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, ver, deviceId(c));
+  return c.json({ ok: true, token, phone });
+});
+
+/* --------------------- TOTP MFA (available to every account) -------------- */
+// Enrollment is opt-in: forcing it on would lock out every existing account
+// that has not scanned a code yet. Once ON, both email/password and phone-OTP
+// sign-in stop at a 5-minute challenge token (purpose='mfa', rejected by the
+// auth middleware) until the 6-digit authenticator code is supplied.
+
+async function mfaSettings(db: D1Database, phone: string): Promise<any | null> {
+  return db.prepare(
+    'SELECT phone, secret, enabled, recovery_codes FROM mfa_settings WHERE phone = ?1',
+  ).bind(phone).first<any>();
+}
+
+async function mfaChallenge(c: any, phone: string, ver: number): Promise<any> {
+  const challenge = await signJwt(
+    phone, c.env.JWT_SECRET, 300, ver, deviceId(c), { purpose: 'mfa' },
+  );
+  return { ok: true, mfa_required: true, challenge, phone };
+}
+
+app.get('/me/mfa', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const row = await mfaSettings(c.env.DB, phone);
+  return c.json({ enabled: Number(row?.enabled ?? 0) === 1, enrolled: Boolean(row?.secret) });
+});
+
+app.post('/me/mfa/enroll', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const existing = await mfaSettings(c.env.DB, phone);
+  if (Number(existing?.enabled ?? 0) === 1) return c.json({ error: 'already_enabled' }, 409);
+  const secret = generateTotpSecret();
+  await c.env.DB.prepare(
+    `INSERT INTO mfa_settings (phone, secret, enabled) VALUES (?1, ?2, 0)
+      ON CONFLICT(phone) DO UPDATE SET secret = excluded.secret, enabled = 0`,
+  ).bind(phone, secret).run();
+  return c.json({
+    ok: true, secret,
+    uri: otpauthUri(secret, phone),
+    note: 'Scan with your authenticator app, then enter the 6-digit code to turn MFA on.',
+  });
+});
+
+app.post('/me/mfa/confirm', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const row = await mfaSettings(c.env.DB, phone);
+  if (!row?.secret) return c.json({ error: 'not_enrolled' }, 404);
+  if (!(await verifyTotp(String(b?.code ?? ''), String(row.secret)))) {
+    return c.json({ error: 'wrong_code' }, 401);
+  }
+  const recovery: string[] = [];
+  for (let i = 0; i < 8; i++) recovery.push(generateEmailToken().slice(0, 10).toUpperCase());
+  const hashes: string[] = [];
+  for (const code of recovery) hashes.push(await hashOtp(code, c.env.JWT_SECRET));
+  await c.env.DB.prepare(
+    'UPDATE mfa_settings SET enabled = 1, recovery_codes = ?2 WHERE phone = ?1',
+  ).bind(phone, JSON.stringify(hashes)).run();
+  await raiseAlert(c.env.DB, phone, 'mfa_enabled', 'medium',
+    `Two-factor authentication turned ON for ${phone}. Save the recovery codes.`).catch(() => {});
+  return c.json({ ok: true, recovery_codes: recovery });
+});
+
+app.post('/me/mfa/disable', async (c) => {
+  const phone = c.get('phone');
+  if (!phone) return c.json({ error: 'identity_required' }, 401);
+  const b: any = await c.req.json().catch(() => null);
+  const row = await mfaSettings(c.env.DB, phone);
+  if (!row?.secret) return c.json({ error: 'not_enrolled' }, 404);
+  const code = String(b?.code ?? '').trim().toUpperCase();
+  let ok = await verifyTotp(String(b?.code ?? ''), String(row.secret));
+  const saved = JSON.parse(String(row.recovery_codes ?? '[]')) as string[];
+  const idx = saved.indexOf(await hashOtp(code, c.env.JWT_SECRET));
+  if (!ok && idx >= 0) { ok = true; saved.splice(idx, 1); }
+  if (!ok) return c.json({ error: 'wrong_code' }, 401);
+  await c.env.DB.prepare(
+    'UPDATE mfa_settings SET enabled = 0, recovery_codes = ?2 WHERE phone = ?1',
+  ).bind(phone, JSON.stringify(saved)).run();
+  await raiseAlert(c.env.DB, phone, 'mfa_disabled', 'high',
+    `Two-factor authentication turned OFF for ${phone}.`).catch(() => {});
+  return c.json({ ok: true });
+});
+
+app.post('/auth/mfa/verify-login', async (c) => {
+  if (await rateLimited(c, 'mfa_verify', 10)) return c.json({ error: 'too_many_requests' }, 429);
+  const b: any = await c.req.json().catch(() => null);
+  const chal = String(b?.challenge ?? '');
+  const claims = chal ? await verifyJwtClaims(chal, c.env.JWT_SECRET) : null;
+  if (!claims || claims.purpose !== 'mfa') return c.json({ error: 'invalid_challenge' }, 401);
+  const phone = claims.phone;
+  const row = await mfaSettings(c.env.DB, phone);
+  if (!row || Number(row.enabled ?? 0) !== 1) return c.json({ error: 'mfa_not_enabled' }, 403);
+  const code = String(b?.code ?? '').trim().toUpperCase();
+  let ok = await verifyTotp(String(b?.code ?? ''), String(row.secret));
+  const saved = JSON.parse(String(row.recovery_codes ?? '[]')) as string[];
+  const idx = saved.indexOf(await hashOtp(code, c.env.JWT_SECRET));
+  if (!ok && idx >= 0) { ok = true; saved.splice(idx, 1); }
+  if (!ok) return c.json({ error: 'wrong_code' }, 401);
+  if (idx >= 0) {
+    await c.env.DB.prepare('UPDATE mfa_settings SET recovery_codes = ?2 WHERE phone = ?1')
+      .bind(phone, JSON.stringify(saved)).run();
+  }
+  const acct = await c.env.DB.prepare(
+    'SELECT COALESCE(token_version, 0) AS ver FROM auth_users WHERE phone = ?1',
+  ).bind(phone).first<{ ver: number }>();
+  const token = await signJwt(
+    phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(acct?.ver ?? 0), claims.did,
+  );
+  try { await noteDevice(c.env.DB, phone, claims.did ?? deviceId(c), clientIp(c), userAgent(c)); } catch { /* best-effort */ }
   return c.json({ ok: true, token, phone });
 });
 
@@ -2004,7 +2123,10 @@ app.post('/auth/login', async (c) => {
       { ip, device: deviceId(c), deviceName: deviceName(c), userAgent: ua, email });
   }
 
-  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, Number(user.token_version ?? 0), deviceId(c));
+  const ver = Number(user.token_version ?? 0);
+  const mfa = await mfaSettings(c.env.DB, phone);
+  if (Number(mfa?.enabled ?? 0) === 1) return c.json(await mfaChallenge(c, phone, ver));
+  const token = await signJwt(phone, c.env.JWT_SECRET, 60 * 60 * 24 * 30, ver, deviceId(c));
   return c.json({ ok: true, token, email, phone, full_name: user.full_name });
 });
 
@@ -3364,6 +3486,60 @@ app.get('/jobs/:ref/live', async (c) => {
 // The rider's waybill: everything needed to act (contacts, both addresses,
 // depot/branch, parcels, declared package VALUE) — never a charge, rate or
 // rider payout. The value is needed at the depot counter (owner 2026-11-21).
+/** Rider-facing offer details for the full-screen incoming order card.
+ *  Unlike /jobs/:ref (sender/recipient only), the assigned rider is the
+ *  participant here. No sender phone, recipient phone or depot money fields. */
+app.get('/jobs/:ref/offer', async (c) => {
+  const ref = String(c.req.param('ref') ?? '').trim().toUpperCase();
+  const job = await c.env.DB.prepare(
+    `SELECT j.ref, j.service, j.status, j.pickup_address, j.pickup_lat, j.pickup_lng,
+            j.dest_address, j.dest_city, j.parcels, j.description,
+            j.pickup_window, j.eta_minutes, j.rider_fee_zmw, j.declared_value_zmw,
+            j.vehicle_class, j.from_city, j.created_at,
+            j.promo_code, j.promo_discount_zmw,
+            co.depot_name, co.lat AS depot_lat, co.lng AS depot_lng,
+            r.phone AS rider_phone, s.full_name AS sender_name
+       FROM jobs j
+       LEFT JOIN couriers co ON co.id = j.courier_id
+       LEFT JOIN riders r ON r.id = j.rider_id
+       LEFT JOIN auth_users s ON s.phone = j.sender_phone
+      WHERE j.ref = ?1`,
+  ).bind(ref).first<any>();
+  if (!job) return c.json({ error: 'not_found' }, 404);
+  const phone = c.get('phone');
+  const role = c.get('role');
+  const staff = role === 'ops' || role === 'admin' || isAdmin(c);
+  if (!staff && (!phone || String(job.rider_phone ?? '') !== phone)) {
+    return c.json({ error: 'not_found' }, 404); // no existence leak
+  }
+  return c.json({
+    offer: {
+      ref: job.ref,
+      service: String(job.service ?? ''),
+      status: job.status,
+      pickup_address: String(job.pickup_address ?? ''),
+      pickup_lat: job.pickup_lat,
+      pickup_lng: job.pickup_lng,
+      dest_address: String(job.dest_address ?? ''),
+      dest_city: String(job.dest_city ?? ''),
+      depot_name: String(job.depot_name ?? ''),
+      depot_lat: job.depot_lat,
+      depot_lng: job.depot_lng,
+      parcels: String(job.parcels ?? ''),
+      description: String(job.description ?? ''),
+      pickup_window: String(job.pickup_window ?? ''),
+      eta_minutes: job.eta_minutes,
+      rider_fee_zmw: job.rider_fee_zmw,
+      declared_value_zmw: job.declared_value_zmw,
+      vehicle_class: String(job.vehicle_class ?? 'motorcycle'),
+      from_city: String(job.from_city ?? ''),
+      sender_name: String(job.sender_name ?? ''),
+      promo_code: String(job.promo_code ?? ''),
+      promo_discount_zmw: job.promo_discount_zmw,
+    },
+  });
+});
+
 app.get('/jobs/:ref/waybill', async (c) => {
   const job = await c.env.DB.prepare(
     `SELECT j.ref, j.created_at, j.pickup_at, j.pickup_window, j.eta_minutes, j.status,
@@ -8430,6 +8606,92 @@ app.post('/places', async (c) => {
   return c.json({ ok: true, label });
 });
 
+/* -------- admin saved-place management (map console, owner 2026-11-26) ----- */
+// Staff can review, add, edit and remove any account's saved places. Riders and
+// senders keep their own /places endpoints; these are admin-gated.
+app.get('/admin/places', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const phone = String(c.req.query('phone') ?? '').trim();
+  const q = String(c.req.query('q') ?? '').trim().toLowerCase();
+  const where: string[] = [];
+  const binds: any[] = [];
+  if (phone) { where.push(`phone = ?${binds.length + 1}`); binds.push(phone); }
+  if (q) { where.push(`LOWER(label) LIKE ?${binds.length + 1}`); binds.push(`%${q}%`); }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.id, p.phone, p.label, p.lat, p.lng, p.source, p.used_at, p.created_at,
+            u.full_name AS owner_name
+       FROM saved_places p LEFT JOIN auth_users u ON u.phone = p.phone
+       ${clause} ORDER BY p.used_at DESC, p.id DESC LIMIT 300`,
+  ).bind(...binds).all();
+  return c.json({ places: results ?? [] });
+});
+
+app.post('/admin/places', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  let phone = '';
+  try { phone = normalizeZmPhone(String(b?.phone ?? '')); } catch { /* 400 below */ }
+  const label = String(b?.label ?? '').trim().slice(0, 180);
+  const lat = Number(b?.lat);
+  const lng = Number(b?.lng);
+  if (!phone || !label) return c.json({ error: 'phone and label required' }, 400);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !validZambiaPin(lat, lng)) {
+    return c.json({ error: 'A real pin inside Zambia is required' }, 400);
+  }
+  const res = await c.env.DB.prepare(
+    `INSERT INTO saved_places (phone, label, lat, lng, source, used_at)
+     VALUES (?1, ?2, ?3, ?4, 'admin', datetime('now'))
+     ON CONFLICT(phone, label) DO UPDATE SET
+       lat = excluded.lat, lng = excluded.lng, source = 'admin', used_at = datetime('now')`,
+  ).bind(phone, label, lat, lng).run();
+  return c.json({ ok: true, phone, label, id: res.meta.last_row_id ?? null });
+});
+
+app.post('/admin/places/:id/update', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'invalid_id' }, 400);
+  const b: any = await c.req.json().catch(() => null);
+  const label = String(b?.label ?? '').trim().slice(0, 180);
+  const lat = Number(b?.lat);
+  const lng = Number(b?.lng);
+  if (!label) return c.json({ error: 'label_required' }, 400);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !validZambiaPin(lat, lng)) {
+    return c.json({ error: 'A real pin inside Zambia is required' }, 400);
+  }
+  const res = await c.env.DB.prepare(
+    `UPDATE saved_places SET label = ?2, lat = ?3, lng = ?4, source = 'admin' WHERE id = ?1`,
+  ).bind(id, label, lat, lng).run();
+  if (!res.meta.changes) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ok: true });
+});
+
+app.delete('/admin/places/:id', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'invalid_id' }, 400);
+  const res = await c.env.DB.prepare('DELETE FROM saved_places WHERE id = ?1').bind(id).run();
+  return c.json({ ok: true, deleted: res.meta.changes ?? 0 });
+});
+
+/* -------- admin fleet map: live rider pins (owner 2026-11-26) -------------- */
+// Only riders with a recent GPS fix appear — a stale pin is worse than no pin.
+app.get('/admin/riders/live', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const minutes = Math.min(240, Math.max(1, Number(c.req.query('minutes') ?? 60) || 60));
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, phone, full_name, vehicle, vehicle_class, status, active, on_shift,
+            current_load, capacity, last_lat, last_lng, last_seen_at
+       FROM riders
+      WHERE active = 1 AND last_lat IS NOT NULL AND last_lng IS NOT NULL
+        AND last_lat <> 0 AND last_lng <> 0
+        AND last_seen_at > datetime('now', ?1)
+      ORDER BY last_seen_at DESC LIMIT 300`,
+  ).bind(`-${minutes} minutes`).all();
+  return c.json({ riders: results ?? [], window_minutes: minutes });
+});
+
 app.get('/plans', async (c) => {
   // Driver economics are for drivers and admins only — sellers/customers get
   // the tier catalogue alone. Flags let the app hide dark features (the
@@ -8729,6 +8991,43 @@ app.post('/admin/promos', async (c) => {
        applies_tier=excluded.applies_tier, uses_left=excluded.uses_left, expires_at=excluded.expires_at, active=1`,
   ).bind(code, pct, b?.note ?? null, tier, uses, exp).run();
   return c.json({ ok: true, code, discount_pct: pct });
+});
+
+/* ---------------- admin team codes (free-delivery generator) --------------- */
+app.post('/admin/promos/generate', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  const b: any = await c.req.json().catch(() => null);
+  const uses = Math.min(100, Math.max(1, Math.round(Number(b?.uses ?? 1) || 1)));
+  // 100 = free delivery, anything lower = percentage reduction of the
+  // DropOff charge (the sender still pays any counter fare at the depot).
+  const pct = Math.min(100, Math.max(1, Math.round(Number(b?.discount_pct ?? 100) || 100)));
+  const audience = String(b?.audience ?? 'sender').toLowerCase() === 'team' ? 'team' : 'sender';
+  const note = String(b?.note ?? '').trim().slice(0, 180)
+    || (pct === 100 ? 'Free delivery' : `${pct}% off your DropOff charge`);
+  const bytes = crypto.getRandomValues(new Uint8Array(5));
+  const suffix = [...bytes].map((x) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[x % 32]).join('');
+  const code = `${audience === 'team' ? 'TEAM' : 'SEND'}-${suffix}`;
+  await c.env.DB.prepare(
+    `INSERT INTO promo_codes (code, discount_pct, note, uses_left, active, kind)
+     VALUES (?1, ?2, ?3, ?4, 1, ?5)`,
+  ).bind(code, pct, note, uses, audience).run();
+  await raiseAlert(
+    c.env.DB, String(c.get('phone') ?? ownerPhone(c.env) ?? ''), 'promo_code_generated', 'low',
+    `${audience} promo ${code} generated: ${pct}% off, ${uses} use(s), by ${c.get('phone') ?? 'admin key'}.`,
+  ).catch(() => {});
+  return c.json({ ok: true, code, uses, discount_pct: pct, note, audience, kind: audience });
+});
+
+app.post('/admin/promos/:code/toggle', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'admin_key_required' }, 403);
+  const code = String(c.req.param('code') ?? '').trim().toUpperCase();
+  const b: any = await c.req.json().catch(() => null);
+  const active = b?.active === true ? 1 : 0;
+  const res = await c.env.DB.prepare(
+    'UPDATE promo_codes SET active = ?2 WHERE code = ?1',
+  ).bind(code, active).run();
+  if (!res.meta.changes) return c.json({ error: 'not_found' }, 404);
+  return c.json({ ok: true, code, active: Boolean(active) });
 });
 
 /* ----------------- rider incentive programmes (admin-promoted promos) -------- */

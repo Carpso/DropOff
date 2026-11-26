@@ -318,11 +318,12 @@ class DropOffApi {
     String path, {
     Map<String, dynamic>? body,
     Duration? timeout,
+    bool admin = false,
   }) async {
     if (!enabled) return const ApiResponse(error: 'offline_demo_mode');
     try {
       final res = await http
-          .delete(_uri(path), headers: _headers, body: jsonEncode(body ?? const {}))
+          .delete(_uri(path), headers: admin ? _adminHeaders : _headers, body: jsonEncode(body ?? const {}))
           .timeout(timeout ?? _timeout);
       Map<String, dynamic>? decoded;
       try {
@@ -431,6 +432,11 @@ class DropOffApi {
       return null;
     }
   }
+
+  /// Rider's full-screen order card: pickup coordinates + every detail, even
+  /// on a cold start when the push payload was lost.
+  static Future<Map<String, dynamic>?> jobOffer(String ref) =>
+      get('/jobs/${Uri.encodeComponent(ref)}/offer');
 
   /// Best-effort promo lookup for the booking form (public today, advisory only).
   static Future<Map<String, dynamic>?> checkPromo(String code) =>
@@ -578,7 +584,7 @@ class DropOffApi {
 
   static Future<ApiResponse> verifyOtp(String phone, String code) async {
     final res = await post('/auth/verify', {'phone': phone, 'code': code});
-    if (res.ok) token = res.body['token'] as String?;
+    if (res.ok && res.body['token'] != null) token = res.body['token'] as String?;
     return res;
   }
 
@@ -602,7 +608,7 @@ class DropOffApi {
 
   static Future<ApiResponse> loginEmail(String email, String password) async {
     final res = await post('/auth/login', {'email': email, 'password': password});
-    if (res.ok) token = res.body['token'] as String?;
+    if (res.ok && res.body['token'] != null) token = res.body['token'] as String?;
     return res;
   }
 
@@ -1106,6 +1112,17 @@ class DropOffApi {
   static Future<ApiResponse> setStaffEmail(String phone, String email) =>
       post('/admin/users/me/email', {'phone': phone, 'email': email.trim().toLowerCase()}, admin: true);
 
+  /// TOTP MFA (available to every account, opt-in).
+  static Future<Map<String, dynamic>?> mfaStatus() => get('/me/mfa');
+  static Future<Map<String, dynamic>?> mfaEnroll() => post('/me/mfa/enroll', const {}).then((r) => r.body);
+  static Future<ApiResponse> mfaConfirm(String code) => post('/me/mfa/confirm', {'code': code});
+  static Future<ApiResponse> mfaDisable(String code) => post('/me/mfa/disable', {'code': code});
+  static Future<ApiResponse> mfaVerifyLogin(String challenge, String code) async {
+    final res = await post('/auth/mfa/verify-login', {'challenge': challenge, 'code': code});
+    if (res.ok && res.body['token'] != null) token = res.body['token'] as String?;
+    return res;
+  }
+
   /// Full dossier for one account: jobs, payments, plans, devices, addresses.
   static Future<Map<String, dynamic>?> adminUserDetail(String phone) =>
       getAdmin('/admin/users/${Uri.encodeComponent(phone)}/detail');
@@ -1117,6 +1134,40 @@ class DropOffApi {
 
   /// Last client crashes (deduped per device+stack) for the admin console.
   static Future<Map<String, dynamic>?> adminClientCrashes() => getAdmin('/admin/client-crashes');
+
+  /// Admin map console: every saved place with its owner and pin.
+  static Future<Map<String, dynamic>?> adminPlaces({String? phone, String? q}) =>
+      getAdmin('/admin/places', {
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+        if (q != null && q.isNotEmpty) 'q': q,
+      });
+  static Future<ApiResponse> adminAddPlace(String phone, String label, double lat, double lng) =>
+      post('/admin/places', {'phone': phone, 'label': label, 'lat': lat, 'lng': lng}, admin: true);
+  static Future<ApiResponse> adminUpdatePlace(int id, String label, double lat, double lng) =>
+      post('/admin/places/$id/update', {'label': label, 'lat': lat, 'lng': lng}, admin: true);
+  static Future<ApiResponse> adminDeletePlace(int id) =>
+      delete('/admin/places/$id', admin: true);
+
+  /// Live rider pins for the admin fleet map.
+  static Future<Map<String, dynamic>?> adminLiveRiders({int minutes = 60}) =>
+      getAdmin('/admin/riders/live', {'minutes': '$minutes'});
+
+  /// Admin team codes: generate a single-use free delivery and toggle it.
+  static Future<Map<String, dynamic>?> adminPromos() => getAdmin('/admin/promos');
+  static Future<ApiResponse> adminGeneratePromo({
+    required String audience,
+    required int discountPct,
+    int uses = 1,
+    String? note,
+  }) =>
+      post('/admin/promos/generate', {
+        'audience': audience,
+        'discount_pct': discountPct,
+        'uses': uses,
+        if (note != null) 'note': note,
+      }, admin: true);
+  static Future<ApiResponse> adminTogglePromo(String code, bool active) =>
+      post('/admin/promos/${Uri.encodeComponent(code)}/toggle', {'active': active}, admin: true);
 
   /// Promote/demote an account. Every non-superadmin role is assignable by an
   /// admin; a partner must also carry a courier_id (its depot console).

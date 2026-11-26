@@ -35,10 +35,12 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
   Timer? _ticker;
   bool _expired = false;
   bool _busy = false;
+  Map<String, dynamic> _offer = const {};
 
   @override
   void initState() {
     super.initState();
+    _loadOffer();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       if (DateTime.now().isAfter(_deadline)) {
@@ -63,21 +65,39 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
     return s < 0 ? 0 : s;
   }
 
-  double? get _pickupLat {
-    final v = widget.detail?['pickup_lat'];
-    if (v == null) return null;
-    return double.tryParse('$v');
+  /// The push payload can be missing (cold start / notification replay). The
+  /// assigned rider always has a server-side offer with the real pin, so the
+  /// card never opens without its map and details.
+  Future<void> _loadOffer() async {
+    try {
+      final data = await DropOffApi.jobOffer(widget.jobRef);
+      final offer = data?['offer'];
+      if (mounted && offer is Map) {
+        setState(() => _offer = Map<String, dynamic>.from(offer));
+      }
+    } catch (_) {
+      // The pushed detail is still a usable fallback.
+    }
   }
 
-  double? get _pickupLng {
-    final v = widget.detail?['pickup_lng'];
-    if (v == null) return null;
-    return double.tryParse('$v');
+  double? _coord(List<String> keys) {
+    for (final k in keys) {
+      final v = _offer[k] ?? widget.detail?[k];
+      if (v == null) continue;
+      final d = double.tryParse('$v');
+      if (d != null && d != 0) return d;
+    }
+    return null;
   }
+
+  double? get _pickupLat => _coord(['pickup_lat', 'lat']);
+  double? get _pickupLng => _coord(['pickup_lng', 'lng']);
+  double? get _destLat => _coord(['depot_lat', 'dest_lat']);
+  double? get _destLng => _coord(['depot_lng', 'dest_lng']);
 
   String _read(List<String> keys) {
     for (final k in keys) {
-      final v = widget.detail?[k];
+      final v = _offer[k] ?? widget.detail?[k];
       if (v != null && '$v'.trim().isNotEmpty) return '$v'.trim();
     }
     return '';
@@ -119,7 +139,10 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
     if (res.ok) {
       await AppScope.of(context).syncJobsFromServer();
       if (!mounted) return;
-      Navigator.of(context).maybePop();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const AppShell()),
+        (route) => false,
+      );
       AppToast.show(context, 'Declined — ${widget.jobRef} went back to the order board.');
       return;
     }
@@ -131,7 +154,10 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
 
   void _openQueue() {
     unawaited(OrderAlert.stop());
-    Navigator.of(context).maybePop();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const AppShell()),
+      (route) => false,
+    );
   }
 
   @override
@@ -143,6 +169,21 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
     final fee = _read(['fee', 'rider_fee_zmw']);
     final service = _read(['service']).toLowerCase();
     final isCollection = service == 'collection';
+    final sender = _read(['sender_name']);
+    final fromCity = _read(['from_city']);
+    final pickupWindow = _read(['pickup_window']);
+    final declared = _read(['declared_value_zmw']);
+    final vehicle = _read(['vehicle_class']);
+    final depotName = _read(['depot_name']);
+    final destAddress = _read(['dest_address', 'dest_address']);
+    final promo = _read(['promo_code']);
+    final promoOff = _read(['promo_discount_zmw']);
+    final pickup = (_pickupLat != null && _pickupLng != null)
+        ? LatLng(_pickupLat!, _pickupLng!)
+        : null;
+    final dest = (_destLat != null && _destLng != null)
+        ? LatLng(_destLat!, _destLng!)
+        : null;
 
     return PopScope(
       canPop: false,
@@ -227,21 +268,79 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
                             Text('Deliver to $city',
                                 style: const TextStyle(fontSize: 13, color: AppColors.muted)),
                           ],
-                          if (_pickupLat != null && _pickupLng != null) ...[
+                          if (pickup != null) ...[
                             const SizedBox(height: 12),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(12),
                               child: SizedBox(
-                                height: 120,
+                                height: 150,
                                 child: RiderMap(
-                                  pickup: LatLng(_pickupLat!, _pickupLng!),
+                                  pickup: pickup,
                                   rider: null,
-                                  city: 'Lusaka',
+                                  depot: dest,
+                                  pickupIsDepot: isCollection,
+                                  depotName: depotName.isNotEmpty ? depotName : null,
+                                  route: dest != null ? [pickup, dest] : null,
+                                  routeIsStraightLine: true,
+                                  city: fromCity.isNotEmpty ? fromCity : null,
                                 ),
                               ),
                             ),
+                            const Padding(
+                              padding: EdgeInsets.only(top: 4),
+                              child: Text('Map preview - open Task Queue for turn-by-turn navigation.',
+                                  style: TextStyle(fontSize: 10.5, color: AppColors.muted)),
+                            ),
                           ],
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
+                          // Everything the rider needs to judge the order,
+                          // before accepting (no raw refs in place of copy).
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF6F8F5),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (sender.isNotEmpty)
+                                  _detailLine('From', sender),
+                                if (fromCity.isNotEmpty)
+                                  _detailLine('Origin', fromCity),
+                                if (destAddress.isNotEmpty)
+                                  _detailLine('Destination', destAddress),
+                                if (city.isNotEmpty)
+                                  _detailLine('Drop-off city', city),
+                                if (pickupWindow.isNotEmpty)
+                                  _detailLine('Pickup window', pickupWindow),
+                                if (vehicle.isNotEmpty)
+                                  _detailLine('Vehicle', vehicle == 'car' ? 'Car' : 'Motorcycle'),
+                                if (declared.isNotEmpty)
+                                  _detailLine('Declared value', 'K$declared'),
+                              ],
+                            ),
+                          ),
+                          if (promo.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                              decoration: BoxDecoration(
+                                color: AppColors.amberSoft,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                promoOff.isNotEmpty
+                                    ? 'Promo $promo — sender saves K$promoOff. Your pay is unchanged.'
+                                    : 'Promo $promo applied — your pay is unchanged.',
+                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700,
+                                    color: AppColors.ink),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 14),
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
@@ -331,6 +430,18 @@ class _IncomingOrderScreenState extends State<IncomingOrderScreen> {
       ),
     );
   }
+
+  Widget _detailLine(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(width: 92, child: Text(label,
+              style: const TextStyle(fontSize: 11.5, color: AppColors.muted))),
+          const SizedBox(width: 6),
+          Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700,
+                  color: Color(0xFF11261B)))),
+        ]),
+      );
 
   Widget _pill(IconData icon, String label) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),

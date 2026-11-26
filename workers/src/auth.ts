@@ -47,10 +47,17 @@ export function generateEmailToken(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-interface JwtPayload { phone: string; exp: number; ver?: number; did?: string } // ver = token_version; did = device id
+interface JwtPayload {
+  phone: string;
+  exp: number;
+  ver?: number;
+  did?: string;
+  purpose?: string; // 'mfa' = short-lived challenge, NOT a session
+}
 
 export async function signJwt(
   phone: string, secret: string, ttlSeconds = 60 * 60 * 24 * 30, ver = 0, deviceId?: string,
+  extra?: { purpose?: string },
 ): Promise<string> {
   const header = b64urlJson({ alg: 'HS256', typ: 'JWT' });
   const payload = b64urlJson({
@@ -58,6 +65,7 @@ export async function signJwt(
     exp: Math.floor(Date.now() / 1000) + ttlSeconds,
     ver,
     ...(deviceId ? { did: deviceId } : {}),
+    ...(extra?.purpose ? { purpose: extra.purpose } : {}),
   } satisfies JwtPayload);
   const sig = b64url(await hmac(`${header}.${payload}`, secret));
   return `${header}.${payload}.${sig}`;

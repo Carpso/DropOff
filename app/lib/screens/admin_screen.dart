@@ -12,6 +12,8 @@ import 'bookings_screen.dart' show BookingDetailScreen;
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
 import '../ui/admin_user_detail_sheet.dart';
+import '../ui/admin_map_console.dart';
+import '../ui/admin_team_codes.dart';
 
 /// Normalise ANY worker list into real maps. A single malformed element used
 /// to throw a TypeError inside setState and wedge the console on a spinner.
@@ -154,6 +156,18 @@ class _AdminScreenState extends State<AdminScreen> {
   Future<void> _sendSms({required bool broadcast}) async {
     final body = _smsBody.text.trim();
     if (body.isEmpty) return;
+    // BUM-PRESS GATE (owner 2026-11-26): a broadcast costs real SMS credit and
+    // reaches every account in the audience — never fire it on one stray tap.
+    if (broadcast) {
+      final go = await showConfirmSheet(
+        context,
+        title: 'Text every $_audience account?',
+        message: 'This sends the message above to every $_audience account. It uses real SMS credit and cannot be undone.',
+        confirmLabel: 'Send broadcast',
+        icon: Icons.broadcast_on_personal_outlined,
+      );
+      if (go != true) return;
+    }
     setState(() => _sending = true);
     final res = broadcast
         ? await DropOffApi.adminBroadcast(audience: _audience, message: body)
@@ -176,6 +190,14 @@ class _AdminScreenState extends State<AdminScreen> {
     final t = _pushTitle.text.trim();
     final msg = _pushBody.text.trim();
     if (t.isEmpty || msg.isEmpty) return;
+    final go = await showConfirmSheet(
+      context,
+      title: 'Push every $_pushAudience account?',
+      message: 'This alert goes to every $_pushAudience device. Send it only when you mean to notify everyone.',
+      confirmLabel: 'Send push',
+      icon: Icons.notifications_active_outlined,
+    );
+    if (go != true) return;
     setState(() { _pushSending = true; _pushPreview = '$t\n$msg'; });
     final res = await DropOffApi.adminPushBroadcast(audience: _pushAudience, title: t, body: msg);
     if (!mounted) return;
@@ -349,6 +371,12 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               if (_role == 'admin') ...[
                 SizedBox(key: _sectionKeys['Senders'], child: const _UsersCard()),
+                const SizedBox(height: 18),
+                const AdminPlacesCard(),
+                const SizedBox(height: 18),
+                const AdminLiveMapCard(),
+                const SizedBox(height: 18),
+                const AdminTeamCodesCard(),
                 const SizedBox(height: 18),
               ],
               const _PackCodesCard(),

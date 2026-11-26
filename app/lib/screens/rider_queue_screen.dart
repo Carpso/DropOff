@@ -1468,6 +1468,18 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                   subtitle: const Text('Sender never got it? Send a fresh code to their phone',
                       style: TextStyle(fontSize: 12)),
                   onTap: () async {
+                    // BUM-PRESS GATE (owner 2026-11-26): resending mints a NEW
+                    // code and invalidates the old one, so a stray tap must
+                    // never fire it without an explicit yes.
+                    final go = await showConfirmSheet(
+                      context,
+                      title: 'Send a fresh 4-digit code?',
+                      message: 'A new pickup code goes to the sender and the old code stops working. '
+                          'Only do this when the sender says they never received it.',
+                      confirmLabel: 'Send new code',
+                      icon: Icons.sms_outlined,
+                    );
+                    if (go != true) return;
                     final msg = await _resendPinCode(ref);
                     if (mounted) _snack(msg);
                   },
@@ -1750,6 +1762,15 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                             icon: const Icon(Icons.sms_outlined, size: 16),
                             label: const Text('Sender never got the SMS? Resend a fresh code', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                             onPressed: () async {
+                              final go = await showConfirmSheet(
+                                dctx,
+                                title: 'Send a fresh 4-digit code?',
+                                message: 'The sender gets a new code and the old one stops working. '
+                                    'Only send when they say the SMS never arrived.',
+                                confirmLabel: 'Send new code',
+                                icon: Icons.sms_outlined,
+                              );
+                              if (go != true) return;
                               setDialog(() => resending = true);
                               final msg = await _resendPinCode(ref);
                               if (!dctx.mounted) return;

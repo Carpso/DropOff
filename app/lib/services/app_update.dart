@@ -44,8 +44,32 @@ int compareAppVersions(String a, String b) {
   return 0;
 }
 
+/// Reads the version Google Play publishes in its public listing. The listing
+/// HTML carries the app's own version in a small `[[["0.5.96"]]]` array; it is
+/// not a Formula error, just Play's compact data encoding. Returns null when
+/// Play is unreachable or the shape changes — our server policy still works.
+String? parsePlayStoreVersion(String html) {
+  final m = RegExp(r'\[\[\["(\d+\.\d+\.\d+(?:\.\d+)?)"\]\]+').firstMatch(html);
+  if (m == null) return null;
+  final v = m.group(1);
+  return (v != null && compareAppVersions(v, '0.0.1') > 0) ? v : null;
+}
+
 class AppUpdateService {
   const AppUpdateService._();
+
+  /// Play's own published version (never blocks startup on failure).
+  static Future<String?> playStoreVersion() async {
+    try {
+      final r = await http.get(
+        Uri.parse('https://play.google.com/store/apps/details?id=zm.dropoff.dropoff&hl=en_US&gl=US'),
+      ).timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return null;
+      return parsePlayStoreVersion(r.body);
+    } catch (_) {
+      return null;
+    }
+  }
 
   static Future<AppUpdateInfo?> _fetch() async {
     for (final base in [DropOffApi.baseUrl, DropOffApi.fallbackBaseUrl]) {
@@ -54,7 +78,7 @@ class AppUpdateService {
         if (r.statusCode != 200) continue;
         final data = jsonDecode(r.body) as Map<String, dynamic>;
         return AppUpdateInfo(
-          latest: '${data['latest'] ?? '0.5.96'}',
+          latest: '${data['latest'] ?? '0.5.97'}',
           minimum: '${data['minimum'] ?? '0.5.0'}',
           force: data['force'] == true,
           message: '${data['message'] ?? 'A faster, smoother DropOff is ready.'}',
@@ -68,8 +92,22 @@ class AppUpdateService {
   }
 
   static Future<void> checkAndShow(BuildContext context) async {
-    final info = await _fetch();
-    if (info == null || !context.mounted) return;
+    // Check BOTH our policy endpoint and the live Play listing: Play can have a
+    // newer build than the rollout note, and a "Download" must always mean the
+    // version actually published on the Store.
+    final results = await Future.wait([_fetch(), playStoreVersion()]);
+    AppUpdateInfo? info = results[0] as AppUpdateInfo?;
+    final play = results[1] as String?;
+    if (play != null && (info == null || compareAppVersions(play, info.latest) > 0)) {
+      info = AppUpdateInfo(
+        latest: play,
+        minimum: info?.minimum ?? '0.5.0',
+        force: info?.force ?? false,
+        message: info?.message ?? 'A faster, smoother DropOff is ready.',
+      );
+    }
+    final effective = info;
+    if (effective == null || !context.mounted) return;
     PackageInfo pkg;
     try {
       pkg = await PackageInfo.fromPlatform();
@@ -77,15 +115,15 @@ class AppUpdateService {
       return; // unsupported platform / test harness
     }
     final current = pkg.version;
-    if (compareAppVersions(current, info.latest) >= 0) return;
+    if (compareAppVersions(current, effective.latest) >= 0) return;
     if (!context.mounted) return;
 
-    final required = compareAppVersions(current, info.minimum) < 0;
+    final required = compareAppVersions(current, effective.minimum) < 0;
     await showDialog<void>(
       context: context,
-      barrierDismissible: !required && !info.force,
+      barrierDismissible: !required && !effective.force,
       barrierColor: Colors.black.withValues(alpha: 0.72),
-      builder: (_) => AppUpdateCurtain(info: info, required: required || info.force),
+      builder: (_) => AppUpdateCurtain(info: effective, required: required || effective.force),
     );
   }
 

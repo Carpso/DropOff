@@ -28,6 +28,7 @@ import '../ui/app_spinner.dart';
 import '../services/step_sounds.dart';
 import '../ui/offline_map_sheet.dart';
 import '../ui/staff_email_card.dart';
+import '../ui/mfa_sheet.dart';
 
 /// Email + password sign in / create account (the JWT + phone persist locally;
 /// the ops device-link stays separate under Team).
@@ -147,8 +148,22 @@ class _AccountScreenState extends State<AccountScreen> {
 
   Future<void> _verifyOtp() async {
     setState(() { _otpBusy = true; _otpMsg = null; });
-    final ok = await AppScope.of(context).confirmOtp(_otpPhone.text, _otpCode.text);
+    final store = AppScope.of(context);
+    final ok = await store.confirmOtp(_otpPhone.text, _otpCode.text);
     if (!mounted) return;
+    if (store.pendingMfaChallenge != null) {
+      final done = await showMfaChallengeSheet(context);
+      if (!mounted) return;
+      setState(() {
+        _otpBusy = false;
+        _otpMsg = done ? null : (store.lastAuthError ?? 'Second-factor check needed.');
+      });
+      if (done) {
+        unawaited(PushService.register());
+        AppToast.show(context, 'Device linked.');
+      }
+      return;
+    }
     setState(() {
       _otpBusy = false;
       _otpMsg = ok ? null : 'Wrong or expired code — request a new one.';
@@ -192,6 +207,18 @@ class _AccountScreenState extends State<AccountScreen> {
         : await store.loginEmail(_email.text.trim(), _password.text, remember: _remember);
     if (!mounted) return;
     setState(() => _busy = false);
+    if (store.pendingMfaChallenge != null) {
+      final done = await showMfaChallengeSheet(context);
+      if (!mounted) return;
+      if (done) {
+        if (!mounted) return;
+        Navigator.of(context).pop();
+        AppToast.show(context, 'Signed in.');
+      } else {
+        setState(() => _error = store.lastAuthError ?? 'Second-factor check needed.');
+      }
+      return;
+    }
     if (ok) {
       if (_creating && _referral.text.trim().isNotEmpty) {
         unawaited(DropOffApi.claimReferral(_referral.text.trim()));
@@ -765,6 +792,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   StaffEmailCard(phone: store.linkedPhone, email: store.email),
                   const SizedBox(height: 12),
                 ],
+                const MfaSettingsCard(),
+                const SizedBox(height: 12),
                 // Offline map (owner 2026-11-26): riders save the city basemap
                 // before a route with no signal.
                 const OfflineMapTile(),
