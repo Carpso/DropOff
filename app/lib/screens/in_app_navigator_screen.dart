@@ -414,13 +414,19 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
         if (_route != null) _syncCues(index == 0 ? _route! : _route!.alternatives[index - 1], _me ?? _dest);
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? AppColors.forest : Colors.white.withValues(alpha: 0.9),
+          color: selected ? AppColors.forest : Colors.white.withValues(alpha: 0.94),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? AppColors.forest : AppColors.line),
+          border: Border.all(color: selected ? AppColors.forest : AppColors.forest.withValues(alpha: 0.28)),
+          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))],
         ),
-        child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: selected ? Colors.white : AppColors.ink)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(selected ? Icons.check_circle : Icons.alt_route,
+              size: 14, color: selected ? AppColors.mint : AppColors.forest),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900, color: selected ? Colors.white : AppColors.forest)),
+        ]),
       ),
     );
   }
@@ -453,20 +459,26 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        // Green heading (owner 2026-11-26): the navigation header is DropOff
+        // forest with a mint subtitle, so it reads as our product, not a stock
+        // white app bar over a map.
+        backgroundColor: AppColors.forest,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: Colors.white,
         elevation: 0,
+        titleSpacing: 16,
         title: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Navigate', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+            const Text('Navigate', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.white)),
             ConstrainedBox(
               // Bounded width + single line: a long depot/recipient name must
               // ellipsise, never wrap one character per line (owner layout
               // invariant, AGENTS.md).
               constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width - 150),
               child: Text(_destinationSuffix(), maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.muted)),
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.mint)),
             ),
           ],
         ),
@@ -543,31 +555,78 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               // ROUTE CARD - distance, ETA and a way into the step list. This
               // existed in an older build and was dropped, leaving the labels
-              // computed but never rendered.
+              // computed but never rendered. Bigger + green-headed now
+              // (owner 2026-11-26) so it is readable at a glance in traffic.
               if (activeRoute != null)
                 Card(
                   margin: EdgeInsets.zero,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                    child: Row(children: [
-                      const Icon(Icons.route, color: AppColors.forest, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(
-                        '${distanceLabel ?? 'Route'}  ·  ${durationLabel ?? ''}  ·  $_destLabel',
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
-                      )),
-                      if (route != null && route.steps.isNotEmpty)
-                        InkWell(
-                          onTap: _openCueSheet,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                            child: Text('Steps (${route.steps.length})',
-                                style: const TextStyle(color: AppColors.forest, fontWeight: FontWeight.w800, fontSize: 11)),
-                          ),
+                  clipBehavior: Clip.antiAlias,
+                  elevation: 5,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Container(
+                      color: AppColors.forest,
+                      padding: const EdgeInsets.fromLTRB(12, 6, 10, 6),
+                      child: Row(children: [
+                        const Icon(Icons.route, color: AppColors.mint, size: 16),
+                        const SizedBox(width: 6),
+                        const Expanded(
+                          child: Text('ROUTE',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w900, letterSpacing: 1.1)),
                         ),
-                    ]),
-                  ),
+                        if (route != null && route.steps.isNotEmpty)
+                          InkWell(
+                            onTap: _openCueSheet,
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                              decoration: BoxDecoration(color: AppColors.amber, borderRadius: BorderRadius.circular(20)),
+                              child: Text('Steps (${route.steps.length})',
+                                  style: const TextStyle(color: AppColors.ink, fontWeight: FontWeight.w900, fontSize: 11)),
+                            ),
+                          ),
+                      ]),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Expanded(
+                            flex: 3,
+                            child: Row(children: [
+                              const Icon(Icons.straighten, size: 16, color: AppColors.forestLight),
+                              const SizedBox(width: 5),
+                              Flexible(
+                                child: Text(distanceLabel ?? 'Route',
+                                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17, color: AppColors.forest)),
+                              ),
+                            ]),
+                          ),
+                          Container(width: 1, height: 20, color: AppColors.line),
+                          const SizedBox(width: 10),
+                          Flexible(
+                            flex: 2,
+                            child: Row(children: [
+                              const Icon(Icons.schedule, size: 16, color: AppColors.forestLight),
+                              const SizedBox(width: 5),
+                              Flexible(
+                                child: Text(durationLabel ?? '',
+                                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: AppColors.forestLight)),
+                              ),
+                            ]),
+                          ),
+                        ]),
+                        const SizedBox(height: 3),
+                        Text(_destLabel,
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.muted)),
+                      ]),
+                    ),
+                  ]),
                 ),
               if (route != null && route.alternatives.isNotEmpty)
                 Padding(
@@ -586,28 +645,50 @@ class _InAppNavigatorScreenState extends State<InAppNavigatorScreen> {
                 ),
               if (_route != null && _cueIndex < _route!.steps.length)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.only(top: 8),
                   child: IgnorePointer(
-                    child: Card(
-                      margin: EdgeInsets.zero,
-                      color: AppColors.forest,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        child: Row(children: [
-                          Icon(_stepIcon(_route!.steps[_cueIndex].instruction), color: AppColors.amber, size: 26),
-                          const SizedBox(width: 12),
-                          Expanded(child: Text(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [AppColors.forest, Color(0xFF14523F)],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(color: AppColors.forest.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4)),
+                        ],
+                      ),
+                      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+                      child: Row(children: [
+                        Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: AppColors.amber.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(13),
+                            border: Border.all(color: AppColors.amber.withValues(alpha: 0.55)),
+                          ),
+                          child: Icon(_stepIcon(_route!.steps[_cueIndex].instruction), color: AppColors.amber, size: 28),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
                             _route!.steps[_cueIndex].instruction,
                             maxLines: 2, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14, height: 1.3),
-                          )),
-                          const SizedBox(width: 10),
-                          Text(_cueDistance >= 1000
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15.5, height: 1.25),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(color: AppColors.amber, borderRadius: BorderRadius.circular(12)),
+                          child: Text(_cueDistance >= 1000
                               ? '${(_cueDistance / 1000).toStringAsFixed(1)} km'
                               : '${(_cueDistance / 10).round() * 10} m',
-                              style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w900, fontSize: 15)),
-                        ]),
-                      ),
+                              style: const TextStyle(color: AppColors.ink, fontWeight: FontWeight.w900, fontSize: 15)),
+                        ),
+                      ]),
                     ),
                   ),
                 ),

@@ -32,6 +32,9 @@ import {
   clientIp, deviceId, deviceName, userAgent, ownerPhone, ownerEmail,
   lockoutStatus, recordAttempt, noteDevice, alertOwner, raiseAlert, acknowledgeAlert,
 } from './security';
+import {
+  PROTECTED_RESET_DETAIL, canRedeemResetToken, isProtectedAccount, resetChannelFor, type ResetChannel,
+} from './account_protection';
 import { ChatRoom } from './chat_do';
 import {
   containsAbuse, recordAbuseStrike, chatSuspendedUntil, clearChatStrikes,
@@ -908,7 +911,7 @@ app.get('/app/version', async (c) => {
     getSetting(c.env.DB, 'app_update_force'),
     getSetting(c.env.DB, 'app_update_message'),
   ]);
-  const fallback = '0.5.93';
+  const fallback = '0.5.96';
   return c.json({
     latest: (latest?.trim() || fallback),
     minimum: (minimum?.trim() || '0.5.0'),
@@ -1735,6 +1738,8 @@ app.post('/auth/register', async (c) => {
 async function createEmailLink(
   c: { env: Env; req: { url: string } },
   email: string, kind: 'verify_email' | 'reset_password',
+  via: ResetChannel = 'email',
+  ip: string | null = null,
 ): Promise<string | null> {
   const token = generateEmailToken();
   const hash = await hashOtp(token, c.env.JWT_SECRET);
@@ -1743,14 +1748,31 @@ async function createEmailLink(
     c.env.DB.prepare('UPDATE email_tokens SET used = 1 WHERE email = ?1 AND kind = ?2 AND used = 0')
       .bind(email, kind),
     c.env.DB.prepare(
-      `INSERT INTO email_tokens (email, token_hash, kind, expires_at) VALUES (?1, ?2, ?3, datetime('now', ?4))`,
-    ).bind(email, hash, kind, ttl),
+      `INSERT INTO email_tokens (email, token_hash, kind, expires_at, issued_via, requested_ip)
+       VALUES (?1, ?2, ?3, datetime('now', ?4), ?5, ?6)`,
+    ).bind(email, hash, kind, ttl, via, ip),
   ]);
   // Hono exposes `c.req.url` as a property (Request.url), NOT a function —
   // calling it threw TypeError and 500'd register/forgot/resend.
   const origin = new URL(c.req.url).origin;
   const base = publicLinkBase(c.env) || origin;
   return `${base}/auth/link?k=${kind}&t=${encodeURIComponent(token)}`;
+}
+
+/** Account identity used by the owner-protection policy. */
+async function accountIdentity(
+  env: Env, email: string,
+): Promise<{ exists: boolean; isProtected: boolean; phone: string | null; role: string | null }> {
+  const row = await env.DB.prepare(
+    'SELECT phone, role FROM auth_users WHERE email = ?1',
+  ).bind(email).first<{ phone: string | null; role: string | null }>();
+  if (!row) return { exists: false, isProtected: false, phone: null, role: null };
+  return {
+    exists: true,
+    isProtected: isProtectedAccount({ email, phone: row.phone, role: row.role }, env),
+    phone: row.phone ?? null,
+    role: row.role ?? null,
+  };
 }
 
 /** HTML confirm pages (public GET; the token is the only secret). */
@@ -1762,7 +1784,7 @@ app.get('/auth/link', async (c) => {
   if (!token || (kind !== 'verify_email' && kind !== 'reset_password')) return fail('Invalid link.');
   const hash = await hashOtp(token, c.env.JWT_SECRET);
   const row = await c.env.DB.prepare(
-    `SELECT id, email FROM email_tokens WHERE token_hash = ?1 AND kind = ?2 AND used = 0 AND expires_at > datetime('now')`,
+    `SELECT id, email, issued_via FROM email_tokens WHERE token_hash = ?1 AND kind = ?2 AND used = 0 AND expires_at > datetime('now')`,
   ).bind(hash, kind).first<any>();
   if (!row) return fail('This link expired or was already used.');
 
@@ -1773,6 +1795,15 @@ app.get('/auth/link', async (c) => {
     ]);
     return c.html(`<div style="font-family:sans-serif;max-width:420px;margin:80px auto;text-align:center">
       <h2>✅ Email confirmed</h2><p>${row.email} is now verified. You can close this page.</p></div>`);
+  }
+
+  // reset_password: owner/admin accounts never reset from an emailed link.
+  const acct = await accountIdentity(c.env, String(row.email));
+  if (!canRedeemResetToken(row.issued_via, acct.isProtected)) {
+    await alertOwner(c.env, acct.phone ?? '', 'password_reset_refused', 'high',
+      `An emailed reset link was opened for the protected account ${row.email} (IP ${clientIp(c)}). Refused — protected accounts reset through a link sent to the account phone.`,
+      { ip: clientIp(c), email: String(row.email) }).catch(() => {});
+    return fail('This reset link cannot be used for this account. Open the link sent by SMS to the account phone, or sign in with your phone number.');
   }
 
   // reset_password: serve the choose-new-password form
@@ -1805,10 +1836,21 @@ app.post('/auth/reset', async (c) => {
   if (password.length < 8) return c.json({ error: 'password_too_short_min_8' }, 400);
   const hash = await hashOtp(token, c.env.JWT_SECRET);
   const row = await c.env.DB.prepare(
-    `SELECT id, email FROM email_tokens WHERE token_hash = ?1 AND kind = 'reset_password'
+    `SELECT id, email, issued_via FROM email_tokens WHERE token_hash = ?1 AND kind = 'reset_password'
       AND used = 0 AND expires_at > datetime('now')`,
   ).bind(hash).first<any>();
   if (!row) return c.json({ error: 'link_expired_or_used' }, 401);
+  // OWNER/STAFF PROTECTION (owner 2026-11-26): a mailbox is not enough to take
+  // over the admin console. Protected accounts only redeem a link delivered to
+  // the account phone or minted by the superadmin key. This also kills every
+  // emailed reset link that was sitting in the owner's inbox before the policy.
+  const acct = await accountIdentity(c.env, String(row.email));
+  if (!canRedeemResetToken(row.issued_via, acct.isProtected)) {
+    await alertOwner(c.env, acct.phone ?? '', 'password_reset_refused', 'high',
+      `A reset attempt with an emailed token was refused for the protected account ${row.email} (IP ${clientIp(c)}).`,
+      { ip: clientIp(c), email: String(row.email) }).catch(() => {});
+    return c.json({ error: 'protected_account_phone_required', detail: PROTECTED_RESET_DETAIL }, 403);
+  }
   const passwordHash = await hashPassword(password);
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE email_tokens SET used = 1 WHERE id = ?1').bind(row.id),
@@ -1825,18 +1867,49 @@ app.post('/auth/forgot', async (c) => {
   const b: any = await c.req.json().catch(() => null);
   const email = String(b?.email ?? '').trim().toLowerCase();
   if (!isValidEmail(email)) return c.json({ error: 'invalid_email' }, 400);
-  const user = await c.env.DB.prepare(
-    'SELECT email FROM auth_users WHERE email = ?1',
-  ).bind(email).first<any>();
+  const ip = clientIp(c);
+  const acct = await accountIdentity(c.env, email);
   // never leak whether the email exists
-  if (!user) return c.json({ ok: true, sent: true });
-  const link = await createEmailLink(c, email, 'reset_password');
+  if (!acct.exists) return c.json({ ok: true, sent: true });
+  const devMode = devModeOn(c.env);
+
+  if (acct.isProtected) {
+    // OWNER/STAFF: deliver the reset link to the PHONE (a factor the attacker
+    // does not hold), never to the mailbox. The request itself is reported to
+    // the owner, so an attempt is visible even when it is ignored.
+    const phone = acct.phone ?? ownerPhone(c.env);
+    const link = await createEmailLink(c, email, 'reset_password', resetChannelFor(true), ip);
+    let phoneSent = false;
+    if (link && phone) {
+      const sms = await sendSms(
+        c.env, phone,
+        `DropOff: a password reset was requested for your account. Open this link within 1 hour to choose a new password: ${link} . If this was not you, ignore it - nobody can change your password without this link.`,
+        { transactional: true },
+      ).catch(() => ({ sent: false }));
+      phoneSent = Boolean(sms?.sent);
+    }
+    // Alert flooding guard: the reset SMS is always delivered (it is the
+    // owner's own recovery path), but the security alert fires at most once
+    // per 30 minutes so a stranger cannot bury the owner's inbox.
+    const recent = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM security_alerts
+        WHERE type = 'password_reset_owner' AND created_at > datetime('now', '-30 minutes')`,
+    ).first<{ n: number }>().catch(() => null);
+    if (Number(recent?.n ?? 0) === 0) {
+      await alertOwner(c.env, phone ?? '', 'password_reset_owner', 'medium',
+        `A password reset was requested for the protected account ${email} from IP ${ip}. No emailed link was sent; the reset link went to the account phone instead (${phoneSent ? 'delivered' : 'not delivered - check SMS credit'}).`,
+        { ip, email }).catch(() => {});
+    }
+    return c.json({ ok: true, sent: true,
+      ...(devMode && link ? { dev_reset_link: link } : {}) });
+  }
+
+  const link = await createEmailLink(c, email, 'reset_password', resetChannelFor(false), ip);
   if (!link) return c.json({ ok: true, sent: true });
   const mail = await sendMail(c.env, {
     to: email, subject: 'Reset your DropOff password',
     html: resetEmailHtml(link), text: `Reset your DropOff password: ${link} (valid 1 hour)`,
   });
-  const devMode = devModeOn(c.env);
   return c.json({ ok: true, sent: mail.sent, ...(mail.error ? { mail_error: mail.error } : {}),
     ...(devMode ? { dev_reset_link: link } : {}) });
 });
@@ -5864,14 +5937,152 @@ app.post('/admin/support/threads/:id/status', async (c) => {
 // row can never be demoted (no self-lockout).
 app.get('/admin/users', async (c) => {
   if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  const q = String(c.req.query('q') ?? '').trim().toLowerCase();
+  const roleFilter = String(c.req.query('role') ?? '').trim().toLowerCase();
+  const limit = Math.min(300, Math.max(1, Number(c.req.query('limit') ?? 200) || 200));
+  const offset = Math.max(0, Number(c.req.query('offset') ?? 0) || 0);
+
+  const where: string[] = [];
+  const binds: any[] = [];
+  if (q) {
+    where.push(`(LOWER(COALESCE(email, '')) LIKE ?${binds.length + 1}
+      OR LOWER(COALESCE(phone, '')) LIKE ?${binds.length + 1}
+      OR LOWER(COALESCE(full_name, '')) LIKE ?${binds.length + 1})`);
+    binds.push(`%${q}%`);
+  }
+  if (roleFilter) {
+    where.push(`LOWER(COALESCE(role, 'customer')) = ?${binds.length + 1}`);
+    binds.push(roleFilter);
+  }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const total = (await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM auth_users ${clause}`,
+  ).bind(...binds).first<{ n: number }>())?.n ?? 0;
+
   const { results } = await c.env.DB.prepare(
-    `SELECT email, phone, full_name, role, courier_id, email_verified, created_at, photo_url
-       FROM auth_users ORDER BY created_at DESC LIMIT 200`,
-  ).all();
+    `SELECT email, phone, full_name, role, courier_id, email_verified, created_at,
+            photo_url, door_pin, referral_code, sms_opt_out
+       FROM auth_users ${clause}
+      ORDER BY created_at DESC LIMIT ?${binds.length + 1} OFFSET ?${binds.length + 2}`,
+  ).bind(...binds, limit, offset).all();
+
+  // One grouped query per fact instead of N+1 per user — the directory stays
+  // fast even with thousands of accounts. Facts unavailable for a phone simply
+  // render as zero/blank rather than blocking the list.
+  const [jobRows, spendRows, subRows, walletRows, deviceRows, strikeRows] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT sender_phone AS phone, COUNT(*) AS jobs,
+              SUM(CASE WHEN status IN ('delivered','completed') THEN 1 ELSE 0 END) AS delivered,
+              MAX(created_at) AS last_job_at
+         FROM jobs GROUP BY sender_phone`,
+    ).all(),
+    c.env.DB.prepare(
+      `SELECT phone, SUM(amount_zmw) AS spend FROM payments
+        WHERE status = 'success' GROUP BY phone`,
+    ).all(),
+    c.env.DB.prepare(
+      `SELECT phone, tier, status, expires_at FROM subscriptions
+        WHERE status = 'active' ORDER BY expires_at DESC`,
+    ).all(),
+    c.env.DB.prepare('SELECT phone, balance_zmw FROM wallets').all(),
+    c.env.DB.prepare(
+      `SELECT phone, COUNT(*) AS devices, MAX(last_seen) AS last_seen_at
+         FROM device_sessions GROUP BY phone`,
+    ).all(),
+    c.env.DB.prepare('SELECT phone, COUNT(*) AS strikes FROM booking_strikes GROUP BY phone').all(),
+  ]);
+
+  const byPhone = <T extends { phone: string }>(r: any): Map<string, T> => {
+    const m = new Map<string, T>();
+    for (const row of (r?.results ?? []) as T[]) {
+      if (row?.phone) m.set(String(row.phone), row);
+    }
+    return m;
+  };
+  const jobs = byPhone<any>(jobRows);
+  const spend = byPhone<any>(spendRows);
+  const subs = byPhone<any>(subRows);
+  const wallets = byPhone<any>(walletRows);
+  const devices = byPhone<any>(deviceRows);
+  const strikes = byPhone<any>(strikeRows);
   const owner = ownerPhone(c.env);
   const ownerMail = ownerEmail(c.env);
-  const users = ((results ?? []) as any[]).map((u) => ({ ...u, superadmin: (owner != null && u.phone === owner) || (ownerMail != null && u.email === ownerMail) }));
-  return c.json({ users });
+
+  const users = ((results ?? []) as any[]).map((u) => {
+    const phone = String(u.phone ?? '');
+    return {
+      ...u,
+      superadmin: (owner != null && phone === owner) || (ownerMail != null && u.email === ownerMail),
+      phone_number: phone,
+      jobs_sent: Number(jobs.get(phone)?.jobs ?? 0),
+      jobs_delivered: Number(jobs.get(phone)?.delivered ?? 0),
+      last_job_at: jobs.get(phone)?.last_job_at ?? null,
+      spend_zmw: Number(spend.get(phone)?.spend ?? 0),
+      plan_tier: subs.get(phone)?.tier ?? null,
+      plan_expires_at: subs.get(phone)?.expires_at ?? null,
+      wallet_balance_zmw: Number(wallets.get(phone)?.balance_zmw ?? 0),
+      devices: Number(devices.get(phone)?.devices ?? 0),
+      last_seen_at: devices.get(phone)?.last_seen_at ?? null,
+      booking_strikes: Number(strikes.get(phone)?.strikes ?? 0),
+      door_pin_set: Boolean(u.door_pin),
+    };
+  });
+  return c.json({ users, total, limit, offset, has_more: offset + users.length < total });
+});
+
+/** Full dossier behind a row in the admin Users directory. */
+app.get('/admin/users/:phone/detail', async (c) => {
+  if (!isAdmin(c) && c.get('role') !== 'ops') return c.json({ error: 'forbidden' }, 403);
+  let phone = '';
+  try { phone = normalizeZmPhone(String(c.req.param('phone') ?? '')); } catch { /* handled below */ }
+  if (!phone) return c.json({ error: 'invalid_phone' }, 400);
+  const user = await c.env.DB.prepare(
+    `SELECT email, phone, full_name, role, courier_id, email_verified, created_at,
+            photo_url, sms_opt_out, door_pin, referral_code, token_version
+       FROM auth_users WHERE phone = ?1`,
+  ).bind(phone).first<any>();
+  if (!user) return c.json({ error: 'not found' }, 404);
+  const [jobs, payments, subscriptions, devices, places, strikes] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT ref, status, service, total_zmw, pickup_address, dest_address, created_at
+         FROM jobs WHERE sender_phone = ?1 OR recipient_phone = ?1
+        ORDER BY created_at DESC LIMIT 20`,
+    ).bind(phone).all(),
+    c.env.DB.prepare(
+      `SELECT id, kind, amount_zmw, status, gateway, created_at, job_id
+         FROM payments WHERE phone = ?1 ORDER BY created_at DESC LIMIT 20`,
+    ).bind(phone).all(),
+    c.env.DB.prepare(
+      `SELECT tier, status, started_at, expires_at FROM subscriptions
+        WHERE phone = ?1 ORDER BY created_at DESC LIMIT 10`,
+    ).bind(phone).all(),
+    c.env.DB.prepare(
+      `SELECT device_name, ip, location, first_seen, last_seen, trusted
+         FROM device_sessions WHERE phone = ?1 ORDER BY last_seen DESC LIMIT 20`,
+    ).bind(phone).all(),
+    c.env.DB.prepare(
+      `SELECT label, source, used_at FROM saved_places WHERE phone = ?1 ORDER BY used_at DESC LIMIT 10`,
+    ).bind(phone).all(),
+    c.env.DB.prepare(
+      `SELECT reason, created_at FROM booking_strikes WHERE phone = ?1 ORDER BY created_at DESC LIMIT 10`,
+    ).bind(phone).all(),
+  ]);
+  const wallet = await c.env.DB.prepare('SELECT balance_zmw FROM wallets WHERE phone = ?1')
+    .bind(phone).first<any>();
+  return c.json({
+    user: {
+      ...user,
+      superadmin: (ownerPhone(c.env) != null && phone === ownerPhone(c.env))
+        || (ownerEmail(c.env) != null && user.email === ownerEmail(c.env)),
+    },
+    wallet_balance_zmw: Number(wallet?.balance_zmw ?? 0),
+    jobs: (jobs.results ?? []) as any[],
+    payments: (payments.results ?? []) as any[],
+    subscriptions: (subscriptions.results ?? []) as any[],
+    devices: (devices.results ?? []) as any[],
+    places: (places.results ?? []) as any[],
+    strikes: (strikes.results ?? []) as any[],
+  });
 });
 
 app.post('/admin/users/role', async (c) => {
@@ -5946,6 +6157,114 @@ app.post('/admin/users/:phone/update', async (c) => {
     return c.json({ error: 'email_already_registered' }, 409);
   }
   return c.json({ ok: true, phone, email: email || (user.email ?? null), full_name: fullName || null });
+});
+
+/* -------- staff self-service email (owner directive 2026-11-26) ------------ */
+// Owner/admin/ops/CFO accounts can now ADD or CHANGE the email on their own
+// account from the app. Previously /admin/users/:phone/update explicitly
+// refused admin rows, so staff had no way to enter an address for email sign-in
+// or recovery. The new address is applied at once and a verification link is
+// emailed to it; it is marked unverified until that link is opened.
+//
+// Safety: a JWT session may only edit ITS OWN phone; an explicit phone in the
+// body is honoured only with the superadmin key. Emails are unique across all
+// accounts, and protected accounts still cannot be reset from an emailed link.
+app.post('/admin/users/me/email', async (c) => {
+  const callerPhone = typeof c.get === 'function' ? String(c.get('phone') ?? '') : '';
+  const role = typeof c.get === 'function' ? String(c.get('role') ?? '') : '';
+  if (!['admin', 'ops', 'cfo'].includes(role)) {
+    return c.json({ error: 'staff_required' }, 403);
+  }
+  const b: any = await c.req.json().catch(() => null);
+  const email = String(b?.email ?? '').trim().toLowerCase();
+  if (!isValidEmail(email)) return c.json({ error: 'invalid_email' }, 400);
+  const superadmin = c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY;
+  let phone = callerPhone;
+  if (superadmin && b?.phone) {
+    try { phone = normalizeZmPhone(String(b.phone)); } catch { /* 400 below */ }
+  }
+  if (!phone) return c.json({ error: 'phone_required' }, 400);
+
+  const clash = await c.env.DB.prepare('SELECT phone FROM auth_users WHERE email = ?1')
+    .bind(email).first<{ phone: string }>();
+  if (clash && String(clash.phone) !== phone) {
+    return c.json({ error: 'email_already_registered' }, 409);
+  }
+  const existing = await c.env.DB.prepare('SELECT email FROM auth_users WHERE phone = ?1')
+    .bind(phone).first<{ email: string }>();
+  if (existing) {
+    await c.env.DB.prepare(
+      `UPDATE auth_users SET email = ?2, email_verified = 0 WHERE phone = ?1`,
+    ).bind(phone, email).run();
+  } else {
+    // An OTP-only staff account has no auth_users row yet. Provision one with
+    // a random password nobody knows; the owner sets a real one through the
+    // phone-delivered reset link (owner/admin accounts never use email reset).
+    await c.env.DB.prepare(
+      `INSERT INTO auth_users (email, password_hash, phone, full_name, email_verified)
+       VALUES (?1, ?2, ?3, ?4, 0)`,
+    ).bind(email, await hashPassword(generateEmailToken()), phone, null).run();
+  }
+
+  let verificationSent = false;
+  let mailError: string | undefined;
+  try {
+    const link = await createEmailLink(c, email, 'verify_email');
+    if (link) {
+      const mail = await sendMail(c.env, {
+        to: email,
+        subject: 'Confirm your DropOff staff email',
+        html: verifyEmailHtml(link),
+        text: `Confirm your DropOff email: ${link}`,
+      });
+      verificationSent = mail.sent;
+      mailError = mail.error;
+    }
+  } catch (e: any) {
+    mailError = String(e?.message ?? 'send_failed');
+  }
+  await raiseAlert(
+    c.env.DB, phone, 'staff_email_changed', 'medium',
+    `Staff email for ${phone} set to ${email} by ${callerPhone || 'admin key'}${superadmin ? ' (superadmin key)' : ''}. Verification sent: ${verificationSent ? 'yes' : 'no'}.`,
+  ).catch(() => {});
+  return c.json({
+    ok: true, phone, email, created: !existing,
+    verification_sent: verificationSent,
+    ...(mailError ? { mail_error: mailError } : {}),
+  });
+});
+
+/* --------------- owner/admin password reset (superadmin only) -------------- */
+// The recovery path that replaces an emailed link for protected accounts
+// (owner 2026-11-26). Only the superadmin key may mint it; the link is texted
+// to the account phone AND returned to the caller so a lost phone is not a
+// permanent lockout. Every mint is recorded as a security alert.
+app.post('/admin/users/:phone/password-reset-link', async (c) => {
+  if (!isSuperAdmin(c)) return c.json({ error: 'superadmin_required' }, 403);
+  let phone = '';
+  try { phone = normalizeZmPhone(String(c.req.param('phone') ?? '')); } catch { /* handled below */ }
+  if (!phone) return c.json({ error: 'invalid_phone' }, 400);
+  const user = await c.env.DB.prepare('SELECT email FROM auth_users WHERE phone = ?1')
+    .bind(phone).first<{ email: string }>();
+  if (!user?.email) {
+    return c.json({
+      error: 'no_email_account',
+      detail: 'This account signs in with the phone OTP; there is no email password to reset.',
+    }, 404);
+  }
+  const ip = clientIp(c);
+  const link = await createEmailLink(c, user.email, 'reset_password', 'admin', ip);
+  if (!link) return c.json({ error: 'could_not_create_link' }, 500);
+  const sms = await sendSms(
+    c.env, phone,
+    `DropOff: an admin reset link for your account (valid 1 hour): ${link}`,
+    { transactional: true },
+  ).catch(() => ({ sent: false }));
+  await raiseAlert(
+    c.env.DB, phone, 'admin_password_reset_link', 'medium',
+    `Superadmin minted a password reset link for ${user.email} from IP ${ip}. SMS delivered: ${sms?.sent ? 'yes' : 'no'}.`,
+  ).catch(() => {});
+  return c.json({ ok: true, phone, email: user.email, sms_sent: Boolean(sms?.sent), link });
 });
 
 /* -------- admin/superadmin SMS communication + marketing ------------------- */
@@ -14463,7 +14782,13 @@ app.onError((err, c) => {
     }));
   } catch { /* logging must never throw */ }
   captureError(c.env, err, { method: c.req.method, url: c.req.path }).catch(() => {});
-  return c.json({ error: 'internal_error' }, 500);
+  // Diagnostics for staff only: the owner's admin key reveals the real error
+  // so a broken console can be fixed without guessing. Users still get clean
+  // JSON with no internals.
+  const debug = c.req.header('X-Admin-Key') === c.env.ADMIN_AUTH_KEY
+    ? { debug: String((err as any)?.message ?? err).slice(0, 500) }
+    : {};
+  return c.json({ error: 'internal_error', ...debug }, 500);
 });
 
 /* -------------------- Business accounts (Step 6) -------------------------- */

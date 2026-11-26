@@ -100,9 +100,21 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        // Green heading, matching the in-app navigator (owner 2026-11-26).
+        backgroundColor: AppColors.forest,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Rider live', style: TextStyle(fontWeight: FontWeight.w900)),
+        title: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Rider live', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.white)),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(color: AppColors.mint.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(20)),
+            child: const Text('LIVE',
+                style: TextStyle(color: AppColors.mint, fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 1)),
+          ),
+        ]),
         actions: [IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _refresh)],
       ),
       body: Column(children: [
@@ -139,24 +151,63 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
         SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(
-                _rider != null
-                    ? 'Last fix: ${_live?['seen_at'] ?? 'just now'}'
-                    : 'Waiting for rider…',
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-              ),
-              if (_error.isNotEmpty) Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(_error, style: const TextStyle(color: AppColors.muted, fontSize: 11)),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'This is the DropOff live map. The rider pin refreshes every 12 seconds while this screen is open.',
-                style: TextStyle(color: AppColors.muted, fontSize: 11.5, height: 1.4),
-              ),
-            ]),
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+            child: Card(
+              margin: EdgeInsets.zero,
+              clipBehavior: Clip.antiAlias,
+              elevation: 4,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Container(
+                  color: AppColors.forest,
+                  padding: const EdgeInsets.fromLTRB(12, 7, 10, 7),
+                  child: Row(children: [
+                    Icon(_rider != null ? Icons.my_location : Icons.location_searching,
+                        color: AppColors.mint, size: 16),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text('RIDER LIVE',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w900, letterSpacing: 1.1)),
+                    ),
+                    Text(
+                      _rider != null ? 'Updating every 12 s' : 'Waiting for a fix',
+                      style: const TextStyle(color: AppColors.mint, fontSize: 10, fontWeight: FontWeight.w800),
+                    ),
+                  ]),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Icon(_rider != null ? Icons.schedule : Icons.hourglass_empty,
+                          size: 16, color: AppColors.forestLight),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _rider != null
+                              ? 'Last fix: ${_live?['seen_at'] ?? 'just now'}'
+                              : 'Waiting for rider…',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14.5, color: AppColors.forest),
+                        ),
+                      ),
+                    ]),
+                    if (_error.isNotEmpty) Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(_error, style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'The rider pin refreshes every 12 seconds while this screen is open. Tap the green target on the map to jump back to the rider.',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+                    ),
+                  ]),
+                ),
+              ]),
+            ),
           ),
         ),
       ]),

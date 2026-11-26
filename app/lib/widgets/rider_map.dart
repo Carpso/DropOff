@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,10 +15,14 @@ import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 import '../data/map_theme_layers.dart';
 import '../data/map_tile_cache.dart';
 import '../data/map_tile_sources.dart';
+import '../data/route_arrows.dart';
 import '../data/dropoff_api.dart';
 import '../services/crash_reporting.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
+import '../ui/map_credit_stamp.dart';
+import '../ui/map_offline_banner.dart';
+import '../ui/offline_map_sheet.dart';
 import '../ui/saved_place_pin.dart';
 import '../ui/map_vehicle_marker.dart';
 
@@ -396,6 +401,19 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     try { return _mapCtl.camera.rotationRad * 180 / math.pi; } catch (_) { return 0; }
   }
 
+  /// Remaining distance to the current target, shown as a smart badge under
+  /// the destination pin so the rider can read "how far" without leaving the
+  /// map (owner 2026-11-26).
+  String? get _remainingLabel {
+    final me = widget.rider;
+    final target = widget.pickup ?? widget.depot;
+    if (me == null || target == null) return null;
+    final metres = const Distance().as(LengthUnit.Meter, me, target);
+    if (metres < 40) return 'Arriving';
+    if (metres < 950) return '${(metres / 10).round() * 10} m away';
+    return '${(metres / 1000).toStringAsFixed(1)} km away';
+  }
+
   /// A map pin with a readable name label beneath it — so riders and senders
   /// see "where" not just "what icon".
   Widget _labeledPin({
@@ -403,6 +421,7 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     required Color color,
     required String label,
     bool highlight = false,
+    String? badge,
   }) {
     final bg = highlight ? AppColors.amber.withValues(alpha: 0.16) : Colors.white.withValues(alpha: 0.94);
     final border = highlight ? AppColors.amber : color.withValues(alpha: 0.35);
@@ -435,22 +454,87 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
           style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: highlight ? const Color(0xFF7A5200) : AppColors.forest),
         ),
       ),
+      if (badge != null) ...[
+        const SizedBox(height: 2),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+          decoration: BoxDecoration(color: AppColors.forest, borderRadius: BorderRadius.circular(20)),
+          child: Text(
+            badge,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: Colors.white, height: 1.15),
+          ),
+        ),
+      ],
     ]);
   }
 
-  /// The rider's vehicle on the map - just the vehicle, no frame/badge.
+  /// The rider on the map: the branded vehicle PLUS a heading arrow, so the
+  /// map answers "which way is the rider going" at a glance (owner 2026-11-26).
   Widget _riderMarker() {
+    final heading = _routeHeading - _mapRotationDeg;
     return SizedBox(
-      width: 64,
-      height: 64,
-      child: Center(
-        child: MapVehicleMarker(
-          heading: _routeHeading - _mapRotationDeg,
-          vehicle: widget.vehicleClass,
-          size: 52,
+      width: 92,
+      height: 92,
+      child: Stack(alignment: Alignment.center, children: [
+        // Mint halo + amber direction cone. The cone rotates with the road
+        // segment the rider is on, and is counter-rotated by the map's own
+        // rotation so it always points at the real direction of travel.
+        Transform.rotate(
+          angle: heading * math.pi / 180,
+          child: const CustomPaint(size: Size(92, 92), painter: _HeadingConePainter()),
         ),
-      ),
+        MapVehicleMarker(
+          heading: heading,
+          vehicle: widget.vehicleClass,
+          size: 54,
+        ),
+      ]),
     );
+  }
+
+  /// Direction chevrons along the route: one arrow roughly every 1.2 km (max
+  /// six), each rotated to the road segment under it. This is what makes the
+  /// green line read as "travelling THIS way" instead of a static stroke.
+  List<Marker> _routeArrows() {
+    final route = widget.route;
+    if (route == null) return const [];
+    final specs = routeArrowSpecs(route, straightLine: widget.routeIsStraightLine);
+    return [
+      for (final spec in specs)
+        Marker(
+          point: spec.point,
+          width: 24,
+          height: 24,
+          child: IgnorePointer(
+            child: Transform.rotate(
+              angle: (spec.bearingDeg - _mapRotationDeg) * math.pi / 180,
+              child: const _RouteArrow(),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  /// Smart recentre: pull the camera back onto the rider and pick the zoom
+  /// that matches how far they still have to go.
+  void _recenterOnRider() {
+    final me = widget.rider;
+    if (me == null) return;
+    HapticFeedback.selectionClick();
+    final target = widget.route?.isNotEmpty == true
+        ? widget.route!.last
+        : (widget.pickup ?? widget.depot);
+    final metres = target == null ? 0.0 : const Distance().as(LengthUnit.Meter, me, target);
+    final zoom = metres > 1000 ? 14.0 : metres > 400 ? 15.2 : metres > 120 ? 16.0 : 16.5;
+    try {
+      _mapCtl.move(me, zoom);
+      if (_headingUp) _mapCtl.rotate(_headingDeg * math.pi / 180);
+    } catch (_) {
+      /* camera not ready - the next fix recentres anyway */
+    }
+    setState(() {});
   }
 
   /// Compass tap -> north-up. flutter_map's rotate(0) is due-north; guarded -
@@ -589,14 +673,15 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 if (widget.pickup != null)
                   Marker(
                     point: widget.pickup!,
-                    width: 100,
-                    height: 72,
+                    width: 110,
+                    height: 96,
                     child: _labeledPin(
                       icon: widget.pickupIsDepot ? Icons.warehouse_outlined : Icons.storefront,
                       color: widget.pickupIsDepot ? AppColors.forest : AppColors.forestLight,
                       label: widget.pickupIsDepot
                           ? (widget.depotName ?? 'Depot')
                           : (widget.senderName ?? 'Pickup'),
+                      badge: _remainingLabel,
                     ),
                   ),
                 if (widget.stops != null)
@@ -630,12 +715,13 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                 if (widget.depot != null)
                   Marker(
                     point: widget.depot!,
-                    width: 100,
-                    height: 72,
+                    width: 110,
+                    height: 96,
                     child: _labeledPin(
                       icon: Icons.warehouse_outlined,
                       color: AppColors.forest,
                       label: widget.depotName ?? widget.courierName ?? 'Depot',
+                      badge: widget.pickup == null ? _remainingLabel : null,
                     ),
                   ),
                 if (widget.searchPin != null)
@@ -663,17 +749,20 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
                       label: '${poi['name'] ?? 'Place'}',
                     ),
                   ),
+                // Direction chevrons under the pins so the route reads as a
+                // direction of travel, never a static line.
+                ..._routeArrows(),
                 if (widget.rider != null)
                   Marker(
                     point: widget.rider!,
-                    width: 76,
-                    height: 76,
+                    width: 96,
+                    height: 96,
                     child: _riderMarker(),
                   ),
               ]),
             ],
           ),
-          // Zoom + re-fit controls - our map, our chrome.
+          // Zoom + re-fit controls - our map, our chrome, our greens.
           Positioned(
             top: 12,
             right: 12,
@@ -684,54 +773,47 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
             child: Padding(
               padding: const EdgeInsets.only(right: 8, top: 64),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                _mapBtn(icon: Icons.add, onTap: () => _zoomBy(1)),
-                const SizedBox(height: 6),
-                _mapBtn(icon: Icons.remove, onTap: () => _zoomBy(-1)),
-                if (bounds != null) ...[
-                  const SizedBox(height: 6),
-                  _mapBtn(icon: Icons.fit_screen, onTap: () => _refit(bounds)),
+                if (widget.rider != null) ...[
+                  _mapBtn(
+                    icon: Icons.my_location,
+                    tooltip: 'Centre on the rider',
+                    primary: true,
+                    onTap: _recenterOnRider,
+                  ),
+                  const SizedBox(height: 8),
                 ],
-                const SizedBox(height: 6),
-                _mapBtn(icon: Icons.refresh, onTap: _retryMap),
+                _mapBtn(icon: Icons.add, tooltip: 'Zoom in', onTap: () => _zoomBy(1)),
+                const SizedBox(height: 8),
+                _mapBtn(icon: Icons.remove, tooltip: 'Zoom out', onTap: () => _zoomBy(-1)),
+                if (bounds != null) ...[
+                  const SizedBox(height: 8),
+                  _mapBtn(icon: Icons.fit_screen, tooltip: 'Fit the whole route', onTap: () => _refit(bounds)),
+                ],
+                const SizedBox(height: 8),
+                _mapBtn(icon: Icons.refresh, tooltip: 'Reload the basemap', onTap: _retryMap),
+                const SizedBox(height: 8),
+                // Offline map manager: riders can save the city before a
+                // route with no signal (owner 2026-11-26).
+                _mapBtn(
+                  icon: Icons.download_for_offline_outlined,
+                  tooltip: 'Offline map',
+                  onTap: () => showOfflineMapSheet(context),
+                ),
               ]),
             ),
           ),
-          const Positioned(
-            right: 6,
-            bottom: 6,
-            child: DecoratedBox(
-              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(4))),
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                child: Text('DropOff map - map data - OpenStreetMap contributors', style: TextStyle(color: Colors.white, fontSize: 9)),
-              ),
-            ),
-          ),
+          // Copyright stamp: circled (c) + DropOff, then the map-data credit.
+          // Sits under the offline banner when that is showing so the two never
+          // overlap.
+          Positioned(top: assets.hasBasemap ? 10 : 96, left: 10, child: _mapCredit()),
           if (!assets.hasBasemap)
             Positioned(
               top: 10,
               left: 10,
               right: 60,
-              child: Material(
-                color: Colors.white.withValues(alpha: 0.96),
-                borderRadius: BorderRadius.circular(10),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  child: Row(children: [
-                    const Icon(Icons.map_outlined, size: 17, color: AppColors.amber),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                      const Text('Basemap offline - your position and route still show.',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.ink)),
-                      if ((assets.error ?? '').isNotEmpty)
-                        Padding(padding: const EdgeInsets.only(top: 3), child: Text(
-                          assets.error!.length > 150 ? '${assets.error!.substring(0, 150)}...' : assets.error!,
-                          style: const TextStyle(fontSize: 9.5, color: AppColors.muted),
-                          maxLines: 2, overflow: TextOverflow.ellipsis,
-                        )),
-                    ])),
-                    TextButton(onPressed: _retryMap, child: const Text('Retry')),
-                  ]),
-                ),
+              child: MapOfflineBanner(
+                onRetry: _retryMap,
+                onDownload: () => showOfflineMapSheet(context),
               ),
             ),
           if (widget.routeIsStraightLine)
@@ -751,16 +833,42 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _mapBtn({required IconData icon, required VoidCallback onTap}) => Material(
-        color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.forest, width: 1.2)),
-        elevation: 2,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onTap,
-          child: SizedBox(width: 38, height: 38, child: Icon(icon, size: 20, color: AppColors.forest)),
+  /// Map chrome button. Greens are the brand: the primary action (recentre)
+  /// is solid forest, the rest are white with a forest edge, so the rail reads
+  /// as one family instead of a pile of stock grey squares.
+  Widget _mapBtn({
+    required IconData icon,
+    required VoidCallback onTap,
+    String? tooltip,
+    bool primary = false,
+  }) {
+    final button = Material(
+      color: primary ? AppColors.forest : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: primary ? AppColors.forest : AppColors.forest.withValues(alpha: 0.45),
+          width: 1.3,
         ),
-      );
+      ),
+      elevation: 3,
+      shadowColor: AppColors.forest.withValues(alpha: 0.35),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon, size: 21, color: primary ? Colors.white : AppColors.forest),
+        ),
+      ),
+    );
+    return tooltip == null ? button : Tooltip(message: tooltip, child: button);
+  }
+
+  /// The map's own copyright stamp: a circled (c) beside the DropOff name,
+  /// then the map-data credit. Reads as OUR map, not a stock tile widget.
+  Widget _mapCredit() => const MapCreditStamp();
 
   void _zoomBy(double delta) {
     try {
@@ -802,5 +910,60 @@ class _RiderMapState extends State<RiderMap> with SingleTickerProviderStateMixin
             ]),
           ),
         ),
+      );
+}
+
+/// Heading cue for the rider marker: a mint halo ring (the rider is live and
+/// tracked) plus an amber arrowhead on the rim. The caller rotates the whole
+/// painter to the direction of travel, so the arrow always shows where the
+/// rider is actually going - even on a rotated map.
+class _HeadingConePainter extends CustomPainter {
+  const _HeadingConePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.width / 2;
+    canvas.drawCircle(c, r * 0.62, Paint()..color = AppColors.mint.withValues(alpha: 0.16));
+    canvas.drawCircle(
+      c,
+      r * 0.62,
+      Paint()
+        ..color = AppColors.mint.withValues(alpha: 0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+    );
+    final tip = ui.Path()
+      ..moveTo(c.dx, c.dy - r + 1)
+      ..lineTo(c.dx - r * 0.17, c.dy - r + 15)
+      ..lineTo(c.dx + r * 0.17, c.dy - r + 15)
+      ..close();
+    canvas.drawPath(tip, Paint()..color = AppColors.amber);
+    canvas.drawPath(
+      tip,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeadingConePainter oldDelegate) => false;
+}
+
+/// A single direction chevron sitting on the route line.
+class _RouteArrow extends StatelessWidget {
+  const _RouteArrow();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.94),
+          shape: BoxShape.circle,
+          border: Border.all(color: AppColors.forest, width: 1.2),
+          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2, offset: Offset(0, 1))],
+        ),
+        child: const Icon(Icons.navigation, size: 13, color: AppColors.forest),
       );
 }

@@ -1084,8 +1084,36 @@ class DropOffApi {
   static Future<Map<String, dynamic>?> jobChatJoinStatus(String jobRef) =>
       get('/jobs/$jobRef/chat/join-status');
 
-  /// {users: [{email, phone, full_name, role, ...}]} — staff can read, superadmin can write.
-  static Future<Map<String, dynamic>?> adminUsers() => getAdmin('/admin/users');
+  /// User directory. `q` searches name/phone/email, `role` filters, and the
+  /// response carries aggregate job/spend/plan/device facts per user so the
+  /// admin console can show real detail without an N+1 request storm.
+  static Future<Map<String, dynamic>?> adminUsers({
+    String? q,
+    String? role,
+    int limit = 200,
+    int offset = 0,
+  }) =>
+      getAdmin('/admin/users', {
+        if (q != null && q.isNotEmpty) 'q': q,
+        if (role != null && role.isNotEmpty) 'role': role,
+        'limit': '$limit',
+        'offset': '$offset',
+      });
+
+  /// Owner/admin/ops/CFO can add or change the email on their own account.
+  /// A JWT session may only edit its own phone; the superadmin key may pass an
+  /// explicit [phone]. A verification link is emailed to the new address.
+  static Future<ApiResponse> setStaffEmail(String phone, String email) =>
+      post('/admin/users/me/email', {'phone': phone, 'email': email.trim().toLowerCase()}, admin: true);
+
+  /// Full dossier for one account: jobs, payments, plans, devices, addresses.
+  static Future<Map<String, dynamic>?> adminUserDetail(String phone) =>
+      getAdmin('/admin/users/${Uri.encodeComponent(phone)}/detail');
+
+  /// Superadmin recovery: mint a password-reset link for a protected account.
+  /// The link is texted to the account phone and returned to the admin.
+  static Future<ApiResponse> adminUserResetLink(String phone) =>
+      post('/admin/users/${Uri.encodeComponent(phone)}/password-reset-link', {}, admin: true);
 
   /// Last client crashes (deduped per device+stack) for the admin console.
   static Future<Map<String, dynamic>?> adminClientCrashes() => getAdmin('/admin/client-crashes');

@@ -1,4 +1,4 @@
-﻿import '../ui/app_toast.dart';
+import '../ui/app_toast.dart';
 import '../ui/app_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +11,7 @@ import '../data/analytics_service.dart';
 import 'bookings_screen.dart' show BookingDetailScreen;
 import '../ui/app_theme.dart';
 import '../ui/app_spinner.dart';
+import '../ui/admin_user_detail_sheet.dart';
 
 /// Normalise ANY worker list into real maps. A single malformed element used
 /// to throw a TypeError inside setState and wedge the console on a spinner.
@@ -63,6 +64,10 @@ class _AdminScreenState extends State<AdminScreen> {
   final _smsBody = TextEditingController();
   final _pushTitle = TextEditingController();
   final _pushBody = TextEditingController();
+  final _scroll = ScrollController();
+  final _sectionKeys = <String, GlobalKey>{
+    for (final s in const ['Overview', 'Money', 'Riders', 'Senders', 'Support']) s: GlobalKey(),
+  };
   String _pushAudience = 'accounts';
   bool _pushSending = false;
   String _pushPreview = '';
@@ -90,7 +95,22 @@ class _AdminScreenState extends State<AdminScreen> {
     _smsBody.dispose();
     _pushTitle.dispose();
     _pushBody.dispose();
+    _scroll.dispose();
     super.dispose();
+  }
+
+  /// Section jump: the chips at the top are now real navigation instead of
+  /// decorative placeholders (console UI audit, owner 2026-11-26).
+  void _jumpTo(String section) {
+    final key = _sectionKeys[section];
+    final ctx = key?.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOutCubic,
+      alignment: 0.04,
+    );
   }
 
   Future<void> _load() async {
@@ -250,6 +270,7 @@ class _AdminScreenState extends State<AdminScreen> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
+          controller: _scroll,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
           children: [
             // Section jump (admin tabbed layout, owner 2026-11-25): quick nav
@@ -264,14 +285,14 @@ class _AdminScreenState extends State<AdminScreen> {
                       padding: const EdgeInsets.only(right: 8),
                       child: ActionChip(
                         label: Text(s, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
-                        onPressed: () {},
+                        onPressed: () => _jumpTo(s),
                       ),
                     ),
                 ],
               ),
             ),
             const SizedBox(height: 12),
-            Container(
+            SizedBox(key: _sectionKeys['Overview'], child: Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: AppColors.forest.withValues(alpha: 0.08),
@@ -290,9 +311,9 @@ class _AdminScreenState extends State<AdminScreen> {
                       style: const TextStyle(color: AppColors.ink, fontSize: 12.5, height: 1.35)),
                 ])),
               ]),
-            ),
+            )),
             const SizedBox(height: 16),
-            _salaryCard(),
+            SizedBox(key: _sectionKeys['Money'], child: _salaryCard()),
             const SizedBox(height: 18),
             if (!_financeOnly) ...[
               _statsCard(),
@@ -312,7 +333,7 @@ class _AdminScreenState extends State<AdminScreen> {
             const SizedBox(height: 18),
             _taxCard(),
             if (!_financeOnly) ...[
-              const _SupportInboxCard(),
+              SizedBox(key: _sectionKeys['Support'], child: const _SupportInboxCard()),
               const SizedBox(height: 18),
               const _MoneyOpsCard(),
               const SizedBox(height: 18),
@@ -322,12 +343,12 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 18),
               const _FeatureFlagsCard(),
               const SizedBox(height: 18),
-              const _RiderRosterCard(),
+              SizedBox(key: _sectionKeys['Riders'], child: const _RiderRosterCard()),
               const SizedBox(height: 18),
               const _ClientCrashesCard(),
               const SizedBox(height: 18),
               if (_role == 'admin') ...[
-                const _UsersCard(),
+                SizedBox(key: _sectionKeys['Senders'], child: const _UsersCard()),
                 const SizedBox(height: 18),
               ],
               const _PackCodesCard(),
@@ -1439,9 +1460,28 @@ class _UsersCard extends StatefulWidget {
   State<_UsersCard> createState() => _UsersCardState();
 }
 
+/// The admin Users directory (owner 2026-11-26, "billion-dollar admin
+/// console"): every account with its number, identity, role, money and activity
+/// in one searchable, premium list. Tapping a row opens the full dossier.
 class _UsersCardState extends State<_UsersCard> {
+  final _search = TextEditingController();
+  Timer? _debounce;
   List<Map<String, dynamic>> _users = const [];
+  int _total = 0;
+  int _shown = 30;
   bool _loading = true;
+  String? _error;
+  String _roleFilter = '';
+
+  static const _filters = <(String, String)>[
+    ('', 'Everyone'),
+    ('customer', 'Senders'),
+    ('rider', 'Riders'),
+    ('partner', 'Partners'),
+    ('ops', 'Ops'),
+    ('admin', 'Admins'),
+    ('cfo', 'CFO'),
+  ];
 
   @override
   void initState() {
@@ -1449,13 +1489,42 @@ class _UsersCardState extends State<_UsersCard> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _search.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
-    final data = await DropOffApi.adminUsers();
-    if (!mounted) return;
-    setState(() {
-      _users = _safeRows(data?['users']);
-      _loading = false;
-    });
+    setState(() { _loading = true; _error = null; });
+    try {
+      final data = await DropOffApi.adminUsers(
+        q: _search.text.trim(),
+        role: _roleFilter,
+        limit: 300,
+        offset: 0,
+      );
+      if (!mounted) return;
+      if (data == null) {
+        setState(() { _loading = false; _error = 'Could not load accounts right now.'; });
+        return;
+      }
+      setState(() {
+        _users = _safeRows(data['users']);
+        _total = (data['total'] as num?)?.toInt() ?? _users.length;
+        _shown = 30;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Admin users load failed: $e');
+      if (mounted) setState(() { _loading = false; _error = 'Could not load accounts right now.'; });
+    }
+  }
+
+  void _onSearch(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), _load);
   }
 
   Future<void> _deleteUser(Map<String, dynamic> user) async {
@@ -1599,82 +1668,249 @@ class _UsersCardState extends State<_UsersCard> {
     }
   }
 
+  Future<void> _pickRole(Map<String, dynamic> user) async {
+    const roles = <(String, String)>[
+      ('customer', 'Customer — regular sender'),
+      ('rider', 'Rider — team member (salary)'),
+      ('partner', 'Partner — courier depot console'),
+      ('ops', 'Ops — dispatch tools (fleet-wide)'),
+      ('admin', 'Admin — full admin console'),
+      ('cfo', 'CFO — finances (payroll, tax; no money moves)'),
+    ];
+    final picked = await showAppSheet<String>(
+      context,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(4)))),
+        const SizedBox(height: 16),
+        const Text('Change role', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
+        const SizedBox(height: 4),
+        Text('${user['email'] ?? user['phone'] ?? ''}', style: AppType.caption),
+        const SizedBox(height: 10),
+        for (final (value, label) in roles)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(label, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+            trailing: '${user['role'] ?? 'customer'}' == value
+                ? const Icon(Icons.check_circle, color: AppColors.forest, size: 18)
+                : null,
+            onTap: () => Navigator.of(context).pop(value),
+          ),
+        const SizedBox(height: 8),
+        SizedBox(width: double.infinity, child: OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel'))),
+      ]),
+    );
+    if (picked != null) await _setRole(user, picked);
+  }
+
+  static String _initials(Map<String, dynamic> u) {
+    final seed = '${u['full_name'] ?? u['email'] ?? u['phone'] ?? '?'}'.trim();
+    final parts = seed.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, parts.first.length.clamp(1, 2)).toUpperCase();
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+
+  static String _kw(num? v) =>
+      'K${(v ?? 0).toStringAsFixed(v == null || v == v.roundToDouble() ? 0 : 2)}';
+
+  static String _shortDate(Object? v) {
+    final raw = '${v ?? ''}';
+    if (raw.isEmpty) return '-';
+    final dt = DateTime.tryParse(raw.replaceFirst(' ', 'T'));
+    if (dt == null) return raw;
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
+
+  Color _roleColor(String role) => switch (role) {
+        'admin' || 'superadmin' => AppColors.amber,
+        'ops' => const Color(0xFF1E4F6E),
+        'cfo' => const Color(0xFF6A3FA0),
+        'partner' => AppColors.forestLight,
+        'rider' => AppColors.forest,
+        _ => AppColors.muted,
+      };
+
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.line),
+        boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 10, offset: Offset(0, 3))],
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            const Icon(Icons.manage_accounts_outlined, color: AppColors.forest),
-            const SizedBox(width: 8),
-            const Expanded(child: Text('Accounts & roles', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15))),
-            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18)),
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.manage_accounts_outlined, color: AppColors.forest, size: 21),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('People & accounts', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: -0.2)),
+              Text('$_total registered ${_total == 1 ? 'account' : 'accounts'} · numbers, roles, money and activity.',
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+            ])),
+            IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load,
+                icon: const Icon(Icons.refresh, size: 18, color: AppColors.forest)),
           ]),
-          const SizedBox(height: 4),
-          const Text('Admins decide who is who. Roles you can grant: customer (regular sender), rider (team member — Team/Rider tab, salary payroll), partner (courier depot console — pick its depot below), ops (dispatch — fleet-wide tools), admin (full admin console), cfo (finances only — payroll, turnover tax and filings; never moves money on their own). The superadmin owner identity is never a selectable role.',
-              style: AppType.caption),
-          const SizedBox(height: 8),
-          if (_loading)
-            const Padding(padding: EdgeInsets.all(14), child: Center(child: AppLogoSpinner(size: 26)))
-          else if (_users.isEmpty)
-            const Text('No accounts found.', style: TextStyle(color: AppColors.ink, fontSize: 12.5))
-          else
-            ..._users.take(60).map((u) {
-              final role = '${u['role'] ?? 'customer'}';
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(children: [
-                  const Icon(Icons.person_outline, size: 16, color: AppColors.forest),
-                  const SizedBox(width: 10),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Text('${u['full_name'] ?? u['email'] ?? u['phone'] ?? 'Account'}',
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                      
-                    ]),
-                    Text('${u['email'] ?? ''} · ${u['phone'] ?? ''}',
-                        style: const TextStyle(color: AppColors.muted, fontSize: 11)),
-                  ])),
-                  ...[
-                    PopupMenuButton<String>(
-                      tooltip: 'Change role',
-                      initialValue: role,
-                      onSelected: (r) => _setRole(u, r),
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(value: 'customer', child: Text('Customer — regular sender')),
-                        PopupMenuItem(value: 'rider', child: Text('Rider — team member (salary)')),
-                        PopupMenuItem(value: 'partner', child: Text('Partner — courier depot console')),
-                        PopupMenuItem(value: 'ops', child: Text('Ops — dispatch tools (fleet-wide)')),
-                        PopupMenuItem(value: 'admin', child: Text('Admin — full admin console')),
-                        PopupMenuItem(value: 'cfo', child: Text('CFO — finances (payroll, tax, books; no money moves)')),
-                      ],
-                      child: Chip(
-                        visualDensity: VisualDensity.compact,
-                        label: Text(role, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                      ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _search,
+            onChanged: _onSearch,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Search by name, phone number or email',
+              prefixIcon: const Icon(Icons.search_rounded, size: 20, color: AppColors.muted),
+              suffixIcon: _search.text.isEmpty
+                  ? null
+                  : IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close, size: 18),
+                      onPressed: () { _search.clear(); _load(); }),
+              filled: true,
+              fillColor: AppColors.canvas,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+              border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: AppColors.line)),
+              enabledBorder: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12)), borderSide: BorderSide(color: AppColors.line)),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final (value, label) in _filters)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700,
+                          color: _roleFilter == value ? Colors.white : AppColors.ink)),
+                      selected: _roleFilter == value,
+                      selectedColor: AppColors.forest,
+                      backgroundColor: AppColors.canvas,
+                      onSelected: (_) { if (_roleFilter != value) setState(() => _roleFilter = value); _load(); },
                     ),
-                    if ('${u['role'] ?? 'customer'}' != 'admin') ...[
-                      IconButton(
-                        tooltip: 'Edit details',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.edit_outlined, size: 18, color: AppColors.forest),
-                        onPressed: () => _editUser(u),
-                      ),
-                      IconButton(
-                        tooltip: 'Delete account',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
-                        onPressed: () => _deleteUser(u),
-                      ),
-                    ],
-                    ]]),
-              );
-            }),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(22), child: Center(child: AppLogoSpinner(size: 26)))
+          else if (_error != null)
+            Padding(padding: const EdgeInsets.all(12), child: Row(children: [
+              const Icon(Icons.cloud_off_outlined, color: AppColors.amber, size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text(_error!, style: const TextStyle(fontSize: 12.5))),
+              TextButton(onPressed: _load, child: const Text('Retry')),
+            ]))
+          else if (_users.isEmpty)
+            const Padding(padding: EdgeInsets.all(20), child: Center(child: Text('No accounts match that search.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.muted))))
+          else ...[
+            for (final u in _users.take(_shown)) _userRow(u),
+            if (_users.length > _shown)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: SizedBox(width: double.infinity, child: OutlinedButton.icon(
+                  onPressed: () => setState(() => _shown += 30),
+                  icon: const Icon(Icons.expand_more, size: 16),
+                  label: Text('Show more (${_users.length - _shown} left)'),
+                )),
+              ),
+          ],
         ]),
       ),
     );
   }
+
+  Widget _userRow(Map<String, dynamic> u) {
+    final role = '${u['role'] ?? 'customer'}';
+    final name = '${u['full_name'] ?? u['email'] ?? u['phone'] ?? 'Account'}';
+    final phone = '${u['phone'] ?? ''}';
+    final email = '${u['email'] ?? ''}';
+    final color = _roleColor(role);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AppColors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => AdminUserDetailSheet.show(
+          context,
+          user: u,
+          onEdit: _editUser,
+          onRole: _pickRole,
+          onDelete: u['superadmin'] == true ? null : _deleteUser,
+          onChanged: _load,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(11),
+          child: Row(children: [
+            ClipOval(child: SizedBox(width: 42, height: 42,
+              child: (u['photo_url'] != null && '${u['photo_url']}'.isNotEmpty)
+                  ? Image.network('${u['photo_url']}', width: 42, height: 42, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _avatarFallback(u, color))
+                  : _avatarFallback(u, color))),
+            const SizedBox(width: 11),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+                if (u['superadmin'] == true) ...[
+                  const SizedBox(width: 6),
+                  const Icon(Icons.verified_rounded, size: 14, color: AppColors.amber),
+                ],
+              ]),
+              const SizedBox(height: 2),
+              Text(phone, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.ink)),
+              if (email.isNotEmpty)
+                Text(email, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 4, children: [
+                _mini('${u['jobs_sent'] ?? 0} jobs'),
+                _mini(_kw((u['spend_zmw'] as num?) ?? 0)),
+                if (u['plan_tier'] != null) _mini('${u['plan_tier']} plan'),
+                if (((u['devices'] as num?) ?? 0) > 0) _mini('${u['devices']} device'),
+                _mini('joined ${_shortDate(u['created_at'])}'),
+              ]),
+            ])),
+            const SizedBox(width: 6),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+                child: Text(role.toUpperCase(), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5, color: color)),
+              ),
+              const SizedBox(height: 10),
+              const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.muted),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _avatarFallback(Map<String, dynamic> u, Color color) => Container(
+        color: color.withValues(alpha: 0.18),
+        alignment: Alignment.center,
+        child: Text(_initials(u), style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: color)),
+      );
+
+  Widget _mini(String label) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.line)),
+        child: Text(label, style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: AppColors.muted)),
+      );
 }
 
 /// Admin booking delete: the soft-delete the ops console has no button for.

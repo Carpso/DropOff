@@ -1,5 +1,107 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-26 (fifty-seventh pass) — owner reset protection, offline map, premium admin Users console
+
+- **Owner/admin password reset protection (owner: "protect it as the app owner"):**
+  the owner account (`godfreymoseskalambo@gmail.com` / `260968551110`, role
+  `admin`) could be taken over by anyone who read that mailbox: `POST /auth/forgot`
+  mailed a 1-hour reset link for ANY account, including staff. Migration `0090`
+  adds `email_tokens.issued_via` (`email` | `sms` | `admin`) + `requested_ip`.
+  Pure policy `workers/src/account_protection.ts` (owner email/phone + roles
+  admin/superadmin/owner/cfo/ops are protected) is unit-tested in
+  `workers/test/account_protection.test.ts` (7). Protected accounts now get the
+  reset link by **SMS to the account phone**; an emailed token can NEVER reset
+  them (`/auth/link` and `/auth/reset` both refuse with plain copy), so every
+  link already in an old inbox is dead. Recovery is superadmin-only
+  `POST /admin/users/:phone/password-reset-link` (SMS + returned link + audit).
+  Alert flooding is capped at one `password_reset_owner` alert / 30 min.
+  **Verified live:** owner forgot-request minted an `sms` token, an emailed
+  token was refused 403 with `protected_account_phone_required`, owner password
+  hash unchanged, and the test token was burned.
+- **Owner/admin email entry:** staff rows were previously blocked from edits, so
+  owner/admin/ops/CFO had no way to enter an address. New
+  `POST /admin/users/me/email` (JWT may edit own phone only; explicit phone only
+  with superadmin key) validates uniqueness, applies the address, emails a
+  verification link and audits `staff_email_changed`. UI: `StaffEmailCard` in
+  Account (staff only) and **Enter email** chip in the admin user dossier.
+  `app/test/staff_email_card_test.dart` pins 320/360/390 px + save gating.
+- **Premium admin Users directory:** `GET /admin/users` now supports `q`, `role`,
+  `limit`, `offset` and returns per-user jobs/delivered/spend/plan/wallet/
+  devices/strikes/last-seen with one grouped query per fact (no N+1). New
+  `GET /admin/users/:phone/detail` dossier (jobs, payments, plans, devices,
+  addresses, strikes). The app's `_UsersCard` is now a searchable, role-filtered
+  directory with avatars, role pills and stat chips; tapping a row opens the new
+  `AdminUserDetailSheet`. The console's section-jump chips now really scroll
+  (`ScrollController` + section keys) instead of being dead placeholders.
+- **Offline map + honest banner:** `MapTileCache` gained live status/progress and
+  an explicit download/delete manager (`OfflineMapSheet` from the map chrome and
+  Account). The map's offline banner is `MapOfflineBanner`, which accepts NO
+  error string — raw `pmtiles:timeoutexception…` can no longer leak; it offers
+  Retry + "Save the map for offline". 7 widget tests
+  (`app/test/offline_map_test.dart`) pin 320/360/390 px, no raw internals, and
+  both callbacks.
+- **Tooling:** `tools/d1_query.ps1` runs read-only (or any) D1 SQL from PowerShell
+  5.1 without inline-quote mangling. Worker `onError` now returns a `debug` field
+  to the admin key (clean JSON for everyone else).
+- **Checks:** Flutter 84/84, worker vitest 37/37 (4 integration skipped), tsc and
+  flutter analyze clean apart from the 6 known pre-existing warnings/infos.
+  Release **0.5.96+106** (APK 72.6 MB, AAB 55.5 MB, web `67e37775`), live
+  `/app/version` latest `0.5.96`, minimum `0.5.0`, force off. Worker
+  `e393dc1b-0a8e-42a7-be24-df511bd45ccb`.
+
+## 2026-11-26 (fifty-sixth pass) — map direction arrows, green chrome, (c) stamp, bigger nav cards
+
+- **Direction on the route:** the rider marker is now a branded vehicle inside a
+  mint halo with an **amber heading arrowhead**, and the route line carries
+  **chevrons every ~1.2 km** (max 6) that rotate to the road segment under
+  them. Geometry lives in the pure, testable `app/lib/data/route_arrows.dart`
+  (`routeArrowSpecs`) — it never decorates a straight-line fallback, skips hops
+  under 220 m, and normalises latlong2's `-180..180` bearing to `0..360`.
+  `app/test/route_arrows_test.dart` pins position-on-line, direction, ordering
+  and the cap.
+- **Map chrome is green now:** controls are 44 px with a forest edge, the
+  **recentre-on-rider** button is solid forest (`Icons.my_location`, smart zoom
+  by remaining distance), and every button has a tooltip. Zoom / fit / reload
+  kept.
+- **Copyright stamp:** new `app/lib/ui/map_credit_stamp.dart` renders a circled
+  **C** + **DropOff** + `map data (c) OpenStreetMap contributors` as a slim
+  pill at the map's top-left (it moves below the offline banner when that
+  shows). The credit text is `ConstrainedBox(maxWidth: 186)` + ellipsis — do
+  NOT use `Flexible` there, it stretches the pill to full width.
+  `app/test/map_credit_stamp_test.dart` renders it at 320/360/390 px.
+- **Bigger navigator cards + green headings:** the in-app navigator AppBar is
+  forest with a mint destination subtitle; the route card is a 16 px card with
+  a **green ROUTE heading strip** (amber `Steps (n)` pill), 17 px distance and
+  15 px ETA, destination on its own line; the live cue banner is a forest
+  gradient with a 46 px amber icon tile and an amber distance pill. Route chips
+  are larger, green-outlined and carry a check / alt-route icon.
+- **Sender live map** (`rider_map_screen.dart`) got the same green AppBar with a
+  LIVE pill and a green-headed "RIDER LIVE" card instead of bare text.
+- **Smart destination badge:** the destination pin shows `Arriving` / `N m
+  away` / `N.N km away` computed from the rider's live fix.
+- Release **`0.5.95+105`**; `/app/version` now serves latest `0.5.95`, minimum
+  `0.5.0`, force off (D1 `app_settings` rows updated, no deploy needed to force
+  later — just POST a higher `minimum`).
+
+## 2026-11-26 (fifty-fifth pass) — Task Queue header + App Links fingerprints
+
+- **Task Queue title no longer truncates:** removed the duplicate tutorial
+  IconButton from the rider Task Queue (Account already owns
+  **How DropOff works - tutorial**, role-aware for riders/senders), reduced the
+  shift pill width, set `titleSpacing: 0` and an 18 px bold title so the full
+  label fits beside notifications, shift, history and account at 320 px.
+- **App Links fingerprints:** owner supplied mixed SHA-1/SHA-256 values. Android
+  Digital Asset Links accepts only 32-byte SHA-256. The three 20-byte values
+  (`D5:5E...`, `5F:7F...`, `9A:9F...`) are SHA-1 and were NOT published. Stored
+  the three valid extra SHA-256 values in live D1 `app_settings` key
+  `android_cert_sha256_extra`: `EB:45...F5`, `6F:A9...56`, `AF:ED...91`.
+  Together with the built-in upload key `D0:DB...37`, all four are now served
+  by `/.well-known/assetlinks.json` with HTTP 200 and no redirect on all three
+  domains (`api.carpsosolutions.store`, `dropoff.carpsosolutions.store`,
+  `dropoff-api.godfreymoseskalambo.workers.dev`). Owner can now press
+  **Recheck** in Play Console -> Test and release -> Deep links.
+- Release **`0.5.94+104`**; worker update-curtain fallback matches.
+
 ## 2026-11-25 (fifty-fourth pass) — exact pins, map repair, receipts, update curtain, premium order alert
 
 - **Rider map theme cast + dead Retry:** `rider_map.dart` decoded the bundled

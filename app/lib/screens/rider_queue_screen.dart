@@ -9,7 +9,6 @@ import 'dart:async';
 
 import '../ui/app_toast.dart';
 import '../widgets/help_sheet.dart';
-import '../widgets/tutorial_sheet.dart';
 import '../widgets/photo_preview.dart';
 import '../ui/receipt_viewer.dart';
 import '../ui/proof_upload_overlay.dart';
@@ -493,7 +492,7 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
           ),
         ),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
             color: on ? AppColors.forest.withValues(alpha: 0.10) : AppColors.line.withValues(alpha: 0.16),
             borderRadius: BorderRadius.circular(18),
@@ -2623,11 +2622,12 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
       // rider's first screen opens the Account screen — profile, plans and
       // the sign-out path live there.
       appBar: AppBar(
+        titleSpacing: 0,
         title: const Text(
           'Task Queue',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontWeight: FontWeight.w900),
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
         ),
         actions: [
           // Bell: notification center (replaces the auto-popping banner).
@@ -2650,11 +2650,6 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
             tooltip: 'Job history',
             icon: const Icon(Icons.history_rounded),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const RiderHistoryScreen())),
-          ),
-          IconButton(
-            tooltip: 'Rider tutorial',
-            icon: const Icon(Icons.menu_book_outlined),
-            onPressed: () => TutorialSheet.show(context, rider: true),
           ),
           IconButton(
             tooltip: 'Account & sign out',

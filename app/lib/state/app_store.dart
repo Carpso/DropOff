@@ -594,6 +594,10 @@ class AppStore extends ChangeNotifier with WidgetsBindingObserver {
         return 'Your session was revoked - sign in again.';
       case 'account_already_exists':
         return 'An account with those details already exists - sign in instead.';
+      case 'protected_account_phone_required':
+        return 'For safety, owner and admin passwords are reset with a link sent to the account phone, not by email.';
+      case 'link_expired_or_used':
+        return 'That reset link expired or was already used - request a new one.';
       case 'internal_error':
         return 'DropOff is having a moment - please try again in a minute.';
       case 'unknown':

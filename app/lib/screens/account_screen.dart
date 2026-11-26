@@ -26,6 +26,8 @@ import '../services/device_lock.dart';
 import '../ui/money_errors.dart';
 import '../ui/app_spinner.dart';
 import '../services/step_sounds.dart';
+import '../ui/offline_map_sheet.dart';
+import '../ui/staff_email_card.dart';
 
 /// Email + password sign in / create account (the JWT + phone persist locally;
 /// the ops device-link stays separate under Team).
@@ -561,13 +563,23 @@ class _AccountScreenState extends State<AccountScreen> {
       return;
     }
     final dev = res.body['dev_reset_link'] as String?;
+    // Honest delivery: the worker reports whether mail actually went out, so
+    // "check your email" is never shown for a send that failed.
+    final sent = res.body['sent'] == true;
+    final delivered = sent || dev != null;
     await showInfoSheet(
       context,
-      title: 'Check your email',
+      title: delivered ? 'Check your messages' : 'We could not send the link',
       message: dev != null
           ? 'Email delivery is not configured yet — reset link for this build:\n\n$dev'
-          : 'If $email has an account, a reset link valid for 1 hour is on its way.',
-      icon: Icons.mark_email_read_outlined,
+          : delivered
+              // Owner/admin accounts are protected: their link goes to the
+              // phone by SMS, never to the mailbox.
+              ? 'If $email has an account, a reset link valid for 1 hour is on its way. '
+                  'Owner and admin accounts get the link by SMS on the account phone, never by email.'
+              : 'The reset message could not be sent just now. Try again in a moment, '
+                  'or sign in with your phone number and the 6-digit SMS code.',
+      icon: delivered ? Icons.mark_email_read_outlined : Icons.error_outline_rounded,
     );
   }
 
@@ -747,6 +759,16 @@ class _AccountScreenState extends State<AccountScreen> {
                       ],
                     ),
                   ),
+                // Staff email (owner 2026-11-26): owner/admin/ops/CFO can enter
+                // or change their own address; protected resets stay phone-only.
+                if (store.isStaff) ...[
+                  StaffEmailCard(phone: store.linkedPhone, email: store.email),
+                  const SizedBox(height: 12),
+                ],
+                // Offline map (owner 2026-11-26): riders save the city basemap
+                // before a route with no signal.
+                const OfflineMapTile(),
+                const SizedBox(height: 6),
                 // Recipient door PIN (owner 2026-11-18): your own 4-digit code
                 // shown to the rider at the door — no SMS code for same-city.
                 ListTile(

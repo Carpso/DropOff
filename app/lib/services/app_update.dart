@@ -54,7 +54,7 @@ class AppUpdateService {
         if (r.statusCode != 200) continue;
         final data = jsonDecode(r.body) as Map<String, dynamic>;
         return AppUpdateInfo(
-          latest: '${data['latest'] ?? '0.5.93'}',
+          latest: '${data['latest'] ?? '0.5.96'}',
           minimum: '${data['minimum'] ?? '0.5.0'}',
           force: data['force'] == true,
           message: '${data['message'] ?? 'A faster, smoother DropOff is ready.'}',
