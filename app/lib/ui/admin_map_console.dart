@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/dropoff_api.dart';
+import '../data/freshness.dart';
 import 'app_sheet.dart';
 import 'app_spinner.dart';
 import 'app_theme.dart';
@@ -213,15 +215,24 @@ class _AdminLiveMapCardState extends State<AdminLiveMapCard> {
   bool _snapshotting = false;
   int _minutes = 60;
   String? _error;
+  Timer? _poll;
+  DateTime? _lastRefresh;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _poll = Timer.periodic(const Duration(seconds: 20), (_) => _load(quiet: true));
   }
 
-  Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool quiet = false}) async {
+    if (!quiet) setState(() { _loading = true; _error = null; });
     try {
       final data = await DropOffApi.adminLiveRiders(minutes: _minutes);
       if (!mounted) return;
@@ -233,9 +244,10 @@ class _AdminLiveMapCardState extends State<AdminLiveMapCard> {
         _riders = (data['riders'] as List?)?.whereType<Map>()
             .map((m) => Map<String, dynamic>.from(m)).toList() ?? const [];
         _loading = false;
+        _lastRefresh = DateTime.now();
       });
     } catch (_) {
-      if (mounted) setState(() { _loading = false; _error = 'Could not load rider positions.'; });
+      if (mounted && !quiet) setState(() { _loading = false; _error = 'Could not load rider positions.'; });
     }
   }
 
@@ -301,12 +313,17 @@ class _AdminLiveMapCardState extends State<AdminLiveMapCard> {
               pickup: center, rider: null,
               stops: [for (final r in pins)
                 {'lat': r['last_lat'], 'lng': r['last_lng'], 'kind': 'saved',
-                 'label': '${r['full_name'] ?? r['phone'] ?? 'Rider'} · ${r['status'] ?? ''}'}],
+                 'label': '${r['full_name'] ?? r['phone'] ?? 'Rider'} · ${fixAgeLabel(r['last_seen_at'])}'}],
               city: 'Lusaka',
             )))),
         const SizedBox(height: 8),
-        const Text('Pins fade out when a rider stops sharing. Snapshot saves a PNG to your phone.',
-            style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
+        Text(
+          _lastRefresh == null
+              ? 'Pins refresh every 20 seconds. Snapshot saves a PNG to your phone.'
+              : 'Refreshed ${fixAgeLabel(_lastRefresh!.toIso8601String())} · pins refresh every 20 seconds. '
+                  'Pins older than 2 minutes are stale.',
+          style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+        ),
       ])),
     );
   }

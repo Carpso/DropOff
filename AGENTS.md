@@ -1,5 +1,33 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-28 (sixty-third pass) — live tracker audit: sender, recipient, admin
+
+- **One source of truth:** new pure `workers/src/tracking.ts` defines the stage
+  (`to_pickup` → `to_depot` → `at_depot` → `to_door` → `done`), the plain label,
+  the ACTIVE destination pin, and `canTrackJob()` (sender, recipient, staff —
+  never a stranger). `STALE_FIX_SECONDS = 120`. 5 vitest cases.
+- **`/jobs/:ref/live`**: now returns `stage`, `rider_name/vehicle`, ETA, active
+  `dest_lat/dest_lng/dest_label`, `fix_age_seconds`, `stale`, and a terminal
+  `ended` note; no Google Maps link. Destination is the sender's door before
+  pickup, the depot after pickup, and the recipient door for collections.
+- **`/track/:token`**: same stage + freshness fields so recipient and sender
+  views agree with the sender's live map.
+- **Sender live map**: stage-aware route/depot pin, rider name, ETA, status
+  label, friendly "last fix 12s ago", STALE FIX badge and a journey-complete
+  state — no raw timestamps or false "live" pins.
+- **Recipient tracker**: 15 s polling while open (idle after delivery), plain
+  fix age + stage line, no manual refresh needed. **Admin fleet map**: 20 s
+  polling, per-rider fix age on pins, "refreshed … ago" footer.
+- **Live verification:** admin key 200 with correct stage/destination/stale;
+  delivered job 200 with `ended: true`; no-auth 401. Sender/recipient gating
+  is pinned by `canTrackJob()` unit tests — a valid live JWT could not be
+  minted from this machine (`wrangler secret get JWT_SECRET` unavailable,
+  AUTH_DEV_MODE=0), so those two roles were not exercised live.
+- **Checks:** Flutter 96/96, worker vitest 47/47 (4 integration skipped), tsc
+  clean, analyze back to the 6 known warnings. Release **0.6.2+112** (APK
+  69.3 MB, AAB 52.9 MB, web `47d4d4b1`), worker
+  `827ca284-132c-465f-bac7-a866ec56ee85`.
+
 ## 2026-11-26 (sixty-second pass) — notification bell shows everything, for every role
 
 - **Complete bell:** `NotificationInbox` now captures every notification for the

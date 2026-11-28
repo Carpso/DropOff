@@ -27,6 +27,7 @@ import { filedReceiptTotal, invalidFiledReceipt, parseFiledReceipts } from './re
 import { baseRiderFee, haversineKm as haversine, tierOverageFee, VEHICLE_CLASSES, VehicleClass, parcelCapFor, vehicleClassForParcel } from './pricing';
 import { resetEmailHtml, sendMail, verifyEmailHtml } from './mail';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp';
+import { canTrackJob, fixAgeSeconds, STALE_FIX_SECONDS, trackingStage } from './tracking';
 import { sendSms } from './sms';
 import { sendToPhone } from './push';
 import {
@@ -914,7 +915,7 @@ app.get('/app/version', async (c) => {
     getSetting(c.env.DB, 'app_update_force'),
     getSetting(c.env.DB, 'app_update_message'),
   ]);
-  const fallback = '0.6.1';
+  const fallback = '0.6.2';
   return c.json({
     latest: (latest?.trim() || fallback),
     minimum: (minimum?.trim() || '0.5.0'),
@@ -3426,7 +3427,9 @@ app.get('/jobs/:ref', async (c) => {
 // Live location for a participant (sender/recipient) or ops/admin (fleet view)
 app.get('/jobs/:ref/live', async (c) => {
   const job = await c.env.DB.prepare(
-    `SELECT j.*, r.phone AS rider_phone, r.last_lat, r.last_lng, r.last_seen_at,
+    `SELECT j.*, r.phone AS rider_phone, r.full_name AS rider_name,
+            r.vehicle AS rider_vehicle, r.photo_url AS rider_photo_url,
+            r.last_lat, r.last_lng, r.last_seen_at,
             co.lat AS depot_lat, co.lng AS depot_lng, co.depot_name
        FROM jobs j
        LEFT JOIN riders r ON r.id = j.rider_id
@@ -3435,9 +3438,8 @@ app.get('/jobs/:ref/live', async (c) => {
   ).bind(c.req.param('ref')).first() as any;
   if (!job) return c.json({ error: 'not found' }, 404);
   const liveRole = c.get('role');
-  const liveStaff = liveRole === 'ops' || isAdmin(c);
   const livePhone = c.get('phone');
-  if (!liveStaff && livePhone !== job.sender_phone && livePhone !== job.recipient_phone) {
+  if (!canTrackJob(liveRole, livePhone, job)) {
     return c.json({ error: 'not found' }, 404);
   }
   if (!job.rider_phone) return c.json({ has_rider: false });
@@ -3445,34 +3447,52 @@ app.get('/jobs/:ref/live', async (c) => {
   // from dispatch — on the way to the pickup — through the collected leg,
   // and ENDS at the depot drop ('delivered') or when the parcel waits at the
   // destination depot for collection ('ready_for_collection').
-  if (['delivered', 'ready_for_collection'].includes(String(job.status ?? ''))) {
-    return c.json({ has_rider: true, location: null, ended: true, note: `Tracking ended — your item is ${String(job.service ?? '') === 'collection' ? 'with the recipient' : 'at the depot'}.` });
+  if (['delivered', 'ready_for_collection', 'collected', 'completed'].includes(String(job.status ?? ''))) {
+    const ended = trackingStage(String(job.status), String(job.service));
+    return c.json({
+      has_rider: true,
+      location: null,
+      ended: true,
+      stage: ended,
+      note: String(job.service ?? '') === 'collection'
+        ? 'Tracking ended — your item was handed to the recipient.'
+        : 'Tracking ended — your item is at the depot.',
+    });
   }
   if (job.last_lat == null) {
-    return c.json({ has_rider: true, location: null, note: 'rider has not shared location yet' });
+    return c.json({ has_rider: true, location: null, stage: trackingStage(String(job.status), String(job.service)), note: 'rider has not shared location yet' });
   }
+  const stage = trackingStage(String(job.status), String(job.service));
+  const age = fixAgeSeconds(String(job.last_seen_at ?? ''));
+  // A fix is LIVE only while it is recent. Old coordinates must never be
+  // presented as a current rider position (owner audit 2026-11-28).
+  const stale = age == null || age > STALE_FIX_SECONDS;
+  const toDepot = stage.destination === 'depot';
   return c.json({
     has_rider: true,
     lat: job.last_lat,
     lng: job.last_lng,
     seen_at: job.last_seen_at,
+    fix_age_seconds: age,
+    stale,
+    stage,
+    rider_name: String(job.rider_name ?? ''),
+    rider_vehicle: String(job.rider_vehicle ?? ''),
+    rider_photo_url: job.rider_photo_url ?? null,
+    eta_minutes: job.eta_minutes ?? null,
     pickup_lat: job.pickup_lat ?? null,
     pickup_lng: job.pickup_lng ?? null,
-    // A collection starts AT the depot and ends at the recipient's door —
-    // the sender's live map must not draw the depot as the journey's end
-    // (owner directive 2026-11-20: "on collection the depot pin remove it").
+    // Active leg only: before pickup the pin is the sender's door; after
+    // pickup it is the courier depot; a collection heads to the door (no GPS).
+    dest_lat: toDepot ? (job.depot_lat ?? null) : (stage.destination === 'pickup' ? (job.pickup_lat ?? null) : null),
+    dest_lng: toDepot ? (job.depot_lng ?? null) : (stage.destination === 'pickup' ? (job.pickup_lng ?? null) : null),
+    dest_label: toDepot ? (job.depot_name ?? 'Courier depot') : stage.destination === 'pickup' ? 'Pickup' : 'Recipient door',
     service: job.service ?? 'standard',
     status: job.status ?? null,
-    // Server-decided vehicle class (motorcycle / car / van / truck). Sender,
-    // recipient and rider maps all show the SAME branded marker.
-    vehicle_class: String(job.vehicle_class ?? (job.needs_car ? 'car' : 'motorcycle')),
-    // END of the visible leg: the courier's depot branch — real stored
-    // coordinates (jobs carry no destination GPS, only an address string),
-    // so the tracking map can draw where the journey ends (owner 2026-11-18).
     depot_lat: job.depot_lat ?? null,
     depot_lng: job.depot_lng ?? null,
     depot_name: job.depot_name ?? null,
-    maps_link: `https://maps.google.com/?q=${job.last_lat},${job.last_lng}`,
+    vehicle_class: String(job.vehicle_class ?? (job.needs_car ? 'car' : 'motorcycle')),
   });
 });
 
@@ -4897,9 +4917,12 @@ app.get('/track/:token', async (c) => {
   ).bind(row.job_id).all();
   // Smart ETA: p50 of this courier's recent legs applied to where the parcel is.
   const predicted = await predictEtaForJob(c.env.DB, row, events as any[]).catch(() => null);
+  const stage = trackingStage(String(row.status), String(row.service));
+  const fixAge = fixAgeSeconds(String(row.last_seen_at ?? ''));
   return c.json({
     ref: row.ref,
     status: row.status,
+    stage,
     created_at: row.created_at,
     predicted,
     pickup_city: (row.pickup_address ?? '').split(',').slice(-1)[0].trim() || null,
@@ -4919,7 +4942,10 @@ app.get('/track/:token', async (c) => {
       ? { name: row.rider_name, vehicle: row.rider_vehicle, photo_url: row.rider_photo_url ?? null, verified: row.rider_verification === 'verified' }
       : null,
     location: row.last_lat != null
-      ? { lat: row.last_lat, lng: row.last_lng, seen_at: row.last_seen_at }
+      ? {
+          lat: row.last_lat, lng: row.last_lng, seen_at: row.last_seen_at,
+          age_seconds: fixAge, stale: fixAge == null || fixAge > STALE_FIX_SECONDS,
+        }
       : null,
     events,
     // "belongs to" proof — shown only after the account gate passes.

@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../data/freshness.dart';
 import '../data/analytics_service.dart';
 import '../data/dropoff_api.dart';
 import '../main.dart';
@@ -88,6 +89,7 @@ class _TrackScreenState extends State<TrackScreen> {
   String? _autoTriggeredFor;
   bool _loading = false;
   String? _error;
+  Timer? _poll;
 
   @override
   void initState() {
@@ -96,20 +98,29 @@ class _TrackScreenState extends State<TrackScreen> {
       _input.text = widget.initialToken!;
       _lookup();
     }
+    // A tracking page is a live view, not a snapshot: refresh while open so a
+    // rider's position and the timeline move without the recipient tapping.
+    _poll = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_input.text.trim().isNotEmpty && !_loading) _lookup(quiet: true);
+    });
   }
 
   @override
   void dispose() {
+    _poll?.cancel();
     _input.dispose();
     super.dispose();
   }
 
-  Future<void> _lookup() async {
+  Future<void> _lookup({bool quiet = false}) async {
     final token = _input.text.trim();
     if (token.isEmpty) return;
-    setState(() { _loading = true; _error = null; });
+    if (!quiet) setState(() { _loading = true; _error = null; });
     final res = await DropOffApi.trackLookup(token);
     if (!mounted) return;
+    final status = '${res.body['status'] ?? ''}';
+    final terminal = ['delivered', 'ready_for_collection', 'collected', 'completed'].contains(status);
+    if (terminal) _poll?.cancel();
     setState(() {
       _loading = false;
       _error = switch (res.error) {
@@ -502,7 +513,21 @@ class _TrackScreenState extends State<TrackScreen> {
               ]),
             ],
             if (loc != null)
-              Text('Last fix ${loc['seen_at'] ?? ''}', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+              Text(
+                'Last fix ${fixAgeLabel(loc['seen_at'])}',
+                style: TextStyle(
+                  color: loc['stale'] == true ? AppColors.danger : AppColors.muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            if (d['stage'] is Map<String, dynamic>)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('${(d['stage'] as Map<String, dynamic>)['label'] ?? ''}',
+                    maxLines: 2, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.forest)),
+              ),
             if (rider == null)
               const Text('Rider on the way', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
           ])),

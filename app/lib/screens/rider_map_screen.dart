@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../data/dropoff_api.dart';
+import '../data/freshness.dart';
 import '../data/map_services.dart';
 import '../ui/app_theme.dart';
 import '../widgets/rider_map.dart';
@@ -55,22 +56,30 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
           ? LatLng((_live!['lat'] as num).toDouble(), (_live!['lng'] as num).toDouble())
           : null;
 
-  /// END of the visible leg: the courier's depot branch (real coordinates the
-  /// live API now serves — jobs carry no destination GPS). Shown as the
-  /// warehouse pin so the tracking map reads start → rider → end (owner
-  /// 2026-11-18: "show start and end of route to pick up and drop off").
-  ///
-  /// COLLECTIONS ARE REVERSED (owner directive 2026-11-20: "on collection the
-  /// depot pin remove it"): the item is already at the depot, so the depot
-  /// is the START, never the destination. No warehouse pin is drawn — the
-  /// route ends at the recipient's handover.
-  /// </summary>
+  /// END of the CURRENT leg, chosen by the server's tracking stage:
+  /// before pickup it is the sender's door; after pickup it is the courier
+  /// depot; a collection heads to the recipient's door (no GPS pin).
+  LatLng? get _activeDest {
+    final lat = _live?['dest_lat'];
+    final lng = _live?['dest_lng'];
+    if (lat != null && lng != null) {
+      return LatLng((lat as num).toDouble(), (lng as num).toDouble());
+    }
+    return _pickup;
+  }
+
   LatLng? get _depot {
-    if ('${_live?['service'] ?? ''}' == 'collection') return null;
+    // Only draw the warehouse pin when it is actually the active destination.
+    if ('${_live?['stage']?['destination'] ?? ''}' != 'depot') return null;
     return (_live?['depot_lat'] != null && _live?['depot_lng'] != null)
         ? LatLng((_live!['depot_lat'] as num).toDouble(), (_live!['depot_lng'] as num).toDouble())
-        : null;
+        : _activeDest;
   }
+
+  Map<String, dynamic>? get _stage => _live?['stage'] as Map<String, dynamic>?;
+  String get _stageLabel => '${_stage?['label'] ?? 'On the move'}';
+  bool get _ended => _live?['ended'] == true || _stage?['live'] == false;
+  bool get _stale => _live?['stale'] == true || isStaleFix(_live?['seen_at']);
 
   RouteResult? _route;
   LatLng? _routeOrigin;
@@ -80,7 +89,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
   bool _routeLoading = false;
 
   Future<void> _maybeRoute() async {
-    final me = _rider, dest = _pickup;
+    final me = _rider, dest = _ended ? null : _activeDest;
     if (me == null || dest == null || _routeLoading) return;
     if (_route != null && _routeOrigin != null &&
         const Distance().as(LengthUnit.Meter, _routeOrigin!, me) < 150) {
@@ -124,7 +133,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
             rider: _rider,
             depot: _depot,
             route: _route?.points ??
-                ((_rider != null && _pickup != null) ? [_rider!, _pickup!] : null),
+                ((_rider != null && _activeDest != null && !_ended) ? [_rider!, _activeDest!] : null),
             routeIsStraightLine: _route == null,
             vehicleClass: '${_live?['vehicle_class'] ?? 'motorcycle'}',
             // Names for labels on map markers (owner: map should show names,
@@ -135,7 +144,17 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
             senderName: '${_live?['sender_name'] ?? ''}',
             city: '${_live?['from_city'] ?? _live?['city'] ?? 'Lusaka'}',
           ),
-          if (_live == null || _live!['lat'] == null)
+          if (_ended)
+            Positioned(
+              left: 12, right: 12, bottom: 12,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(12)),
+                child: Text('${_live?['note'] ?? 'Tracking has ended.'}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700, height: 1.4)),
+              ),
+            )
+          else if (_live == null || _live!['lat'] == null)
             Positioned(
               left: 12, right: 12, bottom: 12,
               child: Container(
@@ -144,6 +163,18 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                 child: const Text(
                   'Waiting for the rider\'s live location. It will appear here as soon as their next GPS update arrives.',
                   style: TextStyle(color: Colors.white, fontSize: 12, height: 1.4),
+                ),
+              ),
+            )
+          else if (_stale)
+            Positioned(
+              left: 12, right: 12, bottom: 12,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: 0.95), borderRadius: BorderRadius.circular(12)),
+                child: const Text(
+                  'Last GPS fix is old — the rider may have moved since. Waiting for a fresh update.',
+                  style: TextStyle(color: AppColors.ink, fontSize: 12, fontWeight: FontWeight.w700, height: 1.4),
                 ),
               ),
             ),
@@ -162,18 +193,19 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                   color: AppColors.forest,
                   padding: const EdgeInsets.fromLTRB(12, 7, 10, 7),
                   child: Row(children: [
-                    Icon(_rider != null ? Icons.my_location : Icons.location_searching,
+                    Icon(_ended ? Icons.flag_circle : (_stale ? Icons.history_toggle_off : Icons.my_location),
                         color: AppColors.mint, size: 16),
                     const SizedBox(width: 6),
-                    const Expanded(
-                      child: Text('RIDER LIVE',
+                    Expanded(
+                      child: Text(_ended ? 'JOURNEY COMPLETE' : 'RIDER LIVE',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w900, letterSpacing: 1.1)),
+                          style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w900, letterSpacing: 1.1)),
                     ),
                     Text(
-                      _rider != null ? 'Updating every 12 s' : 'Waiting for a fix',
-                      style: const TextStyle(color: AppColors.mint, fontSize: 10, fontWeight: FontWeight.w800),
+                      _ended ? 'TRACKING ENDED' : _stale ? 'STALE FIX' : 'UPDATING · 12 s',
+                      style: TextStyle(color: _stale ? AppColors.amber : AppColors.mint,
+                          fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 0.4),
                     ),
                   ]),
                 ),
@@ -181,28 +213,59 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
-                      Icon(_rider != null ? Icons.schedule : Icons.hourglass_empty,
-                          size: 16, color: AppColors.forestLight),
-                      const SizedBox(width: 6),
-                      Expanded(
+                      CircleAvatar(
+                        radius: 18,
+                        backgroundColor: AppColors.forest.withValues(alpha: 0.12),
                         child: Text(
-                          _rider != null
-                              ? 'Last fix: ${_live?['seen_at'] ?? 'just now'}'
-                              : 'Waiting for rider…',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14.5, color: AppColors.forest),
+                          '${_live?['rider_name'] ?? '?'}'.trim().isEmpty
+                              ? '?'
+                              : '${_live?['rider_name']}'.trim()[0].toUpperCase(),
+                          style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.forest),
                         ),
                       ),
+                      const SizedBox(width: 9),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(
+                          '${_live?['rider_name'] ?? 'Your rider'}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: AppColors.forest),
+                        ),
+                        Text('${_live?['rider_vehicle'] ?? 'motorcycle'} · ${_live?['dest_label'] ?? ''}',
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                      ])),
                     ]),
+                    const SizedBox(height: 8),
+                    Text(_stageLabel,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: AppColors.ink)),
+                    const SizedBox(height: 3),
+                    Row(children: [
+                      const Icon(Icons.pin_drop_outlined, size: 14, color: AppColors.forestLight),
+                      const SizedBox(width: 5),
+                      Expanded(child: Text(_ended
+                          ? '${_live?['note'] ?? 'Journey complete'}'
+                          : 'Heading to ${_live?['dest_label'] ?? 'your stop'}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12, color: AppColors.muted))),
+                      if (_live?['eta_minutes'] != null && !_ended)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(20)),
+                          child: Text('~${_live!['eta_minutes']} min',
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: AppColors.forest)),
+                        ),
+                    ]),
+                    const SizedBox(height: 6),
+                    Text(
+                      _rider != null
+                          ? 'Last fix ${fixAgeLabel(_live?['seen_at'])}${_stale ? ' — waiting for a fresh GPS update' : ''}'
+                          : 'Waiting for your rider…',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: _stale ? AppColors.danger : AppColors.muted),
+                    ),
                     if (_error.isNotEmpty) Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(_error, style: const TextStyle(color: AppColors.muted, fontSize: 11.5)),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'The rider pin refreshes every 12 seconds while this screen is open. Tap the green target on the map to jump back to the rider.',
-                      style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
                     ),
                   ]),
                 ),
