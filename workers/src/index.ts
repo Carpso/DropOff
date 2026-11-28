@@ -915,7 +915,7 @@ app.get('/app/version', async (c) => {
     getSetting(c.env.DB, 'app_update_force'),
     getSetting(c.env.DB, 'app_update_message'),
   ]);
-  const fallback = '0.6.2';
+  const fallback = '0.6.4';
   return c.json({
     latest: (latest?.trim() || fallback),
     minimum: (minimum?.trim() || '0.5.0'),
@@ -3557,6 +3557,42 @@ app.get('/jobs/:ref/offer', async (c) => {
       promo_code: String(job.promo_code ?? ''),
       promo_discount_zmw: job.promo_discount_zmw,
     },
+  });
+});
+
+/** Live self-test: a synthetic rider_assigned job with a FRESH pin, so the
+ *  owner can visually confirm the pickup-leg tracker without creating a real
+ *  job or moving a real rider. Admin key only, no data is written. */
+app.get('/admin/tracking-preview', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'forbidden' }, 403);
+  const now = new Date().toISOString();
+  const pickupLat = -15.4255, pickupLng = 28.2805;
+  const riderLat = -15.4320, riderLng = 28.2710;
+  return c.json({
+    demo: true,
+    has_rider: true,
+    lat: riderLat,
+    lng: riderLng,
+    seen_at: now,
+    fix_age_seconds: 0,
+    stale: false,
+    stage: trackingStage('rider_assigned', 'standard'),
+    rider_name: 'Demo Rider',
+    rider_vehicle: 'motorcycle',
+    vehicle_class: 'motorcycle',
+    eta_minutes: 6,
+    pickup_lat: pickupLat,
+    pickup_lng: pickupLng,
+    dest_lat: pickupLat,
+    dest_lng: pickupLng,
+    dest_label: 'Pickup',
+    depot_lat: -15.4150,
+    depot_lng: 28.3000,
+    depot_name: 'Demo courier depot',
+    courier_name: 'DropOff demo',
+    sender_name: 'Demo sender',
+    service: 'standard',
+    status: 'rider_assigned',
   });
 });
 
@@ -10681,8 +10717,24 @@ p.hint{margin:4px 0 16px;color:var(--muted);font-size:12.5px}
 table{border-collapse:collapse;width:100%;margin:10px 0}td,th{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
 th{background:#eef4f1;color:#33544a;font-size:11px;text-transform:uppercase;letter-spacing:.6px}
 tr:last-child td{border-bottom:0}
-.kpi{display:inline-flex;flex-direction:column;background:#f5f9f7;border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:6px 10px 6px 0;min-width:130px}
-.kpi b{font-size:21px;letter-spacing:-.4px}.kpi small{color:var(--muted);font-size:11px}
+.kpi{display:flex;flex-direction:column;background:#f5f9f7;border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:6px 10px 6px 0;min-width:130px}
+.kpi b{font-size:21px;letter-spacing:-.4px}.kpi small,.kpi span:last-child{color:var(--muted);font-size:11px}
+/* Billion-dollar control room: sticky jump nav, card grid, calm status pills */
+nav.jump{position:sticky;top:0;z-index:9;display:flex;gap:8px;overflow:auto;padding:10px 20px;background:#ffffffee;backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+nav.jump a{flex:0 0 auto;text-decoration:none;color:var(--forest);font-size:12px;font-weight:800;padding:7px 13px;border-radius:20px;border:1px solid var(--line);background:#fff}
+nav.jump a:hover{background:var(--forest);color:#fff;border-color:var(--forest)}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0 6px}
+.kpi-grid .kpi{margin:0;min-width:0;background:linear-gradient(145deg,#f5f9f7,#eef5f1);border-radius:16px;padding:16px;box-shadow:0 3px 12px #10312a0d}
+.kpi-grid .kpi b{font-size:25px;display:block}
+.sec-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.sec-head .eyebrow{font-size:10px;font-weight:900;letter-spacing:1.3px;color:var(--accent)}
+.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#24a06a;box-shadow:0 0 0 4px #24a06a22;margin-right:6px}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:800;background:#eef4f1;color:#33544a}
+.badge.warn{background:#fff3d8;color:#8a5a08}.badge.good{background:#e2f5ec;color:#126b48}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.mini{font-size:11px;color:var(--muted)}
+button.ghost{background:#eef4f1;color:var(--forest)}
 input,button,select{padding:9px 11px;border-radius:9px;border:1px solid #cfd8d4;font:inherit;font-size:13px;background:#fff;color:var(--forest)}
 input:focus,select:focus{outline:2px solid #17855f44;border-color:var(--accent)}
 button{background:var(--accent);color:#fff;border:0;font-weight:700;cursor:pointer;padding:9px 16px}
@@ -10716,15 +10768,23 @@ app.get('/console', (c) => {
   return c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">
 <title>DropOff — Admin</title><style>${CONSOLE_CSS}</style></head><body>
 <header><h1>DropOff · Control room</h1><p>Superadmin console — live operations, money and partner network</p></header>
+<nav class="jump">
+<a href="#overview">Overview</a><a href="#people">People</a><a href="#fleet">Live fleet</a><a href="#backup">Backups</a>
+<a href="#partner">Partners</a><a href="#plans">Plans</a><a href="#promos">Promos</a><a href="#pos">POS rails</a>
+</nav>
 <main>
-<section><h2>Operations overview <span>last 30 days</span></h2><p class="hint">Live totals from the production database. Refresh the page for the latest figures.</p><div id="kpis">Loading…</div>
+<section id="overview"><div class="sec-head"><span class="eyebrow">COMMAND CENTRE</span><span class="live-dot"></span><span class="mini">live production data</span></div><h2>Operations overview <span>last 30 days</span></h2><p class="hint">Live totals from the production database. Refresh the page for the latest figures.</p><div id="kpis" class="kpi-grid">Loading…</div>
 <table id="tbl"><thead><tr><th>KPI</th><th>Last 30 days</th></tr></thead><tbody></tbody></table>
-<h2>Partner shops</h2>
+</section>
+<section id="people"><div class="sec-head"><span class="eyebrow">PEOPLE</span><span class="live-dot"></span><span class="mini">all accounts</span></div><h2>Accounts directory</h2><p class="hint">Every registered phone with role, activity and spend. The in-app console has the same directory with full dossiers.</p><div class="toolbar"><input id="uQ" placeholder="Search name / phone / email" oninput="loadUsers()"><button class="ghost" onclick="loadUsers()">Refresh</button><span id="uCount" class="mini"></span></div><table id="usersTbl"><thead><tr><th>phone</th><th>name</th><th>role</th><th>jobs</th><th>spend K</th><th>devices</th><th>last seen</th></tr></thead><tbody></tbody></table></section>
+<section id="fleet"><div class="sec-head"><span class="eyebrow">LIVE FLEET</span><span class="live-dot"></span><span class="mini">fresh GPS only</span></div><h2>Riders online now</h2><p class="hint">Only riders with a GPS fix in the last 60 minutes. Stale pins are not shown.</p><div class="toolbar"><select id="fWindow" onchange="loadFleet()"><option value="30">last 30 min</option><option value="60" selected>last 60 min</option><option value="180">last 3 hours</option></select><button class="ghost" onclick="loadFleet()">Refresh</button><span id="fCount" class="mini"></span></div><table id="fleetTbl"><thead><tr><th>rider</th><th>phone</th><th>status</th><th>load</th><th>last fix</th><th>lat / lng</th></tr></thead><tbody></tbody></table></section>
+<section id="backup"><div class="sec-head"><span class="eyebrow">SAFETY</span><span class="badge good">R2</span></div><h2>Backups</h2><p class="hint">Nightly 02:00 CAT full D1 dump plus one snapshot per completed ride. Storage: dropoff-backups.</p><div class="toolbar"><button class="ghost" onclick="loadBackups()">Refresh list</button><span id="bCount" class="mini"></span></div><table id="backupTbl"><thead><tr><th>type</th><th>key</th><th>size</th><th>uploaded</th></tr></thead><tbody></tbody></table></section>
+<h2 id="partner">Partner shops</h2>
 <p>Add email + courier id → the partner logs in with that email and confirms prices/rides.</p>
 <input id="pEmail" placeholder="partner@shop.co.zm"><input id="pCourier" type="number" placeholder="courier id">
 <button onclick="makePartner()">Promote to partner</button><span id="pMsg"></span>
 
-<h2>Plans (seller packs — full edit + on/off)</h2>
+<h2 id="plans">Plans (seller packs — full edit + on/off)</h2>
 <p>Every field is live. A toggled-off plan disappears from sales and listings instantly; existing subscribers keep their cycle benefit.</p>
 <table id="tiersTbl"><thead><tr><th>tier</th><th>on/off</th><th>fee K</th><th>parcels/day</th><th>parcels/mo</th><th>overage %</th><th>cycle days</th><th>rider fee</th><th>tag</th></tr></thead><tbody></tbody></table>
 <div>
@@ -10742,7 +10802,7 @@ app.get('/console', (c) => {
 <h2>Couriers — on/off (sellers never see an off courier)</h2>
 <table id="couriersTbl"><thead><tr><th>id</th><th>name</th><th>city</th><th>depot</th><th>partnership</th><th>on/off</th></tr></thead><tbody></tbody></table>
 
-<h2>Promo codes (sellers)</h2>
+<h2 id="promos">Promo codes (sellers)</h2>
 <table id="promosTbl"><thead><tr><th>code</th><th>% off</th><th>uses left</th><th>expires</th><th>applies</th><th>note</th></tr></thead><tbody></tbody></table>
 <div>
 <input id="prCode" placeholder="CODE e.g. FIRSTM10" style="text-transform:uppercase">
@@ -10754,7 +10814,7 @@ app.get('/console', (c) => {
 <button onclick="savePromo()">Save promo</button><span id="prMsg"></span>
 </div>
 
-<h2>Partner collection rails (their POS — never our money)</h2>
+<h2 id="pos">Partner collection rails (their POS — never our money)</h2>
 <p>Set how the customer pays the courier directly at the counter/depot. Shown on the courier page.</p>
 <table id="posTbl"><thead><tr><th>courier id</th><th>rail</th><th>merchant</th><th>instructions</th></tr></thead><tbody></tbody></table>
 <div>
@@ -10855,7 +10915,31 @@ async function savePos() {
     body: JSON.stringify({ courier_id: Number(posCourier.value), rail: posRail.value, merchant_id: posMerchant.value.trim(), instructions: posInstructions.value.trim() }) });
   const j = await r.json(); posMsg.textContent = r.ok ? ' ✔ saved' : ' ✖ ' + esc(j.error || 'failed'); loadPos();
 }
-loadTiers(); loadPromos(); loadPos(); loadCouriers();
+async function loadUsers() {
+  const q = (document.getElementById('uQ').value || '').trim();
+  const r = await fetch('/admin/users?limit=100' + (q ? '&q=' + encodeURIComponent(q) : ''), { headers: H });
+  const j = await r.json(); const tb = document.querySelector('#usersTbl tbody'); tb.innerHTML = '';
+  for (const u of j.users ?? []) tb.insertAdjacentHTML('beforeend', '<tr><td class="mono">' + esc(u.phone) + '</td><td>' + esc(u.full_name || u.email || '—') + '</td><td><span class="badge">' + esc(u.role || 'customer') + '</span></td><td>' + (u.jobs_sent ?? 0) + '</td><td>' + (u.spend_zmw ?? 0).toFixed(2) + '</td><td>' + (u.devices ?? 0) + '</td><td class="mini">' + esc(u.last_seen_at || '—') + '</td></tr>');
+  document.getElementById('uCount').textContent = (j.total ?? (j.users || []).length) + ' accounts';
+}
+async function loadFleet() {
+  const m = document.getElementById('fWindow').value;
+  const r = await fetch('/admin/riders/live?minutes=' + m, { headers: H });
+  const j = await r.json(); const tb = document.querySelector('#fleetTbl tbody'); tb.innerHTML = '';
+  for (const f of j.riders ?? []) tb.insertAdjacentHTML('beforeend', '<tr><td>' + esc(f.full_name || '—') + '</td><td class="mono">' + esc(f.phone) + '</td><td><span class="badge ' + (f.on_shift ? 'good' : '') + '">' + esc(f.status || '—') + '</span></td><td>' + (f.current_load ?? 0) + '/' + (f.capacity ?? 0) + '</td><td class="mini">' + esc(f.last_seen_at) + '</td><td class="mono">' + Number(f.last_lat).toFixed(4) + ', ' + Number(f.last_lng).toFixed(4) + '</td></tr>');
+  document.getElementById('fCount').innerHTML = '<span class="live-dot"></span>' + (j.riders || []).length + ' with a fresh pin';
+}
+async function loadBackups() {
+  const r = await fetch('/admin/backups?limit=60', { headers: H });
+  const j = await r.json(); const tb = document.querySelector('#backupTbl tbody'); tb.innerHTML = '';
+  const rows = [
+    ...(j.daily_manifests || []).map(x => ['daily manifest', x]),
+    ...(j.ride_snapshots || []).map(x => ['completed ride', x]),
+  ];
+  for (const [type, x] of rows) tb.insertAdjacentHTML('beforeend', '<tr><td><span class="badge ' + (type === 'daily manifest' ? 'good' : '') + '">' + type + '</span></td><td class="mono">' + esc(x.key) + '</td><td>' + (x.size ?? 0) + '</td><td class="mini">' + esc(x.uploaded || '') + '</td></tr>');
+  document.getElementById('bCount').textContent = (j.daily_files || 0) + ' daily files · ' + (j.ride_files || 0) + ' ride snapshots';
+}
+loadTiers(); loadPromos(); loadPos(); loadCouriers(); loadUsers(); loadFleet(); loadBackups();
 </script></main></body></html>`);
 });
 

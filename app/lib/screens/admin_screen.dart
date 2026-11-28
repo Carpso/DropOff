@@ -70,7 +70,10 @@ class _AdminScreenState extends State<AdminScreen> {
   final _pushBody = TextEditingController();
   final _scroll = ScrollController();
   final _sectionKeys = <String, GlobalKey>{
-    for (final s in const ['Overview', 'Money', 'Riders', 'Senders', 'Support']) s: GlobalKey(),
+    for (final s in const [
+      'Overview', 'Money', 'Riders', 'Senders', 'Support',
+      'LiveMap', 'Places', 'Promos',
+    ]) s: GlobalKey(),
   };
   String _pushAudience = 'accounts';
   bool _pushSending = false;
@@ -103,19 +106,19 @@ class _AdminScreenState extends State<AdminScreen> {
     super.dispose();
   }
 
+  /// Jump by raw section key (used by the quick-action tiles).
+  void _jumpToKey(String key) {
+    final ctx = _sectionKeys[key]?.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(ctx,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOutCubic,
+        alignment: 0.04);
+  }
+
   /// Section jump: the chips at the top are now real navigation instead of
   /// decorative placeholders (console UI audit, owner 2026-11-26).
-  void _jumpTo(String section) {
-    final key = _sectionKeys[section];
-    final ctx = key?.currentContext;
-    if (ctx == null) return;
-    Scrollable.ensureVisible(
-      ctx,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOutCubic,
-      alignment: 0.04,
-    );
-  }
+  void _jumpTo(String section) => _jumpToKey(section);
 
   Future<void> _load() async {
     try {
@@ -390,6 +393,8 @@ class _AdminScreenState extends State<AdminScreen> {
               ]),
             )),
             const SizedBox(height: 16),
+            _quickActionsCard(),
+            const SizedBox(height: 18),
             SizedBox(key: _sectionKeys['Money'], child: _salaryCard()),
             const SizedBox(height: 18),
             if (!_financeOnly) ...[
@@ -427,11 +432,11 @@ class _AdminScreenState extends State<AdminScreen> {
               if (_role == 'admin') ...[
                 SizedBox(key: _sectionKeys['Senders'], child: const _UsersCard()),
                 const SizedBox(height: 18),
-                const AdminPlacesCard(),
+                SizedBox(key: _sectionKeys['Places'], child: const AdminPlacesCard()),
                 const SizedBox(height: 18),
-                const AdminLiveMapCard(),
+                SizedBox(key: _sectionKeys['LiveMap'], child: const AdminLiveMapCard()),
                 const SizedBox(height: 18),
-                const AdminTeamCodesCard(),
+                SizedBox(key: _sectionKeys['Promos'], child: const AdminTeamCodesCard()),
                 const SizedBox(height: 18),
               ],
               const _PackCodesCard(),
@@ -468,6 +473,64 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
+  /// Command-centre shortcuts — one tap to the area you need, with a calm
+  /// icon rail instead of a dense list of links (owner audit 2026-11-28).
+  Widget _quickActionsCard() {
+    final actions = <(String, String, IconData, String)>[
+      ('Money', 'Payments & payouts', Icons.account_balance_wallet_outlined, 'Money'),
+      ('Riders', 'Fleet & payroll', Icons.two_wheeler_outlined, 'Riders'),
+      ('Senders', 'People & accounts', Icons.manage_accounts_outlined, 'Senders'),
+      ('Support', 'Tickets & reports', Icons.support_agent_outlined, 'Support'),
+      if (_role == 'admin') ...[
+        ('Live map', 'Riders online now', Icons.hail_outlined, 'LiveMap'),
+        ('Places', 'Saved place pins', Icons.bookmark_added_outlined, 'Places'),
+        ('Promos', 'Free delivery codes', Icons.card_giftcard_outlined, 'Promos'),
+      ],
+    ];
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.line),
+        boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 10, offset: Offset(0, 3))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('QUICK ACTIONS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.2, color: AppColors.muted)),
+        const SizedBox(height: 12),
+        Wrap(spacing: 10, runSpacing: 10, children: [
+          for (final (label, sub, icon, key) in actions)
+            SizedBox(
+              width: 150,
+              child: Material(
+                color: AppColors.canvas,
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => _jumpToKey(key),
+                  child: Padding(
+                    padding: const EdgeInsets.all(11),
+                    child: Row(children: [
+                      Container(width: 34, height: 34,
+                        decoration: BoxDecoration(color: AppColors.forest.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(10)),
+                        child: Icon(icon, size: 18, color: AppColors.forest)),
+                      const SizedBox(width: 8),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900)),
+                        Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 9.5, color: AppColors.muted)),
+                      ])),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      ]),
+    );
+  }
+
   Widget _statsCard() {
     final raw = _stats ?? const <String, dynamic>{};
     final entries = raw.entries
@@ -487,7 +550,7 @@ class _AdminScreenState extends State<AdminScreen> {
           Wrap(spacing: 8, runSpacing: 8, children: [
             for (final e in entries)
               Container(
-                constraints: const BoxConstraints(minWidth: 104),
+                constraints: const BoxConstraints(minWidth: 120),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(color: AppColors.line.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

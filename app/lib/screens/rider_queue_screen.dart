@@ -108,7 +108,9 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
   static const double _arrivalMetres = 80;
   final Set<String> _arrivedRefs = {};
   StreamSubscription<Position>? _posSub;
-  String? _gpsIssue; // 'permission' | 'service' — drives the recovery banner
+  String? _gpsIssue; // 'permission' | 'service' - drives the recovery banner
+  String? _pinIssue; // live pin failed to reach the server
+  int _pinFailures = 0;
   Position? _riderPos;
 
   // SWEEP SHIFTS (owner 2026-11-21): all riders commit to 06:00–08:30,
@@ -899,14 +901,33 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
     // Any collected stop still moving → on_route; otherwise available.
     final onRoute = batches.any((b) => (((b as Map<String, dynamic>)['stops'] as List?) ?? const [])
         .any((s) => _picked('${(s as Map<String, dynamic>)['status'] ?? ''}')));
-    unawaited(DropOffApi.riderPing(
-      phone: store.linkedPhone!,
-      lat: pos.latitude,
-      lng: pos.longitude,
-      status: onRoute ? 'on_route' : 'available',
-      accuracy: pos.accuracy,
-      capturedAt: pos.timestamp,
-    ));
+    unawaited(() async {
+      final res = await DropOffApi.riderPing(
+        phone: store.linkedPhone!,
+        lat: pos.latitude,
+        lng: pos.longitude,
+        status: onRoute ? 'on_route' : 'available',
+        accuracy: pos.accuracy,
+        capturedAt: pos.timestamp,
+      );
+      if (!mounted) return;
+      if (res.ok) {
+        _pinFailures = 0;
+        if (_pinIssue != null) setState(() => _pinIssue = null);
+        return;
+      }
+      _pinFailures++;
+      // Two failed pings in a row means senders are seeing a stale/absent pin.
+      if (_pinFailures >= 2) {
+        setState(() => _pinIssue = switch (res.error) {
+          'location_not_accurate' => 'Your GPS fix is too weak. Move outside and share your pin again.',
+          'invalid_location' => 'The pin was not a real location in Zambia. Share a fresh pin.',
+          'stale_location' => 'Your phone clock or GPS is out of date. Share a fresh pin.',
+          'network_error' => "We can't send your live pin — check your connection.",
+          _ => 'Your live pin is not reaching DropOff. Share it again.',
+        });
+      }
+    }());
   }
 
   /* ------------------------ stop advancement (proof kit) -------------------- */
@@ -2721,6 +2742,32 @@ class _RiderQueueScreenState extends State<RiderQueueScreen> with WidgetsBinding
                     ? Geolocator.openLocationSettings()
                     : Geolocator.openAppSettings(),
                 child: const Text('Open settings'),
+              ),
+            ]),
+          ),
+        if (store.linked && _pinIssue != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            color: AppColors.amber.withValues(alpha: 0.24),
+            child: Row(children: [
+              const Icon(Icons.my_location, size: 16, color: AppColors.ink),
+              const SizedBox(width: 8),
+              Expanded(child: Text(_pinIssue!,
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.ink, fontWeight: FontWeight.w700))),
+              TextButton(
+                onPressed: () async {
+                  final pos = await Geolocator.getCurrentPosition(
+                    locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+                  ).timeout(const Duration(seconds: 12));
+                  if (!mounted) return;
+                  _lastPingAt = null; // force the next fix to send immediately
+                  _maybeAutoPing(pos);
+                  if (mounted) {
+                    // ignore: use_build_context_synchronously
+                    AppToast.show(context, 'Sharing a fresh pin…');
+                  }
+                },
+                child: const Text('Share pin'),
               ),
             ]),
           ),

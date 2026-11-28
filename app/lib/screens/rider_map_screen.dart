@@ -12,7 +12,11 @@ import '../widgets/rider_map.dart';
 /// Sender-side live rider screen: the DropOff map (Protomaps Zambia/Zimbabwe/Malawi/Mozambique on our R2), fresh fix every 12 s while open, road-following route line when OSRM answers.
 class RiderMapScreen extends StatefulWidget {
   final String jobRef;
-  const RiderMapScreen({super.key, required this.jobRef});
+
+  /// Optional synthetic payload for the admin self-test — no polling, no API.
+  final Map<String, dynamic>? preview;
+
+  const RiderMapScreen({super.key, required this.jobRef, this.preview});
 
   @override
   State<RiderMapScreen> createState() => _RiderMapScreenState();
@@ -26,8 +30,12 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
   @override
   void initState() {
     super.initState();
-    _refresh();
-    _timer = Timer.periodic(const Duration(seconds: 12), (_) => _refresh());
+    if (widget.preview != null) {
+      _live = widget.preview;
+    } else {
+      _refresh();
+      _timer = Timer.periodic(const Duration(seconds: 12), (_) => _refresh());
+    }
   }
 
   @override
@@ -120,11 +128,14 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(color: AppColors.mint.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(20)),
-            child: const Text('LIVE',
-                style: TextStyle(color: AppColors.mint, fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 1)),
+            child: Text(widget.preview != null ? 'DEMO' : 'LIVE',
+                style: const TextStyle(color: AppColors.mint, fontSize: 9.5, fontWeight: FontWeight.w900, letterSpacing: 1)),
           ),
         ]),
-        actions: [IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _refresh)],
+        actions: [
+          if (widget.preview == null)
+            IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _refresh),
+        ],
       ),
       body: Column(children: [
         Expanded(child: Stack(children: [

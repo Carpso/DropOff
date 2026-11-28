@@ -111,7 +111,9 @@ class _BookingScreenState extends State<BookingScreen> {
   bool _parcelPhotoUploading = false;
   String? _tidyPinLabel; // '✨ Tidy pinned ≈ Kabwata — bands apply (±1 km)'
   String? _plusCode;
-  String? _pickupError, _descriptionError, _declaredValueError, _senderNameError, _senderPhoneError, _recipientNameError, _recipientPhoneError, _returnAddressError;
+  String? _pickupError, _descriptionError, _declaredValueError, _senderNameError, _senderPhoneError,
+      _recipientNameError, _recipientPhoneError, _returnAddressError;
+  String? _pinAlert;
   List<String> _cities = cities;
   double? _promoPct;
   String _promoNote = '';
@@ -681,19 +683,23 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Future<void> _captureLocation({bool silent = false}) async {
+    if (!mounted) return;
     setState(() => _locating = true);
     try {
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
+      if (!mounted) return;
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        final msg = permission == LocationPermission.deniedForever
+            ? 'Location is blocked. Allow it in Settings so we can pin your exact pickup.'
+            : 'Allow location so we can pin your exact pickup automatically.';
         setState(() {
-          _pickupError = permission == LocationPermission.deniedForever
-              ? 'Location is blocked. Open Settings, allow location, then tap the pin icon.'
-              : 'Allow location so we can pin your exact pickup automatically.';
+          _pickupError = msg;
+          _pinAlert = msg;
         });
-        if (!silent) _message(_pickupError!);
+        if (!silent) _message(msg);
         return;
       }
       final pos = await Geolocator.getCurrentPosition(
@@ -705,14 +711,20 @@ class _BookingScreenState extends State<BookingScreen> {
         _pickupLng = pos.longitude;
         _tidyPinLabel = null;
         _pickupError = null;
+        _pinAlert = null;
       });
       unawaited(SavedPlaces.remember(
         _pickup.text.trim().isEmpty ? 'My current location' : _pickup.text.trim(),
         lat: pos.latitude, lng: pos.longitude));
       if (!silent) _message('Exact pickup pinned - the nearest rider will dispatch.');
     } catch (_) {
-      setState(() => _pickupError = 'Could not get an exact GPS pin. Turn on location and try the pin icon again.');
-      if (!silent) _message(_pickupError!);
+      if (!mounted) return;
+      const msg = 'Could not get an exact GPS pin. Turn on location and share your pin again.';
+      setState(() {
+        _pickupError = msg;
+        _pinAlert = msg;
+      });
+      if (!silent) _message(msg);
     } finally {
       if (mounted) setState(() => _locating = false);
     }
@@ -1175,6 +1187,39 @@ class _BookingScreenState extends State<BookingScreen> {
         _cityDropdown('Depot destination (receipt)', _to, (value) => setState(() => _to = value)),
         const SizedBox(height: 8),
         const InfoPill(icon: Icons.receipt_long, label: 'Your item is dropped at the courier depot. The destination above is for your receipt only — it is not the actual door drop-off.', color: AppColors.amber),
+        if (_pinAlert != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.amberSoft,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.amber.withValues(alpha: 0.6)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.location_searching, color: AppColors.forest, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text(_pinAlert!, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.ink))),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: _locating ? null : () => _captureLocation(),
+                  icon: const Icon(Icons.my_location_outlined, size: 16),
+                  label: const Text('Share pin again'),
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: () => Geolocator.openAppSettings(),
+                  icon: const Icon(Icons.settings_outlined, size: 16),
+                  label: const Text('Open settings'),
+                )),
+              ]),
+            ]),
+          ),
+        ],
         const SizedBox(height: 18),
               TextField(controller: _pickup, minLines: 2, maxLines: 3, textCapitalization: TextCapitalization.sentences, onChanged: (_) { if (_pickupError != null) setState(() => _pickupError = null); }, decoration: InputDecoration(labelText: 'Home / shop pickup address', hintText: 'e.g. Kabwata, near the market — or a plus code like 8FQ4+J9', prefixIcon: const Icon(Icons.location_on_outlined), alignLabelWithHint: true, errorText: _pickupError, suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [TextButton(onPressed: _aiBusy ? null : _tidyAddress, child: _aiBusy ? const AppLogoSpinner(size: 14) : const Text('✨ Tidy')), IconButton(tooltip: 'Use my current location', onPressed: _locating ? null : _captureLocation, icon: _locating ? const AppLogoSpinner(size: 18) : const Icon(Icons.my_location_outlined, color: AppColors.forest))]))),
         if (_saved.isNotEmpty) ...[
@@ -1192,6 +1237,7 @@ class _BookingScreenState extends State<BookingScreen> {
                     _pickupLng = p.lng;
                     _tidyPinLabel = null;
                     _pickupError = null;
+                    _pinAlert = null;
                   }
                 }),
               ),

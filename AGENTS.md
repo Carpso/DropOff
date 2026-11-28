@@ -1,5 +1,29 @@
 # AGENTS.md — DropOff repo guide for coding agents
 
+## 2026-11-28 (sixty-fourth pass) — tracker self-test, pin alerts, billion-dollar consoles
+
+- **Tracker self-test:** `GET /admin/tracking-preview` (admin key) returns a
+  synthetic fresh `rider_assigned` payload (stage "Rider heading to your
+  pickup", destination = pickup, `stale: false`) with no data written. Verified
+  live. Admin fleet map gained a "Preview pickup-leg tracker" button;
+  `RiderMapScreen(preview: …)` renders it offline with a DEMO pill, no polling.
+- **Auto-pin honesty:** booking auto-capture now clears state safely when
+  unmounted (fixes a logged `Null check operator used on a null value`) and
+  raises a premium banner with **Share pin again** + **Open settings** when the
+  automatic pin fails. Rider auto-ping counts consecutive failures (2+) and
+  shows a plain-language banner with **Share pin** that forces a fresh fix.
+- **In-app admin console:** added a Quick Actions card (Money / Riders / People
+  / Support + Live map / Places / Promos) with smooth scroll-to-section, wider
+  KPI tiles and section keys for the new map/places/promo cards.
+- **Web console:** sticky jump nav, gradient KPI grid, live-dot status pills,
+  and three new live cards — **People** (accounts with jobs/spend/devices),
+  **Live fleet** (fresh rider pins with fix age), **Backups** (daily manifests
+  and per-ride snapshots). All read the existing admin-key endpoints.
+- **Checks:** Flutter 96/96, worker vitest 47/47 (4 integration skipped), tsc
+  clean, analyze back to the 6 known warnings. Release **0.6.4+114** (APK
+  69.3 MB, AAB 52.9 MB, web `1eec915b`), worker
+  `ef91023f-5ce4-4a8c-a105-c5f14052221e`, `/app/version` latest `0.6.4`.
+
 ## 2026-11-28 (sixty-third pass) — live tracker audit: sender, recipient, admin
 
 - **One source of truth:** new pure `workers/src/tracking.ts` defines the stage

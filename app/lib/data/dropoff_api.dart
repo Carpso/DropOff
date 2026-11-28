@@ -1148,6 +1148,10 @@ class DropOffApi {
   static Future<ApiResponse> adminDeletePlace(int id) =>
       delete('/admin/places/$id', admin: true);
 
+  /// Synthetic fresh rider_assigned payload for a no-data tracker self-test.
+  static Future<Map<String, dynamic>?> adminTrackingPreview() =>
+      getAdmin('/admin/tracking-preview');
+
   /// Live rider pins for the admin fleet map.
   static Future<Map<String, dynamic>?> adminLiveRiders({int minutes = 60}) =>
       getAdmin('/admin/riders/live', {'minutes': '$minutes'});

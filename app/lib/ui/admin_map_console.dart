@@ -14,6 +14,7 @@ import 'app_sheet.dart';
 import 'app_spinner.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
+import '../screens/rider_map_screen.dart';
 import '../widgets/rider_map.dart';
 
 /// Admin map console (owner 2026-11-26): manage every account's saved places
@@ -270,6 +271,18 @@ class _AdminLiveMapCardState extends State<AdminLiveMapCard> {
     }
   }
 
+  Future<void> _preview() async {
+    final data = await DropOffApi.adminTrackingPreview();
+    if (!mounted) return;
+    if (data == null) {
+      AppToast.show(context, 'Could not load the tracker preview.');
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => RiderMapScreen(jobRef: 'PREVIEW', preview: data),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final pins = _riders.where((r) => r['last_lat'] is num && r['last_lng'] is num).toList();
@@ -291,6 +304,8 @@ class _AdminLiveMapCardState extends State<AdminLiveMapCard> {
             Text('${pins.length} riders with a fresh pin', style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
           ])),
           IconButton(tooltip: 'Refresh', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18, color: AppColors.forest)),
+          IconButton(tooltip: 'Preview pickup-leg tracker', onPressed: _preview,
+              icon: const Icon(Icons.route_outlined, color: AppColors.forest)),
           IconButton(tooltip: 'Snapshot & share', onPressed: _snapshotting ? null : _snapshot, icon: const Icon(Icons.camera_alt_outlined, color: AppColors.forest)),
         ]),
         const SizedBox(height: 8),
